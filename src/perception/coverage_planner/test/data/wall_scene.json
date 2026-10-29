@@ -1,0 +1,4760 @@
+{
+  "frame_id": "link_base",
+  "note": "Output is in the as-mapped frame; wall planes are arbitrarily oriented. Use each wall's plane/basis to work in 2D. walls.pcd label = wall id; collision_boxes.pcd label = obstacle id (see obstacles[].id).",
+  "source": "rtabmap_rgbd.db",
+  "units": "meters",
+  "parameters": {
+    "voxel": 0.005,
+    "plane_thresh": 0.012,
+    "min_protrusion": 0.03,
+    "max_protrusion": 0.15,
+    "dbscan_eps": 0.025,
+    "dbscan_core_pts": 8,
+    "min_cluster_pts": 50,
+    "max_depth": 0.0,
+    "inflate": 0.02,
+    "box_sample_res": 0.01
+  },
+  "obstacle_policy": "Every cluster protruding past a wall plane is emitted as a collision object.",
+  "obstacles_all_above_scatter": false,
+  "obstacle_reliability_note": "CAUTION: worst wall spread p99 = 67 mm exceeds --min-protrusion = 30 mm. Boxes with above_wall_scatter=false protrude less than the wall's own reconstruction scatter and may be map error rather than real objects -- filter on that flag if you need only confident obstacles. Root fix: hand-eye calibrate camera_link->link_eef and re-map.",
+  "worst_wall_spread_p99_m": 0.066551,
+  "walls": [
+    {
+      "id": 0,
+      "plane_abcd": [
+        -0.903179,
+        -0.428737,
+        -0.02129,
+        1.312755
+      ],
+      "origin_xyz": [
+        0.954755,
+        1.043691,
+        0.225447
+      ],
+      "basis_u": [
+        -0.428834,
+        0.903383,
+        0.0
+      ],
+      "basis_v": [
+        0.019233,
+        0.00913,
+        -0.999773
+      ],
+      "normal_outward": [
+        -0.903179,
+        -0.428737,
+        -0.02129
+      ],
+      "u_range_m": [
+        -5.555562,
+        5.159225
+      ],
+      "v_range_m": [
+        -2.293865,
+        1.586123
+      ],
+      "observed_area_m2": 15.4375,
+      "observed_fraction": 0.3682,
+      "plane_rms_mm": 6.251,
+      "spread_p95_mm": 40.33,
+      "spread_p99_mm": 66.55,
+      "points": 943034,
+      "merged_layers": 4,
+      "layer_offset_spread_mm": 25.24
+    },
+    {
+      "id": 1,
+      "plane_abcd": [
+        -0.83096,
+        -0.556072,
+        -0.017013,
+        1.74893
+      ],
+      "origin_xyz": [
+        0.13025,
+        2.947702,
+        0.074262
+      ],
+      "basis_u": [
+        -0.556153,
+        0.83108,
+        0.0
+      ],
+      "basis_v": [
+        0.014139,
+        0.009462,
+        -0.999855
+      ],
+      "normal_outward": [
+        -0.83096,
+        -0.556072,
+        -0.017013
+      ],
+      "u_range_m": [
+        -0.850707,
+        2.772782
+      ],
+      "v_range_m": [
+        -2.411614,
+        1.458843
+      ],
+      "observed_area_m2": 4.1825,
+      "observed_fraction": 0.2938,
+      "plane_rms_mm": 6.331,
+      "spread_p95_mm": 31.57,
+      "spread_p99_mm": 39.32,
+      "points": 168885,
+      "merged_layers": 2,
+      "layer_offset_spread_mm": 0.55
+    },
+    {
+      "id": 2,
+      "plane_abcd": [
+        -0.883758,
+        -0.467271,
+        -0.025083,
+        1.402911
+      ],
+      "origin_xyz": [
+        -0.07624,
+        3.118614,
+        0.501664
+      ],
+      "basis_u": [
+        -0.467418,
+        0.884036,
+        0.0
+      ],
+      "basis_v": [
+        0.022174,
+        0.011724,
+        -0.999685
+      ],
+      "normal_outward": [
+        -0.883758,
+        -0.467271,
+        -0.025083
+      ],
+      "u_range_m": [
+        -1.845396,
+        2.661643
+      ],
+      "v_range_m": [
+        -2.044155,
+        2.072497
+      ],
+      "observed_area_m2": 6.25,
+      "observed_fraction": 0.331,
+      "plane_rms_mm": 6.205,
+      "spread_p95_mm": 11.25,
+      "spread_p99_mm": 11.92,
+      "points": 187990,
+      "merged_layers": 1,
+      "layer_offset_spread_mm": 0.0
+    },
+    {
+      "id": 3,
+      "plane_abcd": [
+        0.434352,
+        -0.900742,
+        -0.001628,
+        3.356214
+      ],
+      "origin_xyz": [
+        -0.935813,
+        3.271911,
+        1.582288
+      ],
+      "basis_u": [
+        -0.900743,
+        -0.434352,
+        0.0
+      ],
+      "basis_v": [
+        -0.000707,
+        0.001467,
+        -0.999999
+      ],
+      "normal_outward": [
+        0.434352,
+        -0.900742,
+        -0.001628
+      ],
+      "u_range_m": [
+        -0.931865,
+        1.06328
+      ],
+      "v_range_m": [
+        -0.960686,
+        2.845501
+      ],
+      "observed_area_m2": 2.8875,
+      "observed_fraction": 0.375,
+      "plane_rms_mm": 6.631,
+      "spread_p95_mm": 11.35,
+      "spread_p99_mm": 11.98,
+      "points": 144163,
+      "merged_layers": 1,
+      "layer_offset_spread_mm": 0.0
+    },
+    {
+      "id": 4,
+      "plane_abcd": [
+        0.407318,
+        -0.91326,
+        -0.00702,
+        4.873551
+      ],
+      "origin_xyz": [
+        -1.167186,
+        4.816974,
+        -0.101889
+      ],
+      "basis_u": [
+        -0.913282,
+        -0.407328,
+        0.0
+      ],
+      "basis_v": [
+        -0.00286,
+        0.006411,
+        -0.999975
+      ],
+      "normal_outward": [
+        0.407318,
+        -0.91326,
+        -0.00702
+      ],
+      "u_range_m": [
+        -0.473779,
+        1.00755
+      ],
+      "v_range_m": [
+        -1.079416,
+        1.198928
+      ],
+      "observed_area_m2": 1.8225,
+      "observed_fraction": 0.5283,
+      "plane_rms_mm": 6.812,
+      "spread_p95_mm": 11.37,
+      "spread_p99_mm": 11.93,
+      "points": 60749,
+      "merged_layers": 1,
+      "layer_offset_spread_mm": 0.0
+    },
+    {
+      "id": 5,
+      "plane_abcd": [
+        -0.930676,
+        -0.361423,
+        -0.056705,
+        1.206844
+      ],
+      "origin_xyz": [
+        0.403373,
+        2.261314,
+        0.25364
+      ],
+      "basis_u": [
+        -0.362006,
+        0.932176,
+        0.0
+      ],
+      "basis_v": [
+        0.052859,
+        0.020528,
+        -0.998391
+      ],
+      "normal_outward": [
+        -0.930676,
+        -0.361423,
+        -0.056705
+      ],
+      "u_range_m": [
+        -4.505915,
+        1.925297
+      ],
+      "v_range_m": [
+        -2.259851,
+        1.568649
+      ],
+      "observed_area_m2": 3.925,
+      "observed_fraction": 0.1581,
+      "plane_rms_mm": 6.212,
+      "spread_p95_mm": 11.34,
+      "spread_p99_mm": 12.26,
+      "points": 127705,
+      "merged_layers": 1,
+      "layer_offset_spread_mm": 0.0
+    }
+  ],
+  "obstacles": [
+    {
+      "id": 0,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        0.512722,
+        1.80152,
+        1.842863
+      ],
+      "box_extents_uvn": [
+        0.247869,
+        0.267374,
+        0.076129
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030017,
+      "protrusion_max_m": 0.056129,
+      "uv_on_wall": {
+        "u": [
+          0.770234,
+          0.978103
+        ],
+        "v": [
+          -1.732319,
+          -1.504945
+        ]
+      },
+      "source_points": 147,
+      "inflation_m": 0.02,
+      "collision_points": 6552,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 1,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        0.353009,
+        2.030959,
+        1.794914
+      ],
+      "box_extents_uvn": [
+        0.266418,
+        0.141743,
+        0.169932
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.049561,
+      "protrusion_max_m": 0.149932,
+      "uv_on_wall": {
+        "u": [
+          1.036722,
+          1.263139
+        ],
+        "v": [
+          -1.622542,
+          -1.5208
+        ]
+      },
+      "source_points": 315,
+      "inflation_m": 0.02,
+      "collision_points": 8064,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 2,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        0.475015,
+        1.774844,
+        1.777175
+      ],
+      "box_extents_uvn": [
+        0.230517,
+        0.154467,
+        0.169911
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.07022,
+      "protrusion_max_m": 0.149911,
+      "uv_on_wall": {
+        "u": [
+          0.770982,
+          0.961499
+        ],
+        "v": [
+          -1.611161,
+          -1.496695
+        ]
+      },
+      "source_points": 233,
+      "inflation_m": 0.02,
+      "collision_points": 7650,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 3,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        0.754947,
+        1.378823,
+        -0.42147
+      ],
+      "box_extents_uvn": [
+        0.374109,
+        0.13939,
+        0.097448
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030038,
+      "protrusion_max_m": 0.077448,
+      "uv_on_wall": {
+        "u": [
+          0.221382,
+          0.555491
+        ],
+        "v": [
+          0.596292,
+          0.695682
+        ]
+      },
+      "source_points": 343,
+      "inflation_m": 0.02,
+      "collision_points": 6435,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 4,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        1.733655,
+        -0.777804,
+        -0.210004
+      ],
+      "box_extents_uvn": [
+        0.174109,
+        0.30008,
+        0.169798
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.118567,
+      "protrusion_max_m": 0.149798,
+      "uv_on_wall": {
+        "u": [
+          -2.046582,
+          -1.912473
+        ],
+        "v": [
+          0.303664,
+          0.563743
+        ]
+      },
+      "source_points": 223,
+      "inflation_m": 0.02,
+      "collision_points": 10944,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 5,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        2.036558,
+        -1.307375,
+        -0.205202
+      ],
+      "box_extents_uvn": [
+        0.380814,
+        0.103803,
+        0.076535
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030098,
+      "protrusion_max_m": 0.056535,
+      "uv_on_wall": {
+        "u": [
+          -2.758235,
+          -2.417421
+        ],
+        "v": [
+          0.397991,
+          0.461794
+        ]
+      },
+      "source_points": 86,
+      "inflation_m": 0.02,
+      "collision_points": 4320,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 6,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        2.942827,
+        -3.217152,
+        -0.380633
+      ],
+      "box_extents_uvn": [
+        0.271838,
+        0.235243,
+        0.084543
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030143,
+      "protrusion_max_m": 0.064543,
+      "uv_on_wall": {
+        "u": [
+          -4.817646,
+          -4.585808
+        ],
+        "v": [
+          0.507657,
+          0.7029
+        ]
+      },
+      "source_points": 185,
+      "inflation_m": 0.02,
+      "collision_points": 7250,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 7,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        1.507691,
+        -0.206984,
+        -0.428666
+      ],
+      "box_extents_uvn": [
+        0.393127,
+        0.172197,
+        0.097817
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030084,
+      "protrusion_max_m": 0.077817,
+      "uv_on_wall": {
+        "u": [
+          -1.54352,
+          -1.190393
+        ],
+        "v": [
+          0.587082,
+          0.719279
+        ]
+      },
+      "source_points": 313,
+      "inflation_m": 0.02,
+      "collision_points": 8569,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 8,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        1.805064,
+        -0.914609,
+        -0.46827
+      ],
+      "box_extents_uvn": [
+        0.18235,
+        0.067845,
+        0.169112
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.070574,
+      "protrusion_max_m": 0.149112,
+      "uv_on_wall": {
+        "u": [
+          -2.204912,
+          -2.062563
+        ],
+        "v": [
+          0.678113,
+          0.705958
+        ]
+      },
+      "source_points": 89,
+      "inflation_m": 0.02,
+      "collision_points": 2880,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 9,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        2.933763,
+        -3.179018,
+        -0.572453
+      ],
+      "box_extents_uvn": [
+        0.165665,
+        0.151464,
+        0.076384
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030438,
+      "protrusion_max_m": 0.056384,
+      "uv_on_wall": {
+        "u": [
+          -4.726224,
+          -4.600559
+        ],
+        "v": [
+          0.741497,
+          0.85296
+        ]
+      },
+      "source_points": 66,
+      "inflation_m": 0.02,
+      "collision_points": 2754,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 10,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        2.469443,
+        -2.273794,
+        -0.582549
+      ],
+      "box_extents_uvn": [
+        0.156853,
+        0.138759,
+        0.139335
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030042,
+      "protrusion_max_m": 0.119335,
+      "uv_on_wall": {
+        "u": [
+          -3.704937,
+          -3.588084
+        ],
+        "v": [
+          0.757277,
+          0.856037
+        ]
+      },
+      "source_points": 186,
+      "inflation_m": 0.02,
+      "collision_points": 3825,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 11,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        2.894292,
+        -3.066915,
+        -0.797147
+      ],
+      "box_extents_uvn": [
+        0.177742,
+        0.135231,
+        0.061123
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030199,
+      "protrusion_max_m": 0.041123,
+      "uv_on_wall": {
+        "u": [
+          -4.614063,
+          -4.476321
+        ],
+        "v": [
+          0.97452,
+          1.069751
+        ]
+      },
+      "source_points": 52,
+      "inflation_m": 0.02,
+      "collision_points": 2280,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 12,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.24098,
+        3.374637,
+        2.2824
+      ],
+      "box_extents_uvn": [
+        0.431233,
+        0.435857,
+        0.069963
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030022,
+      "protrusion_max_m": 0.049963,
+      "uv_on_wall": {
+        "u": [
+          2.422893,
+          2.814125
+        ],
+        "v": [
+          -2.256132,
+          -1.860275
+        ]
+      },
+      "source_points": 547,
+      "inflation_m": 0.02,
+      "collision_points": 16200,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 13,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        0.154331,
+        2.426683,
+        2.424728
+      ],
+      "box_extents_uvn": [
+        0.141155,
+        0.121107,
+        0.162674
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.043215,
+      "protrusion_max_m": 0.142674,
+      "uv_on_wall": {
+        "u": [
+          1.542043,
+          1.643199
+        ],
+        "v": [
+          -2.242104,
+          -2.160997
+        ]
+      },
+      "source_points": 92,
+      "inflation_m": 0.02,
+      "collision_points": 4032,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 14,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.266536,
+        3.386277,
+        1.848561
+      ],
+      "box_extents_uvn": [
+        0.23682,
+        0.123883,
+        0.124617
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.060327,
+      "protrusion_max_m": 0.104617,
+      "uv_on_wall": {
+        "u": [
+          2.541574,
+          2.738394
+        ],
+        "v": [
+          -1.666789,
+          -1.582907
+        ]
+      },
+      "source_points": 155,
+      "inflation_m": 0.02,
+      "collision_points": 4900,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 15,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.368226,
+        3.699956,
+        -0.332578
+      ],
+      "box_extents_uvn": [
+        0.287555,
+        0.538177,
+        0.132206
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030254,
+      "protrusion_max_m": 0.112206,
+      "uv_on_wall": {
+        "u": [
+          2.843187,
+          3.090742
+        ],
+        "v": [
+          0.307617,
+          0.805793
+        ]
+      },
+      "source_points": 529,
+      "inflation_m": 0.02,
+      "collision_points": 24750,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 16,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.379103,
+        3.555794,
+        2.156443
+      ],
+      "box_extents_uvn": [
+        0.045944,
+        0.219143,
+        0.169489
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.07674,
+      "protrusion_max_m": 0.149489,
+      "uv_on_wall": {
+        "u": [
+          2.838424,
+          2.844368
+        ],
+        "v": [
+          -2.022848,
+          -1.843705
+        ]
+      },
+      "source_points": 89,
+      "inflation_m": 0.02,
+      "collision_points": 2484,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 17,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.232708,
+        3.380468,
+        1.89109
+      ],
+      "box_extents_uvn": [
+        0.428738,
+        0.291299,
+        0.066683
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030002,
+      "protrusion_max_m": 0.046683,
+      "uv_on_wall": {
+        "u": [
+          2.42586,
+          2.814598
+        ],
+        "v": [
+          -1.792418,
+          -1.54112
+        ]
+      },
+      "source_points": 252,
+      "inflation_m": 0.02,
+      "collision_points": 10912,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 18,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.314687,
+        3.670799,
+        -0.470077
+      ],
+      "box_extents_uvn": [
+        0.187633,
+        0.36683,
+        0.066351
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030033,
+      "protrusion_max_m": 0.046351,
+      "uv_on_wall": {
+        "u": [
+          2.843849,
+          2.991482
+        ],
+        "v": [
+          0.531522,
+          0.858352
+        ]
+      },
+      "source_points": 171,
+      "inflation_m": 0.02,
+      "collision_points": 6080,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 19,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.349334,
+        3.598397,
+        1.067688
+      ],
+      "box_extents_uvn": [
+        0.092055,
+        0.364842,
+        0.125541
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.072757,
+      "protrusion_max_m": 0.105541,
+      "uv_on_wall": {
+        "u": [
+          2.841089,
+          2.893144
+        ],
+        "v": [
+          -1.006228,
+          -0.681386
+        ]
+      },
+      "source_points": 154,
+      "inflation_m": 0.02,
+      "collision_points": 5852,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 20,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.301511,
+        3.547847,
+        0.269898
+      ],
+      "box_extents_uvn": [
+        0.073127,
+        0.255854,
+        0.116471
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.065894,
+      "protrusion_max_m": 0.096471,
+      "uv_on_wall": {
+        "u": [
+          2.784379,
+          2.817506
+        ],
+        "v": [
+          -0.153667,
+          0.062187
+        ]
+      },
+      "source_points": 72,
+      "inflation_m": 0.02,
+      "collision_points": 3159,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 21,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.342871,
+        3.482725,
+        2.09127
+      ],
+      "box_extents_uvn": [
+        0.148945,
+        0.186531,
+        0.169469
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.070055,
+      "protrusion_max_m": 0.149469,
+      "uv_on_wall": {
+        "u": [
+          2.705375,
+          2.814321
+        ],
+        "v": [
+          -1.941355,
+          -1.794824
+        ]
+      },
+      "source_points": 105,
+      "inflation_m": 0.02,
+      "collision_points": 5760,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 22,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.492136,
+        4.031581,
+        -0.558575
+      ],
+      "box_extents_uvn": [
+        0.187591,
+        0.183959,
+        0.081295
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.03233,
+      "protrusion_max_m": 0.061295,
+      "uv_on_wall": {
+        "u": [
+          3.24589,
+          3.393481
+        ],
+        "v": [
+          0.711316,
+          0.855275
+        ]
+      },
+      "source_points": 104,
+      "inflation_m": 0.02,
+      "collision_points": 4000,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 23,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.514467,
+        4.018155,
+        -0.438482
+      ],
+      "box_extents_uvn": [
+        0.28486,
+        0.250775,
+        0.128031
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.080127,
+      "protrusion_max_m": 0.108031,
+      "uv_on_wall": {
+        "u": [
+          3.194703,
+          3.439563
+        ],
+        "v": [
+          0.55729,
+          0.768065
+        ]
+      },
+      "source_points": 223,
+      "inflation_m": 0.02,
+      "collision_points": 11340,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 24,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.3776,
+        3.769265,
+        0.11938
+      ],
+      "box_extents_uvn": [
+        0.160998,
+        0.134608,
+        0.070465
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.042327,
+      "protrusion_max_m": 0.050465,
+      "uv_on_wall": {
+        "u": [
+          2.973098,
+          3.094096
+        ],
+        "v": [
+          0.057998,
+          0.152606
+        ]
+      },
+      "source_points": 76,
+      "inflation_m": 0.02,
+      "collision_points": 2430,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 25,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.366075,
+        3.562785,
+        1.509891
+      ],
+      "box_extents_uvn": [
+        0.044493,
+        0.295075,
+        0.16749
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.071838,
+      "protrusion_max_m": 0.14749,
+      "uv_on_wall": {
+        "u": [
+          2.839878,
+          2.844371
+        ],
+        "v": [
+          -1.414095,
+          -1.15902
+        ]
+      },
+      "source_points": 98,
+      "inflation_m": 0.02,
+      "collision_points": 3348,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 26,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.39501,
+        3.744515,
+        0.116796
+      ],
+      "box_extents_uvn": [
+        0.18841,
+        0.137212,
+        0.123246
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.073042,
+      "protrusion_max_m": 0.103246,
+      "uv_on_wall": {
+        "u": [
+          2.944499,
+          3.092909
+        ],
+        "v": [
+          0.058718,
+          0.155931
+        ]
+      },
+      "source_points": 74,
+      "inflation_m": 0.02,
+      "collision_points": 4200,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 27,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.531007,
+        4.103374,
+        -0.426099
+      ],
+      "box_extents_uvn": [
+        0.124945,
+        0.149296,
+        0.084308
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030441,
+      "protrusion_max_m": 0.064308,
+      "uv_on_wall": {
+        "u": [
+          3.358739,
+          3.443684
+        ],
+        "v": [
+          0.59611,
+          0.705406
+        ]
+      },
+      "source_points": 58,
+      "inflation_m": 0.02,
+      "collision_points": 2240,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 28,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.33543,
+        3.695749,
+        -0.156314
+      ],
+      "box_extents_uvn": [
+        0.251058,
+        0.188891,
+        0.069066
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030288,
+      "protrusion_max_m": 0.049066,
+      "uv_on_wall": {
+        "u": [
+          2.843571,
+          3.054629
+        ],
+        "v": [
+          0.306628,
+          0.455519
+        ]
+      },
+      "source_points": 100,
+      "inflation_m": 0.02,
+      "collision_points": 4320,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 29,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.261107,
+        3.467033,
+        1.373333
+      ],
+      "box_extents_uvn": [
+        0.242539,
+        0.177142,
+        0.065799
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.03024,
+      "protrusion_max_m": 0.045799,
+      "uv_on_wall": {
+        "u": [
+          2.60934,
+          2.811879
+        ],
+        "v": [
+          -1.217457,
+          -1.080315
+        ]
+      },
+      "source_points": 114,
+      "inflation_m": 0.02,
+      "collision_points": 3952,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 30,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.542939,
+        4.149486,
+        -0.873933
+      ],
+      "box_extents_uvn": [
+        0.146209,
+        0.122325,
+        0.085391
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.032404,
+      "protrusion_max_m": 0.065391,
+      "uv_on_wall": {
+        "u": [
+          3.394881,
+          3.50109
+        ],
+        "v": [
+          1.057519,
+          1.139844
+        ]
+      },
+      "source_points": 53,
+      "inflation_m": 0.02,
+      "collision_points": 2240,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 31,
+      "parent_wall": 0,
+      "box_center_xyz": [
+        -0.957858,
+        4.997476,
+        -1.22439
+      ],
+      "box_extents_uvn": [
+        0.157796,
+        0.15385,
+        0.122676
+      ],
+      "box_orientation_xyzw": [
+        0.381879,
+        0.603998,
+        -0.591273,
+        -0.373834
+      ],
+      "protrusion_min_m": 0.030876,
+      "protrusion_max_m": 0.102676,
+      "uv_on_wall": {
+        "u": [
+          4.333079,
+          4.450875
+        ],
+        "v": [
+          1.391896,
+          1.505745
+        ]
+      },
+      "source_points": 59,
+      "inflation_m": 0.02,
+      "collision_points": 4046,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 32,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        0.324953,
+        2.598271,
+        -0.164878
+      ],
+      "box_extents_uvn": [
+        0.133373,
+        0.221818,
+        0.073772
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030161,
+      "protrusion_max_m": 0.053772,
+      "uv_on_wall": {
+        "u": [
+          -0.445376,
+          -0.352003
+        ],
+        "v": [
+          0.147643,
+          0.329462
+        ]
+      },
+      "source_points": 85,
+      "inflation_m": 0.02,
+      "collision_points": 3240,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 33,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -1.249399,
+        4.838253,
+        0.692739
+      ],
+      "box_extents_uvn": [
+        0.152245,
+        0.3633,
+        0.169855
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030126,
+      "protrusion_max_m": 0.149855,
+      "uv_on_wall": {
+        "u": [
+          2.282373,
+          2.394618
+        ],
+        "v": [
+          -0.781657,
+          -0.458357
+        ]
+      },
+      "source_points": 860,
+      "inflation_m": 0.02,
+      "collision_points": 11628,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 34,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.285458,
+        3.346451,
+        2.369584
+      ],
+      "box_extents_uvn": [
+        0.465399,
+        0.26661,
+        0.169906
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.045451,
+      "protrusion_max_m": 0.149906,
+      "uv_on_wall": {
+        "u": [
+          0.349891,
+          0.775289
+        ],
+        "v": [
+          -2.4104,
+          -2.18379
+        ]
+      },
+      "source_points": 1074,
+      "inflation_m": 0.02,
+      "collision_points": 24192,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 35,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        0.463521,
+        2.374441,
+        -0.984616
+      ],
+      "box_extents_uvn": [
+        0.38664,
+        0.176454,
+        0.120307
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030021,
+      "protrusion_max_m": 0.100307,
+      "uv_on_wall": {
+        "u": [
+          -0.835095,
+          -0.488455
+        ],
+        "v": [
+          0.989786,
+          1.12624
+        ]
+      },
+      "source_points": 349,
+      "inflation_m": 0.02,
+      "collision_points": 10640,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 36,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.46836,
+        3.728594,
+        -1.189367
+      ],
+      "box_extents_uvn": [
+        0.435478,
+        0.18804,
+        0.169971
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030105,
+      "protrusion_max_m": 0.149971,
+      "uv_on_wall": {
+        "u": [
+          0.784164,
+          1.179642
+        ],
+        "v": [
+          1.188351,
+          1.336391
+        ]
+      },
+      "source_points": 637,
+      "inflation_m": 0.02,
+      "collision_points": 16200,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 37,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.711145,
+        4.092764,
+        -1.214791
+      ],
+      "box_extents_uvn": [
+        0.199378,
+        0.136196,
+        0.169316
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.032387,
+      "protrusion_max_m": 0.149316,
+      "uv_on_wall": {
+        "u": [
+          1.339894,
+          1.499272
+        ],
+        "v": [
+          1.239706,
+          1.335902
+        ]
+      },
+      "source_points": 171,
+      "inflation_m": 0.02,
+      "collision_points": 5670,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 38,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.360219,
+        3.623834,
+        -0.534977
+      ],
+      "box_extents_uvn": [
+        0.142638,
+        0.147852,
+        0.084492
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.03059,
+      "protrusion_max_m": 0.064492,
+      "uv_on_wall": {
+        "u": [
+          0.783376,
+          0.886015
+        ],
+        "v": [
+          0.554688,
+          0.66254
+        ]
+      },
+      "source_points": 52,
+      "inflation_m": 0.02,
+      "collision_points": 2560,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 39,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.192336,
+        3.287322,
+        2.240451
+      ],
+      "box_extents_uvn": [
+        0.364538,
+        0.482808,
+        0.085298
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.03014,
+      "protrusion_max_m": 0.065298,
+      "uv_on_wall": {
+        "u": [
+          0.299391,
+          0.623928
+        ],
+        "v": [
+          -2.388627,
+          -1.94582
+        ]
+      },
+      "source_points": 693,
+      "inflation_m": 0.02,
+      "collision_points": 19000,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 40,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        0.52323,
+        2.316105,
+        -0.421665
+      ],
+      "box_extents_uvn": [
+        0.129327,
+        0.138201,
+        0.066799
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030032,
+      "protrusion_max_m": 0.046799,
+      "uv_on_wall": {
+        "u": [
+          -0.788128,
+          -0.698801
+        ],
+        "v": [
+          0.446335,
+          0.544536
+        ]
+      },
+      "source_points": 55,
+      "inflation_m": 0.02,
+      "collision_points": 1680,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 41,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.321949,
+        3.41285,
+        2.012643
+      ],
+      "box_extents_uvn": [
+        0.341167,
+        0.452621,
+        0.16885
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.041435,
+      "protrusion_max_m": 0.14885,
+      "uv_on_wall": {
+        "u": [
+          0.487484,
+          0.788651
+        ],
+        "v": [
+          -2.146404,
+          -1.733783
+        ]
+      },
+      "source_points": 556,
+      "inflation_m": 0.02,
+      "collision_points": 30456,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 42,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -1.141288,
+        4.779579,
+        0.192448
+      ],
+      "box_extents_uvn": [
+        0.100138,
+        0.159155,
+        0.07246
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030993,
+      "protrusion_max_m": 0.05246,
+      "uv_on_wall": {
+        "u": [
+          2.199538,
+          2.259675
+        ],
+        "v": [
+          -0.178392,
+          -0.059237
+        ]
+      },
+      "source_points": 53,
+      "inflation_m": 0.02,
+      "collision_points": 1836,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 43,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.347613,
+        3.615661,
+        -0.064018
+      ],
+      "box_extents_uvn": [
+        0.117201,
+        0.124945,
+        0.056607
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030477,
+      "protrusion_max_m": 0.036607,
+      "uv_on_wall": {
+        "u": [
+          0.782292,
+          0.859493
+        ],
+        "v": [
+          0.095351,
+          0.180297
+        ]
+      },
+      "source_points": 51,
+      "inflation_m": 0.02,
+      "collision_points": 1274,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 44,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -1.23311,
+        4.843332,
+        -0.262358
+      ],
+      "box_extents_uvn": [
+        0.094743,
+        0.19691,
+        0.169633
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.112855,
+      "protrusion_max_m": 0.149633,
+      "uv_on_wall": {
+        "u": [
+          2.306285,
+          2.361028
+        ],
+        "v": [
+          0.256776,
+          0.413685
+        ]
+      },
+      "source_points": 53,
+      "inflation_m": 0.02,
+      "collision_points": 4158,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 45,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.397898,
+        3.686507,
+        -0.388452
+      ],
+      "box_extents_uvn": [
+        0.288136,
+        0.147717,
+        0.072424
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.03018,
+      "protrusion_max_m": 0.052424,
+      "uv_on_wall": {
+        "u": [
+          0.783669,
+          1.031806
+        ],
+        "v": [
+          0.408311,
+          0.516029
+        ]
+      },
+      "source_points": 132,
+      "inflation_m": 0.02,
+      "collision_points": 4320,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 46,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -1.130611,
+        4.777565,
+        -0.442289
+      ],
+      "box_extents_uvn": [
+        0.121567,
+        0.192123,
+        0.078552
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030583,
+      "protrusion_max_m": 0.058552,
+      "uv_on_wall": {
+        "u": [
+          2.181211,
+          2.262778
+        ],
+        "v": [
+          0.439902,
+          0.592024
+        ]
+      },
+      "source_points": 72,
+      "inflation_m": 0.02,
+      "collision_points": 2646,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 47,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -1.289995,
+        4.933508,
+        -0.421036
+      ],
+      "box_extents_uvn": [
+        0.124804,
+        0.162275,
+        0.169282
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.111708,
+      "protrusion_max_m": 0.149282,
+      "uv_on_wall": {
+        "u": [
+          2.397836,
+          2.48264
+        ],
+        "v": [
+          0.432797,
+          0.555072
+        ]
+      },
+      "source_points": 63,
+      "inflation_m": 0.02,
+      "collision_points": 4536,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 48,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.07085,
+        3.233407,
+        -1.021308
+      ],
+      "box_extents_uvn": [
+        0.124212,
+        0.163221,
+        0.054343
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030009,
+      "protrusion_max_m": 0.034343,
+      "uv_on_wall": {
+        "u": [
+          0.307181,
+          0.391393
+        ],
+        "v": [
+          1.033661,
+          1.156881
+        ]
+      },
+      "source_points": 58,
+      "inflation_m": 0.02,
+      "collision_points": 1764,
+      "above_wall_scatter": false
+    },
+    {
+      "id": 49,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.31706,
+        3.54177,
+        0.261512
+      ],
+      "box_extents_uvn": [
+        0.075896,
+        0.227975,
+        0.076932
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030465,
+      "protrusion_max_m": 0.056932,
+      "uv_on_wall": {
+        "u": [
+          0.724543,
+          0.760439
+        ],
+        "v": [
+          -0.281914,
+          -0.093939
+        ]
+      },
+      "source_points": 63,
+      "inflation_m": 0.02,
+      "collision_points": 1944,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 50,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.364379,
+        3.640741,
+        -0.206935
+      ],
+      "box_extents_uvn": [
+        0.174443,
+        0.166607,
+        0.061441
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030204,
+      "protrusion_max_m": 0.041441,
+      "uv_on_wall": {
+        "u": [
+          0.783839,
+          0.918283
+        ],
+        "v": [
+          0.217416,
+          0.344023
+        ]
+      },
+      "source_points": 132,
+      "inflation_m": 0.02,
+      "collision_points": 2736,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 51,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.858107,
+        4.340179,
+        -1.146288
+      ],
+      "box_extents_uvn": [
+        0.15381,
+        0.100061,
+        0.136062
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030005,
+      "protrusion_max_m": 0.116062,
+      "uv_on_wall": {
+        "u": [
+          1.650032,
+          1.763843
+        ],
+        "v": [
+          1.189544,
+          1.249605
+        ]
+      },
+      "source_points": 68,
+      "inflation_m": 0.02,
+      "collision_points": 3060,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 52,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -1.128416,
+        4.760617,
+        -0.166238
+      ],
+      "box_extents_uvn": [
+        0.153592,
+        0.188029,
+        0.08436
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.030007,
+      "protrusion_max_m": 0.06436,
+      "uv_on_wall": {
+        "u": [
+          2.149893,
+          2.263485
+        ],
+        "v": [
+          0.165807,
+          0.313837
+        ]
+      },
+      "source_points": 73,
+      "inflation_m": 0.02,
+      "collision_points": 3400,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 53,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.293722,
+        3.515194,
+        -0.559044
+      ],
+      "box_extents_uvn": [
+        0.138786,
+        0.077858,
+        0.095621
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.031904,
+      "protrusion_max_m": 0.075621,
+      "uv_on_wall": {
+        "u": [
+          0.658031,
+          0.756818
+        ],
+        "v": [
+          0.61366,
+          0.651519
+        ]
+      },
+      "source_points": 51,
+      "inflation_m": 0.02,
+      "collision_points": 1485,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 54,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        -0.405834,
+        3.542073,
+        2.143365
+      ],
+      "box_extents_uvn": [
+        0.053894,
+        0.242482,
+        0.160099
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.039589,
+      "protrusion_max_m": 0.140099,
+      "uv_on_wall": {
+        "u": [
+          0.785168,
+          0.799062
+        ],
+        "v": [
+          -2.172001,
+          -1.969519
+        ]
+      },
+      "source_points": 120,
+      "inflation_m": 0.02,
+      "collision_points": 3276,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 55,
+      "parent_wall": 1,
+      "box_center_xyz": [
+        0.319291,
+        2.547831,
+        -1.066277
+      ],
+      "box_extents_uvn": [
+        0.109228,
+        0.137569,
+        0.169948
+      ],
+      "box_orientation_xyzw": [
+        0.335931,
+        0.629013,
+        -0.618401,
+        -0.330264
+      ],
+      "protrusion_min_m": 0.138814,
+      "protrusion_max_m": 0.149948,
+      "uv_on_wall": {
+        "u": [
+          -0.472074,
+          -0.402846
+        ],
+        "v": [
+          1.090479,
+          1.188048
+        ]
+      },
+      "source_points": 50,
+      "inflation_m": 0.02,
+      "collision_points": 3240,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 56,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        0.191735,
+        2.466047,
+        1.969168
+      ],
+      "box_extents_uvn": [
+        0.284752,
+        0.123288,
+        0.063517
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030041,
+      "protrusion_max_m": 0.043517,
+      "uv_on_wall": {
+        "u": [
+          -0.824525,
+          -0.579774
+        ],
+        "v": [
+          -1.510395,
+          -1.427107
+        ]
+      },
+      "source_points": 104,
+      "inflation_m": 0.02,
+      "collision_points": 3360,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 57,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        0.346028,
+        2.071741,
+        1.784779
+      ],
+      "box_extents_uvn": [
+        0.184611,
+        0.110316,
+        0.168545
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.057381,
+      "protrusion_max_m": 0.148545,
+      "uv_on_wall": {
+        "u": [
+          -1.195155,
+          -1.050544
+        ],
+        "v": [
+          -1.32078,
+          -1.250464
+        ]
+      },
+      "source_points": 148,
+      "inflation_m": 0.02,
+      "collision_points": 4680,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 58,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        0.145809,
+        2.430468,
+        2.413198
+      ],
+      "box_extents_uvn": [
+        0.15847,
+        0.098469,
+        0.155666
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.034375,
+      "protrusion_max_m": 0.135666,
+      "uv_on_wall": {
+        "u": [
+          -0.77137,
+          -0.6529
+        ],
+        "v": [
+          -1.943311,
+          -1.884843
+        ]
+      },
+      "source_points": 97,
+      "inflation_m": 0.02,
+      "collision_points": 3179,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 59,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.426618,
+        3.540973,
+        2.364053
+      ],
+      "box_extents_uvn": [
+        0.063364,
+        0.163279,
+        0.132091
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030001,
+      "protrusion_max_m": 0.112091,
+      "uv_on_wall": {
+        "u": [
+          0.525472,
+          0.548836
+        ],
+        "v": [
+          -1.92626,
+          -1.802981
+        ]
+      },
+      "source_points": 84,
+      "inflation_m": 0.02,
+      "collision_points": 2160,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 60,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.504195,
+        3.710303,
+        1.188649
+      ],
+      "box_extents_uvn": [
+        0.430904,
+        0.271574,
+        0.169929
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030003,
+      "protrusion_max_m": 0.149929,
+      "uv_on_wall": {
+        "u": [
+          0.527656,
+          0.91856
+        ],
+        "v": [
+          -0.805108,
+          -0.573534
+        ]
+      },
+      "source_points": 655,
+      "inflation_m": 0.02,
+      "collision_points": 23490,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 61,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.437228,
+        3.730094,
+        0.215292
+      ],
+      "box_extents_uvn": [
+        0.403701,
+        0.346407,
+        0.081897
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030009,
+      "protrusion_max_m": 0.061897,
+      "uv_on_wall": {
+        "u": [
+          0.527452,
+          0.891154
+        ],
+        "v": [
+          0.132244,
+          0.43865
+        ]
+      },
+      "source_points": 552,
+      "inflation_m": 0.02,
+      "collision_points": 15120,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 62,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.478397,
+        3.785399,
+        0.872627
+      ],
+      "box_extents_uvn": [
+        0.534534,
+        0.413067,
+        0.070002
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030001,
+      "protrusion_max_m": 0.050002,
+      "uv_on_wall": {
+        "u": [
+          0.530171,
+          1.024705
+        ],
+        "v": [
+          -0.558479,
+          -0.185413
+        ]
+      },
+      "source_points": 831,
+      "inflation_m": 0.02,
+      "collision_points": 21285,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 63,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.41482,
+        3.732082,
+        -0.400061
+      ],
+      "box_extents_uvn": [
+        0.379781,
+        0.165155,
+        0.071303
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030019,
+      "protrusion_max_m": 0.051303,
+      "uv_on_wall": {
+        "u": [
+          0.530696,
+          0.870477
+        ],
+        "v": [
+          0.838549,
+          0.963704
+        ]
+      },
+      "source_points": 218,
+      "inflation_m": 0.02,
+      "collision_points": 6318,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 64,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.407961,
+        3.71744,
+        -0.199136
+      ],
+      "box_extents_uvn": [
+        0.315692,
+        0.214713,
+        0.062784
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030023,
+      "protrusion_max_m": 0.042784,
+      "uv_on_wall": {
+        "u": [
+          0.54659,
+          0.822283
+        ],
+        "v": [
+          0.612889,
+          0.787601
+        ]
+      },
+      "source_points": 194,
+      "inflation_m": 0.02,
+      "collision_points": 6072,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 65,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.358422,
+        3.625148,
+        -0.534316
+      ],
+      "box_extents_uvn": [
+        0.14157,
+        0.148859,
+        0.078287
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.0312,
+      "protrusion_max_m": 0.058287,
+      "uv_on_wall": {
+        "u": [
+          0.528906,
+          0.630476
+        ],
+        "v": [
+          0.980906,
+          1.089765
+        ]
+      },
+      "source_points": 53,
+      "inflation_m": 0.02,
+      "collision_points": 2304,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 66,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.452248,
+        3.738228,
+        0.474632
+      ],
+      "box_extents_uvn": [
+        0.414719,
+        0.226044,
+        0.087834
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030041,
+      "protrusion_max_m": 0.067834,
+      "uv_on_wall": {
+        "u": [
+          0.536155,
+          0.910874
+        ],
+        "v": [
+          -0.067072,
+          0.118972
+        ]
+      },
+      "source_points": 311,
+      "inflation_m": 0.02,
+      "collision_points": 10320,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 67,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.448586,
+        3.787529,
+        -0.014456
+      ],
+      "box_extents_uvn": [
+        0.254384,
+        0.186541,
+        0.059822
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030046,
+      "protrusion_max_m": 0.039822,
+      "uv_on_wall": {
+        "u": [
+          0.658194,
+          0.872579
+        ],
+        "v": [
+          0.442273,
+          0.588814
+        ]
+      },
+      "source_points": 144,
+      "inflation_m": 0.02,
+      "collision_points": 3780,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 68,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.446605,
+        3.727243,
+        -1.157362
+      ],
+      "box_extents_uvn": [
+        0.403096,
+        0.157135,
+        0.169995
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030195,
+      "protrusion_max_m": 0.149995,
+      "uv_on_wall": {
+        "u": [
+          0.529618,
+          0.892714
+        ],
+        "v": [
+          1.59886,
+          1.715995
+        ]
+      },
+      "source_points": 625,
+      "inflation_m": 0.02,
+      "collision_points": 12852,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 69,
+      "parent_wall": 2,
+      "box_center_xyz": [
+        -0.290375,
+        3.373719,
+        1.86703
+      ],
+      "box_extents_uvn": [
+        0.197859,
+        0.142693,
+        0.072518
+      ],
+      "box_orientation_xyzw": [
+        0.369439,
+        0.613234,
+        -0.598041,
+        -0.360286
+      ],
+      "protrusion_min_m": 0.030076,
+      "protrusion_max_m": 0.052518,
+      "uv_on_wall": {
+        "u": [
+          0.246684,
+          0.404542
+        ],
+        "v": [
+          -1.41804,
+          -1.315347
+        ]
+      },
+      "source_points": 90,
+      "inflation_m": 0.02,
+      "collision_points": 3024,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 70,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.296084,
+        3.484991,
+        2.295853
+      ],
+      "box_extents_uvn": [
+        0.067838,
+        0.432586,
+        0.169586
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030283,
+      "protrusion_max_m": 0.149586,
+      "uv_on_wall": {
+        "u": [
+          -0.682703,
+          -0.654864
+        ],
+        "v": [
+          -0.909997,
+          -0.517411
+        ]
+      },
+      "source_points": 336,
+      "inflation_m": 0.02,
+      "collision_points": 6480,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 71,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.691642,
+        3.349016,
+        1.448031
+      ],
+      "box_extents_uvn": [
+        0.244463,
+        0.210659,
+        0.073683
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030108,
+      "protrusion_max_m": 0.053683,
+      "uv_on_wall": {
+        "u": [
+          -0.355658,
+          -0.151195
+        ],
+        "v": [
+          0.048868,
+          0.219527
+        ]
+      },
+      "source_points": 148,
+      "inflation_m": 0.02,
+      "collision_points": 5382,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 72,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.864038,
+        3.262944,
+        1.483776
+      ],
+      "box_extents_uvn": [
+        0.169312,
+        0.207838,
+        0.078862
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030035,
+      "protrusion_max_m": 0.058862,
+      "uv_on_wall": {
+        "u": [
+          -0.125412,
+          0.0039
+        ],
+        "v": [
+          0.014529,
+          0.182368
+        ]
+      },
+      "source_points": 154,
+      "inflation_m": 0.02,
+      "collision_points": 3564,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 73,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.115156,
+        3.576631,
+        -0.230505
+      ],
+      "box_extents_uvn": [
+        0.119184,
+        0.386539,
+        0.169899
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030289,
+      "protrusion_max_m": 0.149899,
+      "uv_on_wall": {
+        "u": [
+          -0.911149,
+          -0.831965
+        ],
+        "v": [
+          1.639388,
+          1.985927
+        ]
+      },
+      "source_points": 608,
+      "inflation_m": 0.02,
+      "collision_points": 9360,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 74,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.217399,
+        3.525196,
+        1.067886
+      ],
+      "box_extents_uvn": [
+        0.065473,
+        0.189706,
+        0.169511
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030114,
+      "protrusion_max_m": 0.149511,
+      "uv_on_wall": {
+        "u": [
+          -0.769858,
+          -0.744385
+        ],
+        "v": [
+          0.439412,
+          0.589118
+        ]
+      },
+      "source_points": 155,
+      "inflation_m": 0.02,
+      "collision_points": 2880,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 75,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.425714,
+        3.428551,
+        -1.168727
+      ],
+      "box_extents_uvn": [
+        0.429069,
+        0.215424,
+        0.169936
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030098,
+      "protrusion_max_m": 0.149936,
+      "uv_on_wall": {
+        "u": [
+          -0.72204,
+          -0.332971
+        ],
+        "v": [
+          2.663169,
+          2.838593
+        ]
+      },
+      "source_points": 1338,
+      "inflation_m": 0.02,
+      "collision_points": 18216,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 76,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.185673,
+        3.541162,
+        0.868208
+      ],
+      "box_extents_uvn": [
+        0.129168,
+        0.189098,
+        0.168959
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030274,
+      "protrusion_max_m": 0.148959,
+      "uv_on_wall": {
+        "u": [
+          -0.837218,
+          -0.74805
+        ],
+        "v": [
+          0.639395,
+          0.788493
+        ]
+      },
+      "source_points": 225,
+      "inflation_m": 0.02,
+      "collision_points": 5040,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 77,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.607973,
+        3.381052,
+        1.285287
+      ],
+      "box_extents_uvn": [
+        0.132239,
+        0.18084,
+        0.089183
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.03001,
+      "protrusion_max_m": 0.069183,
+      "uv_on_wall": {
+        "u": [
+          -0.388825,
+          -0.296586
+        ],
+        "v": [
+          0.22651,
+          0.367349
+        ]
+      },
+      "source_points": 128,
+      "inflation_m": 0.02,
+      "collision_points": 3000,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 78,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.141646,
+        3.563026,
+        0.404585
+      ],
+      "box_extents_uvn": [
+        0.088781,
+        0.223221,
+        0.169329
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030067,
+      "protrusion_max_m": 0.149329,
+      "uv_on_wall": {
+        "u": [
+          -0.866177,
+          -0.817396
+        ],
+        "v": [
+          1.085956,
+          1.269177
+        ]
+      },
+      "source_points": 185,
+      "inflation_m": 0.02,
+      "collision_points": 4320,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 79,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.086118,
+        3.591688,
+        -0.831952
+      ],
+      "box_extents_uvn": [
+        0.084537,
+        0.28948,
+        0.169959
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030114,
+      "protrusion_max_m": 0.149959,
+      "uv_on_wall": {
+        "u": [
+          -0.926522,
+          -0.881985
+        ],
+        "v": [
+          2.289365,
+          2.538846
+        ]
+      },
+      "source_points": 566,
+      "inflation_m": 0.02,
+      "collision_points": 5400,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 80,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.205451,
+        3.573338,
+        -0.544466
+      ],
+      "box_extents_uvn": [
+        0.06554,
+        0.409029,
+        0.098414
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030374,
+      "protrusion_max_m": 0.078414,
+      "uv_on_wall": {
+        "u": [
+          -0.801564,
+          -0.776024
+        ],
+        "v": [
+          1.942163,
+          2.311191
+        ]
+      },
+      "source_points": 131,
+      "inflation_m": 0.02,
+      "collision_points": 3696,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 81,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -1.336965,
+        3.0464,
+        1.275059
+      ],
+      "box_extents_uvn": [
+        0.094129,
+        0.196892,
+        0.05881
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030005,
+      "protrusion_max_m": 0.03881,
+      "uv_on_wall": {
+        "u": [
+          0.432221,
+          0.48635
+        ],
+        "v": [
+          0.228737,
+          0.385628
+        ]
+      },
+      "source_points": 57,
+      "inflation_m": 0.02,
+      "collision_points": 1617,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 82,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -1.522533,
+        2.899825,
+        -1.137327
+      ],
+      "box_extents_uvn": [
+        0.336693,
+        0.276098,
+        0.169515
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030133,
+      "protrusion_max_m": 0.149515,
+      "uv_on_wall": {
+        "u": [
+          0.541754,
+          0.838446
+        ],
+        "v": [
+          2.601433,
+          2.83753
+        ]
+      },
+      "source_points": 643,
+      "inflation_m": 0.02,
+      "collision_points": 18270,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 83,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.361298,
+        3.501827,
+        1.540464
+      ],
+      "box_extents_uvn": [
+        0.118176,
+        0.397482,
+        0.085065
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030022,
+      "protrusion_max_m": 0.065065,
+      "uv_on_wall": {
+        "u": [
+          -0.656443,
+          -0.578267
+        ],
+        "v": [
+          -0.136985,
+          0.220496
+        ]
+      },
+      "source_points": 258,
+      "inflation_m": 0.02,
+      "collision_points": 5330,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 84,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.225728,
+        3.52052,
+        1.56779
+      ],
+      "box_extents_uvn": [
+        0.065849,
+        0.189231,
+        0.169072
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030075,
+      "protrusion_max_m": 0.149072,
+      "uv_on_wall": {
+        "u": [
+          -0.760513,
+          -0.734664
+        ],
+        "v": [
+          -0.060255,
+          0.088976
+        ]
+      },
+      "source_points": 147,
+      "inflation_m": 0.02,
+      "collision_points": 2880,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 85,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.71838,
+        3.335132,
+        1.688037
+      ],
+      "box_extents_uvn": [
+        0.151896,
+        0.227448,
+        0.074684
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030145,
+      "protrusion_max_m": 0.054684,
+      "uv_on_wall": {
+        "u": [
+          -0.27926,
+          -0.167364
+        ],
+        "v": [
+          -0.199533,
+          -0.012085
+        ]
+      },
+      "source_points": 115,
+      "inflation_m": 0.02,
+      "collision_points": 3672,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 86,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.52916,
+        3.432345,
+        1.882219
+      ],
+      "box_extents_uvn": [
+        0.148473,
+        0.137077,
+        0.063301
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030048,
+      "protrusion_max_m": 0.043301,
+      "uv_on_wall": {
+        "u": [
+          -0.490211,
+          -0.381738
+        ],
+        "v": [
+          -0.348521,
+          -0.251444
+        ]
+      },
+      "source_points": 65,
+      "inflation_m": 0.02,
+      "collision_points": 1920,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 87,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.921188,
+        3.226045,
+        1.900821
+      ],
+      "box_extents_uvn": [
+        0.193882,
+        0.32646,
+        0.09433
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030244,
+      "protrusion_max_m": 0.07433,
+      "uv_on_wall": {
+        "u": [
+          -0.070193,
+          0.083689
+        ],
+        "v": [
+          -0.46184,
+          -0.17538
+        ]
+      },
+      "source_points": 147,
+      "inflation_m": 0.02,
+      "collision_points": 7854,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 88,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.290124,
+        3.488563,
+        1.972008
+      ],
+      "box_extents_uvn": [
+        0.061267,
+        0.240526,
+        0.169384
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.032156,
+      "protrusion_max_m": 0.149384,
+      "uv_on_wall": {
+        "u": [
+          -0.686338,
+          -0.66507
+        ],
+        "v": [
+          -0.490121,
+          -0.289595
+        ]
+      },
+      "source_points": 155,
+      "inflation_m": 0.02,
+      "collision_points": 3744,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 89,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.093457,
+        3.588242,
+        -0.605932
+      ],
+      "box_extents_uvn": [
+        0.081676,
+        0.137467,
+        0.169056
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.031124,
+      "protrusion_max_m": 0.149056,
+      "uv_on_wall": {
+        "u": [
+          -0.916984,
+          -0.875308
+        ],
+        "v": [
+          2.139352,
+          2.236819
+        ]
+      },
+      "source_points": 213,
+      "inflation_m": 0.02,
+      "collision_points": 2700,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 90,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -1.666325,
+        2.878366,
+        2.017612
+      ],
+      "box_extents_uvn": [
+        0.093327,
+        0.12228,
+        0.072986
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.03016,
+      "protrusion_max_m": 0.052986,
+      "uv_on_wall": {
+        "u": [
+          0.802277,
+          0.855604
+        ],
+        "v": [
+          -0.476523,
+          -0.394244
+        ]
+      },
+      "source_points": 53,
+      "inflation_m": 0.02,
+      "collision_points": 1386,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 91,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.268261,
+        3.539105,
+        1.101639
+      ],
+      "box_extents_uvn": [
+        0.049703,
+        0.370971,
+        0.10016
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.031043,
+      "protrusion_max_m": 0.08016,
+      "uv_on_wall": {
+        "u": [
+          -0.7222,
+          -0.712498
+        ],
+        "v": [
+          0.315083,
+          0.646055
+        ]
+      },
+      "source_points": 85,
+      "inflation_m": 0.02,
+      "collision_points": 2808,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 92,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.158082,
+        3.557675,
+        -0.958921
+      ],
+      "box_extents_uvn": [
+        0.116264,
+        0.158106,
+        0.16913
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.031226,
+      "protrusion_max_m": 0.14913,
+      "uv_on_wall": {
+        "u": [
+          -0.86279,
+          -0.786526
+        ],
+        "v": [
+          2.482022,
+          2.600128
+        ]
+      },
+      "source_points": 127,
+      "inflation_m": 0.02,
+      "collision_points": 3978,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 93,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.325928,
+        3.471808,
+        2.037028
+      ],
+      "box_extents_uvn": [
+        0.058411,
+        0.157325,
+        0.168253
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.034195,
+      "protrusion_max_m": 0.148253,
+      "uv_on_wall": {
+        "u": [
+          -0.645381,
+          -0.62697
+        ],
+        "v": [
+          -0.51354,
+          -0.396215
+        ]
+      },
+      "source_points": 59,
+      "inflation_m": 0.02,
+      "collision_points": 2142,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 94,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.330212,
+        3.469209,
+        1.91295
+      ],
+      "box_extents_uvn": [
+        0.074754,
+        0.196829,
+        0.169619
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.030908,
+      "protrusion_max_m": 0.149619,
+      "uv_on_wall": {
+        "u": [
+          -0.648565,
+          -0.613811
+        ],
+        "v": [
+          -0.409214,
+          -0.252385
+        ]
+      },
+      "source_points": 141,
+      "inflation_m": 0.02,
+      "collision_points": 3402,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 95,
+      "parent_wall": 3,
+      "box_center_xyz": [
+        -0.284542,
+        3.491422,
+        1.797946
+      ],
+      "box_extents_uvn": [
+        0.061321,
+        0.138268,
+        0.16965
+      ],
+      "box_orientation_xyzw": [
+        -0.157654,
+        0.689898,
+        -0.688776,
+        0.157397
+      ],
+      "protrusion_min_m": 0.036893,
+      "protrusion_max_m": 0.14965,
+      "uv_on_wall": {
+        "u": [
+          -0.692633,
+          -0.671312
+        ],
+        "v": [
+          -0.26493,
+          -0.166662
+        ]
+      },
+      "source_points": 53,
+      "inflation_m": 0.02,
+      "collision_points": 2160,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 96,
+      "parent_wall": 4,
+      "box_center_xyz": [
+        -1.491903,
+        4.607208,
+        -1.224798
+      ],
+      "box_extents_uvn": [
+        0.14324,
+        0.113714,
+        0.133789
+      ],
+      "box_orientation_xyzw": [
+        -0.147755,
+        0.694031,
+        -0.689175,
+        0.146722
+      ],
+      "protrusion_min_m": 0.03073,
+      "protrusion_max_m": 0.113789,
+      "uv_on_wall": {
+        "u": [
+          0.330382,
+          0.433622
+        ],
+        "v": [
+          1.085608,
+          1.159322
+        ]
+      },
+      "source_points": 59,
+      "inflation_m": 0.02,
+      "collision_points": 3120,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 97,
+      "parent_wall": 4,
+      "box_center_xyz": [
+        -2.016992,
+        4.35116,
+        -0.952794
+      ],
+      "box_extents_uvn": [
+        0.133416,
+        0.127984,
+        0.16989
+      ],
+      "box_orientation_xyzw": [
+        -0.147755,
+        0.694031,
+        -0.689175,
+        0.146722
+      ],
+      "protrusion_min_m": 0.030001,
+      "protrusion_max_m": 0.14989,
+      "uv_on_wall": {
+        "u": [
+          0.919143,
+          1.01256
+        ],
+        "v": [
+          0.806335,
+          0.894319
+        ]
+      },
+      "source_points": 195,
+      "inflation_m": 0.02,
+      "collision_points": 3780,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 98,
+      "parent_wall": 4,
+      "box_center_xyz": [
+        -1.745717,
+        4.471178,
+        -0.824169
+      ],
+      "box_extents_uvn": [
+        0.125576,
+        0.14187,
+        0.169859
+      ],
+      "box_orientation_xyzw": [
+        -0.147755,
+        0.694031,
+        -0.689175,
+        0.146722
+      ],
+      "protrusion_min_m": 0.030603,
+      "protrusion_max_m": 0.149859,
+      "uv_on_wall": {
+        "u": [
+          0.626427,
+          0.712003
+        ],
+        "v": [
+          0.670764,
+          0.772634
+        ]
+      },
+      "source_points": 120,
+      "inflation_m": 0.02,
+      "collision_points": 4032,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 99,
+      "parent_wall": 4,
+      "box_center_xyz": [
+        -1.113101,
+        4.752833,
+        -0.203213
+      ],
+      "box_extents_uvn": [
+        0.093786,
+        0.236435,
+        0.162044
+      ],
+      "box_orientation_xyzw": [
+        -0.147755,
+        0.694031,
+        -0.689175,
+        0.146722
+      ],
+      "protrusion_min_m": 0.030317,
+      "protrusion_max_m": 0.142044,
+      "uv_on_wall": {
+        "u": [
+          -0.050161,
+          0.003624
+        ],
+        "v": [
+          0.002538,
+          0.198972
+        ]
+      },
+      "source_points": 152,
+      "inflation_m": 0.02,
+      "collision_points": 4950,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 100,
+      "parent_wall": 4,
+      "box_center_xyz": [
+        -1.133939,
+        4.776252,
+        0.20411
+      ],
+      "box_extents_uvn": [
+        0.078756,
+        0.164508,
+        0.096573
+      ],
+      "box_orientation_xyzw": [
+        -0.147755,
+        0.694031,
+        -0.689175,
+        0.146722
+      ],
+      "protrusion_min_m": 0.03049,
+      "protrusion_max_m": 0.076573,
+      "uv_on_wall": {
+        "u": [
+          -0.033155,
+          0.005601
+        ],
+        "v": [
+          -0.368603,
+          -0.244094
+        ]
+      },
+      "source_points": 77,
+      "inflation_m": 0.02,
+      "collision_points": 1782,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 101,
+      "parent_wall": 4,
+      "box_center_xyz": [
+        -0.739048,
+        4.958993,
+        -0.90045
+      ],
+      "box_extents_uvn": [
+        0.085143,
+        0.195116,
+        0.099995
+      ],
+      "box_orientation_xyzw": [
+        -0.147755,
+        0.694031,
+        -0.689175,
+        0.146722
+      ],
+      "protrusion_min_m": 0.030285,
+      "protrusion_max_m": 0.079995,
+      "uv_on_wall": {
+        "u": [
+          -0.47143,
+          -0.426288
+        ],
+        "v": [
+          0.72067,
+          0.875785
+        ]
+      },
+      "source_points": 69,
+      "inflation_m": 0.02,
+      "collision_points": 2310,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 102,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        0.323291,
+        1.991311,
+        1.786925
+      ],
+      "box_extents_uvn": [
+        0.253267,
+        0.151504,
+        0.169862
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.030419,
+      "protrusion_max_m": 0.149862,
+      "uv_on_wall": {
+        "u": [
+          -0.329333,
+          -0.116066
+        ],
+        "v": [
+          -1.596346,
+          -1.484842
+        ]
+      },
+      "source_points": 395,
+      "inflation_m": 0.02,
+      "collision_points": 8262,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 103,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        0.419034,
+        1.747581,
+        1.769254
+      ],
+      "box_extents_uvn": [
+        0.221708,
+        0.150675,
+        0.169835
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.03007,
+      "protrusion_max_m": 0.149835,
+      "uv_on_wall": {
+        "u": [
+          -0.575413,
+          -0.393705
+        ],
+        "v": [
+          -1.578231,
+          -1.467556
+        ]
+      },
+      "source_points": 312,
+      "inflation_m": 0.02,
+      "collision_points": 7344,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 104,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        0.199881,
+        2.548906,
+        1.155004
+      ],
+      "box_extents_uvn": [
+        0.15897,
+        0.173502,
+        0.068184
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.034548,
+      "protrusion_max_m": 0.048184,
+      "uv_on_wall": {
+        "u": [
+          0.282267,
+          0.401237
+        ],
+        "v": [
+          -0.971517,
+          -0.838015
+        ]
+      },
+      "source_points": 72,
+      "inflation_m": 0.02,
+      "collision_points": 2584,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 105,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        0.523921,
+        1.933957,
+        -0.205493
+      ],
+      "box_extents_uvn": [
+        0.114517,
+        0.396866,
+        0.063838
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.030127,
+      "protrusion_max_m": 0.043838,
+      "uv_on_wall": {
+        "u": [
+          -0.386052,
+          -0.311535
+        ],
+        "v": [
+          0.279613,
+          0.636479
+        ]
+      },
+      "source_points": 119,
+      "inflation_m": 0.02,
+      "collision_points": 4264,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 106,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        0.738792,
+        1.398265,
+        -0.42543
+      ],
+      "box_extents_uvn": [
+        0.332613,
+        0.134313,
+        0.076054
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.030063,
+      "protrusion_max_m": 0.056054,
+      "uv_on_wall": {
+        "u": [
+          -1.072244,
+          -0.779631
+        ],
+        "v": [
+          0.630834,
+          0.725148
+        ]
+      },
+      "source_points": 225,
+      "inflation_m": 0.02,
+      "collision_points": 4725,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 107,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        0.317229,
+        2.506618,
+        -1.045963
+      ],
+      "box_extents_uvn": [
+        0.158273,
+        0.123925,
+        0.129937
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.098507,
+      "protrusion_max_m": 0.109937,
+      "uv_on_wall": {
+        "u": [
+          0.200715,
+          0.318988
+        ],
+        "v": [
+          1.256031,
+          1.339956
+        ]
+      },
+      "source_points": 51,
+      "inflation_m": 0.02,
+      "collision_points": 3332,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 108,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        1.700485,
+        -1.154548,
+        -0.201713
+      ],
+      "box_extents_uvn": [
+        0.241335,
+        0.244615,
+        0.105923
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.030087,
+      "protrusion_max_m": 0.085923,
+      "uv_on_wall": {
+        "u": [
+          -3.754413,
+          -3.553078
+        ],
+        "v": [
+          0.350758,
+          0.555372
+        ]
+      },
+      "source_points": 233,
+      "inflation_m": 0.02,
+      "collision_points": 8112,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 109,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        1.656467,
+        -0.975572,
+        -0.343702
+      ],
+      "box_extents_uvn": [
+        0.108495,
+        0.123285,
+        0.074588
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.030104,
+      "protrusion_max_m": 0.054588,
+      "uv_on_wall": {
+        "u": [
+          -3.505222,
+          -3.436727
+        ],
+        "v": [
+          0.55453,
+          0.637815
+        ]
+      },
+      "source_points": 50,
+      "inflation_m": 0.02,
+      "collision_points": 1512,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 110,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        1.712721,
+        -1.232535,
+        -0.4701
+      ],
+      "box_extents_uvn": [
+        0.389812,
+        0.144332,
+        0.169959
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.031061,
+      "protrusion_max_m": 0.149959,
+      "uv_on_wall": {
+        "u": [
+          -3.905778,
+          -3.555967
+        ],
+        "v": [
+          0.6679,
+          0.772232
+        ]
+      },
+      "source_points": 647,
+      "inflation_m": 0.02,
+      "collision_points": 11520,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 111,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        1.848069,
+        -1.581235,
+        -0.465947
+      ],
+      "box_extents_uvn": [
+        0.237676,
+        0.091486,
+        0.169614
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.030785,
+      "protrusion_max_m": 0.149614,
+      "uv_on_wall": {
+        "u": [
+          -4.203757,
+          -4.006081
+        ],
+        "v": [
+          0.690173,
+          0.74166
+        ]
+      },
+      "source_points": 211,
+      "inflation_m": 0.02,
+      "collision_points": 4950,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 112,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        1.947183,
+        -1.826371,
+        -0.515258
+      ],
+      "box_extents_uvn": [
+        0.311551,
+        0.089432,
+        0.167916
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.030688,
+      "protrusion_max_m": 0.147916,
+      "uv_on_wall": {
+        "u": [
+          -4.505085,
+          -4.233534
+        ],
+        "v": [
+          0.740639,
+          0.790071
+        ]
+      },
+      "source_points": 267,
+      "inflation_m": 0.02,
+      "collision_points": 5940,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 113,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        -0.152304,
+        3.602338,
+        -0.672847
+      ],
+      "box_extents_uvn": [
+        0.100725,
+        0.265715,
+        0.169552
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.121266,
+      "protrusion_max_m": 0.149552,
+      "uv_on_wall": {
+        "u": [
+          1.420866,
+          1.481591
+        ],
+        "v": [
+          0.810294,
+          1.036009
+        ]
+      },
+      "source_points": 96,
+      "inflation_m": 0.02,
+      "collision_points": 6048,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 114,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        -0.086021,
+        3.086121,
+        2.253292
+      ],
+      "box_extents_uvn": [
+        0.335398,
+        0.428807,
+        0.087467
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.03002,
+      "protrusion_max_m": 0.067467,
+      "uv_on_wall": {
+        "u": [
+          0.79833,
+          1.093728
+        ],
+        "v": [
+          -2.199776,
+          -1.810968
+        ]
+      },
+      "source_points": 576,
+      "inflation_m": 0.02,
+      "collision_points": 15400,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 115,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        -0.068699,
+        2.89701,
+        2.447315
+      ],
+      "box_extents_uvn": [
+        0.297938,
+        0.155159,
+        0.169919
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.036273,
+      "protrusion_max_m": 0.149919,
+      "uv_on_wall": {
+        "u": [
+          0.634505,
+          0.892442
+        ],
+        "v": [
+          -2.259628,
+          -2.14447
+        ]
+      },
+      "source_points": 472,
+      "inflation_m": 0.02,
+      "collision_points": 9486,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 116,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        1.513087,
+        -0.598741,
+        -1.227982
+      ],
+      "box_extents_uvn": [
+        0.479625,
+        0.117681,
+        0.169364
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.030221,
+      "protrusion_max_m": 0.149364,
+      "uv_on_wall": {
+        "u": [
+          -3.28761,
+          -2.847985
+        ],
+        "v": [
+          1.440345,
+          1.518027
+        ]
+      },
+      "source_points": 411,
+      "inflation_m": 0.02,
+      "collision_points": 11466,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 117,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        -0.15362,
+        3.377357,
+        0.903718
+      ],
+      "box_extents_uvn": [
+        0.269364,
+        0.141155,
+        0.155829
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.097284,
+      "protrusion_max_m": 0.135829,
+      "uv_on_wall": {
+        "u": [
+          1.127301,
+          1.356665
+        ],
+        "v": [
+          -0.706142,
+          -0.604987
+        ]
+      },
+      "source_points": 144,
+      "inflation_m": 0.02,
+      "collision_points": 7616,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 118,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        -0.26065,
+        3.658115,
+        0.749686
+      ],
+      "box_extents_uvn": [
+        0.130486,
+        0.249107,
+        0.169573
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.130694,
+      "protrusion_max_m": 0.149573,
+      "uv_on_wall": {
+        "u": [
+          1.497201,
+          1.587687
+        ],
+        "v": [
+          -0.606229,
+          -0.397121
+        ]
+      },
+      "source_points": 94,
+      "inflation_m": 0.02,
+      "collision_points": 7020,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 119,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        -0.152642,
+        3.120725,
+        2.407648
+      ],
+      "box_extents_uvn": [
+        0.221093,
+        0.125106,
+        0.168953
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.077182,
+      "protrusion_max_m": 0.148953,
+      "uv_on_wall": {
+        "u": [
+          0.911856,
+          1.092949
+        ],
+        "v": [
+          -2.204844,
+          -2.119738
+        ]
+      },
+      "source_points": 224,
+      "inflation_m": 0.02,
+      "collision_points": 6048,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 120,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        -0.079897,
+        3.461836,
+        -0.966266
+      ],
+      "box_extents_uvn": [
+        0.139819,
+        0.084971,
+        0.169615
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.070321,
+      "protrusion_max_m": 0.149615,
+      "uv_on_wall": {
+        "u": [
+          1.244135,
+          1.343954
+        ],
+        "v": [
+          1.194556,
+          1.239527
+        ]
+      },
+      "source_points": 163,
+      "inflation_m": 0.02,
+      "collision_points": 2700,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 121,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        0.003383,
+        2.935696,
+        1.999203
+      ],
+      "box_extents_uvn": [
+        0.18334,
+        0.115372,
+        0.058605
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.030492,
+      "protrusion_max_m": 0.038605,
+      "uv_on_wall": {
+        "u": [
+          0.701771,
+          0.845111
+        ],
+        "v": [
+          -1.78774,
+          -1.712368
+        ]
+      },
+      "source_points": 50,
+      "inflation_m": 0.02,
+      "collision_points": 1820,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 122,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        -0.061698,
+        3.098495,
+        1.721668
+      ],
+      "box_extents_uvn": [
+        0.129794,
+        0.162596,
+        0.09354
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.06321,
+      "protrusion_max_m": 0.07354,
+      "uv_on_wall": {
+        "u": [
+          0.903862,
+          0.993656
+        ],
+        "v": [
+          -1.534362,
+          -1.411766
+        ]
+      },
+      "source_points": 73,
+      "inflation_m": 0.02,
+      "collision_points": 2772,
+      "above_wall_scatter": true
+    },
+    {
+      "id": 123,
+      "parent_wall": 5,
+      "box_center_xyz": [
+        -0.022779,
+        3.369368,
+        -0.781363
+      ],
+      "box_extents_uvn": [
+        0.124954,
+        0.142707,
+        0.109169
+      ],
+      "box_orientation_xyzw": [
+        0.41054,
+        0.599841,
+        -0.566739,
+        -0.387884
+      ],
+      "protrusion_min_m": 0.030067,
+      "protrusion_max_m": 0.089169,
+      "uv_on_wall": {
+        "u": [
+          1.144694,
+          1.229648
+        ],
+        "v": [
+          0.982203,
+          1.084911
+        ]
+      },
+      "source_points": 69,
+      "inflation_m": 0.02,
+      "collision_points": 2688,
+      "above_wall_scatter": true
+    }
+  ]
+}

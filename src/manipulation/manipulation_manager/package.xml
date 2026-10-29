@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>manipulation_manager</name>
+  <version>0.1.0</version>
+  <description>
+    Orchestrator: sequences a coverage plan's motion segments through
+    motion_planner's MotionPlanner, drives execution via JTAC's
+    FollowJointTrajectory action, and reports per-segment/per-run outcomes.
+    Ported from sii's feat/mp-05-manipulation-manager-core branch; the
+    core (ManipulationManager, CoverageFeasibilityAnalyzer, MotionExec*,
+    SegmentOrderingPolicy) is a near-verbatim port, while JtacExecutionAdapter
+    and CoverageOutputJsonSource are new -- upstream targeted
+    MoveGroupInterface::execute() and a YAML file that was never actually
+    implemented.
+  </description>
+  <maintainer email="100lakshyaagarwal@gmail.com">Lakshya Agarwal</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>control_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>core_types</depend>
+  <depend>ros_adapters</depend>
+  <depend>motion_planner</depend>
+  <depend>nlohmann_json</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

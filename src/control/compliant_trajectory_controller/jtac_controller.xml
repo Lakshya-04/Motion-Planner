@@ -1,0 +1,11 @@
+<library path="jtac_controller">
+  <class name="compliant_trajectory_controller/JtacController"
+         type="compliant_trajectory_controller::JtacController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Fused joint-trajectory-following + admittance controller for the 7-DOF arm+lift chain.
+      Replaces joint_trajectory_controller/JointTrajectoryController outright, exposing the same
+      FollowJointTrajectory action so MoveIt's TrajectoryExecutionManager needs no changes.
+    </description>
+  </class>
+</library>

@@ -1,0 +1,25 @@
+coverage_planner_node:
+  ros__parameters:
+    # Coverage pattern to use
+    # Available: "boustrophedon" (more can be added via factory)
+    coverage_pattern: "boustrophedon"
+
+    # Coverage dimensions
+    swath: 0.5              # Effective coverage width in meters (e.g., vacuum width, sensor FOV)
+    step: 0.4               # Distance between sweep lines in meters (typically <= swath for overlap)
+
+    # Sweep parameters
+    sweep_direction: "vertical"  # "horizontal", "vertical", "auto"
+    start_corner: "bottom_left"       # "top_left", "top_right", "bottom_left", "bottom_right"
+    add_strip_connectors: false    # Interpolate connector waypoints between strip endpoints
+
+    # Obstacle handling
+    obstacle_inflation_radius: 0.0  # Safety margin around obstacles in meters
+    allow_unknown: false            # Treat unknown cells as free space?
+    plan_all_components: false      # false = largest component only
+    min_component_cells: 25         # Ignore tiny disconnected patches
+    optimize_strip_order: false     # Reorder component subpaths to reduce travel
+
+    # Map configuration
+    map_frame: "map"
+    map_topic: "/navigational/map"

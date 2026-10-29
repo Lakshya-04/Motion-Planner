@@ -1,0 +1,20 @@
+# Workspace-wide colcon defaults. Point colcon at this with:
+#     export COLCON_DEFAULTS_FILE=$PWD/colcon_defaults.yaml
+# (the devcontainer and Docker entrypoint already do).
+{
+  "build": {
+    "symlink-install": true,
+    "cmake-args": [
+      "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    ],
+    "event-handlers": ["console_direct+", "desktop_notification-"],
+    "base-paths": ["src"],
+    "parallel-workers": 4
+  },
+  "test": {
+    "event-handlers": ["console_direct+"],
+    "return-code-on-test-failure": true
+  },
+  "list": {"base-paths": ["src"]}
+}

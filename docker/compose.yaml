@@ -1,0 +1,84 @@
+# Usage (from the repo root):
+#   docker compose -f docker/compose.yaml build dev
+#   docker compose -f docker/compose.yaml run --rm dev            # interactive shell
+#   docker compose -f docker/compose.yaml run --rm test           # build + test, no GPU
+#   docker compose -f docker/compose.yaml run --rm gpu            # shell with cuRobo + CUDA
+#   docker compose -f docker/compose.yaml run --rm full           # cuRobo + CUDA + VAMP
+name: motion-planner
+
+x-common: &common
+  working_dir: /ws
+  volumes:
+    - ..:/ws:cached
+    - build-cache:/ws/build
+    - install-cache:/ws/install
+    - log-cache:/ws/log
+  environment:
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+    RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+  network_mode: host
+  tty: true
+  stdin_open: true
+
+services:
+  dev:
+    <<: *common
+    image: motion-planner:dev
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: dev
+      args:
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+
+  test:
+    <<: *common
+    image: motion-planner:dev
+    command: >
+      bash -lc "colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+      && colcon test --event-handlers console_cohesion+ && colcon test-result --verbose"
+
+  gpu:
+    <<: *common
+    image: motion-planner:gpu
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: gpu
+      args:
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  full:
+    <<: *common
+    image: motion-planner:full
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: full
+      args:
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  build-cache:
+  install-cache:
+  log-cache:

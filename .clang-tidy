@@ -1,0 +1,19 @@
+---
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-pro-type-static-cast-downcast,
+  google-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -google-readability-todo,
+  -misc-non-private-member-variables-in-classes,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-magic-numbers
+WarningsAsErrors: 'bugprone-*,performance-*'
+HeaderFilterRegex: '.*\/(include|src)\/.*\.(h|hpp)$'
+FormatStyle: file

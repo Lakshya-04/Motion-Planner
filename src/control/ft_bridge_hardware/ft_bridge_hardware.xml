@@ -1,0 +1,11 @@
+<library path="ft_bridge_hardware">
+  <class name="ft_bridge_hardware/FtBridgeHardwareInterface"
+         type="ft_bridge_hardware::FtBridgeHardwareInterface"
+         base_class_type="hardware_interface::SensorInterface">
+    <description>
+      Bridges a geometry_msgs/WrenchStamped topic (the real F/T sensor, or a settable test
+      topic in injection_mode) into ros2_control state interfaces, biased by a settable
+      force setpoint. No vendor hardware changes.
+    </description>
+  </class>
+</library>
