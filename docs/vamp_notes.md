@@ -118,3 +118,28 @@ Things found while integrating upstream `27cb9b6` (all worked around without pat
   `Robot::resolution`.
 - VAMP's UR5 model has no collision spheres on the base link, so an obstacle around the base
   alone does not collide; test obstacles must be placed where the arm actually is.
+
+## Generating our own robot (FOAM + Cricket), verified end to end
+
+```
+docker/tools/build_robot_tools.sh                       # builds motion-planner-foam / -cricket images
+xacro .../mobile_manipulator.urdf.xacro arm:=generic_6dof lift_fixed_height:=0.5 -o robot.urdf
+docker/tools/generate_vamp_robot.sh GenericArm robot.urdf - tcp_link build/vamp_robots
+cmake ... -DVAMP_PLANNER_ROBOT_DIR=build/vamp_robots   # every <Name>.hh there is compiled in and registered
+```
+
+- `lift_fixed_height` pins the lift, giving a 6-DOF arm-only model (the lift as a joint would add
+  mimic stages as extra DOF). It is a 1.5 MB header, 54 spheres, generated in ~80 s.
+- FOAM spherizes **mesh** collisions only and silently skips URDF primitives, so
+  `docker/tools/primitives_to_meshes.py` converts boxes / cylinders / spheres to STL first.
+  `package://` mesh URIs must be resolved to relative paths before generation (the script refuses
+  otherwise).
+- Upstream FOAM's Dockerfile is a developer shell that expects a file missing from the repo, so we
+  ship `docker/tools/foam.Dockerfile`; Cricket's own image only contains `fkcc_gen`, so the code
+  templates are taken from the pinned checkout.
+- **Pass `-` for the SRDF.** An SRDF computed for the primitive model made every sampled
+  configuration invalid (0 of 2000): spherization bulges, so two link pairs overlap in the sphere
+  model that were free in the source model. Letting Cricket sample the allowed pairs from the sphere
+  model itself gave 633 valid of 2000.
+- Joint order and names in the header follow the URDF (`arm_joint1..6` for the generic arm), and
+  the header's world frame is the URDF root, so planning scenes must be in the robot base frame.

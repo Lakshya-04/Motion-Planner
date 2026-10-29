@@ -136,3 +136,33 @@ TEST(VampPlanner, ReportsStartAndGoalInCollision)
   p.setWorld(w);
   EXPECT_EQ(p.plan(request(-0.5, 0.5)).failure_reason_code, "start_in_collision");
 }
+
+// Only runs when a Cricket-generated robot named "genericarm" was compiled in
+// (-DVAMP_PLANNER_ROBOT_DIR=<dir with GenericArm.hh>, from docker/tools/generate_vamp_robot.sh).
+TEST(VampPlannerGenerated, PlansOnTheGeneratedMobileManipulatorArm)
+{
+  const auto names = VampPlanner::availableRobots();
+  if (std::find(names.begin(), names.end(), "genericarm") == names.end()) {
+    GTEST_SKIP() << "no generated robot compiled in";
+  }
+  Options o;
+  o.robot = "genericarm";
+  VampPlanner p(o);
+  ASSERT_TRUE(p.ok());
+  EXPECT_EQ(p.dimension(), 6U);
+  ASSERT_EQ(p.jointNames().size(), 6U);
+  EXPECT_EQ(p.jointNames()[0], "arm_joint1");
+
+  mp::PlanningRequest r;
+  r.start_joint_state = {-0.8, -0.5, 0.8, 0.0, 0.5, 0.0};
+  r.target_joint_state = {0.8, -0.5, 0.8, 0.0, 0.5, 0.0};
+  auto res = p.plan(r);
+  ASSERT_TRUE(res.success) << res.failure_reason_code << ": " << res.message;
+  EXPECT_NEAR(res.trajectory.points.back().positions[0], 0.8, 1e-5);
+
+  // A huge obstacle puts the start in collision, so the generated spheres really are being checked.
+  mp::WorldGeometryUpdate w;
+  w.boxes.push_back(box(0.0, 0.0, 1.5, 8.0, 8.0, 8.0));
+  p.setWorld(w);
+  EXPECT_EQ(p.plan(r).failure_reason_code, "start_in_collision");
+}

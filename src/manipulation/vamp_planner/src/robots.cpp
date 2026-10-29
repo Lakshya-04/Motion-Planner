@@ -1,7 +1,6 @@
 // Compiled-in VAMP robots. Adding a robot = include its generated header and add one line to the
 // table at the bottom; nothing else in the package changes.
 #include <algorithm>
-#include <array>
 #include <memory>
 
 #include <vamp/planning/rrtc.hh>
@@ -12,6 +11,9 @@
 #include <vamp/vector.hh>
 
 #include "robot_backend.hpp"
+
+// Cricket-generated robots found at configure time (see CMakeLists.txt); empty when none.
+#include "robots_includes.inc"
 
 namespace vamp_planner
 {
@@ -110,9 +112,10 @@ std::unique_ptr<RobotBackend> make()
   return std::make_unique<VampRobot<Robot>>();
 }
 
-const std::array<Entry, 1> kRobots{{
+const Entry kRobots[] = {
   {"ur5", &make<vamp::robots::UR5>},
-}};
+#include "robots_table.inc"
+};
 }  // namespace
 
 std::unique_ptr<RobotBackend> makeBackend(const std::string & robot)

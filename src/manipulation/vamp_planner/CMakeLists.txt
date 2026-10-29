@@ -35,7 +35,29 @@ endforeach()
 set(VAMP_PLANNER_ARCH "-march=x86-64-v3;-mavx2" CACHE STRING "SIMD flags matching the VAMP build")
 
 # Robot models are compiled-in VAMP headers, one per robot. The bundled ones need no generation;
-# ours come from FOAM + Cricket (docker/tools) and are added to src/robots.cpp.
+# ours come from FOAM + Cricket (docker/tools/generate_vamp_robot.sh). Point
+# VAMP_PLANNER_ROBOT_DIR at a directory of generated <Name>.hh files and each one is compiled in and
+# registered under its own `name` (no source edits). Headers are large: keep them out of git.
+set(VAMP_PLANNER_ROBOT_DIR "" CACHE PATH "Directory of Cricket-generated VAMP robot headers")
+set(GEN_INC ${CMAKE_CURRENT_BINARY_DIR}/generated)
+file(MAKE_DIRECTORY ${GEN_INC})
+set(INCLUDES_TEXT "")
+set(TABLE_TEXT "")
+if(VAMP_PLANNER_ROBOT_DIR)
+  file(GLOB GENERATED_HEADERS ${VAMP_PLANNER_ROBOT_DIR}/*.hh)
+  foreach(h ${GENERATED_HEADERS})
+    file(STRINGS ${h} STRUCT_LINE REGEX "^struct [A-Za-z_][A-Za-z0-9_]*$" LIMIT_COUNT 1)
+    if(STRUCT_LINE)
+      string(REGEX REPLACE "^struct " "" STRUCT_NAME "${STRUCT_LINE}")
+      string(APPEND INCLUDES_TEXT "#include \"${h}\"\n")
+      string(APPEND TABLE_TEXT "  {vamp::robots::${STRUCT_NAME}::name, &make<vamp::robots::${STRUCT_NAME}>},\n")
+      message(STATUS "vamp_planner: generated robot ${STRUCT_NAME} (${h})")
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${h})
+    endif()
+  endforeach()
+endif()
+file(WRITE ${GEN_INC}/robots_includes.inc "${INCLUDES_TEXT}")
+file(WRITE ${GEN_INC}/robots_table.inc "${TABLE_TEXT}")
 add_library(vamp_planner
   src/vamp_planner.cpp
   src/robots.cpp
@@ -48,6 +70,7 @@ target_compile_options(vamp_planner PRIVATE ${VAMP_PLANNER_ARCH})
 target_link_libraries(vamp_planner PUBLIC motion_planner::motion_planner_core core_types::core_types
   PRIVATE Eigen3::Eigen ${VAMP_LIBS})
 target_include_directories(vamp_planner SYSTEM PRIVATE ${VAMP_ROOT}/include)
+target_include_directories(vamp_planner PRIVATE ${GEN_INC})
 set_target_properties(vamp_planner PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 install(TARGETS vamp_planner EXPORT export_vamp_planner
