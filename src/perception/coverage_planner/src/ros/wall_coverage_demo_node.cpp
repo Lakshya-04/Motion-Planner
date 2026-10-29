@@ -36,15 +36,24 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
-#include "coverage_planner/coverage_pass_expander.hpp"
-#include "coverage_planner/tool_coverage_profile.hpp"
-#include "coverage_planner/wall_basis.hpp"
-#include "coverage_planner/wall_rasterizer.hpp"
-#include "coverage_planner/wall_scene_loader.hpp"
+#include "coverage_planner/core/coverage_pass_expander.hpp"
+#include "coverage_planner/core/tool_coverage_profile.hpp"
+#include "coverage_planner/core/wall_basis.hpp"
+#include "coverage_planner/core/wall_rasterizer.hpp"
+#include "coverage_planner/ros/conversions.hpp"
+#include "coverage_planner/core/wall_scene_loader.hpp"
 #include "coverage_planner_msgs/srv/generate_coverage_path.hpp"
 
 namespace
 {
+
+/// Message-typed view of the core's ExpandedCoverage, for the ROS publishing/JSON helpers below.
+struct ExpandedRos
+{
+  nav_msgs::msg::Path path;
+  std::vector<coverage_planner_msgs::msg::MotionPlanSegment> segments;
+};
+
 
 visualization_msgs::msg::MarkerArray buildPoseArrowMarkers(
   const nav_msgs::msg::Path & path, const std::string & ns, float r, float g, float b)
@@ -147,8 +156,8 @@ sensor_msgs::msg::PointCloud2 loadWallPointCloud(
  *        compare against buildObstacleBoxMarkers()'s real 3D boxes to sanity-check it.
  */
 visualization_msgs::msg::MarkerArray buildObstacleMarkers(
-  const std::vector<coverage_planner_msgs::msg::ObstacleRegion> & obstacles,
-  const coverage_planner_msgs::msg::WallPlane & wall, const std::string & frame_id)
+  const std::vector<coverage_planner::ObstacleRegion> & obstacles,
+  const coverage_planner::WallPlane & wall, const std::string & frame_id)
 {
   visualization_msgs::msg::MarkerArray markers;
 
@@ -373,7 +382,7 @@ void writeCoverageOutputJson(
   const std::string & output_path, const std::string & wall_scene_json, uint32_t wall_id,
   double resolution, const coverage_planner::ToolCoverageProfile & tool_profile,
   const coverage_planner_msgs::srv::GenerateCoveragePath::Response & response,
-  const coverage_planner::ExpandedCoverage & expanded, OrientationFormat orientation_format)
+  const ExpandedRos & expanded, OrientationFormat orientation_format)
 {
   const nlohmann::json output = {
     {"wall_scene_json", wall_scene_json},
@@ -604,7 +613,7 @@ int main(int argc, char ** argv)
   }
 
   auto request = std::make_shared<coverage_planner_msgs::srv::GenerateCoveragePath::Request>();
-  request->map = grid;
+  request->map = coverage_planner::ros_conv::toRos(grid);
   request->pattern = "boustrophedon";
   request->swath = static_cast<float>(tool_profile.coverage.swath_m);
   request->step = static_cast<float>(
@@ -637,8 +646,17 @@ int main(int argc, char ** argv)
     node->get_logger(), "Flat coverage path: %d waypoints, %zu segments", response->num_waypoints,
     response->segments.size());
 
-  const auto expanded = coverage_planner::expandCoveragePasses(
-    response->path, response->segments, scene.wall, tool_profile);
+  std::vector<coverage_planner::MotionPlanSegment> flat_segments;
+  flat_segments.reserve(response->segments.size());
+  for (const auto & segment : response->segments) {
+    flat_segments.push_back(coverage_planner::ros_conv::toCore(segment));
+  }
+  const auto expanded_core = coverage_planner::expandCoveragePasses(
+    coverage_planner::ros_conv::toCore(response->path), flat_segments, scene.wall, tool_profile);
+  ExpandedRos expanded;
+  expanded.path = coverage_planner::ros_conv::toRos(expanded_core.path);
+  expanded.path.header.stamp = response->path.header.stamp;
+  expanded.segments = coverage_planner::ros_conv::toRos(expanded_core.segments);
   RCLCPP_INFO(
     node->get_logger(), "Final lifted+expanded path: %zu waypoints, %zu segments",
     expanded.path.poses.size(), expanded.segments.size());
