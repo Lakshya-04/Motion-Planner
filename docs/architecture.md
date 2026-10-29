@@ -48,6 +48,8 @@ Status: **exists** = port in the code today; **planned** = to be added.
 
 | Stage | Port (status) | Implementations (now / planned) |
 |---|---|---|
+| Robot model | `mobile_manipulator_description` (exists) — see [robot_description.md](robot_description.md) | telescopic lift + UR10e (now); any lift / 6-DOF arm via contracts |
+| Reachability | `ReachabilityMap` (planned) — see [reachability.md](reachability.md) | RM4D map: forward + inverse queries, base stationing, lift bands |
 | Robot self filter | `RobotSelfFilter` (planned) — see [robot_self_filter.md](robot_self_filter.md) | geometry containment, collision-sphere model, GPU depth mask (cuRobo-style), learned segmentation later |
 | Perception | `PerceptionSource` (planned) | point-cloud topic, depth + camera (cuRobo `Mapper`), file replay |
 | World / scene | `ScenePort` (exists, `motion_planner/core/scene_port.hpp`); `SceneModel` (planned) | loaders: `.pcd`/`.ply`, meshes, primitives YAML/JSON, voxel/ESDF, MoveIt `PlanningScene`, depth; consumers: MoveIt, cuRobo v2, VAMP |
@@ -109,6 +111,8 @@ pipeline:
 ## Related documents
 
 - [Package layout: core/ + ros/](package_layout.md)
+- [Robot description](robot_description.md)
+- [Reachability (RM4D)](reachability.md)
 - [Robot self filter module](robot_self_filter.md)
 - [Learned recovery research (RL / IL / MPC)](learned_recovery.md)
 - [Design principles and lessons learned](design_principles.md)

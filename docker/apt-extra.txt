@@ -31,3 +31,8 @@ ros-@ROS@-pinocchio
 
 # orchestration / behavior trees (recovery manager, task sequencing)
 ros-@ROS@-behaviortree-cpp
+
+# robot descriptions (UR family for the starter configuration; arm:=ur10e)
+ros-@ROS@-ur-description
+ros-@ROS@-xacro
+ros-@ROS@-joint-state-publisher-gui
