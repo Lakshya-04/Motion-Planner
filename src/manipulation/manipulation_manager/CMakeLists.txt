@@ -105,7 +105,8 @@ if(BUILD_TESTING)
     test/manipulation_manager_test.cpp
   )
   if(TARGET manipulation_manager_test)
-    target_link_libraries(manipulation_manager_test ${PROJECT_NAME}_core core_types::core_types)
+    target_link_libraries(manipulation_manager_test ${PROJECT_NAME}_core core_types::core_types
+      motion_planner_moveit::motion_planner_moveit_lib)
   endif()
 
   ament_add_gtest(coverage_feasibility_analyzer_test
