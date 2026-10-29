@@ -47,6 +47,11 @@ public:
     RCLCPP_WARN(logger_, "%s", message.c_str());
   }
 
+  void debug(const std::string & message) const override
+  {
+    RCLCPP_DEBUG(logger_, "%s", message.c_str());
+  }
+
 private:
   rclcpp::Logger logger_;
 };

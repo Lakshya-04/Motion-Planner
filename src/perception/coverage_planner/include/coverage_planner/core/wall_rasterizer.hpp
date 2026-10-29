@@ -1,30 +1,24 @@
 #ifndef COVERAGE_PLANNER__WALL_RASTERIZER_HPP_
 #define COVERAGE_PLANNER__WALL_RASTERIZER_HPP_
 
+#include "coverage_planner/core/types.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
 
-#include <geometry_msgs/msg/pose.hpp>
-#include <nav_msgs/msg/occupancy_grid.hpp>
 
-#include "coverage_planner/tool_coverage_profile.hpp"
-#include "coverage_planner_msgs/msg/obstacle_region.hpp"
-#include "coverage_planner_msgs/msg/wall_plane.hpp"
+#include "coverage_planner/core/tool_coverage_profile.hpp"
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 /**
  * @brief Builds an OccupancyGrid origin (position + orientation) from a wall's own basis, so that
  *        CoveragePlannerBase::gridToWorld()'s existing rotation-matrix transform lifts grid
  *        (u, v) cells straight into the wall's actual pose in `wall.frame_id`.
  */
-geometry_msgs::msg::Pose buildWallGridOrigin(const msg::WallPlane & wall);
+Pose buildWallGridOrigin(const WallPlane & wall);
 
 /**
  * @brief Rasterize one wall's (u, v) extent into a nav_msgs::OccupancyGrid, with obstacles
@@ -46,8 +40,8 @@ geometry_msgs::msg::Pose buildWallGridOrigin(const msg::WallPlane & wall);
  * @throws std::runtime_error if `observed_mask` or `reachable_mask` is non-empty but its size
  *         doesn't match `width * height`.
  */
-nav_msgs::msg::OccupancyGrid rasterizeWallCoverageGrid(
-  const msg::WallPlane & wall, const std::vector<msg::ObstacleRegion> & obstacles,
+OccupancyGrid rasterizeWallCoverageGrid(
+  const WallPlane & wall, const std::vector<ObstacleRegion> & obstacles,
   const coverage_planner::ToolCoverage & tool_coverage, double resolution,
   const std::string & frame_id, const std::vector<bool> & observed_mask = {},
   const std::vector<bool> & reachable_mask = {});
@@ -63,7 +57,7 @@ nav_msgs::msg::OccupancyGrid rasterizeWallCoverageGrid(
  *         field.
  */
 std::vector<bool> loadWallObservedMask(
-  const std::string & pcd_path, uint32_t wall_id, const msg::WallPlane & wall, int width,
+  const std::string & pcd_path, uint32_t wall_id, const WallPlane & wall, int width,
   int height, double resolution);
 
 }  // namespace coverage_planner

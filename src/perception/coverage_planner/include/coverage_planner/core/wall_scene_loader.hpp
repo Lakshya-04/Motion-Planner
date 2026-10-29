@@ -1,19 +1,15 @@
 #ifndef COVERAGE_PLANNER__WALL_SCENE_LOADER_HPP_
 #define COVERAGE_PLANNER__WALL_SCENE_LOADER_HPP_
 
+#include "coverage_planner/core/types.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
 
-#include "coverage_planner_msgs/msg/obstacle_region.hpp"
-#include "coverage_planner_msgs/msg/wall_plane.hpp"
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 /**
  * @brief Flatness/reliability gate applied to a wall's own plane-fit-quality metrics before it is
@@ -32,8 +28,8 @@ struct WallFlatnessThresholds
 
 struct WallSceneQuery
 {
-  msg::WallPlane wall;
-  std::vector<msg::ObstacleRegion> obstacles;
+  WallPlane wall;
+  std::vector<ObstacleRegion> obstacles;
   /// Set when `allow_override` let a flatness-threshold violation through instead of throwing;
   /// empty otherwise. Callers should log this loudly even though loading succeeded.
   std::string flatness_warning;

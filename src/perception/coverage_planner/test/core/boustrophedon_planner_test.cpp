@@ -1,16 +1,18 @@
 #include <gtest/gtest.h>
 
-#include "coverage_planner/boustrophedon_planner.hpp"
+#include "coverage_planner/core/boustrophedon_planner.hpp"
 
 #include <algorithm>
 #include <cmath>
 
+using namespace coverage_planner;
+
 namespace
 {
 
-nav_msgs::msg::OccupancyGrid makeGrid(int width, int height, const std::vector<int8_t> & data)
+OccupancyGrid makeGrid(int width, int height, const std::vector<int8_t> & data)
 {
-  nav_msgs::msg::OccupancyGrid grid;
+  OccupancyGrid grid;
   grid.header.frame_id = "map";
   grid.info.width = static_cast<uint32_t>(width);
   grid.info.height = static_cast<uint32_t>(height);
@@ -336,7 +338,7 @@ TEST(BoustrophedonPlannerTest, BoundaryPassSplitsAtObstacleGapInsteadOfBridgingI
   auto result = planner.generatePath(grid, params);
 
   ASSERT_TRUE(result.success);
-  std::vector<const coverage_planner_msgs::msg::MotionPlanSegment *> boundary_segments;
+  std::vector<const MotionPlanSegment *> boundary_segments;
   for (const auto & segment : result.segments) {
     if (std::find(segment.tags.begin(), segment.tags.end(), "boundary") != segment.tags.end()) {
       boundary_segments.push_back(&segment);

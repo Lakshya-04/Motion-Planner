@@ -1,23 +1,19 @@
-#include "coverage_planner/boustrophedon_planner.hpp"
+#include "coverage_planner/core/boustrophedon_planner.hpp"
+#include <chrono>
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <coverage_planner_msgs/msg/motion_plan_segment.hpp>
 #include <numeric>
 #include <queue>
-#include <rclcpp/rclcpp.hpp>
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 namespace
 {
 
-Eigen::Vector2d gridCellCenterToWorld2D(int x, int y, const nav_msgs::msg::OccupancyGrid & map)
+Eigen::Vector2d gridCellCenterToWorld2D(int x, int y, const OccupancyGrid & map)
 {
   const double local_x = (x + 0.5) * map.info.resolution;
   const double local_y = (y + 0.5) * map.info.resolution;
@@ -33,7 +29,7 @@ Eigen::Vector2d gridCellCenterToWorld2D(int x, int y, const nav_msgs::msg::Occup
 }
 
 bool pointInPolygon2D(
-  const Eigen::Vector2d & point, const std::vector<geometry_msgs::msg::Point32> & polygon)
+  const Eigen::Vector2d & point, const std::vector<Point32> & polygon)
 {
   if (polygon.size() < 3) {
     return false;
@@ -113,7 +109,7 @@ std::vector<std::vector<int>> extractConnectedComponents(
 }
 
 double poseDistance(
-  const geometry_msgs::msg::PoseStamped & a, const geometry_msgs::msg::PoseStamped & b)
+  const PoseStamped & a, const PoseStamped & b)
 {
   const double dx = a.pose.position.x - b.pose.position.x;
   const double dy = a.pose.position.y - b.pose.position.y;
@@ -125,12 +121,12 @@ double poseDistance(
 // coverage-planner redesign notes (reference_docs/13_cleaning_modes_spec.md SS2.2's landing map):
 // strips and the boundary pass are cartesian/contact-driven; connectors are fsp/ompl and always
 // force a retraction (never contact-adjacent).
-msg::MotionPlanSegment makeSegment(
+MotionPlanSegment makeSegment(
   const std::string & label, uint32_t start_index, uint32_t end_index, const std::string & frame_id,
   const std::string & mode, const std::string & planner, bool requires_contact,
   bool requires_retraction, const std::vector<std::string> & tags)
 {
-  msg::MotionPlanSegment segment;
+  MotionPlanSegment segment;
   segment.label = label;
   segment.start_index = start_index;
   segment.end_index = end_index;
@@ -146,7 +142,7 @@ msg::MotionPlanSegment makeSegment(
   return segment;
 }
 
-msg::MotionPlanSegment makeStripSegment(
+MotionPlanSegment makeStripSegment(
   const std::string & label, uint32_t start_index, uint32_t end_index, const std::string & frame_id,
   const CoveragePlannerParams & params, const std::vector<std::string> & tags)
 {
@@ -155,7 +151,7 @@ msg::MotionPlanSegment makeStripSegment(
     false, tags);
 }
 
-msg::MotionPlanSegment makeConnectorSegment(
+MotionPlanSegment makeConnectorSegment(
   const std::string & label, uint32_t start_index, uint32_t end_index, const std::string & frame_id)
 {
   return makeSegment(
@@ -165,7 +161,7 @@ msg::MotionPlanSegment makeConnectorSegment(
 }  // namespace
 
 std::vector<std::pair<int, int>> BoustrophedonPlanner::findObstacleAwareConnectorPath(
-  const nav_msgs::msg::OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
+  const OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
   const CoveragePlannerParams & params, int start_x, int start_y, int end_x, int end_y) const
 {
   const int width = static_cast<int>(map.info.width);
@@ -240,11 +236,11 @@ std::vector<std::pair<int, int>> BoustrophedonPlanner::findObstacleAwareConnecto
 }
 
 bool BoustrophedonPlanner::addStripConnectorWaypoints(
-  nav_msgs::msg::Path & path, const nav_msgs::msg::OccupancyGrid & map,
+  Path & path, const OccupancyGrid & map,
   const std::vector<int8_t> & inflated_grid, const CoveragePlannerParams & params,
   int current_end_x, int current_end_y, int next_start_x, int next_start_y,
-  const geometry_msgs::msg::PoseStamped * reference_pose,
-  std::vector<msg::MotionPlanSegment> & segments)
+  const PoseStamped * reference_pose,
+  std::vector<MotionPlanSegment> & segments)
 {
   // Fast path: the direct line, exactly as before -- cheap, and correct whenever nothing is
   // actually in the way.
@@ -298,17 +294,13 @@ bool BoustrophedonPlanner::addStripConnectorWaypoints(
   // start) -- by definition, exactly the case a straight-line check alone can never satisfy.
   // Route around it through the surrounding free space instead of giving up on the connector.
   if (direct_line_blocked) {
-    RCLCPP_DEBUG(
-      rclcpp::get_logger("BoustrophedonPlanner"),
-      "Connector [%d,%d]->[%d,%d]: direct line blocked, searching for a free-space route around "
+    logDebug("Connector [%d,%d]->[%d,%d]: direct line blocked, searching for a free-space route around "
       "it",
       current_end_x, current_end_y, next_start_x, next_start_y);
     auto routed = findObstacleAwareConnectorPath(
       map, inflated_grid, params, current_end_x, current_end_y, next_start_x, next_start_y);
     if (routed.empty()) {
-      RCLCPP_DEBUG(
-        rclcpp::get_logger("BoustrophedonPlanner"),
-        "Connector [%d,%d]->[%d,%d]: no free-space route exists either -- rejecting", current_end_x,
+      logDebug("Connector [%d,%d]->[%d,%d]: no free-space route exists either -- rejecting", current_end_x,
         current_end_y, next_start_x, next_start_y);
       return false;
     }
@@ -351,7 +343,7 @@ bool BoustrophedonPlanner::addStripConnectorWaypoints(
 }
 
 CoveragePlannerResult BoustrophedonPlanner::generatePath(
-  const nav_msgs::msg::OccupancyGrid & map, const CoveragePlannerParams & params)
+  const OccupancyGrid & map, const CoveragePlannerParams & params)
 {
   CoveragePlannerResult result;
   result.success = false;
@@ -380,8 +372,7 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
   for (const auto & cell : inflated_grid) {
     if (cell > 50) obstacle_count_before++;
   }
-  RCLCPP_INFO(
-    rclcpp::get_logger("BoustrophedonPlanner"), "Map size: %dx%d, Obstacles before inflation: %d",
+  logInfo("Map size: %dx%d, Obstacles before inflation: %d",
     map.info.width, map.info.height, obstacle_count_before);
 
   if (params.obstacle_inflation_radius > 0.0) {
@@ -394,8 +385,7 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
     for (const auto & cell : inflated_grid) {
       if (cell > 50) obstacle_count_after++;
     }
-    RCLCPP_INFO(
-      rclcpp::get_logger("BoustrophedonPlanner"), "Obstacles after inflation (radius=%.2fm): %d",
+    logInfo("Obstacles after inflation (radius=%.2fm): %d",
       params.obstacle_inflation_radius, obstacle_count_after);
   }
 
@@ -410,9 +400,7 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
   if (params.use_region && params.region.polygon.points.size() >= 3) {
     const std::string region_frame = params.region.header.frame_id;
     if (!region_frame.empty() && region_frame != map.header.frame_id) {
-      RCLCPP_WARN(
-        rclcpp::get_logger("BoustrophedonPlanner"),
-        "Region frame '%s' != map frame '%s'; ignoring region clipping", region_frame.c_str(),
+      logWarn("Region frame '%s' != map frame '%s'; ignoring region clipping", region_frame.c_str(),
         map.header.frame_id.c_str());
     } else {
       for (int y = 0; y < height; ++y) {
@@ -443,9 +431,7 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
       sizes += std::to_string(components[i].size());
       if (i + 1 < components.size() && i + 1 < 10) sizes += ", ";
     }
-    RCLCPP_INFO(
-      rclcpp::get_logger("BoustrophedonPlanner"),
-      "Free-space components: %zu total (min_component_cells=%d, allow_unknown=%s), "
+    logInfo("Free-space components: %zu total (min_component_cells=%d, allow_unknown=%s), "
       "largest 10 sizes: [%s]",
       components.size(), params.min_component_cells, params.allow_unknown ? "true" : "false",
       sizes.c_str());
@@ -454,15 +440,12 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
   // Initialize path
   result.path.header = map.header;  // Use the map's frame_id directly
   // Stamp is left as map.header's own -- this planner has no node handle to source a clock from,
-  // and rclcpp::Clock() here would be a detached system clock that ignores use_sim_time. The
-  // caller (coverage_planner_node) re-stamps the response path with its own now() instead.
+  // and the core carries no time stamps. The ROS layer re-stamps the response path.
 
   // Determine sweep direction in world frame (considering map rotation)
   bool use_vertical_sweeps = determineWorldAwareSweepDirection(params.sweep_direction, map);
 
-  RCLCPP_INFO(
-    rclcpp::get_logger("BoustrophedonPlanner"),
-    "Sweep direction '%s' -> using %s sweeps (map rotation aware)", params.sweep_direction.c_str(),
+  logInfo("Sweep direction '%s' -> using %s sweeps (map rotation aware)", params.sweep_direction.c_str(),
     use_vertical_sweeps ? "vertical (grid Y-axis)" : "horizontal (grid X-axis)");
 
   std::vector<size_t> selected_components;
@@ -473,9 +456,9 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
     selected_components.push_back(0);  // Largest component only.
   }
 
-  std::vector<nav_msgs::msg::Path> component_paths;
+  std::vector<Path> component_paths;
   component_paths.reserve(selected_components.size());
-  std::vector<std::vector<msg::MotionPlanSegment>> component_segments_list;
+  std::vector<std::vector<MotionPlanSegment>> component_segments_list;
   component_segments_list.reserve(selected_components.size());
 
   for (size_t component_id : selected_components) {
@@ -490,14 +473,12 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
       continue;
     }
 
-    nav_msgs::msg::Path component_path;
+    Path component_path;
     component_path.header = map.header;
-    std::vector<msg::MotionPlanSegment> component_segments;
+    std::vector<MotionPlanSegment> component_segments;
 
     if (params.enable_boundary_pass) {
-      RCLCPP_INFO(
-        rclcpp::get_logger("BoustrophedonPlanner"),
-        "Generating boundary pass for component %zu (offset=%.3fm)", component_id,
+      logInfo("Generating boundary pass for component %zu (offset=%.3fm)", component_id,
         params.boundary_offset);
       generateBoundaryPass(
         map, component_grid, params, min_x, max_x, min_y, max_y, component_path,
@@ -530,7 +511,7 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
   // local (0-based) numbering to their final position once component paths are concatenated
   // (and, under optimize_strip_order, sometimes reversed).
   auto appendComponentSegments = [&result](
-                                   const std::vector<msg::MotionPlanSegment> & component_segments,
+                                   const std::vector<MotionPlanSegment> & component_segments,
                                    size_t component_size, size_t offset, bool reversed) {
     for (auto segment : component_segments) {
       if (reversed) {
@@ -629,7 +610,7 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
 }
 
 bool BoustrophedonPlanner::extractFreeSpaceBounds(
-  const nav_msgs::msg::OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
+  const OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
   bool allow_unknown, int & min_x, int & max_x, int & min_y, int & max_y)
 {
   min_x = map.info.width;
@@ -656,9 +637,9 @@ bool BoustrophedonPlanner::extractFreeSpaceBounds(
 }
 
 void BoustrophedonPlanner::generateHorizontalSweeps(
-  const nav_msgs::msg::OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
+  const OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
   const CoveragePlannerParams & params, int min_x, int max_x, int min_y, int max_y,
-  nav_msgs::msg::Path & path, std::vector<msg::MotionPlanSegment> & segments)
+  Path & path, std::vector<MotionPlanSegment> & segments)
 {
   int step_cells = std::max(1, static_cast<int>(params.step / map.info.resolution));
   bool left_to_right = (params.start_corner == "top_left" || params.start_corner == "bottom_left");
@@ -779,9 +760,7 @@ void BoustrophedonPlanner::generateHorizontalSweeps(
     }
 
     if (obstacles_hit > 0) {
-      RCLCPP_DEBUG(
-        rclcpp::get_logger("BoustrophedonPlanner"),
-        "Sweep %d at y=%d: hit %d obstacles, generated %d segment(s)", sweep_count, y,
+      logDebug("Sweep %d at y=%d: hit %d obstacles, generated %d segment(s)", sweep_count, y,
         obstacles_hit, (obstacles_hit + (in_free ? 1 : 0)));
     }
 
@@ -814,9 +793,7 @@ void BoustrophedonPlanner::generateHorizontalSweeps(
 
       if (!found_next_start) {
         ++connectors_rejected;
-        RCLCPP_DEBUG(
-          rclcpp::get_logger("BoustrophedonPlanner"),
-          "Skipping connector at y=%d: next sweep y=%d has no reachable free start", y, next_y);
+        logDebug("Skipping connector at y=%d: next sweep y=%d has no reachable free start", y, next_y);
       } else {
         const auto * ref_pose = &path.poses.back();
         if (addStripConnectorWaypoints(
@@ -832,21 +809,18 @@ void BoustrophedonPlanner::generateHorizontalSweeps(
     left_to_right = !left_to_right;
   }
 
-  RCLCPP_INFO(
-    rclcpp::get_logger("BoustrophedonPlanner"), "Generated %d sweeps with %d total segments%s",
+  logInfo("Generated %d sweeps with %d total segments%s",
     sweep_count, segment_count, params.add_strip_connectors ? " (with strip connectors)" : "");
   if (params.add_strip_connectors) {
-    RCLCPP_INFO(
-      rclcpp::get_logger("BoustrophedonPlanner"),
-      "Connector summary (horizontal): attempted=%d accepted=%d rejected=%d", connectors_attempted,
+    logInfo("Connector summary (horizontal): attempted=%d accepted=%d rejected=%d", connectors_attempted,
       connectors_accepted, connectors_rejected);
   }
 }
 
 void BoustrophedonPlanner::generateVerticalSweeps(
-  const nav_msgs::msg::OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
+  const OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
   const CoveragePlannerParams & params, int min_x, int max_x, int min_y, int max_y,
-  nav_msgs::msg::Path & path, std::vector<msg::MotionPlanSegment> & segments)
+  Path & path, std::vector<MotionPlanSegment> & segments)
 {
   int step_cells = std::max(1, static_cast<int>(params.step / map.info.resolution));
   bool bottom_to_top =
@@ -982,9 +956,7 @@ void BoustrophedonPlanner::generateVerticalSweeps(
       }
       if (!found_next_start) {
         ++connectors_rejected;
-        RCLCPP_DEBUG(
-          rclcpp::get_logger("BoustrophedonPlanner"),
-          "Skipping connector at x=%d: next sweep x=%d has no reachable free start", x, next_x);
+        logDebug("Skipping connector at x=%d: next sweep x=%d has no reachable free start", x, next_x);
       } else {
         const auto * ref_pose = &path.poses.back();
         if (addStripConnectorWaypoints(
@@ -1000,13 +972,10 @@ void BoustrophedonPlanner::generateVerticalSweeps(
     bottom_to_top = !bottom_to_top;
   }
 
-  RCLCPP_INFO(
-    rclcpp::get_logger("BoustrophedonPlanner"), "Generated vertical sweeps%s",
+  logInfo("Generated vertical sweeps%s",
     params.add_strip_connectors ? " (with strip connectors)" : "");
   if (params.add_strip_connectors) {
-    RCLCPP_INFO(
-      rclcpp::get_logger("BoustrophedonPlanner"),
-      "Connector summary (vertical): attempted=%d accepted=%d rejected=%d", connectors_attempted,
+    logInfo("Connector summary (vertical): attempted=%d accepted=%d rejected=%d", connectors_attempted,
       connectors_accepted, connectors_rejected);
   }
 }
@@ -1083,9 +1052,9 @@ bool BoustrophedonPlanner::isLineFree(
 }
 
 void BoustrophedonPlanner::generateBoundaryPass(
-  const nav_msgs::msg::OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
+  const OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
   const CoveragePlannerParams & params, int min_x, int max_x, int min_y, int max_y,
-  nav_msgs::msg::Path & path, std::vector<msg::MotionPlanSegment> & segments)
+  Path & path, std::vector<MotionPlanSegment> & segments)
 {
   // Calculate offset in grid cells
   int offset_cells = std::max(1, static_cast<int>(params.boundary_offset / map.info.resolution));
@@ -1098,9 +1067,7 @@ void BoustrophedonPlanner::generateBoundaryPass(
 
   // Validate that we still have space
   if (offset_min_x >= offset_max_x || offset_min_y >= offset_max_y) {
-    RCLCPP_WARN(
-      rclcpp::get_logger("BoustrophedonPlanner"),
-      "Boundary offset too large for map area, skipping boundary pass");
+    logWarn("Boundary offset too large for map area, skipping boundary pass");
     return;
   }
 
@@ -1152,8 +1119,7 @@ void BoustrophedonPlanner::generateBoundaryPass(
   // straight contact line -- matches how generateHorizontalSweeps handles
   // obstacle-split strips.
   if (!perimeter_points.empty()) {
-    RCLCPP_INFO(
-      rclcpp::get_logger("BoustrophedonPlanner"), "Adding boundary perimeter with %zu points",
+    logInfo("Adding boundary perimeter with %zu points",
       perimeter_points.size());
 
     const auto is_adjacent = [](const std::pair<int, int> & a, const std::pair<int, int> & b) {

@@ -1,17 +1,13 @@
 #ifndef COVERAGE_PLANNER__WALL_POSE_LIFT_HPP_
 #define COVERAGE_PLANNER__WALL_POSE_LIFT_HPP_
 
-#include <nav_msgs/msg/path.hpp>
 
-#include "coverage_planner/tool_coverage_profile.hpp"
-#include "coverage_planner_msgs/msg/wall_plane.hpp"
+#include "coverage_planner/core/types.hpp"
+#include "coverage_planner/core/tool_coverage_profile.hpp"
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 /**
  * @brief Lifts a flat (identity-orientation) 2D coverage path -- already positioned in 3D world
@@ -29,8 +25,8 @@ namespace msg = coverage_planner_msgs::msg;
  * @param tool_task The active tool's task facet. `standoff_m` is the effective standoff for this
  *        call (base + any per-pass delta).
  */
-nav_msgs::msg::Path liftCoveragePathPose(
-  const nav_msgs::msg::Path & flat_path, const msg::WallPlane & wall,
+Path liftCoveragePathPose(
+  const Path & flat_path, const WallPlane & wall,
   const coverage_planner::ToolTask & tool_task);
 
 }  // namespace coverage_planner

@@ -3,9 +3,11 @@
 #include <cmath>
 #include <string>
 
-#include "coverage_planner/wall_basis.hpp"
-#include "coverage_planner/wall_rasterizer.hpp"
-#include "coverage_planner/wall_scene_loader.hpp"
+#include "coverage_planner/core/wall_basis.hpp"
+#include "coverage_planner/core/wall_rasterizer.hpp"
+#include "coverage_planner/core/wall_scene_loader.hpp"
+
+using namespace coverage_planner;
 
 namespace
 {
@@ -18,9 +20,9 @@ namespace
 // field values rather than a hand-authored fixture.
 const std::string kSampleScenePath = WALL_SCENE_SAMPLE_PATH;
 
-coverage_planner_msgs::msg::WallPlane makeSyntheticWall()
+WallPlane makeSyntheticWall()
 {
-  coverage_planner_msgs::msg::WallPlane wall;
+  WallPlane wall;
   wall.id = 0;
   wall.pose.header.frame_id = "map";
   wall.pose.pose = coverage_planner::encodeWallBasis(
@@ -36,9 +38,9 @@ coverage_planner_msgs::msg::WallPlane makeSyntheticWall()
   return wall;
 }
 
-coverage_planner_msgs::msg::ObstacleRegion makeCenteredObstacle()
+ObstacleRegion makeCenteredObstacle()
 {
-  coverage_planner_msgs::msg::ObstacleRegion obstacle;
+  ObstacleRegion obstacle;
   obstacle.id = 0;
   obstacle.parent_wall = 0;
   obstacle.u_min = 0.9;

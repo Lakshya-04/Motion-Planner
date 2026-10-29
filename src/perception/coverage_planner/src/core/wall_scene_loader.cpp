@@ -1,4 +1,4 @@
-#include "coverage_planner/wall_scene_loader.hpp"
+#include "coverage_planner/core/wall_scene_loader.hpp"
 
 #include <fstream>
 #include <sstream>
@@ -8,14 +8,11 @@
 
 #include <Eigen/Dense>
 
-#include "coverage_planner/wall_basis.hpp"
+#include "coverage_planner/core/wall_basis.hpp"
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 namespace
 {
@@ -26,9 +23,9 @@ Eigen::Vector3d vector3dFromArray(const nlohmann::json & array)
     array.at(0).get<double>(), array.at(1).get<double>(), array.at(2).get<double>());
 }
 
-msg::WallPlane parseWall(const nlohmann::json & wall_node, const std::string & frame_id)
+WallPlane parseWall(const nlohmann::json & wall_node, const std::string & frame_id)
 {
-  msg::WallPlane wall;
+  WallPlane wall;
   wall.id = wall_node.at("id").get<uint32_t>();
   wall.pose.header.frame_id = frame_id;
   wall.pose.pose = encodeWallBasis(
@@ -49,9 +46,9 @@ msg::WallPlane parseWall(const nlohmann::json & wall_node, const std::string & f
   return wall;
 }
 
-msg::ObstacleRegion parseObstacle(const nlohmann::json & obstacle_node)
+ObstacleRegion parseObstacle(const nlohmann::json & obstacle_node)
 {
-  msg::ObstacleRegion obstacle;
+  ObstacleRegion obstacle;
   obstacle.id = obstacle_node.at("id").get<uint32_t>();
   obstacle.parent_wall = obstacle_node.at("parent_wall").get<uint32_t>();
 

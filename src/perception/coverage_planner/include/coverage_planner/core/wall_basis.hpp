@@ -1,19 +1,16 @@
 #ifndef COVERAGE_PLANNER__WALL_BASIS_HPP_
 #define COVERAGE_PLANNER__WALL_BASIS_HPP_
 
+#include "coverage_planner/core/types.hpp"
 #include <cmath>
 #include <stdexcept>
 
 #include <Eigen/Dense>
 
-#include "coverage_planner_msgs/msg/wall_plane.hpp"
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 /// A wall's own origin + orthonormal (u, v, normal) basis, decomposed out of WallPlane.pose.
 struct WallBasis
@@ -29,7 +26,7 @@ struct WallBasis
  *        basis_v, normal_outward) rotation-matrix columns it was built from -- see
  *        encodeWallBasis() for the inverse.
  */
-inline WallBasis decomposeWallBasis(const msg::WallPlane & wall)
+inline WallBasis decomposeWallBasis(const WallPlane & wall)
 {
   const auto & pose = wall.pose.pose;
   const Eigen::Quaterniond quaternion(
@@ -49,7 +46,7 @@ inline WallBasis decomposeWallBasis(const msg::WallPlane & wall)
  *        decomposeWallBasis(). Returns a bare Pose (not WallPlane.pose's own PoseStamped) since
  *        this is also used for OccupancyGrid.info.origin, which has no frame_id of its own.
  */
-inline geometry_msgs::msg::Pose encodeWallBasis(
+inline Pose encodeWallBasis(
   const Eigen::Vector3d & origin, const Eigen::Vector3d & basis_u, const Eigen::Vector3d & basis_v,
   const Eigen::Vector3d & normal_outward)
 {
@@ -78,7 +75,7 @@ inline geometry_msgs::msg::Pose encodeWallBasis(
   Eigen::Quaterniond quaternion(rotation);
   quaternion.normalize();
 
-  geometry_msgs::msg::Pose pose;
+  Pose pose;
   pose.position.x = origin.x();
   pose.position.y = origin.y();
   pose.position.z = origin.z();

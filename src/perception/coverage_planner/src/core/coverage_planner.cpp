@@ -1,11 +1,64 @@
 #include <Eigen/Dense>
 #include <cmath>
 #include <queue>
-#include "coverage_planner/boustrophedon_planner.hpp"
-#include "coverage_planner/coverage_planner_base.hpp"
+#include "coverage_planner/core/boustrophedon_planner.hpp"
+#include <cstdarg>
+#include <cstdio>
+
+#include "coverage_planner/core/coverage_planner_base.hpp"
 
 namespace coverage_planner
 {
+namespace
+{
+std::string vformat(const char * fmt, va_list args)
+{
+  va_list copy;
+  va_copy(copy, args);
+  const int n = std::vsnprintf(nullptr, 0, fmt, copy);
+  va_end(copy);
+  if (n <= 0) {
+    return {};
+  }
+  std::string out(static_cast<size_t>(n), '\0');
+  std::vsnprintf(out.data(), out.size() + 1, fmt, args);
+  return out;
+}
+}  // namespace
+
+void CoveragePlannerBase::logDebug(const char * fmt, ...) const
+{
+  if (!logger_) {
+    return;
+  }
+  va_list args;
+  va_start(args, fmt);
+  logger_->debug(vformat(fmt, args));
+  va_end(args);
+}
+
+void CoveragePlannerBase::logInfo(const char * fmt, ...) const
+{
+  if (!logger_) {
+    return;
+  }
+  va_list args;
+  va_start(args, fmt);
+  logger_->info(vformat(fmt, args));
+  va_end(args);
+}
+
+void CoveragePlannerBase::logWarn(const char * fmt, ...) const
+{
+  if (!logger_) {
+    return;
+  }
+  va_list args;
+  va_start(args, fmt);
+  logger_->warn(vformat(fmt, args));
+  va_end(args);
+}
+
 
 void CoveragePlannerBase::inflateObstacles(
   std::vector<int8_t> & grid_data, int width, int height, double resolution,
@@ -57,14 +110,14 @@ bool CoveragePlannerBase::isCellFree(int8_t value, bool allow_unknown) const
   return value < 50;  // Free space threshold
 }
 
-geometry_msgs::msg::PoseStamped CoveragePlannerBase::gridToWorld(
-  int x, int y, const nav_msgs::msg::OccupancyGrid & map,
-  const geometry_msgs::msg::PoseStamped * prev_pose, const std::string & pose_mode) const
+PoseStamped CoveragePlannerBase::gridToWorld(
+  int x, int y, const OccupancyGrid & map,
+  const PoseStamped * prev_pose, const std::string & pose_mode) const
 {
   (void)prev_pose;  // Unused - orientation computed by application layer
   (void)pose_mode;  // Unused - orientation computed by application layer
 
-  geometry_msgs::msg::PoseStamped pose;
+  PoseStamped pose;
   pose.header = map.header;
 
   // Convert grid coordinates to world coordinates
@@ -113,7 +166,7 @@ geometry_msgs::msg::PoseStamped CoveragePlannerBase::gridToWorld(
 }
 
 void CoveragePlannerBase::calculatePathStats(
-  const nav_msgs::msg::Path & path, double & total_distance, int & num_waypoints) const
+  const Path & path, double & total_distance, int & num_waypoints) const
 {
   total_distance = 0.0;
   num_waypoints = static_cast<int>(path.poses.size());
@@ -131,7 +184,7 @@ void CoveragePlannerBase::calculatePathStats(
 }
 
 bool CoveragePlannerBase::determineWorldAwareSweepDirection(
-  const std::string & sweep_direction_param, const nav_msgs::msg::OccupancyGrid & map) const
+  const std::string & sweep_direction_param, const OccupancyGrid & map) const
 {
   // The wall occupancy grid is already properly oriented:
   // - Grid X-axis = u_axis (horizontal along wall, typically left-right)

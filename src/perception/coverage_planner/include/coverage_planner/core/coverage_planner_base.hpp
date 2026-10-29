@@ -1,20 +1,16 @@
 #ifndef COVERAGE_PLANNER__COVERAGE_PLANNER_BASE_HPP_
 #define COVERAGE_PLANNER__COVERAGE_PLANNER_BASE_HPP_
 
-#include <geometry_msgs/msg/polygon_stamped.hpp>
+#include "core_types/logger.hpp"
+#include "coverage_planner/core/types.hpp"
 #include <memory>
-#include <coverage_planner_msgs/msg/motion_plan_segment.hpp>
-#include <nav_msgs/msg/occupancy_grid.hpp>
-#include <nav_msgs/msg/path.hpp>
+#include <cstdarg>
 #include <string>
 #include <vector>
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 /**
  * @brief Parameters for coverage path planning
@@ -47,7 +43,7 @@ struct CoveragePlannerParams
 
   // Optional planning region
   bool use_region;
-  geometry_msgs::msg::PolygonStamped region;
+  PolygonStamped region;
 
   // Connected component handling
   bool plan_all_components;  // If false, only largest connected free-space component is planned
@@ -69,11 +65,11 @@ struct CoveragePlannerResult
 {
   bool success;
   std::string message;
-  nav_msgs::msg::Path path;
+  Path path;
 
   // Segment metadata aligned with path.poses (start_index/end_index reference the final,
   // post-reordering result.path, not any intermediate per-component path).
-  std::vector<msg::MotionPlanSegment> segments;
+  std::vector<MotionPlanSegment> segments;
 
   // Metadata
   double total_distance;
@@ -108,14 +104,23 @@ public:
    * @return CoveragePlannerResult Path and metadata
    */
   virtual CoveragePlannerResult generatePath(
-    const nav_msgs::msg::OccupancyGrid & map, const CoveragePlannerParams & params) = 0;
+    const OccupancyGrid & map, const CoveragePlannerParams & params) = 0;
 
   /**
    * @brief Get the name of this planner strategy
    */
   virtual std::string getName() const = 0;
 
+  /// Inject the logging sink. Null (the default) means silent. Core never owns ROS logging.
+  void setLogger(std::shared_ptr<const core_types::Logger> logger) { logger_ = std::move(logger); }
+
 protected:
+  void logDebug(const char * fmt, ...) const __attribute__((format(printf, 2, 3)));
+  void logInfo(const char * fmt, ...) const __attribute__((format(printf, 2, 3)));
+  void logWarn(const char * fmt, ...) const __attribute__((format(printf, 2, 3)));
+
+  std::shared_ptr<const core_types::Logger> logger_;
+
   /**
    * @brief Inflate obstacles in the occupancy grid
    */
@@ -136,16 +141,16 @@ protected:
    * @param prev_pose Previous pose (for calculating movement direction)
    * @param pose_mode "navigation", "arm", or "identity"
    */
-  geometry_msgs::msg::PoseStamped gridToWorld(
-    int x, int y, const nav_msgs::msg::OccupancyGrid & map,
-    const geometry_msgs::msg::PoseStamped * prev_pose = nullptr,
+  PoseStamped gridToWorld(
+    int x, int y, const OccupancyGrid & map,
+    const PoseStamped * prev_pose = nullptr,
     const std::string & pose_mode = "identity") const;
 
   /**
    * @brief Calculate path statistics
    */
   void calculatePathStats(
-    const nav_msgs::msg::Path & path, double & total_distance, int & num_waypoints) const;
+    const Path & path, double & total_distance, int & num_waypoints) const;
 
   /**
    * @brief Determine sweep direction in world frame considering map rotation
@@ -154,7 +159,7 @@ protected:
    * @return true if should sweep along grid Y-axis (vertical in grid), false for X-axis (horizontal in grid)
    */
   bool determineWorldAwareSweepDirection(
-    const std::string & sweep_direction_param, const nav_msgs::msg::OccupancyGrid & map) const;
+    const std::string & sweep_direction_param, const OccupancyGrid & map) const;
 };
 
 /**
