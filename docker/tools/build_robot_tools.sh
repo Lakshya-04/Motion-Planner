@@ -18,5 +18,9 @@ build() {
   echo "built motion-planner-$name:$ref"
 }
 
-build foam foam "$FOAM_REF"
+# FOAM: our own thin Dockerfile (upstream's is a developer shell that expects a missing file).
+docker build -f "$(dirname "$0")/foam.Dockerfile" --build-arg FOAM_REF="$FOAM_REF" \
+  -t "motion-planner-foam:$FOAM_REF" "$(dirname "$0")"
+echo "built motion-planner-foam:$FOAM_REF"
+# Cricket: upstream's Dockerfile is a clean two-stage image whose entrypoint is fkcc_gen.
 build cricket cricket "$CRICKET_REF"

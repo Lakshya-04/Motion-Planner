@@ -95,6 +95,19 @@ def test_lift_mimic_stages(stages):
         assert j.mimic.multiplier == pytest.approx(1.0 / stages)
 
 
+def test_fixed_lift_gives_an_arm_only_robot():
+    """lift_fixed_height pins the lift and its stages: six moving joints, no mimics."""
+    robot = URDF.from_xml_string(_render(arm='generic_6dof', lift_stages=3, lift_fixed_height=0.5))
+    moving = [j for j in robot.joints if j.type in ('revolute', 'prismatic', 'continuous')]
+    assert len(moving) == 6
+    assert all(j.mimic is None for j in robot.joints)
+    lift = next(j for j in robot.joints if j.name == 'lift_joint')
+    default = URDF.from_xml_string(_render(arm='generic_6dof'))
+    base = next(j for j in default.joints if j.name == 'lift_joint')
+    assert lift.type == 'fixed'
+    assert lift.origin.xyz[2] == pytest.approx(base.origin.xyz[2] + 0.5)
+
+
 def test_lift_velocity_and_stroke_are_parameters():
     robot = URDF.from_xml_string(_render(arm='generic_6dof', lift_stroke=0.9,
                                          lift_max_velocity=0.3))
