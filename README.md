@@ -7,6 +7,7 @@ execution on a compliant (admittance) joint trajectory controller (JTAC).
 
 | Package | Description |
 |---|---|
+| [`reachability`](src/manipulation/reachability) | RM4D reachability map (ROS-free): forward / inverse queries, lift-band planning, CLI |
 | [`mobile_manipulator_moveit_config`](src/description/mobile_manipulator_moveit_config) | MoveIt 2 config for the description: groups `arm` / `lift_arm`, OMPL, mock-hardware demo, smoke test |
 | [`scene_model`](src/perception/scene_model) | Backend-neutral scene model: clouds, meshes, primitives, voxels, ESDF; loaders, plane fit, exporters |
 | [`mobile_manipulator_description`](src/description/mobile_manipulator_description) | Generic 7-DOF robot model: base + swappable telescopic lift + swappable 6-DOF arm (UR10e, generic) + tool |

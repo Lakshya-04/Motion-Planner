@@ -2,7 +2,8 @@
 
 Answers, for a given robot arm: **can the tool reach this pose** (forward query) and **where
 should the base be so that it can** (inverse query), from one compact precomputed map.
-Planned module; design below. Method: **RM4D**, Rudorfer, *"RM4D: A Combined Reachability and
+Package: [`src/manipulation/reachability`](../src/manipulation/reachability) (ROS-free core,
+28 tests). Implemented here from the paper's idea; the other pieces below describe how it fits. Method: **RM4D**, Rudorfer, *"RM4D: A Combined Reachability and
 Inverse Reachability Map for Common 6-/7-Axis Robot Arms by Dimensionality Reduction to 4D"*,
 ICRA 2025, [arXiv:2410.06968](https://arxiv.org/abs/2410.06968) (project page
 mrudorfer.github.io/rm4d). Per the paper's abstract, the map is far more compact and builds
@@ -31,31 +32,46 @@ Assumptions to check for our robot: last wrist joint full rotation (UR family: y
 base axis (arm on a vertical lift: yes), base free to rotate (mobile base: yes). Contact work
 adds an orientation constraint (tool normal to the wall); query with the constrained pose set.
 
-## Port (ROS-free core)
+## What exists
 
-```cpp
-struct MapParams { /* workspace envelope, resolution, polar-angle bin size */ };
-struct BaseCandidate { double x, y, theta; int score; };
+| Piece | Where |
+|---|---|
+| `Map4D`: canonical key (pz, theta, x*, y*), `record`, forward `isReachable` / `cellCount`, inverse `inverseQuery` (base positions; ring of candidates for a vertical approach axis), `mergeFrom` | `core/map4d.hpp` |
+| `ArmModel` port (joint limits + FK/validity per configuration) and `ChainModel` (revolute chain, optional validity callback, fingerprint, `loadChainYaml`) | `core/arm_model.hpp` |
+| `buildMap`: uniform joint sampling on N threads, deterministic for a seed, stats (valid, in window, saturated cells) | `core/builder.hpp` |
+| `planLiftBands`: greedy set cover of target poses over candidate lift heights for a base station; reports unreachable targets | `core/lift_bands.hpp` |
+| Versioned binary map file with a robot fingerprint (a map for another robot is rejected) | `core/io.hpp` |
+| `scripts/urdf_to_chain.py`: URDF -> chain YAML (folds fixed joints, records axes and limits) | `scripts/` |
+| `rm4d_tool build / info / bands` | `apps/rm4d_tool.cpp` |
 
-class ReachabilityMap {            // core/, no ROS
- public:
-  static ReachabilityMap build(const RobotModel&, const MapParams&, const Backend&);
-  void save(const std::string&) const;  static ReachabilityMap load(const std::string&);
-  bool  isReachable(const Pose& tool_in_arm_base) const;
-  int   cellCount(const Pose& tool_in_arm_base) const;            // how many wrist configs
-  std::vector<BaseCandidate> inverseQuery(const Pose& tool_in_world) const;
-  void  mergeFrom(const std::vector<ReachabilityMap>& shards);    // parallel build
-};
+Backends other than the built-in chain (Pinocchio, VAMP, cuRobo, MoveIt, with self-collision)
+implement `ArmModel`; none is written yet, so the built-in chain only checks joint limits.
+
+## Try it
+
+```bash
+xacro urdf/mobile_manipulator.urdf.xacro arm:=ur10e -o /tmp/robot.urdf
+urdf_to_chain.py /tmp/robot.urdf --base arm_base_link --tip tcp_link -o ur10e_chain.yaml
+rm4d_tool build ur10e_chain.yaml ur10e.rm4d --samples 3000000 --resolution 0.05 --extent 2.0 --zmin -1.8 --zmax 2.0
+rm4d_tool bands ur10e.rm4d --wall-x 0.8 --z-min 0.1 --z-max 3.0 --lift-max 1.5 --mount-z 0.2
 ```
 
-A **Backend** supplies batched FK, joint limits, self-collision and optional IK, so the build
-reuses the planning stack's models instead of a separate one: Pinocchio (CPU, reference),
-VAMP (SIMD CPU, [vamp_notes.md](vamp_notes.md)), cuRobo (GPU, [curobo_v2_notes.md](curobo_v2_notes.md)).
-Input robot: the [description package](robot_description.md) profile (arm joints, limits, frames),
-so one robot definition drives planning, reachability and filtering.
+Measured on this machine (8 threads): 3 million samples in 0.5 s. UR10e, a 3 m wall 0.8 m in
+front of the base: **2 bands** (lift 0.95 m covers 25 of 30 targets, 1.45 m the other 5). The same
+wall 3 m away: all targets unreachable. Generic arm: 3 bands.
 
-ROS shell: a node / CLI that builds and saves maps, and a service for forward / inverse queries
-(`GetBaseCandidates`, `IsReachable`), plus RViz slice markers.
+## Limits and next steps
+
+- **Sampling density.** Uniform joint sampling leaves cells empty at fine resolution: 3 M samples
+  set 11% of a 5 cm map. Use at least ten samples per reachable cell, or a coarser map; the
+  saturated-cell count in the build stats shows where more samples add nothing.
+- **Self-collision** is not checked by the built-in chain; plug a collision-aware `ArmModel` in
+  before trusting a map for cluttered arms.
+- **Joint range assumption.** The reduction needs the first joint to rotate a full turn and the
+  last joint to rotate fully (UR family: yes). Check a new arm against brute force.
+- **Not done:** ROS shell (services `GetBaseCandidates` / `IsReachable`, RViz slices), a
+  validation harness against brute-force 6D sampling, base-station selection over several
+  stations, orientation-constrained wall queries.
 
 ## File format
 
