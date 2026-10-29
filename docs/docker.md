@@ -59,7 +59,34 @@ The `gpu` and `full` services request all GPUs through the NVIDIA container runt
 Isaac Sim / Isaac Lab are large and ship as NVIDIA images; add them as a separate compose
 service when needed instead of installing them here.
 
+## Build and test in a container
+
+`docker/build.sh [test]` is the one build entry point (the `build` target and the compose `test`
+service both use it). For a fast edit-build loop, mount the source into the `deps` image and keep
+the build output in volumes:
+
+```bash
+docker run --rm -v $PWD/src:/ws/src:ro -v $PWD/docker:/ws/docker:ro \
+  -v mp_build:/ws/build -v mp_install:/ws/install -v mp_log:/ws/log \
+  -w /ws motion-planner:deps docker/build.sh test
+```
+
+## Findings from the first Jazzy build
+
+- **Octomap version clash (Ubuntu 24.04 / Jazzy apt snapshot).** MoveIt's binaries are built
+  against Ubuntu's octomap 1.9 while `ros-jazzy-octomap` 1.10 is also installed. Code linked
+  against 1.10 plus MoveIt's 1.9 loads two versions into one process; every test passes and then
+  the process aborts at exit with `malloc_consolidate(): invalid chunk size`. `docker/build.sh`
+  passes `-Doctomap_DIR=/usr/share/octomap` so everything links the same version. If you build
+  outside the container on such a system, do the same.
+- **`ur_description` macro differs by distro.** Humble's `ur_robot` takes `ur_type`; Jazzy's does
+  not. The description's UR adapter switches on `ROS_DISTRO`.
+- **Style linters are off in `colcon test`.** uncrustify, flake8 and pep257 flagged formatting
+  only. `.clang-format` is the formatting standard.
+
 ## Status
 
-Dockerfile and compose file pass `docker build --check` and `compose config`. The images
-have not all been built end to end yet (disk space on the dev machine).
+Verified on Jazzy in the container: all 12 packages build and install, and the 277 unit tests
+in 10 packages pass, plus the description's pytest contract tests. The `gpu` / `full` targets
+(CUDA PyTorch, cuRobo, VAMP) and the FOAM / Cricket tool images are written and lint-checked but
+have not been built here yet.
