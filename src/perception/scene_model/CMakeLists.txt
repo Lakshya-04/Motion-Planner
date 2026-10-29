@@ -30,7 +30,23 @@ target_include_directories(scene_model_core PUBLIC
 target_link_libraries(scene_model_core PUBLIC Eigen3::Eigen yaml-cpp)
 target_compile_features(scene_model_core PUBLIC cxx_std_17)
 
-install(TARGETS scene_model_core
+# ros/: message conversions (PointCloud2, MoveIt collision objects / planning scene). Messages only,
+# no rclcpp. Optional: the core builds without any ROS message package.
+find_package(sensor_msgs QUIET)
+find_package(shape_msgs QUIET)
+find_package(geometry_msgs QUIET)
+find_package(moveit_msgs QUIET)
+set(SCENE_MODEL_TARGETS scene_model_core)
+if(sensor_msgs_FOUND AND shape_msgs_FOUND AND geometry_msgs_FOUND AND moveit_msgs_FOUND)
+  add_library(scene_model_ros src/ros/conversions.cpp)
+  target_link_libraries(scene_model_ros PUBLIC scene_model_core)
+  ament_target_dependencies(scene_model_ros PUBLIC sensor_msgs shape_msgs geometry_msgs moveit_msgs)
+  list(APPEND SCENE_MODEL_TARGETS scene_model_ros)
+else()
+  message(WARNING "ROS message packages not found: building scene_model without ros/ conversions")
+endif()
+
+install(TARGETS ${SCENE_MODEL_TARGETS}
   EXPORT export_scene_model
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -52,9 +68,13 @@ if(BUILD_TESTING)
     ament_add_gtest(${t}_test test/core/${t}_test.cpp)
     target_link_libraries(${t}_test scene_model_core)
   endforeach()
+  if(TARGET scene_model_ros)
+    ament_add_gtest(ros_conversions_test test/ros/conversions_test.cpp)
+    target_link_libraries(ros_conversions_test scene_model_ros)
+  endif()
 endif()
 
 ament_export_targets(export_scene_model HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(Eigen3 yaml-cpp)
+ament_export_dependencies(Eigen3 yaml-cpp sensor_msgs shape_msgs geometry_msgs moveit_msgs)
 ament_package()

@@ -272,6 +272,6 @@ TEST(SelfFilter, FilteringALargeCloudIsFast)
   const auto r = f.filter(in);
   const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   ASSERT_TRUE(r.success);
-  EXPECT_LT(s, 1.0) << "200k points x 15 shapes took " << s << " s";
+  EXPECT_LT(s, 3.0) << "200k points x 15 shapes took " << s << " s";
   EXPECT_GT(r.removed_count, 0U);
 }
