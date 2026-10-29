@@ -54,7 +54,8 @@ Status: **exists** = port in the code today; **planned** = to be added.
 | Perception | `PerceptionSource` (planned) | point-cloud topic, depth + camera (cuRobo `Mapper`), file replay |
 | World / scene | `SceneModel` (exists, `scene_model`, see [scene_model.md](scene_model.md)); `ScenePort` (exists, `motion_planner/core/scene_port.hpp`) | loaders: `.pcd`/`.ply`, meshes, primitives YAML/JSON, voxel/ESDF, MoveIt `PlanningScene`, depth; consumers: MoveIt, cuRobo v2, VAMP |
 | Surface | `SurfaceModel` (planned) | planar fit from scene (`WallPlane` today); later: mesh / parametric / height-map surfaces |
-| Coverage | `CoveragePlannerBase` + `CoveragePlannerFactory` (exists) | boustrophedon (now); sweep-line / BCD, spiral, learned (planned) |
+| Coverage planner | `CoveragePlannerBase` + `CoveragePlannerFactory` (exists) | boustrophedon, sweepline (now); cell decomposition (BCD), spiral, learned (planned) |
+| Coverage pattern | `planWallPattern` (exists) — see [coverage_patterns.md](coverage_patterns.md) | vertical, horizontal, zigzag (now), over any coverage planner; non-planar surfaces later |
 | Coverage feed | `CoverageSource` (exists, `manipulation_manager`) | JSON source (now); ROS service source |
 | Sequencing | `SegmentOrderingPolicy` (exists) | input order (now); TSP with time metric `max_i \|Δq_i\|/v_max_i`, failure-aware resequencing (planned) |
 | IK | `IkPort` (exists) | MoveIt/KDL via `motion_planner_moveit` (now); TRAC-IK, cuRobo IK, analytic (planned) |
@@ -111,6 +112,7 @@ pipeline:
 ## Related documents
 
 - [Package layout: core/ + ros/](package_layout.md)
+- [Coverage planners and patterns](coverage_patterns.md)
 - [Scene model](scene_model.md)
 - [nvblox notes](nvblox_notes.md)
 - [Robot description](robot_description.md)

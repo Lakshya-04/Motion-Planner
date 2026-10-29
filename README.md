@@ -9,7 +9,7 @@ execution on a compliant (admittance) joint trajectory controller (JTAC).
 |---|---|
 | [`scene_model`](src/perception/scene_model) | Backend-neutral scene model: clouds, meshes, primitives, voxels, ESDF; loaders, plane fit, exporters |
 | [`mobile_manipulator_description`](src/description/mobile_manipulator_description) | Generic 7-DOF robot model: base + swappable telescopic lift + swappable 6-DOF arm (UR10e, generic) + tool |
-| [`coverage_planner`](src/perception/coverage_planner) | Wall coverage path planning (boustrophedon passes over a wall point cloud) |
+| [`coverage_planner`](src/perception/coverage_planner) | Wall coverage planning: boustrophedon and sweepline planners, vertical / horizontal / zigzag wall patterns, scan-to-plan pipeline |
 | [`coverage_planner_msgs`](src/perception/coverage_planner_msgs) | Messages and services for the coverage planner |
 | [`motion_planner`](src/manipulation/motion_planner) | ROS-free motion planning core: planner, IK, collision and scene ports, `MotionPlanner` orchestration |
 | [`motion_planner_moveit`](src/manipulation/motion_planner_moveit) | MoveIt / OMPL backend implementing those ports (Cartesian + free-space planners) |
