@@ -97,3 +97,22 @@ own C++ implementation (map, builder with Pinocchio and VAMP backends, numerical
 format, apps for building and querying, paper-accuracy tests); it informed the module list and
 test ideas here, but its code is not used. Our implementation is written from the paper;
 check the license of any public reference code before reusing it.
+
+## ROS shell
+
+`reachability_node` (package `reachability`, interfaces in `reachability_msgs`) loads a map file
+built with `rm4d_tool` and serves it:
+
+| Service | Request | Answer |
+|---|---|---|
+| `~/is_reachable` | tool pose in the arm base frame | reachable, sample count |
+| `~/get_base_candidates` | tool pose in the world, arm base height | base (x, y) candidates |
+| `~/plan_lift_bands` | wall targets, base station, lift range and step | bands + unreachable targets |
+
+Parameters: `map_file` (required), `robot_fingerprint` (rejects a map built for another robot).
+The map does not know which side of a wall is free, so base candidates come back on both sides of
+the target plane; the caller (stationing logic) picks the free side.
+
+```
+ros2 launch reachability reachability.launch.py map_file:=/path/ur10e.rm4d
+```

@@ -31,7 +31,24 @@ target_compile_features(reachability_core PUBLIC cxx_std_17)
 add_executable(rm4d_tool apps/rm4d_tool.cpp)
 target_link_libraries(rm4d_tool reachability_core)
 
-install(TARGETS reachability_core
+# ros/: services over a loaded map. Optional: the core builds without rclcpp.
+find_package(rclcpp QUIET)
+find_package(reachability_msgs QUIET)
+set(REACHABILITY_TARGETS reachability_core)
+if(rclcpp_FOUND AND reachability_msgs_FOUND)
+  add_library(reachability_ros src/ros/reachability_node.cpp)
+  target_link_libraries(reachability_ros PUBLIC reachability_core)
+  ament_target_dependencies(reachability_ros PUBLIC rclcpp reachability_msgs)
+  add_executable(reachability_node src/ros/reachability_main.cpp)
+  target_link_libraries(reachability_node reachability_ros)
+  install(TARGETS reachability_node DESTINATION lib/${PROJECT_NAME})
+  install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}/)
+  list(APPEND REACHABILITY_TARGETS reachability_ros)
+else()
+  message(WARNING "rclcpp/reachability_msgs not found: building reachability without the ROS node")
+endif()
+
+install(TARGETS ${REACHABILITY_TARGETS}
   EXPORT export_reachability
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -47,6 +64,11 @@ if(BUILD_TESTING)
     target_link_libraries(${t}_test reachability_core)
     target_include_directories(${t}_test PRIVATE test/core)
   endforeach()
+  if(TARGET reachability_ros)
+    ament_add_gtest(reachability_node_test test/ros/reachability_node_test.cpp)
+    target_link_libraries(reachability_node_test reachability_ros)
+    target_include_directories(reachability_node_test PRIVATE test/core)
+  endif()
 endif()
 
 ament_export_targets(export_reachability HAS_LIBRARY_TARGET)
