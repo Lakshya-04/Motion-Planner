@@ -48,6 +48,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 
 
+## Design
+
+Every stage (perception, scene, surface, coverage, sequencing, motion planning, timing,
+execution, control, and a slot for learned policies) is a swappable module selected by
+config. Planning backends: MoveIt, cuRobo v2 and VAMP. See [docs/](docs/README.md), starting
+with [architecture.md](docs/architecture.md).
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
