@@ -48,6 +48,7 @@ Status: **exists** = port in the code today; **planned** = to be added.
 
 | Stage | Port (status) | Implementations (now / planned) |
 |---|---|---|
+| Robot self filter | `RobotSelfFilter` (planned) — see [robot_self_filter.md](robot_self_filter.md) | geometry containment, collision-sphere model, GPU depth mask (cuRobo-style), learned segmentation later |
 | Perception | `PerceptionSource` (planned) | point-cloud topic, depth + camera (cuRobo `Mapper`), file replay |
 | World / scene | `ScenePort` (exists, `motion_planner/scene_port.hpp`); `SceneModel` (planned) | loaders: `.pcd`/`.ply`, meshes, primitives YAML/JSON, voxel/ESDF, MoveIt `PlanningScene`, depth; consumers: MoveIt, cuRobo v2, VAMP |
 | Surface | `SurfaceModel` (planned) | planar fit from scene (`WallPlane` today); later: mesh / parametric / height-map surfaces |
@@ -108,6 +109,7 @@ pipeline:
 ## Related documents
 
 - [Package layout: core/ + ros/](package_layout.md)
+- [Robot self filter module](robot_self_filter.md)
 - [Learned recovery research (RL / IL / MPC)](learned_recovery.md)
 - [Design principles and lessons learned](design_principles.md)
 - [cuRobo v2 integration notes](curobo_v2_notes.md)
