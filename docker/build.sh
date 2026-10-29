@@ -2,7 +2,7 @@
 # Build (and optionally test) the workspace the way the Docker image expects.
 #   docker/build.sh            build
 #   docker/build.sh test       build, run tests, print the result summary
-set -euo pipefail
+set -eo pipefail
 source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
 
 CMAKE_ARGS=(-DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17)
