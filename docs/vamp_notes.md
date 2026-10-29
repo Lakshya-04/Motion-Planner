@@ -39,6 +39,33 @@ URDF + meshes --FOAM--> per-link spheres + spherized URDF --Cricket--> <robot>.h
 - One header per tool variant if the tool changes collision geometry; an arm-only variant
   (lift pinned as a parameter) gives a much cheaper 6-DOF C-space when the lift is not moving.
 
+## Upstream state (checked at `27cb9b6`, 2026-09-28)
+
+- Header-only C++17 `INTERFACE` target `vamp::vamp`, installable with CMake exports
+  (`VAMP_INSTALL_CPP_LIBRARY=ON`); Python bindings optional (`VAMP_BUILD_PYTHON_BINDINGS=OFF`).
+- Dependencies pulled with CPM at configure time: Eigen 3.4, `nigh`, `pdqsort`, `cddlib`,
+  `SIMDxorshift` (x86). Builds need network once, or a pre-filled `CPM_SOURCE_CACHE`.
+- Planners: RRT-Connect, PRM, FCIT, AORRTC, all multi-goal. Simplifiers: shortcut, reduce,
+  B-spline, perturb.
+- Environment: spheres, capsules, cuboids, **heightfields**, **convex polytopes (GJK)** with
+  a mesh -> convex-decomposition helper, point clouds via CAPT. So meshes can be native
+  obstacles (as polytopes), not only sampled points.
+- Attachments (sphere sets on the end effector) for UR5 / Panda / Fetch, so a held tool can
+  be added without regenerating the robot.
+- Bundled robots: UR5, Panda, Fetch, Baxter, sphere. Custom robots via FOAM + Cricket.
+
+## How we integrate it
+
+Own layer on top of **unmodified upstream**, so updates are a one-line commit bump:
+
+| Package | Contents |
+|---|---|
+| `vamp_vendor` | `FetchContent` of `KavrakiLab/vamp` pinned to a commit (bindings off), installs `vamp::vamp` |
+| `vamp_robots` | our generated robot headers + the FOAM/Cricket generation script and FK check |
+| `vamp_planner` | pimpl facade + runtime robot factory, implementing our `ScenePort` / planner / collision ports; TOPP-RA timing; ROS adapter at the edge |
+
+Never patch upstream files; anything robot- or task-specific lives in our packages.
+
 ## Lessons from an earlier production integration
 
 - Wrap VAMP behind one non-template facade (pimpl): robot templates and VAMP/Eigen types stay
@@ -63,7 +90,9 @@ URDF + meshes --FOAM--> per-link spheres + spherized URDF --Cricket--> <robot>.h
 |---|---|
 | `ScenePort` boxes / primitives | `addCuboid*`, `addSphere`, `addCapsule*`, `addCylinder*` |
 | `ScenePort` points | `setPointCloud(points, radius)` |
-| meshes / voxels / ESDF | not native: sample surface points or sphere-fill, then point cloud |
+| meshes | convex decomposition -> `ConvexPolytope`s (or sampled surface points) |
+| voxels / ESDF | occupied voxel centers -> point cloud |
+| heightfields | native `Heightfield` |
 | free-space `Planner::plan` | RRT-Connect / AORRTC + simplify, then TOPP-RA |
 | `Planner::collision` | `isStateInCollision`, `isMotionInCollision`, batched validity |
 | `Planner::ik` | not provided; delegate to the IK backend |
