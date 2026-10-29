@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-#include "coverage_planner/wall_coverage_service_node.hpp"
+#include "coverage_planner/ros/wall_coverage_service_node.hpp"
 
 #include <algorithm>
 #include <cmath>
