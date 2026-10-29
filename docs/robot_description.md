@@ -75,8 +75,9 @@ python3 -m pytest src/description/mobile_manipulator_description/test
 - Collision geometry is primitives; generate a collision-sphere model per robot (FOAM, see
   [vamp_notes.md](vamp_notes.md)) for the VAMP / cuRobo backends and the
   [self filter](robot_self_filter.md).
-- The SRDF carries structural exclusions only; generate the full allowed-collision matrix per
-  arm.
-- Add the `ros2_control` hardware block per backend (real, mock, sim) as a separate xacro.
+- The SRDF carries the generated structural allowed-collision matrix (`scripts/generate_acm.py`);
+  geometry-specific pairs can be added by sampling, see [moveit_config.md](moveit_config.md).
+- `hardware:=mock` adds a ros2_control block (mock components); add real and sim backends as
+  further branches of that one xacro.
 - Verified here with `check_urdf` and the contract tests for the generic arm and UR10e (rendered
-  with the Humble xacro). Not yet loaded into MoveIt.
+  with the Humble xacro). Loaded into MoveIt and planned with on Jazzy, see [moveit_config.md](moveit_config.md).
