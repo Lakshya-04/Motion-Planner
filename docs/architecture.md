@@ -50,12 +50,12 @@ Status: **exists** = port in the code today; **planned** = to be added.
 |---|---|---|
 | Robot self filter | `RobotSelfFilter` (planned) — see [robot_self_filter.md](robot_self_filter.md) | geometry containment, collision-sphere model, GPU depth mask (cuRobo-style), learned segmentation later |
 | Perception | `PerceptionSource` (planned) | point-cloud topic, depth + camera (cuRobo `Mapper`), file replay |
-| World / scene | `ScenePort` (exists, `motion_planner/scene_port.hpp`); `SceneModel` (planned) | loaders: `.pcd`/`.ply`, meshes, primitives YAML/JSON, voxel/ESDF, MoveIt `PlanningScene`, depth; consumers: MoveIt, cuRobo v2, VAMP |
+| World / scene | `ScenePort` (exists, `motion_planner/core/scene_port.hpp`); `SceneModel` (planned) | loaders: `.pcd`/`.ply`, meshes, primitives YAML/JSON, voxel/ESDF, MoveIt `PlanningScene`, depth; consumers: MoveIt, cuRobo v2, VAMP |
 | Surface | `SurfaceModel` (planned) | planar fit from scene (`WallPlane` today); later: mesh / parametric / height-map surfaces |
 | Coverage | `CoveragePlannerBase` + `CoveragePlannerFactory` (exists) | boustrophedon (now); sweep-line / BCD, spiral, learned (planned) |
 | Coverage feed | `CoverageSource` (exists, `manipulation_manager`) | JSON source (now); ROS service source |
 | Sequencing | `SegmentOrderingPolicy` (exists) | input order (now); TSP with time metric `max_i \|Δq_i\|/v_max_i`, failure-aware resequencing (planned) |
-| IK | `IkPort` (exists) | MoveIt/KDL (now); TRAC-IK, cuRobo IK, analytic (planned) |
+| IK | `IkPort` (exists) | MoveIt/KDL via `motion_planner_moveit` (now); TRAC-IK, cuRobo IK, analytic (planned) |
 | Collision | `CollisionPort` (exists) | MoveIt/FCL (now); VAMP, cuRobo (planned) |
 | Planning | `Planner` (exists: plan + ik + collision) | MoveIt Cartesian + OMPL (now); VAMP free-space, cuRobo v2 trajopt, velocity-constrained IK seam planner (planned) |
 | Timing | `TimeParameterizer` (planned) | S-curve Cartesian for contact seams, TOPP-RA for transitions |

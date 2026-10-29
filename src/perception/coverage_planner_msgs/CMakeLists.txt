@@ -18,8 +18,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 ament_export_dependencies(rosidl_default_runtime nav_msgs geometry_msgs)
 
 if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  ament_lint_auto_find_test_dependencies()
+  find_package(ament_lint_auto QUIET)
+  if(ament_lint_auto_FOUND)
+    ament_lint_auto_find_test_dependencies()
+  endif()
 endif()
 
 ament_package()

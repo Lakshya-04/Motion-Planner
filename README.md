@@ -9,7 +9,8 @@ execution on a compliant (admittance) joint trajectory controller (JTAC).
 |---|---|
 | [`coverage_planner`](src/perception/coverage_planner) | Wall coverage path planning (boustrophedon passes over a wall point cloud) |
 | [`coverage_planner_msgs`](src/perception/coverage_planner_msgs) | Messages and services for the coverage planner |
-| [`motion_planner`](src/manipulation/motion_planner) | MoveIt-based Cartesian and coverage motion planning |
+| [`motion_planner`](src/manipulation/motion_planner) | ROS-free motion planning core: planner, IK, collision and scene ports, `MotionPlanner` orchestration |
+| [`motion_planner_moveit`](src/manipulation/motion_planner_moveit) | MoveIt / OMPL backend implementing those ports (Cartesian + free-space planners) |
 | [`manipulation_manager`](src/manipulation/manipulation_manager) | Orchestrates coverage -> planning -> execution |
 | [`compliant_trajectory_controller`](src/control/compliant_trajectory_controller) | JTAC: compliant trajectory controller for `ros2_control` |
 | [`ft_bridge_hardware`](src/control/ft_bridge_hardware) | Force/torque sensor bridge (`ros2_control` hardware interface) |

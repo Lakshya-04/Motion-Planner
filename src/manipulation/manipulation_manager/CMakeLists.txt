@@ -13,11 +13,12 @@ find_package(std_msgs REQUIRED)
 find_package(core_types REQUIRED)
 find_package(ros_adapters REQUIRED)
 # PCL (and its own Findlibusb.cmake module) must be resolved BEFORE motion_planner --
-# motion_planner_core's exported link interface references the libusb::libusb imported
+# motion_planner_pcd's exported link interface references the libusb::libusb imported
 # target that only PCL's own find_package() call defines; motion_plannerConfig.cmake
 # doesn't re-run it itself.
 find_package(PCL REQUIRED COMPONENTS common io)
 find_package(motion_planner REQUIRED)
+find_package(motion_planner_moveit REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
 # core/ (zero ROS deps -- verified: only stdlib + core_types/motion_planner headers)
@@ -66,9 +67,13 @@ ament_target_dependencies(manipulation_manager_node
   rclcpp
   std_msgs
 )
+# The node is the composition root: it wires the MoveIt/OMPL backend (motion_planner_moveit)
+# into the ROS-free core. Swapping the backend (cuRobo, VAMP) means changing only this link
+# and the factory in the node.
 target_link_libraries(manipulation_manager_node
   ${PROJECT_NAME}_core
   ros_adapters::ros_adapters
+  motion_planner_moveit::motion_planner_moveit_lib
 )
 
 install(TARGETS
@@ -110,10 +115,12 @@ if(BUILD_TESTING)
     target_link_libraries(coverage_feasibility_analyzer_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
-  find_package(ament_lint_auto REQUIRED)
-  set(ament_cmake_copyright_FOUND TRUE)
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
+  find_package(ament_lint_auto QUIET)
+  if(ament_lint_auto_FOUND)
+    set(ament_cmake_copyright_FOUND TRUE)
+    set(ament_cmake_cpplint_FOUND TRUE)
+    ament_lint_auto_find_test_dependencies()
+  endif()
 endif()
 
 ament_export_dependencies(

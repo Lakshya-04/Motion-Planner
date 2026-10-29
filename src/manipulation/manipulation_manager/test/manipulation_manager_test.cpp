@@ -7,10 +7,10 @@
 #include <thread>
 #include <vector>
 
-#include "motion_planner/motion_planner.hpp"
-#include "motion_planner/moveit_planning_backend.hpp"
-#include "motion_planner/planners/ompl_planner.hpp"
-#include "motion_planner/planners/planner.hpp"
+#include "motion_planner/core/motion_planner.hpp"
+#include "motion_planner_moveit/moveit_planning_backend.hpp"
+#include "motion_planner_moveit/ompl_planner.hpp"
+#include "motion_planner/core/planners/planner.hpp"
 
 #include "manipulation_manager/core/execution/execution_port.hpp"
 #include "manipulation_manager/core/motion_segment_spec.hpp"

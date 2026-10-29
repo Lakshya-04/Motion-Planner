@@ -37,12 +37,14 @@ if(BUILD_TESTING)
   ament_add_gtest(test_ros_adapters test/tool_profile_yaml_loader_test.cpp)
   target_link_libraries(test_ros_adapters ${PROJECT_NAME})
 
-  find_package(ament_lint_auto REQUIRED)
-  # No per-file copyright headers in this repo yet -- matches the same
-  # skip used by motion_planner's CMakeLists.txt.
-  set(ament_cmake_copyright_FOUND TRUE)
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
+  find_package(ament_lint_auto QUIET)
+  if(ament_lint_auto_FOUND)
+    # No per-file copyright headers in this repo yet -- matches the same
+    # skip used by motion_planner's CMakeLists.txt.
+    set(ament_cmake_copyright_FOUND TRUE)
+    set(ament_cmake_cpplint_FOUND TRUE)
+    ament_lint_auto_find_test_dependencies()
+  endif()
 endif()
 
 ament_package()
