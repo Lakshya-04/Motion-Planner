@@ -124,9 +124,12 @@ planner.attachment_manager                         # attach objects to links
 
 ## Integration shape (decision)
 
-cuRobo is Python/CUDA. The C++ packages talk to it through a small Python node
-(`curobo_bridge`) exposing ROS services/actions that mirror `ScenePort` and the planner
-interface. Keeping the backend behind that seam means MoveIt and cuRobo stay swappable.
+Backends are **pluggable, not exclusive**. MoveIt (OMPL / Cartesian), cuRobo v2 and any
+future backend (e.g. VAMP) all implement the same ports (`ScenePort`, `Planner`, IK,
+collision, time parameterization); the active one is chosen by config per request or per
+segment role. cuRobo is Python/CUDA, so its adapter is a small Python node
+(`curobo_bridge`) exposing ROS services/actions that mirror those ports; the C++ side
+never links cuRobo directly.
 
 ## Open questions
 
