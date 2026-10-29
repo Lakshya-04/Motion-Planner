@@ -135,5 +135,5 @@ FROM gpu AS full
 ARG USERNAME=dev
 USER root
 COPY --from=vamp-build /opt/vamp /opt/vamp
-ENV CMAKE_PREFIX_PATH=/opt/vamp:${CMAKE_PREFIX_PATH:-}
+ENV CMAKE_PREFIX_PATH=/opt/vamp
 USER ${USERNAME}
