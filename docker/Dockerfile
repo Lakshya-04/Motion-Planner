@@ -51,8 +51,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && (rosdep init 2>/dev/null || true) && rosdep update --rosdistro ${ROS_DISTRO} \
     && rosdep install --from-paths /tmp/src-manifest --ignore-src -y --rosdistro ${ROS_DISTRO} \
          --skip-keys "ament_cmake_clang_format" \
-    && grep -v '^\s*#' /tmp/apt-extra.txt | grep -v '^\s*$' | sed "s/@ROS@/${ROS_DISTRO}/g" | xargs apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /tmp/src-manifest
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && grep -v '^\s*#' /tmp/apt-extra.txt | grep -v '^\s*$' | sed "s/@ROS@/${ROS_DISTRO}/g" | xargs apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 ############################ dev ##############################
 FROM deps AS dev

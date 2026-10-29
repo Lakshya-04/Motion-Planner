@@ -5,7 +5,6 @@
 # geometry / perception
 libeigen3-dev
 libpcl-dev
-libpcl-conversions-dev
 nlohmann-json3-dev
 libyaml-cpp-dev
 libccd-dev
