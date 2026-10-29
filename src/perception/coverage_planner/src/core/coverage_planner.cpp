@@ -2,6 +2,7 @@
 #include <cmath>
 #include <queue>
 #include "coverage_planner/core/boustrophedon_planner.hpp"
+#include "coverage_planner/core/sweepline_planner.hpp"
 #include <cstdarg>
 #include <cstdio>
 
@@ -223,6 +224,9 @@ std::unique_ptr<CoveragePlannerBase> CoveragePlannerFactory::createPlanner(
   if (pattern_name == "boustrophedon") {
     return std::make_unique<BoustrophedonPlanner>();
   }
+  if (pattern_name == "sweepline") {
+    return std::make_unique<SweeplinePlanner>();
+  }
   // Add more planners here as they are implemented:
   // else if (pattern_name == "spiral")
   // {
@@ -239,7 +243,8 @@ std::unique_ptr<CoveragePlannerBase> CoveragePlannerFactory::createPlanner(
 std::vector<std::string> CoveragePlannerFactory::getAvailablePlanners()
 {
   return {
-    "boustrophedon"
+    "boustrophedon",
+    "sweepline"
     // Add more patterns here as implemented
     // "spiral",
     // "zigzag"

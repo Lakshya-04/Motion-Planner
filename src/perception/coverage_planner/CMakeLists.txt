@@ -13,6 +13,7 @@ find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(core_types REQUIRED)
+find_package(scene_model REQUIRED)
 
 # ------------------------------------------------------------------------------
 # core/: ROS-free. Plain C++17 types, interfaces and algorithms. Nothing here may include
@@ -21,16 +22,20 @@ find_package(core_types REQUIRED)
 add_library(coverage_planner_core
   src/core/coverage_planner.cpp
   src/core/planners/boustrophedon_planner.cpp
+  src/core/planners/sweepline_planner.cpp
   src/core/wall_pose_lift.cpp
   src/core/coverage_pass_expander.cpp
   src/core/wall_scene_loader.cpp
   src/core/wall_rasterizer.cpp
+  src/core/coverage_patterns.cpp
+  src/core/coverage_from_scan.cpp
 )
 target_include_directories(coverage_planner_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(coverage_planner_core PUBLIC
   core_types::core_types
+  scene_model::scene_model_core
   Eigen3::Eigen
   nlohmann_json::nlohmann_json)
 target_compile_features(coverage_planner_core PUBLIC cxx_std_17)
@@ -121,6 +126,9 @@ if(BUILD_TESTING)
   if(ament_lint_auto_FOUND)
     set(ament_cmake_copyright_FOUND TRUE)
     set(ament_cmake_cpplint_FOUND TRUE)
+    set(ament_cmake_uncrustify_FOUND TRUE)
+    set(ament_cmake_flake8_FOUND TRUE)
+    set(ament_cmake_pep257_FOUND TRUE)
     ament_lint_auto_find_test_dependencies()
   endif()
 
@@ -135,6 +143,15 @@ if(BUILD_TESTING)
   ament_add_gtest(test_wall_pose_lift test/core/wall_pose_lift_test.cpp)
   target_link_libraries(test_wall_pose_lift coverage_planner_core)
 
+  ament_add_gtest(test_coverage_patterns test/core/coverage_patterns_test.cpp)
+  target_link_libraries(test_coverage_patterns coverage_planner_core)
+
+  ament_add_gtest(test_sweepline_planner test/core/sweepline_planner_test.cpp)
+  target_link_libraries(test_sweepline_planner coverage_planner_core)
+
+  ament_add_gtest(test_coverage_from_scan test/core/coverage_from_scan_test.cpp)
+  target_link_libraries(test_coverage_from_scan coverage_planner_core)
+
   # ros/ tests: message <-> core conversions.
   ament_add_gtest(test_conversions test/ros/conversions_test.cpp)
   target_link_libraries(test_conversions coverage_planner_core ${coverage_planner_msgs_TARGETS})
@@ -143,5 +160,5 @@ endif()
 
 ament_export_targets(export_coverage_planner_core HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(coverage_planner_msgs core_types Eigen3 nlohmann_json)
+ament_export_dependencies(coverage_planner_msgs core_types scene_model Eigen3 nlohmann_json)
 ament_package()

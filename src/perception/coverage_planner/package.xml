@@ -11,6 +11,7 @@
 
   <depend>coverage_planner_msgs</depend>
   <depend>core_types</depend>
+  <depend>scene_model</depend>
   <depend>ros_adapters</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>

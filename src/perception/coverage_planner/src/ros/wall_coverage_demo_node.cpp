@@ -728,7 +728,7 @@ int main(int argc, char ** argv)
     for (auto & marker : stamped_obstacle_box_markers.markers) {
       marker.header.stamp = latest_available;
     }
-    auto stamped_grid = grid;
+    auto stamped_grid = coverage_planner::ros_conv::toRos(grid);
     stamped_grid.header.stamp = latest_available;
     auto stamped_flat_lines = flat_lines;
     stamped_flat_lines.header.stamp = latest_available;

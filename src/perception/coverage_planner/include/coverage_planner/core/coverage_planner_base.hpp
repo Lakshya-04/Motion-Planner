@@ -56,6 +56,9 @@ struct CoveragePlannerParams
   // See MotionPlanSegment emission mapping in generatePath(): strip/boundary segments carry this
   // through as requires_contact; connector segments always emit requires_contact=false.
   bool requires_contact{false};
+  /// Force a final pass flush with the far boundary so the last strip never leaves a gap
+  /// (may overlap the previous strip). Used by the sweepline planner.
+  bool ensure_coverage_within_boundary{false};
 };
 
 /**
