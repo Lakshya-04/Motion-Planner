@@ -1,0 +1,34 @@
+# System packages installed in addition to what rosdep resolves from package.xml.
+# One package per line. `@ROS@` is replaced with the ROS distro name at build time.
+# Keep this list explicit so the environment is auditable.
+
+# geometry / perception
+libeigen3-dev
+libpcl-dev
+libpcl-conversions-dev
+nlohmann-json3-dev
+libyaml-cpp-dev
+libccd-dev
+libfcl-dev
+
+# motion planning
+ros-@ROS@-moveit
+ros-@ROS@-ompl
+
+# control
+ros-@ROS@-ros2-control
+ros-@ROS@-ros2-controllers
+ros-@ROS@-realtime-tools
+ros-@ROS@-kinematics-interface-kdl
+
+# test / lint
+libgtest-dev
+libgmock-dev
+python3-pytest
+python3-yaml
+
+# kinematics (robot model generation, FK verification)
+ros-@ROS@-pinocchio
+
+# orchestration / behavior trees (recovery manager, task sequencing)
+ros-@ROS@-behaviortree-cpp

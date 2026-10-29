@@ -1,0 +1,20 @@
+# Python / GPU stack for cuRobo v2. Pinned for reproducibility; bump deliberately.
+# CUDA 12.8 wheels (match the host driver >= 570). Use the matching index.
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.8.0
+numpy<2.3
+
+# cuRobo v2 (NVlabs/curobo, Apache-2.0), pinned to a commit. The v2 API differs from v1
+# (v1 is tag v0.7.8).
+curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@78fd485
+
+# mesh handling (scene loaders, convex decomposition for VAMP polytopes)
+trimesh
+scipy
+
+# Reserved for later (uncomment when needed, keep pinned):
+# toppra            # time parameterization
+# gymnasium         # RL environments
+# tensorboard       # training curves
+# Isaac Sim / Isaac Lab are large and ship as their own NVIDIA images; run them as a
+# separate compose service instead of installing them here.
