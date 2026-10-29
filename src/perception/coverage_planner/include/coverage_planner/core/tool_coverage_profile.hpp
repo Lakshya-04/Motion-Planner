@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "coverage_planner/core/types.hpp"
 #include <string>
 #include <vector>
 

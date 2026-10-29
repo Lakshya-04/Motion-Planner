@@ -1,24 +1,21 @@
-#include "coverage_planner/coverage_pass_expander.hpp"
+#include "coverage_planner/core/coverage_pass_expander.hpp"
 
 #include <algorithm>
 #include <string>
 
-#include "coverage_planner/wall_pose_lift.hpp"
+#include "coverage_planner/core/wall_pose_lift.hpp"
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 namespace
 {
 
-nav_msgs::msg::Path extractSubPath(
-  const nav_msgs::msg::Path & flat_path, uint32_t start_index, uint32_t end_index, bool reverse)
+Path extractSubPath(
+  const Path & flat_path, uint32_t start_index, uint32_t end_index, bool reverse)
 {
-  nav_msgs::msg::Path sub_path;
+  Path sub_path;
   sub_path.header = flat_path.header;
   sub_path.poses.reserve(static_cast<size_t>(end_index - start_index) + 1);
   for (uint32_t i = start_index; i <= end_index; ++i) {
@@ -33,8 +30,8 @@ nav_msgs::msg::Path extractSubPath(
 }  // namespace
 
 ExpandedCoverage expandCoveragePasses(
-  const nav_msgs::msg::Path & flat_path, const std::vector<msg::MotionPlanSegment> & flat_segments,
-  const msg::WallPlane & wall, const coverage_planner::ToolCoverageProfile & tool_profile)
+  const Path & flat_path, const std::vector<MotionPlanSegment> & flat_segments,
+  const WallPlane & wall, const coverage_planner::ToolCoverageProfile & tool_profile)
 {
   ExpandedCoverage expanded;
   expanded.path.header = flat_path.header;

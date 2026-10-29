@@ -1,14 +1,12 @@
 #ifndef COVERAGE_PLANNER__BOUSTROPHEDON_PLANNER_HPP_
 #define COVERAGE_PLANNER__BOUSTROPHEDON_PLANNER_HPP_
 
-#include "coverage_planner/coverage_planner_base.hpp"
+#include "coverage_planner/core/types.hpp"
+#include "coverage_planner/core/coverage_planner_base.hpp"
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 /**
  * @brief Boustrophedon (lawn-mower) coverage path planner
@@ -37,7 +35,7 @@ public:
   virtual ~BoustrophedonPlanner() = default;
 
   CoveragePlannerResult generatePath(
-    const nav_msgs::msg::OccupancyGrid & map, const CoveragePlannerParams & params) override;
+    const OccupancyGrid & map, const CoveragePlannerParams & params) override;
 
   std::string getName() const override { return "boustrophedon"; }
 
@@ -46,24 +44,24 @@ private:
    * @brief Extract free space bounds from the map
    */
   bool extractFreeSpaceBounds(
-    const nav_msgs::msg::OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
+    const OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
     bool allow_unknown, int & min_x, int & max_x, int & min_y, int & max_y);
 
   /**
    * @brief Generate horizontal sweeps
    */
   void generateHorizontalSweeps(
-    const nav_msgs::msg::OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
+    const OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
     const CoveragePlannerParams & params, int min_x, int max_x, int min_y, int max_y,
-    nav_msgs::msg::Path & path, std::vector<msg::MotionPlanSegment> & segments);
+    Path & path, std::vector<MotionPlanSegment> & segments);
 
   /**
    * @brief Generate vertical sweeps
    */
   void generateVerticalSweeps(
-    const nav_msgs::msg::OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
+    const OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
     const CoveragePlannerParams & params, int min_x, int max_x, int min_y, int max_y,
-    nav_msgs::msg::Path & path, std::vector<msg::MotionPlanSegment> & segments);
+    Path & path, std::vector<MotionPlanSegment> & segments);
 
   /**
    * @brief Check if a line segment is mostly free
@@ -76,9 +74,9 @@ private:
    * @brief Generate boundary perimeter pass for edge coverage
    */
   void generateBoundaryPass(
-    const nav_msgs::msg::OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
+    const OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
     const CoveragePlannerParams & params, int min_x, int max_x, int min_y, int max_y,
-    nav_msgs::msg::Path & path, std::vector<msg::MotionPlanSegment> & segments);
+    Path & path, std::vector<MotionPlanSegment> & segments);
 
   /**
    * @brief Trim sweep line to free space boundaries
@@ -91,11 +89,11 @@ private:
    * @brief Add interpolated waypoints between strips in grid space
    */
   bool addStripConnectorWaypoints(
-    nav_msgs::msg::Path & path, const nav_msgs::msg::OccupancyGrid & map,
+    Path & path, const OccupancyGrid & map,
     const std::vector<int8_t> & inflated_grid, const CoveragePlannerParams & params,
     int current_end_x, int current_end_y, int next_start_x, int next_start_y,
-    const geometry_msgs::msg::PoseStamped * reference_pose,
-    std::vector<msg::MotionPlanSegment> & segments);
+    const PoseStamped * reference_pose,
+    std::vector<MotionPlanSegment> & segments);
 
   /**
    * @brief BFS shortest path (4-connected, free cells only) from (start_x, start_y) to
@@ -104,7 +102,7 @@ private:
    * @return The path including both endpoints, in grid cells; empty if unreachable.
    */
   std::vector<std::pair<int, int>> findObstacleAwareConnectorPath(
-    const nav_msgs::msg::OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
+    const OccupancyGrid & map, const std::vector<int8_t> & inflated_grid,
     const CoveragePlannerParams & params, int start_x, int start_y, int end_x, int end_y) const;
 };
 

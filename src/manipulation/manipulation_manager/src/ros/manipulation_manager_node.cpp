@@ -23,10 +23,10 @@
 #include "std_msgs/msg/float64.hpp"
 
 #include "core_types/pose.hpp"
-#include "motion_planner/motion_planner.hpp"
-#include "motion_planner/moveit_planning_backend.hpp"
-#include "motion_planner/planners/cartesian_planner.hpp"
-#include "motion_planner/planners/ompl_planner.hpp"
+#include "motion_planner/core/motion_planner.hpp"
+#include "motion_planner_moveit/moveit_planning_backend.hpp"
+#include "motion_planner_moveit/cartesian_planner.hpp"
+#include "motion_planner_moveit/ompl_planner.hpp"
 #include "ros_adapters/rclcpp_logger.hpp"
 
 #include "manipulation_manager/core/manipulation_manager.hpp"

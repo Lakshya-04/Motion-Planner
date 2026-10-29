@@ -50,12 +50,17 @@ if(BUILD_TESTING)
   ament_add_gtest(force_stage_sequencer_test test/force_stage_sequencer_test.cpp)
   target_link_libraries(force_stage_sequencer_test ${PROJECT_NAME})
 
-  find_package(ament_lint_auto REQUIRED)
-  # No per-file copyright headers in this repo yet -- matches core_types'/motion_planner's
-  # own skip.
-  set(ament_cmake_copyright_FOUND TRUE)
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
+  find_package(ament_lint_auto QUIET)
+  if(ament_lint_auto_FOUND)
+    # No per-file copyright headers in this repo yet -- matches core_types'/motion_planner's
+    # own skip.
+    set(ament_cmake_copyright_FOUND TRUE)
+    set(ament_cmake_cpplint_FOUND TRUE)
+    set(ament_cmake_uncrustify_FOUND TRUE)
+    set(ament_cmake_flake8_FOUND TRUE)
+    set(ament_cmake_pep257_FOUND TRUE)
+    ament_lint_auto_find_test_dependencies()
+  endif()
 endif()
 
 ament_package()

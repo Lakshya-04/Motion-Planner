@@ -12,9 +12,11 @@
 #include <string>
 
 #include <rclcpp/rclcpp.hpp>
+
+#include "coverage_planner/core/types.hpp"
 #include <std_srvs/srv/trigger.hpp>
 
-#include "coverage_planner/tool_coverage_profile.hpp"
+#include "coverage_planner/core/tool_coverage_profile.hpp"
 #include "coverage_planner_msgs/msg/coverage_plan.hpp"
 #include "coverage_planner_msgs/msg/wall_plane.hpp"
 #include "coverage_planner_msgs/srv/generate_coverage_path.hpp"
@@ -79,7 +81,7 @@ private:
   rclcpp::Client<GenerateCoveragePath>::SharedPtr coverage_client_;
   rclcpp::Publisher<msg::CoveragePlan>::SharedPtr plan_pub_;
 
-  msg::WallPlane wall_;
+  WallPlane wall_;  ///< Core type; converted to messages only at the ROS boundary.
 
   std::atomic<bool> busy_{false};
   std::atomic<bool> stop_requested_{false};

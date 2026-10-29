@@ -1,25 +1,20 @@
 #ifndef COVERAGE_PLANNER__COVERAGE_PASS_EXPANDER_HPP_
 #define COVERAGE_PLANNER__COVERAGE_PASS_EXPANDER_HPP_
 
+#include "coverage_planner/core/types.hpp"
 #include <vector>
 
-#include <nav_msgs/msg/path.hpp>
 
-#include "coverage_planner/tool_coverage_profile.hpp"
-#include "coverage_planner_msgs/msg/motion_plan_segment.hpp"
-#include "coverage_planner_msgs/msg/wall_plane.hpp"
+#include "coverage_planner/core/tool_coverage_profile.hpp"
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 struct ExpandedCoverage
 {
-  nav_msgs::msg::Path path;
-  std::vector<msg::MotionPlanSegment> segments;
+  Path path;
+  std::vector<MotionPlanSegment> segments;
 };
 
 /**
@@ -35,8 +30,8 @@ struct ExpandedCoverage
  * @param tool_profile The active tool's full profile.
  */
 ExpandedCoverage expandCoveragePasses(
-  const nav_msgs::msg::Path & flat_path, const std::vector<msg::MotionPlanSegment> & flat_segments,
-  const msg::WallPlane & wall, const coverage_planner::ToolCoverageProfile & tool_profile);
+  const Path & flat_path, const std::vector<MotionPlanSegment> & flat_segments,
+  const WallPlane & wall, const coverage_planner::ToolCoverageProfile & tool_profile);
 
 }  // namespace coverage_planner
 

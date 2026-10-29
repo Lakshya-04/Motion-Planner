@@ -1,34 +1,28 @@
-#include "coverage_planner/wall_pose_lift.hpp"
+#include "coverage_planner/core/wall_pose_lift.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 #include <Eigen/Dense>
 
-#include <geometry_msgs/msg/point.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
-#include <geometry_msgs/msg/quaternion.hpp>
 
-#include "coverage_planner/wall_basis.hpp"
+#include "coverage_planner/core/wall_basis.hpp"
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 namespace
 {
 
-Eigen::Vector3d toEigen(const geometry_msgs::msg::Point & point)
+Eigen::Vector3d toEigen(const Point & point)
 {
   return Eigen::Vector3d(point.x, point.y, point.z);
 }
 
-geometry_msgs::msg::Quaternion toQuaternionMsg(const Eigen::Quaterniond & quaternion)
+Quaternion toQuaternionMsg(const Eigen::Quaterniond & quaternion)
 {
-  geometry_msgs::msg::Quaternion msg;
+  Quaternion msg;
   msg.x = quaternion.x();
   msg.y = quaternion.y();
   msg.z = quaternion.z();
@@ -49,7 +43,7 @@ struct EdgeProximity
   double distance_m;
 };
 
-EdgeProximity findNearestEdge(double u, double v, const msg::WallPlane & wall)
+EdgeProximity findNearestEdge(double u, double v, const WallPlane & wall)
 {
   const double du_min = std::max(0.0, u - wall.u_min);
   const double du_max = std::max(0.0, wall.u_max - u);
@@ -86,8 +80,8 @@ Eigen::Vector3d rotateTowardDirection(
 
 }  // namespace
 
-nav_msgs::msg::Path liftCoveragePathPose(
-  const nav_msgs::msg::Path & flat_path, const msg::WallPlane & wall,
+Path liftCoveragePathPose(
+  const Path & flat_path, const WallPlane & wall,
   const coverage_planner::ToolTask & tool_task)
 {
   const WallBasis wall_basis = decomposeWallBasis(wall);
@@ -109,7 +103,7 @@ nav_msgs::msg::Path liftCoveragePathPose(
   const double margin_m = tool_task.standoff_m;
   const double max_tilt_rad = tool_task.max_edge_tilt_deg * M_PI / 180.0;
 
-  nav_msgs::msg::Path lifted;
+  Path lifted;
   lifted.header = flat_path.header;
   lifted.poses.reserve(flat_path.poses.size());
 
@@ -167,7 +161,7 @@ nav_msgs::msg::Path liftCoveragePathPose(
 
     const Eigen::Vector3d offset_position = position + normal * tool_task.standoff_m;
 
-    geometry_msgs::msg::PoseStamped lifted_pose;
+    PoseStamped lifted_pose;
     lifted_pose.header = flat_pose.header;
     lifted_pose.pose.position.x = offset_position.x();
     lifted_pose.pose.position.y = offset_position.y();

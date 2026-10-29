@@ -51,8 +51,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && (rosdep init 2>/dev/null || true) && rosdep update --rosdistro ${ROS_DISTRO} \
     && rosdep install --from-paths /tmp/src-manifest --ignore-src -y --rosdistro ${ROS_DISTRO} \
          --skip-keys "ament_cmake_clang_format" \
-    && grep -v '^\s*#' /tmp/apt-extra.txt | grep -v '^\s*$' | sed "s/@ROS@/${ROS_DISTRO}/g" | xargs apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /tmp/src-manifest
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && grep -v '^\s*#' /tmp/apt-extra.txt | grep -v '^\s*$' | sed "s/@ROS@/${ROS_DISTRO}/g" | xargs apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 ############################ dev ##############################
 FROM deps AS dev
@@ -82,12 +87,9 @@ CMD ["bash"]
 
 ############################ build ############################
 FROM deps AS build
+COPY docker/build.sh /usr/local/bin/mp-build
 COPY src/ /ws/src/
-RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
-    && colcon build --symlink-install --event-handlers console_cohesion+ \
-         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 \
-    && colcon test --event-handlers console_cohesion+ \
-    && colcon test-result --verbose
+RUN chmod +x /usr/local/bin/mp-build && mp-build test
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]

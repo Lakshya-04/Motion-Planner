@@ -26,7 +26,7 @@
 #include "core_types/pose.hpp"
 #include "manipulation_manager/core/coverage_source.hpp"
 #include "manipulation_manager/core/motion_segment_spec.hpp"
-#include "motion_planner/planners/planner.hpp"
+#include "motion_planner/core/planners/planner.hpp"
 
 namespace manipulation_manager
 {

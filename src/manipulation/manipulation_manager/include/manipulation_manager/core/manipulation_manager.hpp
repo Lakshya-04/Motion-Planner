@@ -34,7 +34,7 @@
 #include "core_types/logger.hpp"
 #include "core_types/null_logger.hpp"
 #include "core_types/pose.hpp"
-#include "motion_planner/motion_planner.hpp"
+#include "motion_planner/core/motion_planner.hpp"
 
 #include "manipulation_manager/core/coverage_feasibility_analyzer.hpp"
 #include "manipulation_manager/core/coverage_source.hpp"

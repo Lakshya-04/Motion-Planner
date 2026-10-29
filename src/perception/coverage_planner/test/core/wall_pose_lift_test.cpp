@@ -4,19 +4,21 @@
 
 #include <Eigen/Dense>
 
-#include "coverage_planner/coverage_pass_expander.hpp"
-#include "coverage_planner/wall_basis.hpp"
-#include "coverage_planner/wall_pose_lift.hpp"
+#include "coverage_planner/core/coverage_pass_expander.hpp"
+#include "coverage_planner/core/wall_basis.hpp"
+#include "coverage_planner/core/wall_pose_lift.hpp"
+
+using namespace coverage_planner;
 
 namespace
 {
 
-coverage_planner_msgs::msg::WallPlane makeWall()
+WallPlane makeWall()
 {
   // origin at world (0,0,0); basis_u = world +X, basis_v = world +Z, normal_outward = basis_u x
   // basis_v = world -Y (matches the right-handed convention
   // generate_wall_occupancy_grid_action_server.cpp uses: col(2) = col(0) x col(1)).
-  coverage_planner_msgs::msg::WallPlane wall;
+  WallPlane wall;
   wall.id = 0;
   wall.pose.header.frame_id = "map";
   wall.pose.pose = coverage_planner::encodeWallBasis(
@@ -29,9 +31,9 @@ coverage_planner_msgs::msg::WallPlane makeWall()
   return wall;
 }
 
-geometry_msgs::msg::PoseStamped makeFlatPose(double u, double v)
+PoseStamped makeFlatPose(double u, double v)
 {
-  geometry_msgs::msg::PoseStamped pose;
+  PoseStamped pose;
   pose.header.frame_id = "map";
   pose.pose.position.x = u;
   pose.pose.position.y = 0.0;
@@ -40,7 +42,7 @@ geometry_msgs::msg::PoseStamped makeFlatPose(double u, double v)
   return pose;
 }
 
-Eigen::Vector3d zAxisOf(const geometry_msgs::msg::Pose & pose)
+Eigen::Vector3d zAxisOf(const Pose & pose)
 {
   Eigen::Quaterniond q(
     pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
@@ -71,7 +73,7 @@ coverage_planner::ToolTask makeNonContactTask(double standoff_m, double max_edge
 TEST(WallPoseLift, ContactToolKeepsOnSurfaceWithZAxisIntoWall)
 {
   const auto wall = makeWall();
-  nav_msgs::msg::Path flat;
+  Path flat;
   flat.poses.push_back(makeFlatPose(1.0, 1.0));
 
   const auto lifted = coverage_planner::liftCoveragePathPose(flat, wall, makeContactTask());
@@ -92,7 +94,7 @@ TEST(WallPoseLift, ContactToolKeepsOnSurfaceWithZAxisIntoWall)
 TEST(WallPoseLift, NonContactToolOffsetsAlongNormalByStandoff)
 {
   const auto wall = makeWall();
-  nav_msgs::msg::Path flat;
+  Path flat;
   flat.poses.push_back(makeFlatPose(1.0, 1.0));
 
   const auto lifted =
@@ -109,7 +111,7 @@ TEST(WallPoseLift, NonContactToolOffsetsAlongNormalByStandoff)
 TEST(WallPoseLift, TiltAtEdgesTiltsTowardNearestBoundaryWithinMargin)
 {
   const auto wall = makeWall();
-  nav_msgs::msg::Path flat;
+  Path flat;
   // v=0.05 is within the 0.2 m margin of the v_min=0.0 boundary; u=1.0 is far from both u edges.
   flat.poses.push_back(makeFlatPose(1.0, 0.05));
 
@@ -130,7 +132,7 @@ TEST(WallPoseLift, TiltAtEdgesTiltsTowardNearestBoundaryWithinMargin)
 TEST(WallPoseLift, NoTiltFarFromAnyBoundary)
 {
   const auto wall = makeWall();
-  nav_msgs::msg::Path flat;
+  Path flat;
   flat.poses.push_back(makeFlatPose(1.0, 1.0));  // dead center, 1.0 m from every edge.
 
   const auto lifted =
@@ -146,7 +148,7 @@ TEST(WallPoseLift, NoTiltFarFromAnyBoundary)
 TEST(WallPoseLift, ContactToolNeverTiltsEvenIfPolicySaysTiltAtEdges)
 {
   const auto wall = makeWall();
-  nav_msgs::msg::Path flat;
+  Path flat;
   flat.poses.push_back(makeFlatPose(1.0, 0.01));  // right at the v_min edge.
 
   coverage_planner::ToolTask task;
@@ -166,9 +168,9 @@ TEST(WallPoseLift, ContactToolNeverTiltsEvenIfPolicySaysTiltAtEdges)
 namespace
 {
 
-std::vector<coverage_planner_msgs::msg::MotionPlanSegment> makeFlatSegments()
+std::vector<MotionPlanSegment> makeFlatSegments()
 {
-  coverage_planner_msgs::msg::MotionPlanSegment strip;
+  MotionPlanSegment strip;
   strip.label = "strip_0";
   strip.start_index = 0;
   strip.end_index = 2;
@@ -176,7 +178,7 @@ std::vector<coverage_planner_msgs::msg::MotionPlanSegment> makeFlatSegments()
   strip.mode = "cartesian";
   strip.planner = "cartesian";
 
-  coverage_planner_msgs::msg::MotionPlanSegment connector;
+  MotionPlanSegment connector;
   connector.label = "connector_0";
   connector.start_index = 3;
   connector.end_index = 4;
@@ -188,9 +190,9 @@ std::vector<coverage_planner_msgs::msg::MotionPlanSegment> makeFlatSegments()
   return {strip, connector};
 }
 
-nav_msgs::msg::Path makeFlatPathForSegments()
+Path makeFlatPathForSegments()
 {
-  nav_msgs::msg::Path path;
+  Path path;
   path.poses.push_back(makeFlatPose(0.0, 0.5));
   path.poses.push_back(makeFlatPose(0.5, 0.5));
   path.poses.push_back(makeFlatPose(1.0, 0.5));

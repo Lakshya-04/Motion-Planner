@@ -36,9 +36,7 @@ services:
   test:
     <<: *common
     image: motion-planner:dev
-    command: >
-      bash -lc "colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-      && colcon test --event-handlers console_cohesion+ && colcon test-result --verbose"
+    command: bash -lc "docker/build.sh test"
 
   gpu:
     <<: *common

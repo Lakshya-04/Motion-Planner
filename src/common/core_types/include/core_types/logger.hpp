@@ -2,9 +2,8 @@
  * @file logger.hpp
  * @brief Minimal logging port so core logic never depends on rclcpp.
  * @details Adapters inject a concrete implementation (e.g. an rclcpp::Logger
- *          wrapper) at construction time. Only info/warn are declared since
- *          those are the only levels any current core-logic call site uses --
- *          extend when a real caller needs more.
+ *          wrapper) at construction time. info/warn are required; debug is
+ *          optional and defaults to a no-op so existing implementations keep working.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 
@@ -35,6 +34,12 @@ public:
    * @param[in] message Fully-formatted message text.
    */
   virtual void warn(const std::string & message) const = 0;
+
+  /**
+   * @brief Log a debug message. Optional: the default discards it.
+   * @param[in] message Fully-formatted message text.
+   */
+  virtual void debug(const std::string & message) const { (void)message; }
 };
 
 }  // namespace core_types

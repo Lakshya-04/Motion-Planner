@@ -68,6 +68,7 @@ ROS message and a converter in `ros/`. Then the same module can run either:
 | `manipulation_manager` | already split into `core/` + `ros/` |
 | `core_types`, `force_core` | ROS-free already (pure core packages) |
 | `ros_adapters` | ROS-only conversions (correct as is) |
-| `motion_planner` | mixed: ROS-free ports next to MoveIt backend; split core / move MoveIt into an adapter package |
-| `coverage_planner` | mixed: algorithms next to nodes; split into `core/` + `ros/` |
+| `motion_planner` | **done**: ROS-free core only (ports, types, `MotionPlanner`, geometry helpers); 32 core tests run without ROS |
+| `motion_planner_moveit` | **done**: the MoveIt / OMPL adapter (the only package that depends on MoveIt) |
+| `coverage_planner` | **done**: `core/` + `ros/` split, 44 tests |
 | `compliant_trajectory_controller`, `ft_bridge_hardware` | ros2_control plugins; extract controller math into `core/` |

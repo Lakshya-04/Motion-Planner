@@ -5,7 +5,7 @@ The stack turns sensor data into executed tool motion over a surface. Every stag
 runtime by config. Nothing downstream knows which implementation produced its input.
 
 ```
- sensors ──► Perception ──► World/Scene ──► Surface ──► Coverage ──► Sequencing
+ sensors ──► Perception ──► Self filter ──► World/Scene ──► Surface ──► Coverage ──► Sequencing
                                                                         │
    ┌────────────────────────────────────────────────────────────────────┘
    ▼
@@ -48,13 +48,17 @@ Status: **exists** = port in the code today; **planned** = to be added.
 
 | Stage | Port (status) | Implementations (now / planned) |
 |---|---|---|
+| Robot model | `mobile_manipulator_description` (exists) — see [robot_description.md](robot_description.md) | telescopic lift + UR10e (now); any lift / 6-DOF arm via contracts |
+| Reachability | `ReachabilityMap` (planned) — see [reachability.md](reachability.md) | RM4D map: forward + inverse queries, base stationing, lift bands |
+| Robot self filter | `RobotSelfFilter` (planned) — see [robot_self_filter.md](robot_self_filter.md) | geometry containment, collision-sphere model, GPU depth mask (cuRobo-style), learned segmentation later |
 | Perception | `PerceptionSource` (planned) | point-cloud topic, depth + camera (cuRobo `Mapper`), file replay |
-| World / scene | `ScenePort` (exists, `motion_planner/scene_port.hpp`); `SceneModel` (planned) | loaders: `.pcd`/`.ply`, meshes, primitives YAML/JSON, voxel/ESDF, MoveIt `PlanningScene`, depth; consumers: MoveIt, cuRobo v2, VAMP |
+| World / scene | `SceneModel` (exists, `scene_model`, see [scene_model.md](scene_model.md)); `ScenePort` (exists, `motion_planner/core/scene_port.hpp`) | loaders: `.pcd`/`.ply`, meshes, primitives YAML/JSON, voxel/ESDF, MoveIt `PlanningScene`, depth; consumers: MoveIt, cuRobo v2, VAMP |
 | Surface | `SurfaceModel` (planned) | planar fit from scene (`WallPlane` today); later: mesh / parametric / height-map surfaces |
-| Coverage | `CoveragePlannerBase` + `CoveragePlannerFactory` (exists) | boustrophedon (now); sweep-line / BCD, spiral, learned (planned) |
+| Coverage planner | `CoveragePlannerBase` + `CoveragePlannerFactory` (exists) | boustrophedon, sweepline (now); cell decomposition (BCD), spiral, learned (planned) |
+| Coverage pattern | `planWallPattern` (exists) — see [coverage_patterns.md](coverage_patterns.md) | vertical, horizontal, zigzag (now), over any coverage planner; non-planar surfaces later |
 | Coverage feed | `CoverageSource` (exists, `manipulation_manager`) | JSON source (now); ROS service source |
 | Sequencing | `SegmentOrderingPolicy` (exists) | input order (now); TSP with time metric `max_i \|Δq_i\|/v_max_i`, failure-aware resequencing (planned) |
-| IK | `IkPort` (exists) | MoveIt/KDL (now); TRAC-IK, cuRobo IK, analytic (planned) |
+| IK | `IkPort` (exists) | MoveIt/KDL via `motion_planner_moveit` (now); TRAC-IK, cuRobo IK, analytic (planned) |
 | Collision | `CollisionPort` (exists) | MoveIt/FCL (now); VAMP, cuRobo (planned) |
 | Planning | `Planner` (exists: plan + ik + collision) | MoveIt Cartesian + OMPL (now); VAMP free-space, cuRobo v2 trajopt, velocity-constrained IK seam planner (planned) |
 | Timing | `TimeParameterizer` (planned) | S-curve Cartesian for contact seams, TOPP-RA for transitions |
@@ -108,6 +112,12 @@ pipeline:
 ## Related documents
 
 - [Package layout: core/ + ros/](package_layout.md)
+- [Coverage planners and patterns](coverage_patterns.md)
+- [Scene model](scene_model.md)
+- [nvblox notes](nvblox_notes.md)
+- [Robot description](robot_description.md)
+- [Reachability (RM4D)](reachability.md)
+- [Robot self filter module](robot_self_filter.md)
 - [Learned recovery research (RL / IL / MPC)](learned_recovery.md)
 - [Design principles and lessons learned](design_principles.md)
 - [cuRobo v2 integration notes](curobo_v2_notes.md)

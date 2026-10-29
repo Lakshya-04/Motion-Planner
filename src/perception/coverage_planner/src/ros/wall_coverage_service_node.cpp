@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-#include "coverage_planner/wall_coverage_service_node.hpp"
+#include "coverage_planner/ros/wall_coverage_service_node.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -12,9 +12,10 @@
 #include <memory>
 #include <string>
 
-#include "coverage_planner/coverage_pass_expander.hpp"
-#include "coverage_planner/wall_rasterizer.hpp"
-#include "coverage_planner/wall_scene_loader.hpp"
+#include "coverage_planner/core/coverage_pass_expander.hpp"
+#include "coverage_planner/core/wall_rasterizer.hpp"
+#include "coverage_planner/core/wall_scene_loader.hpp"
+#include "coverage_planner/ros/conversions.hpp"
 
 namespace coverage_planner
 {
@@ -167,7 +168,7 @@ void WallCoverageServiceNode::requestCoveragePath()
     observed_mask);
 
   auto request = std::make_shared<GenerateCoveragePath::Request>();
-  request->map = grid;
+  request->map = ros_conv::toRos(grid);
   request->pattern = "boustrophedon";
   request->swath = static_cast<float>(tool_profile.coverage.swath_m);
   request->step = static_cast<float>(
@@ -224,10 +225,16 @@ void WallCoverageServiceNode::coveragePathResponseCallback(
   }
 
   const auto tool_profile = buildToolCoverageProfile();
-  const auto expanded =
-    expandCoveragePasses(response->path, response->segments, wall_, tool_profile);
-  plan.path = expanded.path;
-  plan.segments = expanded.segments;
+  std::vector<MotionPlanSegment> flat_segments;
+  flat_segments.reserve(response->segments.size());
+  for (const auto & segment : response->segments) {
+    flat_segments.push_back(ros_conv::toCore(segment));
+  }
+  const auto expanded = expandCoveragePasses(
+    ros_conv::toCore(response->path), flat_segments, wall_, tool_profile);
+  plan.path = ros_conv::toRos(expanded.path);
+  plan.path.header.stamp = response->path.header.stamp;
+  plan.segments = ros_conv::toRos(expanded.segments);
 
   RCLCPP_INFO(
     this->get_logger(), "coverage path: %zu waypoints, %zu segments", expanded.path.poses.size(),

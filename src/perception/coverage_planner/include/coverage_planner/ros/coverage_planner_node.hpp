@@ -8,7 +8,7 @@
 #include <std_msgs/msg/string.hpp>
 #include <string>
 #include <visualization_msgs/msg/marker_array.hpp>
-#include "coverage_planner/coverage_planner_base.hpp"
+#include "coverage_planner/core/coverage_planner_base.hpp"
 #include "coverage_planner_msgs/srv/generate_coverage_path.hpp"
 
 namespace coverage_planner

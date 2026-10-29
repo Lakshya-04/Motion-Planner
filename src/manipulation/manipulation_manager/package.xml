@@ -26,7 +26,8 @@
   <depend>core_types</depend>
   <depend>ros_adapters</depend>
   <depend>motion_planner</depend>
-  <depend>nlohmann_json</depend>
+  <depend>motion_planner_moveit</depend>
+  <depend>nlohmann-json-dev</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

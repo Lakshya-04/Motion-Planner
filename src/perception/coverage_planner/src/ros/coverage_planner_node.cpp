@@ -1,7 +1,9 @@
-#include "coverage_planner/coverage_planner_node.hpp"
+#include "coverage_planner/ros/conversions.hpp"
+#include "coverage_planner/ros/coverage_planner_node.hpp"
 #include <chrono>
 #include <sstream>
-#include "coverage_planner/coverage_planner_base.hpp"
+#include "coverage_planner/core/coverage_planner_base.hpp"
+#include "ros_adapters/rclcpp_logger.hpp"
 
 namespace coverage_planner
 {
@@ -147,7 +149,7 @@ CoveragePlannerParams CoveragePlannerNode::buildPlannerParams(
 
   // Handle optional region
   params.use_region = !request->region.polygon.points.empty();
-  params.region = request->region;
+  params.region = ros_conv::toCore(request->region);
   params.plan_all_components = plan_all_components_;
   params.min_component_cells = min_component_cells_;
   params.optimize_strip_order = optimize_strip_order_;
@@ -254,6 +256,8 @@ void CoveragePlannerNode::generateCoveragePathCallback(
     return;
   }
 
+  planner->setLogger(std::make_shared<ros_adapters::RclcppLogger>(this->get_logger()));
+
   // Build parameters
   CoveragePlannerParams params = buildPlannerParams(request);
 
@@ -286,17 +290,17 @@ void CoveragePlannerNode::generateCoveragePathCallback(
       map_to_use.info.height);
   }
 
-  CoveragePlannerResult result = planner->generatePath(map_to_use, params);
-  // The planner has no node handle to source a clock from, so it leaves stamp as the input map's
-  // own; stamp it here with this node's own clock instead so use_sim_time is respected -- applied
-  // before response/publish/markers below so all three see the same, correctly-sourced stamp.
-  result.path.header.stamp = this->now();
+  CoveragePlannerResult result = planner->generatePath(ros_conv::toCore(map_to_use), params);
+  // The core carries no time stamps; stamp the path with this node's own clock so use_sim_time
+  // is respected, before response/publish/markers below so all three see the same stamp.
+  nav_msgs::msg::Path path_msg = ros_conv::toRos(result.path);
+  path_msg.header.stamp = this->now();
 
   // Fill response
   response->success = result.success;
   response->message = result.message;
-  response->path = result.path;
-  response->segments = result.segments;
+  response->path = path_msg;
+  response->segments = ros_conv::toRos(result.segments);
   response->segment_labels.reserve(result.segments.size());
   for (const auto & segment : result.segments) {
     response->segment_labels.push_back(segment.label);
@@ -315,10 +319,10 @@ void CoveragePlannerNode::generateCoveragePathCallback(
     RCLCPP_INFO(this->get_logger(), "  Planning Time: %.3f s", result.planning_time);
 
     // Publish path for visualization
-    path_pub_->publish(result.path);
+    path_pub_->publish(path_msg);
 
     // Publish waypoint markers for visualization
-    publishWaypointMarkers(result.path);
+    publishWaypointMarkers(path_msg);
 
     // Publish diagnostics summary for monitoring/troubleshooting.
     publishDiagnostics(result, pattern_to_use, map_to_use);

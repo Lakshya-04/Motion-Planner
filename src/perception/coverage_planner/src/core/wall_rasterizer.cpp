@@ -1,21 +1,16 @@
-#include "coverage_planner/wall_rasterizer.hpp"
+#include "coverage_planner/core/wall_rasterizer.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
-#include <pcl/io/pcd_io.h>
-#include <pcl/point_types.h>
 #include <Eigen/Dense>
 
-#include "coverage_planner/wall_basis.hpp"
+#include "coverage_planner/core/wall_basis.hpp"
 
 namespace coverage_planner
 {
 
-// The interfaces live in coverage_planner_msgs; alias them into this package's own
-// namespace so `msg::`/`srv::` still mean what they always did here.
-namespace msg = coverage_planner_msgs::msg;
 
 namespace
 {
@@ -29,7 +24,7 @@ struct InflatedObstacle
 };
 
 InflatedObstacle inflate(
-  const msg::ObstacleRegion & obstacle, const coverage_planner::ToolCoverage & tool_coverage)
+  const ObstacleRegion & obstacle, const coverage_planner::ToolCoverage & tool_coverage)
 {
   InflatedObstacle inflated{obstacle.u_min, obstacle.u_max, obstacle.v_min, obstacle.v_max};
   const double margin = tool_coverage.obstacle_inflation_radius_m;
@@ -58,7 +53,7 @@ InflatedObstacle inflate(
 
 }  // namespace
 
-geometry_msgs::msg::Pose buildWallGridOrigin(const msg::WallPlane & wall)
+Pose buildWallGridOrigin(const WallPlane & wall)
 {
   const WallBasis basis = decomposeWallBasis(wall);
   const Eigen::Vector3d grid_origin =
@@ -66,8 +61,8 @@ geometry_msgs::msg::Pose buildWallGridOrigin(const msg::WallPlane & wall)
   return encodeWallBasis(grid_origin, basis.basis_u, basis.basis_v, basis.normal_outward);
 }
 
-nav_msgs::msg::OccupancyGrid rasterizeWallCoverageGrid(
-  const msg::WallPlane & wall, const std::vector<msg::ObstacleRegion> & obstacles,
+OccupancyGrid rasterizeWallCoverageGrid(
+  const WallPlane & wall, const std::vector<ObstacleRegion> & obstacles,
   const coverage_planner::ToolCoverage & tool_coverage, double resolution,
   const std::string & frame_id, const std::vector<bool> & observed_mask,
   const std::vector<bool> & reachable_mask)
@@ -85,7 +80,7 @@ nav_msgs::msg::OccupancyGrid rasterizeWallCoverageGrid(
   const int height = std::max(1, static_cast<int>(std::ceil(v_extent / resolution)));
   const size_t num_cells = static_cast<size_t>(width) * static_cast<size_t>(height);
 
-  nav_msgs::msg::OccupancyGrid grid;
+  OccupancyGrid grid;
   grid.header.frame_id = frame_id;
   grid.info.resolution = static_cast<float>(resolution);
   grid.info.width = static_cast<uint32_t>(width);
@@ -141,34 +136,6 @@ nav_msgs::msg::OccupancyGrid rasterizeWallCoverageGrid(
   }
 
   return grid;
-}
-
-std::vector<bool> loadWallObservedMask(
-  const std::string & pcd_path, uint32_t wall_id, const msg::WallPlane & wall, int width,
-  int height, double resolution)
-{
-  pcl::PointCloud<pcl::PointXYZL> cloud;
-  if (pcl::io::loadPCDFile<pcl::PointXYZL>(pcd_path, cloud) < 0) {
-    throw std::runtime_error("loadWallObservedMask: failed to load point cloud from " + pcd_path);
-  }
-
-  const WallBasis basis = decomposeWallBasis(wall);
-
-  std::vector<bool> mask(static_cast<size_t>(width) * static_cast<size_t>(height), false);
-  for (const auto & point : cloud.points) {
-    if (point.label != wall_id) {
-      continue;
-    }
-    const Eigen::Vector3d p(point.x, point.y, point.z);
-    const double u = (p - basis.origin).dot(basis.basis_u);
-    const double v = (p - basis.origin).dot(basis.basis_v);
-    const int x = static_cast<int>(std::floor((u - wall.u_min) / resolution));
-    const int y = static_cast<int>(std::floor((v - wall.v_min) / resolution));
-    if (x >= 0 && x < width && y >= 0 && y < height) {
-      mask[static_cast<size_t>(y) * width + x] = true;
-    }
-  }
-  return mask;
 }
 
 }  // namespace coverage_planner
