@@ -13,6 +13,7 @@ from moveit_msgs.srv import GetPositionFK, GetPositionIK
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from sensor_msgs.msg import JointState
 
 TIMEOUT = 60.0
 
@@ -24,6 +25,11 @@ class Smoke(Node):
         self.fk = self.create_client(GetPositionFK, '/compute_fk')
         self.ik = self.create_client(GetPositionIK, '/compute_ik')
         self.move = ActionClient(self, MoveGroup, '/move_action')
+        self.joint_state = None
+        self.create_subscription(JointState, '/joint_states', self._on_joint_state, 10)
+
+    def _on_joint_state(self, msg):
+        self.joint_state = msg
 
     def wait(self):
         for client, name in ((self.fk, 'compute_fk'), (self.ik, 'compute_ik')):
@@ -31,6 +37,11 @@ class Smoke(Node):
                 raise RuntimeError(f'{name} is not available (is demo.launch.py running?)')
         if not self.move.wait_for_server(timeout_sec=TIMEOUT):
             raise RuntimeError('move_action is not available')
+        deadline = self.get_clock().now().nanoseconds + int(TIMEOUT * 1e9)
+        while self.joint_state is None and self.get_clock().now().nanoseconds < deadline:
+            rclpy.spin_once(self, timeout_sec=0.2)
+        if self.joint_state is None:
+            raise RuntimeError('no /joint_states received')
 
     def call(self, client, request):
         future = client.call_async(request)
@@ -43,22 +54,50 @@ class Smoke(Node):
         fk_req = GetPositionFK.Request()
         fk_req.header.frame_id = base
         fk_req.fk_link_names = [tip]
-        fk_req.robot_state.is_diff = True
+        fk_req.robot_state.joint_state = self.joint_state  # the real current state, not a default
         fk = self.call(self.fk, fk_req)
         if fk.error_code.val != 1 or not fk.pose_stamped:
             raise RuntimeError(f'[{group}] FK failed: {fk.error_code.val}')
-        pose = fk.pose_stamped[0]
-        pose.pose.position.x += 0.08  # a reachable nearby target
+        home_pose = fk.pose_stamped[0]
 
-        ik_req = GetPositionIK.Request()
-        ik_req.ik_request.group_name = group
-        ik_req.ik_request.pose_stamped = pose
-        ik_req.ik_request.ik_link_name = tip
-        ik_req.ik_request.avoid_collisions = True
-        ik_req.ik_request.timeout.sec = 1
-        ik = self.call(self.ik, ik_req)
-        if ik.error_code.val != 1:
-            raise RuntimeError(f'[{group}] IK failed: {ik.error_code.val}')
+        # A reachable nearby target that is also collision free: try small offsets in turn and
+        # accept the first IK solution that stays close to the current state. (The home pose can
+        # sit next to a collision boundary, which makes the nearest solution in one direction
+        # invalid and sends a numerical solver to a distant branch.)
+        current = dict(zip(self.joint_state.name, self.joint_state.position))
+        ik = None
+        biggest = None
+        tried = []
+        for axis, delta in (('z', 0.05), ('z', -0.05), ('x', 0.05), ('x', -0.05), ('y', 0.05),
+                            ('y', -0.05)):
+            pose = type(home_pose)()
+            pose.header = home_pose.header
+            pose.pose.orientation = home_pose.pose.orientation
+            pose.pose.position.x = home_pose.pose.position.x + (delta if axis == 'x' else 0.0)
+            pose.pose.position.y = home_pose.pose.position.y + (delta if axis == 'y' else 0.0)
+            pose.pose.position.z = home_pose.pose.position.z + (delta if axis == 'z' else 0.0)
+
+            ik_req = GetPositionIK.Request()
+            ik_req.ik_request.group_name = group
+            ik_req.ik_request.robot_state.joint_state = self.joint_state  # seed: nearby solution
+            ik_req.ik_request.pose_stamped = pose
+            ik_req.ik_request.ik_link_name = tip
+            ik_req.ik_request.avoid_collisions = True
+            ik_req.ik_request.timeout.sec = 1
+            candidate = self.call(self.ik, ik_req)
+            if candidate.error_code.val != 1:
+                tried.append(f'{axis}{delta:+.2f}: IK error {candidate.error_code.val}')
+                continue
+            moved = max(abs(v - current[n]) for n, v in zip(
+                candidate.solution.joint_state.name, candidate.solution.joint_state.position)
+                if n in current)
+            if moved > 1.0:
+                tried.append(f'{axis}{delta:+.2f}: far solution ({moved:.2f} rad)')
+                continue
+            ik, biggest = candidate, moved
+            break
+        if ik is None:
+            raise RuntimeError(f'[{group}] no nearby collision-free IK solution: ' + '; '.join(tried))
 
         names = ik.solution.joint_state.name
         values = ik.solution.joint_state.position
@@ -93,7 +132,8 @@ class Smoke(Node):
         if len(points) < 2:
             raise RuntimeError(f'[{group}] empty trajectory')
         duration = points[-1].time_from_start.sec + points[-1].time_from_start.nanosec * 1e-9
-        print(f'[{group}] OK: IK solved, {len(points)} waypoints, {duration:.2f} s, '
+        print(f'[{group}] OK: IK solved (largest joint move {biggest:.2f}), '
+              f'{len(points)} waypoints, {duration:.2f} s, '
               f'{len(result.planned_trajectory.joint_trajectory.joint_names)} joints')
 
     @staticmethod
