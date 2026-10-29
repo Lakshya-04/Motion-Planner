@@ -96,3 +96,25 @@ Never patch upstream files; anything robot- or task-specific lives in our packag
 | free-space `Planner::plan` | RRT-Connect / AORRTC + simplify, then TOPP-RA |
 | `Planner::collision` | `isStateInCollision`, `isMotionInCollision`, batched validity |
 | `Planner::ik` | not provided; delegate to the IK backend |
+
+## Status: `vamp_planner` (first adapter)
+
+`src/manipulation/vamp_planner` implements the `motion_planner::Planner` port over VAMP, ROS-free:
+free-space RRT-Connect (+ shortcut/B-spline simplification), `collision()` for states and
+trajectories, `setWorld()` from `WorldGeometryUpdate` (boxes -> cuboids, points -> CAPT point
+cloud), structured failures (`start_in_collision`, `goal_in_collision`, `no_path`, `no_world`,
+`invalid_request`, `unsupported` for IK). Robots are compiled in; `src/robots.cpp` has a one-line
+table (bundled `ur5` today, our Cricket-generated headers next). Tested in the `full` image.
+
+Things found while integrating upstream `27cb9b6` (all worked around without patching upstream):
+
+- The installed `vampConfig.cmake` is unusable: it calls `find_dependency` without including the
+  macro, exports `vamp::vamp_cpp` but checks for `vamp::vamp`, and its include path is one level
+  too deep for `#include <vamp/...>`. We describe the install ourselves in `CMakeLists.txt`.
+- `cmake --install` ships only VAMP's own headers, but they include `pdqsort.h`, `nigh/`,
+  `simdxorshift128plus.h` and cddlib's headers. The `vamp-build` Docker stage now copies those
+  from the CPM tree into `/opt/vamp/include`.
+- A single-state check is `validate_motion<Robot, rake, 1>(q, q, env)`; motions use
+  `Robot::resolution`.
+- VAMP's UR5 model has no collision spheres on the base link, so an obstacle around the base
+  alone does not collide; test obstacles must be placed where the arm actually is.
