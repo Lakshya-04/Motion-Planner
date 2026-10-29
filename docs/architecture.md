@@ -21,14 +21,18 @@ coverage, planning or control interfaces.
 
 ## Rules every module follows
 
-1. **Port in `core` C++, no ROS.** Interfaces and data types are plain C++17 (`core_types`
-   and each package's `core/` headers). ROS, MoveIt, CUDA and Python live only in adapters.
-2. **Data contracts, not call chains.** Modules exchange typed, serializable data
-   (`Pose`, `Trajectory`, scene, surface, segment intents). Every contract has a ROS message
-   mirror so any stage can run in another process or be replayed from a log.
+1. **Every module has a `core/` and a `ros/` half.** `core/` holds the algorithms, the
+   interfaces (ports) and the data types in plain C++17 with no ROS, so it never changes
+   with the ROS version. `ros/` is the thin ROS 2 shell (node, parameters, topics, message
+   conversions, plugin registration). See [package_layout.md](package_layout.md).
+2. **Two ways to connect modules, as in Nav2 / MoveIt / ros2_control.** Inside one process,
+   through the C++ interface with the implementation picked by pluginlib. Across processes,
+   through ROS 2 messages, services and actions. Each core data type that crosses a module
+   boundary has a matching message, so a module can run in-process or as its own node, and
+   its traffic can be recorded with `ros2 bag` and replayed.
 3. **Structured results.** Every port returns success + failure code + failure stage +
    message. No exceptions across module boundaries, no log-string parsing.
-4. **Selected by config.** Each module family has a registry (factory keyed by name);
+4. **Selected by config.** Each module family is a pluginlib plugin type;
    a YAML profile names the implementation and its parameters. Per-segment overrides are
    allowed (e.g. contact seam → Cartesian planner, transition → VAMP).
 5. **Inject dependencies.** Loggers, clocks, ROS nodes and other ports are passed in.
@@ -102,6 +106,7 @@ pipeline:
 
 ## Related documents
 
+- [Package layout: core/ + ros/](package_layout.md)
 - [Design principles and lessons learned](design_principles.md)
 - [cuRobo v2 integration notes](curobo_v2_notes.md)
 - [VAMP integration notes](vamp_notes.md)
