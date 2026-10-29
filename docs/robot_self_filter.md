@@ -5,7 +5,9 @@ checking or perception. Without it the arm, base, lift and tool show up as obsta
 the planner refuses motions because the robot "collides with itself" as seen by the sensor.
 It is a generic perception module: any robot, any sensor, any consumer.
 
-Status: **planned**. Design written from a review of an earlier production stack (a
+Status: **core implemented** ([`src/perception/robot_self_filter`](../src/perception/robot_self_filter), 24 tests);
+ROS shell (cloud subscription, TF / joint-state time alignment, lifecycle node) and the GPU / learned
+implementations are not built yet. Design written from a review of an earlier production stack (a
 point-cloud self filter run as a lifecycle node in front of mapping and in front of the
 planning cloud) and from cuRobo v2's `RobotSegmenter` (see [curobo_v2_notes.md](curobo_v2_notes.md)).
 
@@ -152,3 +154,16 @@ wall; label ground truth by geometry. Metrics, on the shared benchmark:
   filtering).
 - For depth cameras with cuRobo, the GPU mask path (`RobotSegmenter`) replaces the CPU cloud filter; lidar and cloud-only sensors use the CPU implementations.
 - A GPU point-cloud variant (the same sphere-distance test applied to lidar points instead of depth pixels) is a plausible later implementation; not verified against the cuRobo code.
+
+## What is implemented
+
+| Piece | Detail |
+|---|---|
+| `UrdfRobot` | URDF text parsed with tinyxml2 (no ROS, no urdfdom version drift): link collision shapes (box, sphere, cylinder; meshes become their bounding box through a caller-supplied resolver, otherwise they are skipped and listed), joint tree, forward kinematics for fixed / revolute / continuous / prismatic joints and mimic joints |
+| `SelfFilter` | containment test against each link's padded shapes; per-shape-kind padding with per-link overrides; `links` selects what counts as self; `min_sensor_distance`; optional `shadow` (points hidden behind a link, off by default); `speed_padding_gain` (more padding for fast links); contact mode (reduced padding on the contact link only) |
+| Output | kept points with labels and colors still aligned, a per-point removed mask, and counts per link |
+| Checks | on the rendered generic mobile manipulator: 99.5%+ of points sampled on the robot's surface are removed and none of 5,000 free-space points are; the filtered region follows the lift; 200k points x 15 shapes in well under a second |
+
+The caller supplies link poses at the cloud's time stamp (joint state + TF), so this core stays
+free of ROS; the ROS shell will do that lookup and publish the filtered cloud. For depth cameras
+with cuRobo the GPU `RobotSegmenter` path replaces this one, behind the same port.

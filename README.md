@@ -7,6 +7,9 @@ execution on a compliant (admittance) joint trajectory controller (JTAC).
 
 | Package | Description |
 |---|---|
+| [`robot_self_filter`](src/perception/robot_self_filter) | Robot self filter (ROS-free): removes the robot's own body from point clouds from the URDF |
+| [`reachability`](src/manipulation/reachability) | RM4D reachability map (ROS-free): forward / inverse queries, lift-band planning, CLI |
+| [`mobile_manipulator_moveit_config`](src/description/mobile_manipulator_moveit_config) | MoveIt 2 config for the description: groups `arm` / `lift_arm`, OMPL, mock-hardware demo, smoke test |
 | [`scene_model`](src/perception/scene_model) | Backend-neutral scene model: clouds, meshes, primitives, voxels, ESDF; loaders, plane fit, exporters |
 | [`mobile_manipulator_description`](src/description/mobile_manipulator_description) | Generic 7-DOF robot model: base + swappable telescopic lift + swappable 6-DOF arm (UR10e, generic) + tool |
 | [`coverage_planner`](src/perception/coverage_planner) | Wall coverage planning: boustrophedon and sweepline planners, vertical / horizontal / zigzag wall patterns, scan-to-plan pipeline |

@@ -6,7 +6,7 @@ numpy<2.3
 
 # cuRobo v2 (NVlabs/curobo, Apache-2.0), pinned to a commit. The v2 API differs from v1
 # (v1 is tag v0.7.8).
-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@78fd485
+nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@78fd485
 
 # mesh handling (scene loaders, convex decomposition for VAMP polytopes)
 trimesh

@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>robot_self_filter</name>
+  <version>0.1.0</version>
+  <description>
+    Robot self filter (ROS-free core): removes the robot's own body from point clouds using link
+    collision shapes parsed from the URDF, with per-link padding, contact mode, speed padding,
+    optional shadow removal and a minimum sensor distance.
+  </description>
+  <maintainer email="100lakshyaagarwal@gmail.com">Lakshya Agarwal</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>eigen</depend>
+  <depend>scene_model</depend>
+  <depend>tinyxml2</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>ament_index_cpp</depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

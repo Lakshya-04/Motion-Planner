@@ -1,0 +1,19 @@
+# Example parameters for the self filter node. The robot description comes from the
+# `robot_description` topic (robot_state_publisher) unless `robot_description` is set here.
+self_filter:
+  ros__parameters:
+    root_link: ""                 # empty = the URDF root (base_footprint for mobile_manipulator_description)
+    links: []                     # empty = every link with a collision shape
+    padding:
+      sphere: 0.02
+      box: [0.02, 0.02, 0.02]
+      cylinder_radius: 0.02
+      cylinder_height: 0.02
+    # Links that need their own padding (thin clips vs large housings): list the names, then give
+    # each one a block below.
+    padding_overrides: [arm_wrist_3_link]
+    min_sensor_distance: 0.0      # drop points this close to the sensor (its own mount, cables)
+    shadow: false                 # also drop points hidden behind a link (deletes real surfaces)
+    contact_link: tool_mount_link # reduced padding on this link while ~/contact_mode is true
+    contact_padding: 0.0
+    tf_timeout_sec: 0.1
