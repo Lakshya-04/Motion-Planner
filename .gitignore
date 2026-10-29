@@ -1,0 +1,55 @@
+# --- colcon / ROS build artefacts -------------------------------------------
+build/
+install/
+log/
+.colcon/
+*.pyc
+__pycache__/
+*.egg-info/
+
+# --- generated / machine-local ----------------------------------------------
+compile_commands.json
+.cache/
+.ccls-cache/
+.clangd/
+.venv/
+venv/
+
+# --- tf2_tools view_frames debug output --------------------------------------
+frames_*.gv
+frames_*.pdf
+
+# --- runtime data (never commit; use git-lfs or an artefact store) -----------
+*.bag
+rosbag2_*/
+*.db3
+*.mcap
+maps/*.pgm
+maps/*.yaml
+!maps/README.md
+recordings/
+calibration_output/
+
+# --- large binaries ---------------------------------------------------------
+*.pt
+*.onnx
+*.engine
+*.pth
+*.weights
+
+# --- editor / OS ------------------------------------------------------------
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Editor config is not shared: VS Code settings live in
+# .devcontainer/devcontainer.json, and workflows live in the Makefile.
+.vscode/
+
+# --- secrets ----------------------------------------------------------------
+*.pem
+*.key
+.env
+.env.local
+config/env/*.secret.env

@@ -1,0 +1,113 @@
+<?xml version="1.0"?>
+<!--
+  Canonical URDF for the JTAC compliance demo -- identical in structure to the mixed
+  prismatic+revolute 7-joint chain used in test/test_admittance_rule_integration.cpp (T4a),
+  extracted to a shared file so the C++ demo node and the two robot_state_publisher instances
+  (actual + ghost) all render exactly the same robot from one source. Purely synthetic, not the
+  real UF850+lift geometry -- see applications/force_control_backend_admittance_vs_diffik.md
+  section 7 and section 10 (T5) for why the real-URDF re-run is a separate, later gate.
+-->
+<robot name="jtac_demo_robot">
+  <link name="base_link">
+    <visual>
+      <geometry><cylinder radius="0.08" length="0.05"/></geometry>
+      <material name="grey"><color rgba="0.5 0.5 0.5 1.0"/></material>
+    </visual>
+  </link>
+  <link name="lift_top_link">
+    <visual>
+      <origin xyz="0 0 -0.1" rpy="0 0 0"/>
+      <geometry><box size="0.10 0.10 0.20"/></geometry>
+      <material name="lift_grey"><color rgba="0.6 0.6 0.65 1.0"/></material>
+    </visual>
+  </link>
+  <link name="link1">
+    <visual>
+      <origin xyz="0 0 0.075" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.05" length="0.15"/></geometry>
+      <material name="arm_blue"><color rgba="0.2 0.4 0.8 1.0"/></material>
+    </visual>
+  </link>
+  <link name="link2">
+    <visual>
+      <origin xyz="0 0 0.195" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.045" length="0.39"/></geometry>
+      <material name="arm_blue"/>
+    </visual>
+  </link>
+  <link name="link3">
+    <visual>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.04" length="0.10"/></geometry>
+      <material name="arm_blue"/>
+    </visual>
+  </link>
+  <link name="link4">
+    <visual>
+      <origin xyz="0 0 0.15" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.035" length="0.30"/></geometry>
+      <material name="arm_blue"/>
+    </visual>
+  </link>
+  <link name="link5">
+    <visual>
+      <origin xyz="0 0 0.03" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.03" length="0.06"/></geometry>
+      <material name="arm_blue"/>
+    </visual>
+  </link>
+  <link name="link6">
+    <visual>
+      <origin xyz="0 0 0.045" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.03" length="0.09"/></geometry>
+      <material name="wrist_orange"><color rgba="0.9 0.5 0.1 1.0"/></material>
+    </visual>
+  </link>
+  <link name="link_tcp">
+    <visual>
+      <geometry><sphere radius="0.015"/></geometry>
+      <material name="tcp_red"><color rgba="0.9 0.1 0.1 1.0"/></material>
+    </visual>
+  </link>
+
+  <joint name="lift_prismatic_joint" type="prismatic">
+    <parent link="base_link"/><child link="lift_top_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="0.8" effort="1000" velocity="0.2"/>
+    <origin xyz="0 0 0.2" rpy="0 0 0"/>
+  </joint>
+  <joint name="joint1" type="revolute">
+    <parent link="lift_top_link"/><child link="link1"/>
+    <axis xyz="0 0 1"/><limit lower="-3.14" upper="3.14" effort="100" velocity="3.14"/>
+    <origin xyz="0 0 0.10" rpy="0 0 0"/>
+  </joint>
+  <joint name="joint2" type="revolute">
+    <parent link="link1"/><child link="link2"/>
+    <axis xyz="0 1 0"/><limit lower="-3.14" upper="3.14" effort="100" velocity="3.14"/>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+  </joint>
+  <joint name="joint3" type="revolute">
+    <parent link="link2"/><child link="link3"/>
+    <axis xyz="0 1 0"/><limit lower="-3.14" upper="3.14" effort="100" velocity="3.14"/>
+    <origin xyz="0 0 0.39" rpy="0 0 0"/>
+  </joint>
+  <joint name="joint4" type="revolute">
+    <parent link="link3"/><child link="link4"/>
+    <axis xyz="0 0 1"/><limit lower="-3.14" upper="3.14" effort="100" velocity="3.14"/>
+    <origin xyz="0 0 0.10" rpy="0 0 0"/>
+  </joint>
+  <joint name="joint5" type="revolute">
+    <parent link="link4"/><child link="link5"/>
+    <axis xyz="0 1 0"/><limit lower="-3.14" upper="3.14" effort="100" velocity="3.14"/>
+    <origin xyz="0 0 0.30" rpy="0 0 0"/>
+  </joint>
+  <joint name="joint6" type="revolute">
+    <parent link="link5"/><child link="link6"/>
+    <axis xyz="0 0 1"/><limit lower="-3.14" upper="3.14" effort="100" velocity="3.14"/>
+    <origin xyz="0 0 0.06" rpy="0 0 0"/>
+  </joint>
+  <joint name="tcp_joint" type="fixed">
+    <parent link="link6"/><child link="link_tcp"/>
+    <origin xyz="0 0 0.09" rpy="0 0 0"/>
+  </joint>
+</robot>

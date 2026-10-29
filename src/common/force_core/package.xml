@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>force_core</name>
+  <version>0.1.0</version>
+  <description>
+    Pure C++ force-staging sequencing logic (ForceStageFsm, ForceStageSequencer) for the
+    APPROACH/CARTESIAN/RETRACT contact-force lifecycle -- no rclcpp, no ROS message
+    dependencies, no clock, no I/O. Builds and tests with ROS not sourced.
+
+    Extracted from manipulation_manager at the trigger named in
+    implementation_plan_manipulation_architecture.md's roadmap (P2.1/P2.2): a genuine
+    cross-tree consumer at the platform tier (compliant_trajectory_controller,
+    a fused JTC+admittance controller prototype) needed this logic, and platform
+    packages may not depend on capabilities orchestration packages -- see CLAUDE.md's
+    core/adapter split and dependency-direction rule. force_segment_expander stayed behind
+    in manipulation_manager: unlike the FSM/sequencer, it depends on manager-specific
+    types (MotionSegmentSpec, CoverageSource) and was never designed to be portable.
+  </description>
+  <maintainer email="100lakshyaagarwal@gmail.com">Lakshya Agarwal</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>core_types</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

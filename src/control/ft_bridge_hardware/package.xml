@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ft_bridge_hardware</name>
+  <version>0.0.0</version>
+  <description>
+    ros2_control sensor hardware component bridging a geometry_msgs/WrenchStamped topic (real
+    F/T sensor, or a settable test topic for mock/ufactory_sim) into the state interfaces
+    admittance_controller expects, with a settable force-setpoint bias. No vendor changes.
+  </description>
+  <maintainer email="100lakshyaagarwal@gmail.com">Lakshya Agarwal</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>geometry_msgs</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+    <hardware_interface plugin="${prefix}/ft_bridge_hardware.xml"/>
+  </export>
+</package>

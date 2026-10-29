@@ -1,0 +1,71 @@
+# Request: Trigger coverage path generation with optional parameters
+# If parameters are not set, node defaults will be used
+
+# Optional: Occupancy grid to plan on (if empty, uses last received map from topic)
+nav_msgs/OccupancyGrid map
+
+# Optional: Override default coverage pattern
+string pattern  # e.g., "boustrophedon", "spiral", "zigzag" (empty = use node default)
+
+# Optional: Override swath (effective coverage width in meters)
+float32 swath  # -1.0 = use node default
+
+# Optional: Override step (distance between sweep lines in meters)
+float32 step  # -1.0 = use node default
+
+# Optional: Override sweep direction
+string sweep_direction  # "horizontal", "vertical", "auto" (empty = use node default)
+
+# Optional: Override start corner
+string start_corner  # "top_left", "top_right", "bottom_left", "bottom_right" (empty = use node default)
+
+# Optional: Pose orientation mode
+string pose_mode  # "navigation" = Nav2 compatible (facing movement direction), "arm" = Z-axis perpendicular to surface (for wall cleaning), "identity" = no rotation (default)
+
+# Optional: Allow planning in unknown space
+bool allow_unknown
+
+# Optional: Obstacle inflation radius (meters)
+float32 obstacle_inflation_radius  # -1.0 = use node default
+
+# Optional: Enable boundary perimeter pass for edge coverage
+bool enable_boundary_pass  # false = disabled, true = add perimeter
+
+# Optional: Boundary offset (distance from boundary in meters)
+float32 boundary_offset  # -1.0 = use default (0.02m)
+
+# Optional: Add connector waypoints between strips (for boustrophedon pattern)
+bool add_strip_connectors  # false = only strip endpoints (default), true = interpolate linear connectors between strips
+
+# Optional: Whether the active tool is a contact tool (mop/soap) vs non-contact (sprayer).
+# Populated by the caller from the active ToolProfile.task.contact; drives the emitted
+# MotionPlanSegment.requires_contact for every strip/boundary-pass segment.
+bool requires_contact
+
+# Optional: Planning region (empty = use entire free space)
+geometry_msgs/PolygonStamped region
+
+---
+# Response: Generated coverage path and metadata
+
+# Success flag
+bool success
+
+# Status message
+string message
+
+# Generated coverage path
+nav_msgs/Path path
+
+# Segment metadata aligned with MotionMode/Planner handoff.
+coverage_planner_msgs/MotionPlanSegment[] segments
+
+# Segment labels parallel to `segments` for lightweight consumers.
+string[] segment_labels
+
+# Planning metadata
+float32 total_distance  # Total path length in meters
+float32 coverage_area  # Estimated coverage area in m²
+int32 num_waypoints  # Number of waypoints in path
+float32 planning_time  # Time taken to generate path in seconds
+string pattern_used  # Actual pattern used
