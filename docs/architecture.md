@@ -5,7 +5,7 @@ The stack turns sensor data into executed tool motion over a surface. Every stag
 runtime by config. Nothing downstream knows which implementation produced its input.
 
 ```
- sensors ──► Perception ──► World/Scene ──► Surface ──► Coverage ──► Sequencing
+ sensors ──► Perception ──► Self filter ──► World/Scene ──► Surface ──► Coverage ──► Sequencing
                                                                         │
    ┌────────────────────────────────────────────────────────────────────┘
    ▼
