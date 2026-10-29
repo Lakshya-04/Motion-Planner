@@ -87,12 +87,9 @@ CMD ["bash"]
 
 ############################ build ############################
 FROM deps AS build
+COPY docker/build.sh /usr/local/bin/mp-build
 COPY src/ /ws/src/
-RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
-    && colcon build --symlink-install --event-handlers console_cohesion+ \
-         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 \
-    && colcon test --event-handlers console_cohesion+ \
-    && colcon test-result --verbose
+RUN chmod +x /usr/local/bin/mp-build && mp-build test
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
