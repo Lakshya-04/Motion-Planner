@@ -60,6 +60,7 @@ Status: **exists** = port in the code today; **planned** = to be added.
 | Timing | `TimeParameterizer` (planned) | S-curve Cartesian for contact seams, TOPP-RA for transitions |
 | Execution | `ExecutionPort` (exists) | JTAC / `FollowJointTrajectory` (now); mock, sim (planned) |
 | Control | `CompliancePort` (exists, `core_types`) | JTAC admittance (now); other force controllers (planned) |
+| Recovery | `RecoveryProposer` (planned) | retract along normal, path retrace, global plan to nearest safe target set; learned proposer later — see [learned_recovery.md](learned_recovery.md) |
 | Policy | `Policy` (planned) | none yet — see below |
 | Logging | `Logger` (exists) | rclcpp, null |
 
@@ -107,6 +108,7 @@ pipeline:
 ## Related documents
 
 - [Package layout: core/ + ros/](package_layout.md)
+- [Learned recovery research (RL / IL / MPC)](learned_recovery.md)
 - [Design principles and lessons learned](design_principles.md)
 - [cuRobo v2 integration notes](curobo_v2_notes.md)
 - [VAMP integration notes](vamp_notes.md)
