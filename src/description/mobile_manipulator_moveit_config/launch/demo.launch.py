@@ -14,30 +14,14 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from moveit_configs_utils import MoveItConfigsBuilder
+from mobile_manipulator_moveit_config import build_moveit_config, controllers_file
 
 
 def _nodes(context):
     arm = LaunchConfiguration('arm').perform(context)
-    family = 'ur' if arm.startswith('ur') else 'generic_6dof'
     config_pkg = get_package_share_directory('mobile_manipulator_moveit_config')
-    description_pkg = get_package_share_directory('mobile_manipulator_description')
-
-    moveit_config = (
-        MoveItConfigsBuilder('mobile_manipulator', package_name='mobile_manipulator_moveit_config')
-        .robot_description(
-            file_path=os.path.join(description_pkg, 'urdf', 'mobile_manipulator.urdf.xacro'),
-            mappings={'arm': arm, 'hardware': 'mock'})
-        .robot_description_semantic(
-            file_path=os.path.join(description_pkg, 'srdf', 'mobile_manipulator.srdf.xacro'),
-            mappings={'arm': arm})
-        .robot_description_kinematics(file_path='config/kinematics.yaml')
-        .joint_limits(file_path='config/joint_limits.yaml')
-        .trajectory_execution(file_path=f'config/{family}/moveit_controllers.yaml')
-        .planning_pipelines(pipelines=['ompl'])
-        .to_moveit_configs()
-    )
-    controllers = os.path.join(config_pkg, 'config', family, 'ros2_controllers.yaml')
+    moveit_config = build_moveit_config(arm, hardware='mock')
+    controllers = controllers_file(arm)
 
     return [
         Node(package='robot_state_publisher', executable='robot_state_publisher',
