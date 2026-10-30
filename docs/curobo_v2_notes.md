@@ -137,3 +137,114 @@ never links cuRobo directly.
   mesh-convertible only and verify against the current docs before depending on it.
 - Mobile base + lift + arm as one kinematic chain vs. arm-only planning with base fixed.
 - Contact (wall touching) semantics under cuRobo's collision cost.
+
+## Status: `curobo_bridge` (first adapter, verified on an RTX 3050 4 GB)
+
+`src/manipulation/curobo_bridge` is a ROS-free Python core over cuRobo v2 (`78fd485`):
+`CuroboPlanner.plan_joint` (`plan_cspace`), `plan_pose` (`plan_pose`), `set_world` / `clear_world`,
+structured `PlanResult` (success, failure code, failure stage, message, joint names, rows, dt) in
+the same shape as the motion_planner ports. A ROS node and a C++ `Planner` client go on top of it.
+Tested in the `gpu` image (`docker run --gpus all ... pytest`); the GPU tests skip without CUDA.
+
+Facts learned integrating it:
+
+- cuRobo v2 needs no nvcc: it uses NVIDIA Warp kernels, JIT-compiled on first use (the first
+  `warmup()` took ~40 s, cached afterwards in `~/.cache/warp`).
+- The obstacle cache is allocated when the planner is built: pass `collision_cache={"cuboid": N}`
+  to `MotionPlannerCfg.create` or `update_world` fails with `'NoneType' ... load_collision_model`.
+  We expose it as `max_boxes`; explicit boxes beyond it raise.
+- `SceneCfg` (exported as `curobo.scene.Scene`) has no raw point-cloud field. Sparse, already
+  filtered points are voxelized into cubes that only ever grow when capped (conservative). Dense
+  sensing should use cuRobo's own ESDF mapper (`Mapper`) instead.
+- Interpolated plans include locked joints (Franka's two finger joints, 9 columns for a 7-DOF arm);
+  the bridge returns only the active joints, in planner order.
+- Poses and quaternions are `[x y z]` + `[w x y z]`; results come back as `(1, 1, T, dof)` tensors.
+
+Not done: a cuRobo robot config for our mobile manipulator (URDF + sphere fit via cuRobo's
+`robot_builder`), the point-cloud ESDF path, and the ROS / C++ client.
+
+## Our own robot in cuRobo (verified)
+
+```
+docker run --rm --gpus all -v "$PWD/robots:/robots" -v "$PWD/docker/tools:/tools:ro" motion-planner:gpu \
+  /opt/venv/bin/python /tools/generate_curobo_robot.py --urdf /robots/meshed/robot.urdf \
+  --tool-frame tcp_link --out /robots/mm_arm.yml
+```
+
+- Same mesh-converted URDF as the VAMP pipeline (`docker/tools/primitives_to_meshes.py`): cuRobo's
+  `RobotBuilder` fits spheres (MorphIt) and samples the collision matrix; 396 spheres on 12 links,
+  ~80 s on the 4 GB GPU, 38.5% of sampled poses collision-free (VAMP's Cricket model: 31.6%).
+- The config stores **absolute** paths to the URDF and mesh root, so mount them at the same path
+  when planning (`/robots`). `CuroboPlanner("/robots/mm_arm.yml")` then plans (1.5 s joint move) and
+  correctly fails with `no_path` for a slab through the arm.
+- The `Start or End state in collision` lines cuRobo prints during warmup are its own sampling of
+  invalid seeds, not errors.
+
+## ROS shell: `curobo_planner_node`
+
+`curobo_bridge` ships `curobo_planner_node` (entry point `curobo_bridge.ros_node:main`) with
+interfaces in `curobo_bridge_msgs`: `~/plan_joint`, `~/plan_pose` (ROS xyzw quaternion in, cuRobo
+wxyz out), `~/set_world` (boxes + an optional PointCloud2 voxelized into the obstacle cache; an
+empty request clears the world). Parameters: `robot` (bundled name or absolute path to a generated
+config), `max_boxes`. If the planner cannot start (no GPU, bad config) the node stays up and the
+services answer `failure_reason_code: unavailable` instead of hanging callers. Tested in the `gpu`
+image: logic tests with a stand-in planner (no GPU needed) and a real-planner test through the
+services.
+
+## C++ client: `curobo_planner`
+
+`curobo_planner::CuroboClientPlanner` implements the `motion_planner::Planner` port by calling the
+node's services: `plan()` (joint goal, or exactly one pose goal), `setWorld()` / `clearWorld()`
+(boxes + points with `points_origin` applied), `ik()` (pose as xyz + quaternion or xyz + rpy, optional
+seed) and `collision()` (joint values and/or a trajectory; pose-based inputs are `unsupported`). The node passed in must be spun elsewhere (calls wait on the service future); a missing server
+yields `unavailable` after `wait_for_service_sec`, never a hang.
+
+Verified: 6 tests against a stand-in server, plus a gated end-to-end test (`CUROBO_START=...`,
+node running) in the `full` image: C++ client -> ROS -> Python node -> cuRobo on the RTX 3050 ->
+trajectory that reaches the goal, and `no_path` once a slab swallows the robot. Start the node with
+the venv Python (`/opt/venv/bin/python -m curobo_bridge.ros_node`): `ros2 run` uses the system
+Python, which has no torch, and the node then answers `unavailable`.
+
+## ESDF world (verified on the GPU)
+
+Reserve a voxel grid when the planner is built, then points (or a ready-made field) become one
+distance field instead of thousands of cubes:
+
+```python
+planner = CuroboPlanner('franka.yml', esdf=EsdfSpec(dims=(2.0, 2.0, 2.0), voxel_size=0.05, center=(0.3, 0, 0.5)))
+planner.set_world(points=cloud)            # points -> ESDF on that grid
+planner.set_world(esdf=field, esdf_center=...)   # or a field from the scene model / a mapper
+```
+
+- cuRobo allocates the voxel cache at construction (`collision_cache={"voxel": {"layers": 1, "dims":
+  [...], "voxel_size": ...}}`), so grid size and voxel size are fixed; the centre can move per update.
+  Voxel counts per axis must be even (the cell centre formula is `(i + 0.5 - n/2) * voxel`).
+- **Convention:** positive outside obstacles, negative inside (the empty cache starts at +10000).
+  Our `EsdfGrid` uses the same, so a field goes in unchanged. (`VoxelGrid.get_occupied_voxels` reads
+  as if the sign were the other way round; do not trust it.)
+- **Layout:** x-major (`ix * ny * nz + iy * nz + iz`), i.e. a C-order `(nx, ny, nz)` array flattened.
+  Checked end to end: an obstacle blob at the robot's tool position blocks the start pose, the same
+  blob with x and z swapped does not.
+- `update_world` keeps the previous voxel layer unless a new one is given, so `clear_world` submits
+  an all-free grid; otherwise a stale ESDF would stay in the world silently.
+- `points_to_esdf` (numpy + scipy EDT) is the bridge for sparse filtered clouds; dense depth should
+  use cuRobo's own `Mapper`. The node takes `esdf_dims`, `esdf_voxel_size`, `esdf_center` parameters.
+
+## IK and validity checks
+
+`CuroboPlanner.solve_ik` (cuRobo `ik_solver.solve_pose`, collision-free, seedable),
+`check_states` (joint limits + self-collision + world, via the graph planner's feasibility check)
+and `check_motion` (the same on interpolated states, largest joint step `max_step`; a sampled check,
+so gaps thinner than `max_step` can be missed). ROS: `~/solve_ik`, `~/check_motion`; the C++ client's
+`ik()` / `collision()` call them. Checked on the GPU: the default pose is valid; out-of-limits, a folded
+(self-colliding) pose and a pose inside an obstacle are not; IK of a pose under an obstacle fails
+with `no_solution`.
+
+### One planner per process
+
+Building a planner with a voxel cache (an ESDF grid) while a plain planner already runs in the same
+process breaks the plain one: Warp specialises its collision kernels on the cache layout, and the
+older planner then fails with `illegal memory access` (two plain planners are fine, and a lone ESDF
+planner is fine). The node builds exactly one planner, so deployment is unaffected; in tests call
+`CuroboPlanner.close()` before building one with a different layout (the ESDF tests live in their own
+module for this reason).

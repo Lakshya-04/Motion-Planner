@@ -130,6 +130,13 @@ RUN git clone https://github.com/KavrakiLab/vamp.git /tmp/vamp \
          -DCMAKE_INSTALL_PREFIX=/opt/vamp \
     && cmake --build /tmp/vamp/build \
     && cmake --install /tmp/vamp/build \
+    # Upstream's install step ships only its own headers, but they include the headers of the
+    # dependencies CPM fetched (pdqsort, nigh, SIMDxorshift, cddlib). Install those next to them so
+    # /opt/vamp is self-contained; nothing upstream is modified.
+    && D=/tmp/vamp/build/_deps \
+    && cp ${D}/pdqsort-src/pdqsort.h ${D}/simdxorshift-src/include/simdxorshift128plus.h /opt/vamp/include/ \
+    && cp -r ${D}/nigh-src/src/nigh /opt/vamp/include/ \
+    && cp ${D}/cddlib-src/lib-src/*.h /opt/vamp/include/ \
     && rm -rf /tmp/vamp
 
 ############################ full #############################

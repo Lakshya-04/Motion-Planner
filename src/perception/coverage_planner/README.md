@@ -3,7 +3,6 @@ type: Reference
 title: coverage_planner
 description: Package README for the service-based boustrophedon coverage path planner that turns a sensed-wall occupancy grid into an arm waypoint path.
 tags: [coverage-planning, motion-planning, package-readme, wall-cleaning]
-generated: { by: claude-code/fable-5, at: 2026-07-25T06:27:42Z }
 status: stable
 ---
 

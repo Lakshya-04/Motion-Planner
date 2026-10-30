@@ -75,3 +75,21 @@ docker run --rm -v $PWD/src:/ws/src:ro -v mp_build:/ws/build -v mp_install:/ws/i
   Its names and the base-to-footprint offset are parameters now.
 - Pairs that are never or always in collision for one arm's geometry beyond the sampled check.
 - Seed-preferring IK solver.
+
+## Compliant controller (JTAC) variant
+
+`demo.launch.py controller:=jtac` swaps the plain joint trajectory controller for the compliant
+`JtacController` (admittance), under the same name `lift_arm_controller`, so MoveIt's controller
+config and the wall-pass demo (`controller_name`, the `…/target_force_n` topic) work unchanged.
+
+- `hardware:=jtac_mock` (description): the same seven joints with position **and** velocity command
+  interfaces, plus a force/torque sensor named `ft_sensor` from `ft_bridge_hardware` in injection
+  mode, so a wall contact can be scripted without a real sensor.
+- `config/<family>/jtac_controllers.yaml`: controller parameters with our joint names and frames
+  (`base_footprint` -> `tcp_link`, F/T and control frame `tcp_link`), all admittance axes deselected
+  until a segment engages them. `robot_description` is injected through the spawner's `--param-file`
+  because the controller reads it on its own node.
+- Verified on Jazzy for both `ur10e` and `generic_6dof`: the controller goes active, and
+  `scripts/smoke_plan.py --execute` plans with `lift_arm` through MoveIt, executes through the
+  controller, and checks the joints arrived. The 6-joint `arm` group stays plan-only: the single
+  controller takes all seven joints (no partial goals), same as the plain trajectory controller.

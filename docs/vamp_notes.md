@@ -96,3 +96,69 @@ Never patch upstream files; anything robot- or task-specific lives in our packag
 | free-space `Planner::plan` | RRT-Connect / AORRTC + simplify, then TOPP-RA |
 | `Planner::collision` | `isStateInCollision`, `isMotionInCollision`, batched validity |
 | `Planner::ik` | not provided; delegate to the IK backend |
+
+## Status: `vamp_planner` (first adapter)
+
+`src/manipulation/vamp_planner` implements the `motion_planner::Planner` port over VAMP, ROS-free:
+free-space RRT-Connect (+ shortcut/B-spline simplification), `collision()` for states and
+trajectories, `setWorld()` from `WorldGeometryUpdate` (boxes -> cuboids, points -> CAPT point
+cloud), structured failures (`start_in_collision`, `goal_in_collision`, `no_path`, `no_world`,
+`invalid_request`, `unsupported` for IK). Robots are compiled in; `src/robots.cpp` has a one-line
+table (bundled `ur5` today, our Cricket-generated headers next). Tested in the `full` image.
+
+Things found while integrating upstream `27cb9b6` (all worked around without patching upstream):
+
+- The installed `vampConfig.cmake` is unusable: it calls `find_dependency` without including the
+  macro, exports `vamp::vamp_cpp` but checks for `vamp::vamp`, and its include path is one level
+  too deep for `#include <vamp/...>`. We describe the install ourselves in `CMakeLists.txt`.
+- `cmake --install` ships only VAMP's own headers, but they include `pdqsort.h`, `nigh/`,
+  `simdxorshift128plus.h` and cddlib's headers. The `vamp-build` Docker stage now copies those
+  from the CPM tree into `/opt/vamp/include`.
+- A single-state check is `validate_motion<Robot, rake, 1>(q, q, env)`; motions use
+  `Robot::resolution`.
+- VAMP's UR5 model has no collision spheres on the base link, so an obstacle around the base
+  alone does not collide; test obstacles must be placed where the arm actually is.
+
+## Generating our own robot (FOAM + Cricket), verified end to end
+
+```
+docker/tools/build_robot_tools.sh                       # builds motion-planner-foam / -cricket images
+xacro .../mobile_manipulator.urdf.xacro arm:=generic_6dof lift_fixed_height:=0.5 -o robot.urdf
+docker/tools/generate_vamp_robot.sh GenericArm robot.urdf - tcp_link build/vamp_robots
+cmake ... -DVAMP_PLANNER_ROBOT_DIR=build/vamp_robots   # every <Name>.hh there is compiled in and registered
+```
+
+- `lift_fixed_height` pins the lift, giving a 6-DOF arm-only model (the lift as a joint would add
+  mimic stages as extra DOF). It is a 1.5 MB header, 54 spheres, generated in ~80 s.
+- FOAM spherizes **mesh** collisions only and silently skips URDF primitives, so
+  `docker/tools/primitives_to_meshes.py` converts boxes / cylinders / spheres to STL first.
+  `package://` mesh URIs must be resolved to relative paths before generation (the script refuses
+  otherwise).
+- Upstream FOAM's Dockerfile is a developer shell that expects a file missing from the repo, so we
+  ship `docker/tools/foam.Dockerfile`; Cricket's own image only contains `fkcc_gen`, so the code
+  templates are taken from the pinned checkout.
+- **Pass `-` for the SRDF.** An SRDF computed for the primitive model made every sampled
+  configuration invalid (0 of 2000): spherization bulges, so two link pairs overlap in the sphere
+  model that were free in the source model. Letting Cricket sample the allowed pairs from the sphere
+  model itself gave 633 valid of 2000.
+- Joint order and names in the header follow the URDF (`arm_joint1..6` for the generic arm), and
+  the header's world frame is the URDF root, so planning scenes must be in the robot base frame.
+
+## UR10e: cuRobo works, VAMP/Cricket model is an open problem
+
+Pipeline used for the real arm: `xacro ... arm:=ur10e lift_fixed_height:=0.5` ->
+`docker/tools/resolve_package_uris.py` (copies the 7 `package://ur_description` collision meshes and
+rewrites the URIs) -> `primitives_to_meshes.py` (also mirrors collision geometry as visual, because
+cuRobo's `RobotBuilder` picks links from visuals even with `use_collision_mesh=True`).
+
+- cuRobo: 716 spheres on 13 links, 44% of random poses collision-free, plans in 1.5 s and fails with
+  `no_path` through an obstacle. Needed `--batch-size 1000` (its default 10000 wants >7 GB of GPU
+  memory; the 4 GB card ran out).
+- VAMP/Cricket: header generates (55 spheres, real joint names) but **every sampled configuration is
+  reported in collision (0 of 2000), including home poses**, while the same arm is fine in cuRobo and
+  the generic 6-DOF arm is fine in VAMP. Tried and ruled out: Cricket's guessed allowed pairs, an SRDF
+  with every rigid/adjacent pair (`rigid_pairs_srdf.py`), an SRDF built from cuRobo's computed matrix
+  (and the union), more spheres per link (`FOAM_ARGS="--branch 24"`, 84 spheres). A reduced model
+  with the static chain removed crashes Cricket's guess ("pair.second is larger than the number of
+  geometries"). Next steps: dump Cricket's per-link sphere ownership to see which checked pair
+  overlaps at home, or feed cuRobo's fitted spheres into Cricket so both backends share one model.
