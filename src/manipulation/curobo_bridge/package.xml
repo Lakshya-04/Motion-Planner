@@ -14,6 +14,10 @@
   <buildtool_depend>ament_python</buildtool_depend>
 
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs_py</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>curobo_bridge_msgs</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
 

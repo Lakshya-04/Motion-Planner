@@ -179,3 +179,14 @@ docker run --rm --gpus all -v "$PWD/robots:/robots" -v "$PWD/docker/tools:/tools
   correctly fails with `no_path` for a slab through the arm.
 - The `Start or End state in collision` lines cuRobo prints during warmup are its own sampling of
   invalid seeds, not errors.
+
+## ROS shell: `curobo_planner_node`
+
+`curobo_bridge` ships `curobo_planner_node` (entry point `curobo_bridge.ros_node:main`) with
+interfaces in `curobo_bridge_msgs`: `~/plan_joint`, `~/plan_pose` (ROS xyzw quaternion in, cuRobo
+wxyz out), `~/set_world` (boxes + an optional PointCloud2 voxelized into the obstacle cache; an
+empty request clears the world). Parameters: `robot` (bundled name or absolute path to a generated
+config), `max_boxes`. If the planner cannot start (no GPU, bad config) the node stays up and the
+services answer `failure_reason_code: unavailable` instead of hanging callers. Tested in the `gpu`
+image: logic tests with a stand-in planner (no GPU needed) and a real-planner test through the
+services.

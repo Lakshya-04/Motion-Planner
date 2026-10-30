@@ -12,6 +12,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
+    entry_points={'console_scripts': ['curobo_planner_node = curobo_bridge.ros_node:main']},
     maintainer='Lakshya Agarwal',
     maintainer_email='100lakshyaagarwal@gmail.com',
     description='cuRobo v2 behind a ROS-free planner core',
