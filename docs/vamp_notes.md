@@ -143,3 +143,22 @@ cmake ... -DVAMP_PLANNER_ROBOT_DIR=build/vamp_robots   # every <Name>.hh there i
   model itself gave 633 valid of 2000.
 - Joint order and names in the header follow the URDF (`arm_joint1..6` for the generic arm), and
   the header's world frame is the URDF root, so planning scenes must be in the robot base frame.
+
+## UR10e: cuRobo works, VAMP/Cricket model is an open problem
+
+Pipeline used for the real arm: `xacro ... arm:=ur10e lift_fixed_height:=0.5` ->
+`docker/tools/resolve_package_uris.py` (copies the 7 `package://ur_description` collision meshes and
+rewrites the URIs) -> `primitives_to_meshes.py` (also mirrors collision geometry as visual, because
+cuRobo's `RobotBuilder` picks links from visuals even with `use_collision_mesh=True`).
+
+- cuRobo: 716 spheres on 13 links, 44% of random poses collision-free, plans in 1.5 s and fails with
+  `no_path` through an obstacle. Needed `--batch-size 1000` (its default 10000 wants >7 GB of GPU
+  memory; the 4 GB card ran out).
+- VAMP/Cricket: header generates (55 spheres, real joint names) but **every sampled configuration is
+  reported in collision (0 of 2000), including home poses**, while the same arm is fine in cuRobo and
+  the generic 6-DOF arm is fine in VAMP. Tried and ruled out: Cricket's guessed allowed pairs, an SRDF
+  with every rigid/adjacent pair (`rigid_pairs_srdf.py`), an SRDF built from cuRobo's computed matrix
+  (and the union), more spheres per link (`FOAM_ARGS="--branch 24"`, 84 spheres). A reduced model
+  with the static chain removed crashes Cricket's guess ("pair.second is larger than the number of
+  geometries"). Next steps: dump Cricket's per-link sphere ownership to see which checked pair
+  overlaps at home, or feed cuRobo's fitted spheres into Cricket so both backends share one model.

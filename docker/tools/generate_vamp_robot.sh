@@ -11,7 +11,8 @@
 # <name> becomes the C++ struct name in the header, so it must be a valid identifier (no '-').
 # The URDF's collision geometry may be primitives or package-relative-free meshes; primitives are
 # converted to meshes first because FOAM only spherizes meshes. Needs the two tool images from
-# docker/tools/build_robot_tools.sh. The header is large: write it to a build directory, do not
+# docker/tools/build_robot_tools.sh. FOAM_ARGS passes extra options to FOAM (e.g. FOAM_ARGS="--branch 16"
+# for more spheres per link). The header is large: write it to a build directory, do not
 # commit it.
 set -euo pipefail
 [ $# -ge 5 ] || { sed -n 2,11p "$0"; exit 2; }
@@ -43,7 +44,7 @@ for m in ET.parse(sys.argv[1]).getroot().iter('mesh'):
 PY
 
 docker run --rm --user "$(id -u):$(id -g)" -v "$OUT:/work" -w /work "$FOAM_IMG" \
-  --filename meshed/robot.urdf --output spherized.urdf --database sphere_database.json
+  --filename meshed/robot.urdf --output spherized.urdf --database sphere_database.json ${FOAM_ARGS:-}
 
 rm -rf "$OUT/templates" && cp -r "$CRICKET_SRC/resources/templates" "$OUT/templates"
 SRDF_LINE=""

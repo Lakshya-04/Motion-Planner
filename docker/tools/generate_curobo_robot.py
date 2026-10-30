@@ -25,6 +25,8 @@ def main():
     ap.add_argument('--tool-frame', action='append', required=True, help='repeatable')
     ap.add_argument('--out', required=True)
     ap.add_argument('--sphere-density', type=float, default=1.0)
+    ap.add_argument('--batch-size', type=int, default=1000,
+                    help='collision-matrix sampling batch; cuRobo defaults to 10000, which needs >7 GB of GPU memory')
     ap.add_argument('--seed', type=int, default=0)
     args = ap.parse_args()
 
@@ -36,8 +38,12 @@ def main():
     urdf = pathlib.Path(args.urdf).resolve()
     root = pathlib.Path(args.asset_root).resolve() if args.asset_root else urdf.parent
     builder = RobotBuilder(urdf_path=str(urdf), asset_path=str(root), tool_frames=args.tool_frame)
-    builder.fit_collision_spheres(sphere_density=args.sphere_density)
-    builder.compute_collision_matrix()
+    # cuRobo fits to the *visual* meshes by default; our pipelines carry collision meshes only (the
+    # resolver drops visuals), so fit to those.
+    builder.fit_collision_spheres(sphere_density=args.sphere_density, use_collision_mesh=True)
+    if builder.num_spheres == 0:
+        raise SystemExit('no collision spheres fitted: the URDF has no collision meshes cuRobo could load')
+    builder.compute_collision_matrix(batch_size=args.batch_size)
     builder.save(builder.build(), args.out)
     print(f'wrote {args.out}: {builder.num_spheres} spheres on {len(builder.collision_link_names)} links')
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replace box / cylinder / sphere collision geometry in a URDF with STL meshes.
+"""Replace box / cylinder / sphere collision geometry in a URDF with STL meshes, and mirror each link's collision geometry as its visual.
 
 FOAM spherizes mesh collisions only and silently skips URDF primitives, so a robot built from
 primitives (the generic arm, the lift column) would come out with no spheres at all. This writes one
@@ -79,6 +79,21 @@ def convert(urdf_in, out_dir):
             geom.remove(shape)
             ET.SubElement(geom, 'mesh', filename=f'meshes/{name}')
             count += 1
+    # cuRobo's RobotBuilder picks the links to fit from their *visual* geometry, whatever fitting mode
+    # is requested, so a URDF with collision meshes only yields zero spheres. Make every link's
+    # visual the same as its collision geometry so both generators (and FOAM) see one model.
+    import copy
+    for link in tree.getroot().iter('link'):
+        collisions = link.findall('collision')
+        if not collisions:
+            continue
+        for visual in link.findall('visual'):
+            link.remove(visual)
+        for k, coll in enumerate(collisions):
+            visual = ET.Element('visual')
+            for child in coll:
+                visual.append(copy.deepcopy(child))
+            link.insert(list(link).index(coll), visual)
     tree.write(out / 'robot.urdf', xml_declaration=True, encoding='utf-8')
     return count
 
