@@ -48,7 +48,8 @@ COPY docker/apt-extra.txt /tmp/apt-extra.txt
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
-    && (rosdep init 2>/dev/null || true) && rosdep update --rosdistro ${ROS_DISTRO} \
+    && (rosdep init 2>/dev/null || true) \
+    && (for i in 1 2 3 4 5; do rosdep update --rosdistro ${ROS_DISTRO} && exit 0; echo "rosdep update failed (try $i), retrying"; sleep 10; done; exit 1) \
     && rosdep install --from-paths /tmp/src-manifest --ignore-src -y --rosdistro ${ROS_DISTRO} \
          --skip-keys "ament_cmake_clang_format" \
     && rm -rf /var/lib/apt/lists/* /tmp/src-manifest
