@@ -138,6 +138,7 @@ class CuroboPlanner:
         if warmup:
             self._planner.warmup(enable_graph=True, num_warmup_iterations=3)
         self._world_set = False
+        self._boxes: List[Box] = []      # explicit boxes of the current world (kept by set_esdf)
 
     def close(self) -> None:
         """Releases the GPU resources. Use one planner per process, or close one before building
@@ -195,13 +196,23 @@ class CuroboPlanner:
         voxels = self._voxel_scene(field, esdf_center) if self.esdf is not None else []
         self._planner.update_world(Scene(cuboid=cuboids, voxel=voxels))
         self._world_set = True
+        self._boxes = list(boxes)
         return len(cuboids) + (1 if field is not None else 0)
+
+    def set_esdf(self, esdf: np.ndarray, center: Optional[Sequence[float]] = None) -> int:
+        """Replaces only the distance field, keeping the explicit boxes already in the world.
+
+        `esdf` is (nx, ny, nz) metres, positive outside obstacles, on the configured grid, centred at
+        `center` (default: the grid's configured centre). Returns the number of obstacles now in the
+        world (boxes + the field)."""
+        return self.set_world(self._boxes, esdf=esdf, esdf_center=center)
 
     def clear_world(self) -> None:
         from curobo.scene import Scene
         voxels = self._voxel_scene(None, None) if self.esdf is not None else []
         self._planner.update_world(Scene(voxel=voxels))
         self._world_set = False
+        self._boxes = []
 
     # ---- ESDF helpers -----------------------------------------------------------------------
     def _grid(self, center: Optional[Sequence[float]]) -> EsdfSpec:

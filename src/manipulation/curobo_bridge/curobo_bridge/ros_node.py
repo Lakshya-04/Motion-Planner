@@ -15,7 +15,7 @@ can take a minute); until then the services answer `unavailable` instead of bloc
 import numpy as np
 import rclpy
 from builtin_interfaces.msg import Duration
-from curobo_bridge_msgs.srv import CheckMotion, PlanJoint, PlanPose, SetWorld, SolveIk
+from curobo_bridge_msgs.srv import CheckMotion, PlanJoint, PlanPose, SetEsdf, SetWorld, SolveIk
 from rclpy.node import Node
 from sensor_msgs_py import point_cloud2
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
@@ -79,6 +79,7 @@ class CuroboPlannerNode(Node):
         self.create_service(PlanJoint, '~/plan_joint', self._plan_joint)
         self.create_service(PlanPose, '~/plan_pose', self._plan_pose)
         self.create_service(SetWorld, '~/set_world', self._set_world)
+        self.create_service(SetEsdf, '~/set_esdf', self._set_esdf)
         self.create_service(SolveIk, '~/solve_ik', self._solve_ik)
         self.create_service(CheckMotion, '~/check_motion', self._check_motion)
 
@@ -97,6 +98,30 @@ class CuroboPlannerNode(Node):
         p, q = request.goal.position, request.goal.orientation
         return fill(response, self._planner.plan_pose(
             list(request.start), (p.x, p.y, p.z), (q.w, q.x, q.y, q.z)))   # ROS xyzw -> cuRobo wxyz
+
+    def _set_esdf(self, request, response):
+        if self._planner is None:
+            response.message = 'cuRobo planner is not running'
+            return response
+        shape = (request.nx, request.ny, request.nz)
+        grid = getattr(self._planner, 'esdf', None)
+        if grid is None:
+            response.message = 'no ESDF grid configured: start the node with esdf_dims'
+            return response
+        if len(request.distance) != request.nx * request.ny * request.nz:
+            response.message = f'distance has {len(request.distance)} values, expected {shape[0] * shape[1] * shape[2]}'
+            return response
+        if shape != grid.shape() or abs(request.voxel_size - grid.voxel_size) > 1e-9:
+            response.message = (f'grid {shape} at {request.voxel_size} m does not match the planner\'s '
+                                f'{grid.shape()} at {grid.voxel_size} m')
+            return response
+        field = np.asarray(request.distance, dtype=np.float32).reshape(shape)
+        try:
+            self._planner.set_esdf(field, tuple(request.center))
+            response.success = True
+        except ValueError as e:
+            response.message = str(e)
+        return response
 
     def _solve_ik(self, request, response):
         if self._planner is None:

@@ -13,6 +13,7 @@
 #include "core_types/logger.hpp"
 #include "motion_planner/core/planners/planner.hpp"
 #include "motion_planner/core/scene_port.hpp"
+#include "scene_model/core/types.hpp"
 
 namespace curobo_planner
 {
@@ -37,6 +38,11 @@ public:
   /// Replaces the planner's world (boxes + points, `points_origin` applied). False on failure.
   bool setWorld(const motion_planner::WorldGeometryUpdate & world, std::string * message = nullptr);
   bool clearWorld(std::string * message = nullptr);
+
+  /// Replaces only the distance field (the world's boxes stay). The node must run with an ESDF grid
+  /// of the same shape and voxel size; its centre may differ per call. Our x-fastest layout and
+  /// voxel-(0,0,0)-centre origin are converted to cuRobo's x-major layout and grid centre.
+  bool setEsdf(const scene_model::EsdfGrid & grid, std::string * message = nullptr);
 
   /// ScenePort: the same two operations, so a SceneModel (via scene_adapters) can feed cuRobo like
   /// any other backend.
