@@ -108,6 +108,34 @@ def test_fixed_lift_gives_an_arm_only_robot():
     assert lift.origin.xyz[2] == pytest.approx(base.origin.xyz[2] + 0.5)
 
 
+def _ros2_control(arm, hardware):
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(_render(arm=arm, hardware=hardware))
+    return root.findall('ros2_control')
+
+
+@pytest.mark.parametrize('arm', ['generic_6dof'])
+def test_mock_hardware_is_position_commanded_only(arm):
+    blocks = _ros2_control(arm, 'mock')
+    assert [b.get('type') for b in blocks] == ['system']
+    for joint in blocks[0].findall('joint'):
+        assert [c.get('name') for c in joint.findall('command_interface')] == ['position']
+
+
+@pytest.mark.parametrize('arm', ['generic_6dof'])
+def test_jtac_mock_adds_velocity_commands_and_an_ft_sensor(arm):
+    system, sensor = _ros2_control(arm, 'jtac_mock')
+    assert system.get('type') == 'system' and sensor.get('type') == 'sensor'
+    joints = system.findall('joint')
+    assert len(joints) == 7
+    for joint in joints:
+        assert [c.get('name') for c in joint.findall('command_interface')] == ['position', 'velocity']
+    assert sensor.find('hardware/plugin').text == 'ft_bridge_hardware/FtBridgeHardwareInterface'
+    assert sensor.find('sensor').get('name') == 'ft_sensor'
+    assert [i.get('name') for i in sensor.find('sensor')] == [
+        'force.x', 'force.y', 'force.z', 'torque.x', 'torque.y', 'torque.z']
+
+
 def test_lift_velocity_and_stroke_are_parameters():
     robot = URDF.from_xml_string(_render(arm='generic_6dof', lift_stroke=0.9,
                                          lift_max_velocity=0.3))
