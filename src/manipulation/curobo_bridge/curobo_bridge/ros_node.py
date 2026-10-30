@@ -4,6 +4,9 @@ Parameters: `robot` (cuRobo robot config: a bundled name like franka.yml or an a
 made by docker/tools/generate_curobo_robot.py), `max_boxes` (obstacle cache size). Services (under
 the node name): ~/plan_joint, ~/plan_pose, ~/set_world. Everything is in the robot base frame.
 
+Run it with the Python that has torch and cuRobo (in the gpu image that is the venv, not the system
+Python `ros2 run` picks): `/opt/venv/bin/python -m curobo_bridge.ros_node --ros-args -p robot:=...`.
+
 The planner is built lazily-but-once at start-up (CUDA kernels compile on the first warmup, which
 can take a minute); until then the services answer `unavailable` instead of blocking callers.
 """
@@ -102,3 +105,7 @@ def main():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

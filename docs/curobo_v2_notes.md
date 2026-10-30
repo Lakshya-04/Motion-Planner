@@ -190,3 +190,17 @@ config), `max_boxes`. If the planner cannot start (no GPU, bad config) the node 
 services answer `failure_reason_code: unavailable` instead of hanging callers. Tested in the `gpu`
 image: logic tests with a stand-in planner (no GPU needed) and a real-planner test through the
 services.
+
+## C++ client: `curobo_planner`
+
+`curobo_planner::CuroboClientPlanner` implements the `motion_planner::Planner` port by calling the
+node's services: `plan()` (joint goal, or exactly one pose goal), `setWorld()` / `clearWorld()`
+(boxes + points with `points_origin` applied). `ik()` and `collision()` return `unsupported` for
+now. The node passed in must be spun elsewhere (calls wait on the service future); a missing server
+yields `unavailable` after `wait_for_service_sec`, never a hang.
+
+Verified: 6 tests against a stand-in server, plus a gated end-to-end test (`CUROBO_START=...`,
+node running) in the `full` image: C++ client -> ROS -> Python node -> cuRobo on the RTX 3050 ->
+trajectory that reaches the goal, and `no_path` once a slab swallows the robot. Start the node with
+the venv Python (`/opt/venv/bin/python -m curobo_bridge.ros_node`): `ros2 run` uses the system
+Python, which has no torch, and the node then answers `unavailable`.
