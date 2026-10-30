@@ -1,0 +1,12 @@
+# TRAC-IK (stock, from apt): runs a KDL Newton solver and an SQP solver side by side. With
+# solve_type Distance it keeps searching for the allotted time and returns the solution closest to
+# the seed in joint space, i.e. it prefers the branch the robot is already on.
+# Select with `ik:=trac_ik` (demo.launch.py) or build_moveit_config(..., ik='trac_ik').
+arm:
+  kinematics_solver: trac_ik_kinematics_plugin/TRAC_IKKinematicsPlugin
+  kinematics_solver_timeout: 0.05
+  solve_type: Distance
+lift_arm:
+  kinematics_solver: trac_ik_kinematics_plugin/TRAC_IKKinematicsPlugin
+  kinematics_solver_timeout: 0.1
+  solve_type: Distance

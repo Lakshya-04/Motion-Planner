@@ -18,8 +18,16 @@ def arm_family(arm):
     return 'ur' if arm.startswith('ur') else 'generic_6dof'
 
 
-def build_moveit_config(arm='ur10e', hardware='mock'):
-    """MoveItConfigs for `arm` with the lift + arm planning groups and the given hardware."""
+KINEMATICS = {'kdl': 'config/kinematics.yaml', 'pick_ik': 'config/kinematics_pick_ik.yaml',
+              'trac_ik': 'config/kinematics_trac_ik.yaml'}
+
+
+def build_moveit_config(arm='ur10e', hardware='mock', ik='kdl'):
+    """MoveItConfigs for `arm` with the lift + arm planning groups and the given hardware.
+
+    `ik` picks the kinematics solver: 'kdl' (always available), 'pick_ik' or 'trac_ik' (each needs its
+    package; see docs/moveit_config.md for how they compare).
+    """
     description = get_package_share_directory(DESCRIPTION)
     return (
         MoveItConfigsBuilder('mobile_manipulator', package_name=PACKAGE)
@@ -29,7 +37,7 @@ def build_moveit_config(arm='ur10e', hardware='mock'):
         .robot_description_semantic(
             file_path=os.path.join(description, 'srdf', 'mobile_manipulator.srdf.xacro'),
             mappings={'arm': arm})
-        .robot_description_kinematics(file_path='config/kinematics.yaml')
+        .robot_description_kinematics(file_path=KINEMATICS[ik])
         .joint_limits(file_path='config/joint_limits.yaml')
         .trajectory_execution(file_path=f'config/{arm_family(arm)}/moveit_controllers.yaml')
         .planning_pipelines(pipelines=['ompl'])

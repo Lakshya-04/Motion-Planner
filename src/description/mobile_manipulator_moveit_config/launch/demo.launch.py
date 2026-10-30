@@ -3,6 +3,7 @@
   ros2 launch mobile_manipulator_moveit_config demo.launch.py arm:=ur10e
   ros2 launch mobile_manipulator_moveit_config demo.launch.py arm:=generic_6dof rviz:=false
   ros2 launch mobile_manipulator_moveit_config demo.launch.py controller:=jtac
+  ros2 launch mobile_manipulator_moveit_config demo.launch.py ik:=pick_ik   (or ik:=trac_ik)
 
 Starts robot_state_publisher, ros2_control (mock hardware) with the joint state broadcaster and
 one 7-joint controller (lift + arm), move_group, and optionally RViz. `controller:=trajectory`
@@ -27,8 +28,9 @@ from mobile_manipulator_moveit_config import build_moveit_config, controllers_fi
 def _nodes(context):
     arm = LaunchConfiguration('arm').perform(context)
     controller = LaunchConfiguration('controller').perform(context)
+    ik = LaunchConfiguration('ik').perform(context)
     config_pkg = get_package_share_directory('mobile_manipulator_moveit_config')
-    moveit_config = build_moveit_config(arm, hardware=hardware_for(controller))
+    moveit_config = build_moveit_config(arm, hardware=hardware_for(controller), ik=ik)
     controllers = controllers_file(arm, controller)
 
     controller_spawn_args = ['lift_arm_controller', '--controller-manager', '/controller_manager']
@@ -69,6 +71,8 @@ def generate_launch_description():
                               description='ur10e, ur5e, ... or generic_6dof'),
         DeclareLaunchArgument('controller', default_value='trajectory',
                               description='trajectory (joint_trajectory_controller) or jtac'),
+        DeclareLaunchArgument('ik', default_value='kdl',
+                              description='kdl, pick_ik or trac_ik (the last two need their packages)'),
         DeclareLaunchArgument('rviz', default_value='true'),
         OpaqueFunction(function=_nodes),
     ])
