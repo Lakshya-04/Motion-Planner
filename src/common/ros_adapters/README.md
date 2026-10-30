@@ -3,7 +3,6 @@ type: Reference
 title: ros_adapters
 description: Package README for the shared ROS-boundary adapter layer implementing core_types' ports -- RclcppLogger and the toCore()/toRos() conversion free functions.
 tags: [ros-adapters, ports-and-adapters, package-readme]
-generated: { by: claude-code/fable-5, at: 2026-07-25T06:27:42Z }
 status: stable
 ---
 

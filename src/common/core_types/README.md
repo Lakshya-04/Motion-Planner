@@ -3,7 +3,6 @@ type: Reference
 title: core_types
 description: Package README for the pure C++ domain types + ports library at the bottom of the hexagonal split -- Pose, Trajectory, Logger, zero rclcpp/ROS message deps.
 tags: [core-types, hexagonal-architecture, package-readme]
-generated: { by: claude-code/fable-5, at: 2026-07-25T06:27:42Z }
 status: stable
 ---
 
