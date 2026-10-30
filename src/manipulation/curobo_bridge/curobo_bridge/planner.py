@@ -58,11 +58,54 @@ def voxelize_points(points: np.ndarray, voxel: float = 0.05, max_boxes: int = 20
     return [Box(f'pc_{i}', tuple(((c + 0.5) * size).tolist()), (size, size, size)) for i, c in enumerate(cells)]
 
 
+@dataclass
+class EsdfSpec:
+    """The fixed voxel grid the planner reserves for an ESDF (cuRobo allocates it at construction).
+
+    `dims` are the full extents (m) and must be an even number of voxels per axis. The grid is
+    centred on `center` in the robot base frame; the centre can move per update, the size cannot.
+    """
+    dims: Tuple[float, float, float] = (2.0, 2.0, 2.0)
+    voxel_size: float = 0.04
+    center: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+    def shape(self) -> Tuple[int, int, int]:
+        n = tuple(int(round(d / self.voxel_size)) for d in self.dims)
+        if any(c < 2 or c % 2 for c in n):
+            raise ValueError(f'ESDF grid {self.dims} at {self.voxel_size} m needs an even voxel count '
+                             f'per axis, got {n}')
+        return n
+
+
+def points_to_esdf(points: np.ndarray, spec: EsdfSpec, max_distance: float = 1.0) -> np.ndarray:
+    """Signed distance field (m, positive OUTSIDE obstacles) of a point cloud on `spec`'s grid.
+
+    Each point occupies the voxel it falls in; points outside the grid are ignored. The result has
+    shape (nx, ny, nz) with cell (i, j, k) centred at `center + ((i, j, k) + 0.5 - n/2) * voxel`.
+    Distances are clamped to +-max_distance. Needs scipy.
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    nx, ny, nz = spec.shape()
+    occupied = np.zeros((nx, ny, nz), dtype=bool)
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    if len(pts):
+        idx = np.floor((pts - np.asarray(spec.center)) / spec.voxel_size + np.array([nx, ny, nz]) / 2.0).astype(int)
+        inside = np.all((idx >= 0) & (idx < np.array([nx, ny, nz])), axis=1)
+        idx = idx[inside]
+        occupied[idx[:, 0], idx[:, 1], idx[:, 2]] = True
+    if not occupied.any():
+        return np.full((nx, ny, nz), max_distance, dtype=np.float32)
+    outside = distance_transform_edt(~occupied) * spec.voxel_size
+    inside_d = distance_transform_edt(occupied) * spec.voxel_size
+    return np.clip(outside - inside_d, -max_distance, max_distance).astype(np.float32)
+
+
 class CuroboPlanner:
     """Joint-goal and pose-goal planning with cuRobo v2 on the GPU."""
 
     def __init__(self, robot: str = 'franka.yml', max_goalset: int = 1, max_boxes: int = 256,
-                 warmup: bool = True):
+                 esdf: Optional[EsdfSpec] = None, warmup: bool = True):
         import torch
         from curobo.motion_planner import MotionPlanner, MotionPlannerCfg
         from curobo.types import JointState
@@ -73,8 +116,13 @@ class CuroboPlanner:
         self._JointState = JointState
         # cuRobo allocates the obstacle cache up front; update_world can then swap scenes up to this size.
         self.max_boxes = max_boxes
+        self.esdf = esdf
+        cache = {'cuboid': max_boxes}
+        if esdf is not None:
+            esdf.shape()   # validate before allocating anything on the GPU
+            cache['voxel'] = {'layers': 1, 'dims': list(esdf.dims), 'voxel_size': esdf.voxel_size}
         self._planner = MotionPlanner(MotionPlannerCfg.create(
-            robot=robot, max_goalset=max_goalset, collision_cache={'cuboid': max_boxes}))
+            robot=robot, max_goalset=max_goalset, collision_cache=cache))
         if warmup:
             self._planner.warmup(enable_graph=True, num_warmup_iterations=3)
         self._world_set = False
@@ -98,28 +146,63 @@ class CuroboPlanner:
 
     # ---- world ------------------------------------------------------------------------------
     def set_world(self, boxes: Sequence[Box] = (), points: Optional[np.ndarray] = None,
-                  point_voxel: float = 0.05) -> int:
-        """Replaces the world. Returns the number of boxes handed to cuRobo.
+                  point_voxel: float = 0.05, esdf: Optional[np.ndarray] = None,
+                  esdf_center: Optional[Sequence[float]] = None) -> int:
+        """Replaces the world. Returns the number of obstacles handed to cuRobo (boxes + 1 per ESDF).
 
-        Points are voxelized into whatever room the explicit boxes leave in the obstacle cache
-        (`max_boxes`); explicit boxes beyond the cache are an error, not silently dropped.
+        Points: with an ESDF grid configured (`esdf=EsdfSpec(...)` at construction) they become that
+        grid's distance field; otherwise they are voxelized into cubes (capped by the obstacle
+        cache, conservative). `esdf` passes a ready-made field instead (nx, ny, nz; metres, positive
+        outside obstacles, e.g. from the scene model or a mapper) on the configured grid, centred
+        at `esdf_center`. Explicit boxes beyond the cache are an error, not silently dropped.
         """
         from curobo.scene import Cuboid, Scene
 
         all_boxes = list(boxes)
         if len(all_boxes) > self.max_boxes:
             raise ValueError(f'{len(all_boxes)} boxes exceed the obstacle cache ({self.max_boxes})')
-        if points is not None and len(points) > 0:
-            all_boxes += voxelize_points(points, point_voxel, self.max_boxes - len(all_boxes))
+        field = None
+        if esdf is not None:
+            if self.esdf is None:
+                raise ValueError('no ESDF grid configured: construct the planner with esdf=EsdfSpec(...)')
+            if tuple(np.shape(esdf)) != self.esdf.shape():
+                raise ValueError(f'ESDF shape {tuple(np.shape(esdf))} != grid {self.esdf.shape()}')
+            field = np.asarray(esdf, dtype=np.float32)
+        elif points is not None and len(points) > 0:
+            if self.esdf is not None:
+                field = points_to_esdf(points, self._grid(esdf_center))
+            else:
+                all_boxes += voxelize_points(points, point_voxel, self.max_boxes - len(all_boxes))
         cuboids = [Cuboid(name=b.id, dims=list(b.size), pose=[*b.center, *b.quat_wxyz]) for b in all_boxes]
-        self._planner.update_world(Scene(cuboid=cuboids))
+        voxels = self._voxel_scene(field, esdf_center) if self.esdf is not None else []
+        self._planner.update_world(Scene(cuboid=cuboids, voxel=voxels))
         self._world_set = True
-        return len(cuboids)
+        return len(cuboids) + (1 if field is not None else 0)
 
     def clear_world(self) -> None:
         from curobo.scene import Scene
-        self._planner.update_world(Scene())
+        voxels = self._voxel_scene(None, None) if self.esdf is not None else []
+        self._planner.update_world(Scene(voxel=voxels))
         self._world_set = False
+
+    # ---- ESDF helpers -----------------------------------------------------------------------
+    def _grid(self, center: Optional[Sequence[float]]) -> EsdfSpec:
+        c = tuple(center) if center is not None else self.esdf.center
+        return EsdfSpec(self.esdf.dims, self.esdf.voxel_size, c)
+
+    def _voxel_scene(self, field: Optional[np.ndarray], center: Optional[Sequence[float]]):
+        """The voxel layer for update_world. With no field it is an all-free grid, because the cache
+        keeps the previous layer otherwise (a stale ESDF would silently stay in the world)."""
+        from curobo.scene import VoxelGrid
+        t = self._torch
+        spec = self._grid(center)
+        if field is None:
+            field = np.full(spec.shape(), 1.0, dtype=np.float32)    # far outside everything
+        # Same convention as ours (positive outside; cuRobo initialises empty voxels to +10000) and
+        # x-major flattening, so the field goes in as is.
+        feature = t.as_tensor(field.reshape(-1), device='cuda', dtype=t.float32)
+        return [VoxelGrid(name='esdf', pose=[*spec.center, 1.0, 0.0, 0.0, 0.0], dims=list(spec.dims),
+                          voxel_size=spec.voxel_size, feature_tensor=feature)]
 
     # ---- planning ---------------------------------------------------------------------------
     def plan_joint(self, start: Sequence[float], goal: Sequence[float]) -> PlanResult:

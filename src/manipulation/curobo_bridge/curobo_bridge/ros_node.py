@@ -1,7 +1,9 @@
 """ROS 2 shell over CuroboPlanner: services for joint / pose planning and the world.
 
 Parameters: `robot` (cuRobo robot config: a bundled name like franka.yml or an absolute path to one
-made by docker/tools/generate_curobo_robot.py), `max_boxes` (obstacle cache size). Services (under
+made by docker/tools/generate_curobo_robot.py), `max_boxes` (obstacle cache size), and optionally
+`esdf_dims` (3 values, m), `esdf_voxel_size`, `esdf_center` to reserve an ESDF grid: set_world points
+then become a distance field instead of cubes. Services (under
 the node name): ~/plan_joint, ~/plan_pose, ~/set_world. Everything is in the robot base frame.
 
 Run it with the Python that has torch and cuRobo (in the gpu image that is the venv, not the system
@@ -18,12 +20,22 @@ from rclpy.node import Node
 from sensor_msgs_py import point_cloud2
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-from curobo_bridge.planner import Box, CuroboPlanner, PlanResult
+from curobo_bridge.planner import Box, CuroboPlanner, EsdfSpec, PlanResult
 
 
 def _duration(seconds: float) -> Duration:
     sec = int(seconds)
     return Duration(sec=sec, nanosec=int(round((seconds - sec) * 1e9)))
+
+
+def esdf_from_parameters(dims, voxel_size, center):
+    """EsdfSpec from node parameters; an empty `dims` means no ESDF grid (points become cubes)."""
+    if not len(dims):
+        return None
+    if len(dims) != 3:
+        raise ValueError(f'esdf_dims needs 3 values, got {len(dims)}')
+    return EsdfSpec(tuple(float(d) for d in dims), float(voxel_size),
+                    tuple(float(c) for c in center) if len(center) else (0.0, 0.0, 0.0))
 
 
 def to_trajectory(result: PlanResult) -> JointTrajectory:
@@ -50,10 +62,16 @@ class CuroboPlannerNode(Node):
         super().__init__('curobo_planner', **node_kwargs)
         robot = self.declare_parameter('robot', 'franka.yml').value
         max_boxes = int(self.declare_parameter('max_boxes', 256).value)
+        esdf_dims = self.declare_parameter('esdf_dims', [0.0]).value
+        esdf_dims = [d for d in esdf_dims if d > 0.0]
+        esdf_voxel = float(self.declare_parameter('esdf_voxel_size', 0.04).value)
+        esdf_center = self.declare_parameter('esdf_center', [0.0, 0.0, 0.0]).value
         self._planner = planner
         if self._planner is None:
             try:
-                self._planner = CuroboPlanner(robot, max_boxes=max_boxes)
+                self._planner = CuroboPlanner(
+                    robot, max_boxes=max_boxes,
+                    esdf=esdf_from_parameters(esdf_dims, esdf_voxel, esdf_center))
                 self.get_logger().info(
                     f'cuRobo ready: {self._planner.dimension} joints, tool {self._planner.tool_frames}')
             except Exception as e:  # noqa: BLE001 - report, keep serving "unavailable"

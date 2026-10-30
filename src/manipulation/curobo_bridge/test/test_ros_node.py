@@ -195,3 +195,13 @@ def test_real_planner_through_the_node():
         node.destroy_node()
         client_node.destroy_node()
         rclpy.shutdown()
+
+
+def test_esdf_parameters():
+    from curobo_bridge.ros_node import esdf_from_parameters
+    assert esdf_from_parameters([], 0.04, []) is None
+    spec = esdf_from_parameters([2.0, 2.0, 1.0], 0.05, [0.3, 0.0, 0.5])
+    assert spec.dims == (2.0, 2.0, 1.0) and spec.voxel_size == 0.05 and spec.center == (0.3, 0.0, 0.5)
+    assert esdf_from_parameters([2.0, 2.0, 1.0], 0.05, []).center == (0.0, 0.0, 0.0)
+    with pytest.raises(ValueError):
+        esdf_from_parameters([2.0, 2.0], 0.05, [])

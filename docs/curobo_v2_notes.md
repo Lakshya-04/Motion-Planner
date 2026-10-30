@@ -204,3 +204,28 @@ node running) in the `full` image: C++ client -> ROS -> Python node -> cuRobo on
 trajectory that reaches the goal, and `no_path` once a slab swallows the robot. Start the node with
 the venv Python (`/opt/venv/bin/python -m curobo_bridge.ros_node`): `ros2 run` uses the system
 Python, which has no torch, and the node then answers `unavailable`.
+
+## ESDF world (verified on the GPU)
+
+Reserve a voxel grid when the planner is built, then points (or a ready-made field) become one
+distance field instead of thousands of cubes:
+
+```python
+planner = CuroboPlanner('franka.yml', esdf=EsdfSpec(dims=(2.0, 2.0, 2.0), voxel_size=0.05, center=(0.3, 0, 0.5)))
+planner.set_world(points=cloud)            # points -> ESDF on that grid
+planner.set_world(esdf=field, esdf_center=...)   # or a field from the scene model / a mapper
+```
+
+- cuRobo allocates the voxel cache at construction (`collision_cache={"voxel": {"layers": 1, "dims":
+  [...], "voxel_size": ...}}`), so grid size and voxel size are fixed; the centre can move per update.
+  Voxel counts per axis must be even (the cell centre formula is `(i + 0.5 - n/2) * voxel`).
+- **Convention:** positive outside obstacles, negative inside (the empty cache starts at +10000).
+  Our `EsdfGrid` uses the same, so a field goes in unchanged. (`VoxelGrid.get_occupied_voxels` reads
+  as if the sign were the other way round; do not trust it.)
+- **Layout:** x-major (`ix * ny * nz + iy * nz + iz`), i.e. a C-order `(nx, ny, nz)` array flattened.
+  Checked end to end: an obstacle blob at the robot's tool position blocks the start pose, the same
+  blob with x and z swapped does not.
+- `update_world` keeps the previous voxel layer unless a new one is given, so `clear_world` submits
+  an all-free grid; otherwise a stale ESDF would stay in the world silently.
+- `points_to_esdf` (numpy + scipy EDT) is the bridge for sparse filtered clouds; dense depth should
+  use cuRobo's own `Mapper`. The node takes `esdf_dims`, `esdf_voxel_size`, `esdf_center` parameters.
