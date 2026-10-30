@@ -162,3 +162,20 @@ Facts learned integrating it:
 
 Not done: a cuRobo robot config for our mobile manipulator (URDF + sphere fit via cuRobo's
 `robot_builder`), the point-cloud ESDF path, and the ROS / C++ client.
+
+## Our own robot in cuRobo (verified)
+
+```
+docker run --rm --gpus all -v "$PWD/robots:/robots" -v "$PWD/docker/tools:/tools:ro" motion-planner:gpu \
+  /opt/venv/bin/python /tools/generate_curobo_robot.py --urdf /robots/meshed/robot.urdf \
+  --tool-frame tcp_link --out /robots/mm_arm.yml
+```
+
+- Same mesh-converted URDF as the VAMP pipeline (`docker/tools/primitives_to_meshes.py`): cuRobo's
+  `RobotBuilder` fits spheres (MorphIt) and samples the collision matrix; 396 spheres on 12 links,
+  ~80 s on the 4 GB GPU, 38.5% of sampled poses collision-free (VAMP's Cricket model: 31.6%).
+- The config stores **absolute** paths to the URDF and mesh root, so mount them at the same path
+  when planning (`/robots`). `CuroboPlanner("/robots/mm_arm.yml")` then plans (1.5 s joint move) and
+  correctly fails with `no_path` for a slab through the arm.
+- The `Start or End state in collision` lines cuRobo prints during warmup are its own sampling of
+  invalid seeds, not errors.
