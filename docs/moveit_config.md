@@ -114,9 +114,8 @@ The generic 6-DOF arm gives the same picture (KDL excess 0.65 / 0.29 with 4 / 2 
 0.00 with 1 / 0). For targets within 0.4 rad of the seed all three behave (KDL and TRAC-IK 20/20, no
 excess), so the difference only shows on larger moves, where KDL can return a far or wrapped branch.
 
-- **Recommendation:** `trac_ik` with `Distance` whenever the plugin is installed (it prefers the seed's
-  branch); `kdl` stays the default because it ships with MoveIt and the Docker deps layer only gains
-  `trac_ik_kinematics_plugin` when the image is rebuilt (it is now an `exec_depend`).
+- **Default: `trac_ik` with `Distance`** (it prefers the seed's branch). `kdl` ships with MoveIt and
+  stays available as `ik:=kdl`. The plugin is an `exec_depend`, so the Docker deps layer installs it.
 - `pick_ik` is kept as an opt-in config but performed poorly here (tolerances / scales untuned for
   these poses); do not use it without tuning.
 - The 7-DOF `lift_arm` group is redundant, so even TRAC-IK still jumps branch on a couple of poses;

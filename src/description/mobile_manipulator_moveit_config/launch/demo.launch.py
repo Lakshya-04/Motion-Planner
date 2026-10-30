@@ -3,7 +3,7 @@
   ros2 launch mobile_manipulator_moveit_config demo.launch.py arm:=ur10e
   ros2 launch mobile_manipulator_moveit_config demo.launch.py arm:=generic_6dof rviz:=false
   ros2 launch mobile_manipulator_moveit_config demo.launch.py controller:=jtac
-  ros2 launch mobile_manipulator_moveit_config demo.launch.py ik:=pick_ik   (or ik:=trac_ik)
+  ros2 launch mobile_manipulator_moveit_config demo.launch.py ik:=kdl   (or ik:=pick_ik)
 
 Starts robot_state_publisher, ros2_control (mock hardware) with the joint state broadcaster and
 one 7-joint controller (lift + arm), move_group, and optionally RViz. `controller:=trajectory`
@@ -71,8 +71,8 @@ def generate_launch_description():
                               description='ur10e, ur5e, ... or generic_6dof'),
         DeclareLaunchArgument('controller', default_value='trajectory',
                               description='trajectory (joint_trajectory_controller) or jtac'),
-        DeclareLaunchArgument('ik', default_value='kdl',
-                              description='kdl, pick_ik or trac_ik (the last two need their packages)'),
+        DeclareLaunchArgument('ik', default_value='trac_ik',
+                              description='trac_ik (default), kdl or pick_ik'),
         DeclareLaunchArgument('rviz', default_value='true'),
         OpaqueFunction(function=_nodes),
     ])

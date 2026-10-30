@@ -22,11 +22,11 @@ KINEMATICS = {'kdl': 'config/kinematics.yaml', 'pick_ik': 'config/kinematics_pic
               'trac_ik': 'config/kinematics_trac_ik.yaml'}
 
 
-def build_moveit_config(arm='ur10e', hardware='mock', ik='kdl'):
+def build_moveit_config(arm='ur10e', hardware='mock', ik='trac_ik'):
     """MoveItConfigs for `arm` with the lift + arm planning groups and the given hardware.
 
-    `ik` picks the kinematics solver: 'kdl' (always available), 'pick_ik' or 'trac_ik' (each needs its
-    package; see docs/moveit_config.md for how they compare).
+    `ik` picks the kinematics solver: 'trac_ik' (default: stays on the seed's branch on large moves),
+    'kdl' (ships with MoveIt) or 'pick_ik' (opt-in, untuned); see docs/moveit_config.md.
     """
     description = get_package_share_directory(DESCRIPTION)
     return (
