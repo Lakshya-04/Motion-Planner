@@ -195,8 +195,8 @@ services.
 
 `curobo_planner::CuroboClientPlanner` implements the `motion_planner::Planner` port by calling the
 node's services: `plan()` (joint goal, or exactly one pose goal), `setWorld()` / `clearWorld()`
-(boxes + points with `points_origin` applied). `ik()` and `collision()` return `unsupported` for
-now. The node passed in must be spun elsewhere (calls wait on the service future); a missing server
+(boxes + points with `points_origin` applied), `ik()` (pose as xyz + quaternion or xyz + rpy, optional
+seed) and `collision()` (joint values and/or a trajectory; pose-based inputs are `unsupported`). The node passed in must be spun elsewhere (calls wait on the service future); a missing server
 yields `unavailable` after `wait_for_service_sec`, never a hang.
 
 Verified: 6 tests against a stand-in server, plus a gated end-to-end test (`CUROBO_START=...`,
@@ -229,3 +229,22 @@ planner.set_world(esdf=field, esdf_center=...)   # or a field from the scene mod
   an all-free grid; otherwise a stale ESDF would stay in the world silently.
 - `points_to_esdf` (numpy + scipy EDT) is the bridge for sparse filtered clouds; dense depth should
   use cuRobo's own `Mapper`. The node takes `esdf_dims`, `esdf_voxel_size`, `esdf_center` parameters.
+
+## IK and validity checks
+
+`CuroboPlanner.solve_ik` (cuRobo `ik_solver.solve_pose`, collision-free, seedable),
+`check_states` (joint limits + self-collision + world, via the graph planner's feasibility check)
+and `check_motion` (the same on interpolated states, largest joint step `max_step`; a sampled check,
+so gaps thinner than `max_step` can be missed). ROS: `~/solve_ik`, `~/check_motion`; the C++ client's
+`ik()` / `collision()` call them. Checked on the GPU: the default pose is valid; out-of-limits, a folded
+(self-colliding) pose and a pose inside an obstacle are not; IK of a pose under an obstacle fails
+with `no_solution`.
+
+### One planner per process
+
+Building a planner with a voxel cache (an ESDF grid) while a plain planner already runs in the same
+process breaks the plain one: Warp specialises its collision kernels on the cache layout, and the
+older planner then fails with `illegal memory access` (two plain planners are fine, and a lone ESDF
+planner is fine). The node builds exactly one planner, so deployment is unaffected; in tests call
+`CuroboPlanner.close()` before building one with a different layout (the ESDF tests live in their own
+module for this reason).

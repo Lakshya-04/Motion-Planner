@@ -6,9 +6,11 @@
 
 #include <Eigen/Geometry>
 #include <curobo_bridge_msgs/msg/box.hpp>
+#include <curobo_bridge_msgs/srv/check_motion.hpp>
 #include <curobo_bridge_msgs/srv/plan_joint.hpp>
 #include <curobo_bridge_msgs/srv/plan_pose.hpp>
 #include <curobo_bridge_msgs/srv/set_world.hpp>
+#include <curobo_bridge_msgs/srv/solve_ik.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
 #include "core_types/null_logger.hpp"
@@ -16,9 +18,11 @@
 namespace curobo_planner
 {
 namespace mp = motion_planner;
+using curobo_bridge_msgs::srv::CheckMotion;
 using curobo_bridge_msgs::srv::PlanJoint;
 using curobo_bridge_msgs::srv::PlanPose;
 using curobo_bridge_msgs::srv::SetWorld;
+using curobo_bridge_msgs::srv::SolveIk;
 
 namespace
 {
@@ -77,6 +81,8 @@ struct CuroboClientPlanner::Impl
   rclcpp::Client<PlanJoint>::SharedPtr plan_joint;
   rclcpp::Client<PlanPose>::SharedPtr plan_pose;
   rclcpp::Client<SetWorld>::SharedPtr set_world;
+  rclcpp::Client<SolveIk>::SharedPtr solve_ik;
+  rclcpp::Client<CheckMotion>::SharedPtr check_motion;
 
   template<typename Srv>
   typename Srv::Response::SharedPtr call(
@@ -107,6 +113,8 @@ CuroboClientPlanner::CuroboClientPlanner(
   impl_->plan_joint = impl_->node->create_client<PlanJoint>(options.node_name + "/plan_joint");
   impl_->plan_pose = impl_->node->create_client<PlanPose>(options.node_name + "/plan_pose");
   impl_->set_world = impl_->node->create_client<SetWorld>(options.node_name + "/set_world");
+  impl_->solve_ik = impl_->node->create_client<SolveIk>(options.node_name + "/solve_ik");
+  impl_->check_motion = impl_->node->create_client<CheckMotion>(options.node_name + "/check_motion");
 }
 
 CuroboClientPlanner::~CuroboClientPlanner() = default;
@@ -198,22 +206,92 @@ bool CuroboClientPlanner::clearWorld(std::string * message)
   return setWorld(mp::WorldGeometryUpdate{}, message);
 }
 
-mp::IkResult CuroboClientPlanner::ik(const mp::IkRequest &)
+mp::IkResult CuroboClientPlanner::ik(const mp::IkRequest & request)
 {
-  mp::IkResult r;
-  r.message = "the cuRobo client does not expose IK; use an IK backend";
-  r.failure_reason_code = "unsupported";
-  r.failure_stage = mp::FailureStage::kPrecheck;
-  return r;
+  mp::IkResult out;
+  out.failure_stage = mp::FailureStage::kPrecheck;
+  const auto & t = request.target_pose;
+  if (t.size() != 6 && t.size() != 7) {
+    out.failure_reason_code = "invalid_request";
+    out.message = "target_pose must be xyz+rpy (6) or xyz+quaternion x y z w (7)";
+    return out;
+  }
+  auto req = std::make_shared<SolveIk::Request>();
+  req->pose.position.x = t[0];
+  req->pose.position.y = t[1];
+  req->pose.position.z = t[2];
+  if (t.size() == 7) {
+    req->pose.orientation.x = t[3];
+    req->pose.orientation.y = t[4];
+    req->pose.orientation.z = t[5];
+    req->pose.orientation.w = t[6];
+  } else {
+    const Eigen::Quaterniond q = Eigen::AngleAxisd(t[5], Eigen::Vector3d::UnitZ()) *
+      Eigen::AngleAxisd(t[4], Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(t[3], Eigen::Vector3d::UnitX());
+    req->pose.orientation.x = q.x();
+    req->pose.orientation.y = q.y();
+    req->pose.orientation.z = q.z();
+    req->pose.orientation.w = q.w();
+  }
+  req->seed = request.joint_seed;
+  std::string error;
+  auto res = impl_->call<SolveIk>(impl_->solve_ik, req, error);
+  if (!res) {
+    out.failure_reason_code = "unavailable";
+    out.message = error;
+    return out;
+  }
+  if (!res->success) {
+    out.failure_reason_code = res->failure_reason_code;
+    out.failure_stage = stageFrom(res->failure_stage);
+    out.message = res->message;
+    return out;
+  }
+  out.success = true;
+  out.failure_stage = mp::FailureStage::kNone;
+  out.joint_solution = res->joints;
+  return out;
 }
 
-mp::CollisionResult CuroboClientPlanner::collision(const mp::CollisionRequest &)
+mp::CollisionResult CuroboClientPlanner::collision(const mp::CollisionRequest & request)
 {
-  mp::CollisionResult r;
-  r.message = "the cuRobo client does not expose collision checks";
-  r.failure_reason_code = "unsupported";
-  r.failure_stage = mp::FailureStage::kPrecheck;
-  return r;
+  mp::CollisionResult out;
+  out.failure_stage = mp::FailureStage::kPrecheck;
+  if (!request.target_pose.empty() || !request.trajectory_poses.empty()) {
+    out.failure_reason_code = "unsupported";
+    out.message = "pose-based collision checks are not supported; give joint values";
+    return out;
+  }
+  if (request.joint_values.empty() && request.trajectory_joint_values.empty()) {
+    out.failure_reason_code = "invalid_request";
+    out.message = "need joint_values or trajectory_joint_values";
+    return out;
+  }
+  auto req = std::make_shared<CheckMotion::Request>();
+  auto add = [&req](const std::vector<double> & q) {
+      trajectory_msgs::msg::JointTrajectoryPoint p;
+      p.positions = q;
+      req->states.points.push_back(p);
+    };
+  if (!request.joint_values.empty()) {add(request.joint_values);}
+  for (const auto & q : request.trajectory_joint_values) {add(q);}
+  req->max_step = request.trajectory_joint_values.size() > 1 ? 0.05 : 0.0;
+  std::string error;
+  auto res = impl_->call<CheckMotion>(impl_->check_motion, req, error);
+  if (!res) {
+    out.failure_reason_code = "unavailable";
+    out.message = error;
+    return out;
+  }
+  if (!res->success) {
+    out.failure_reason_code = "invalid_request";
+    out.message = res->message;
+    return out;
+  }
+  out.success = true;
+  out.collision_free = res->collision_free;
+  out.failure_stage = mp::FailureStage::kNone;
+  return out;
 }
 
 }  // namespace curobo_planner

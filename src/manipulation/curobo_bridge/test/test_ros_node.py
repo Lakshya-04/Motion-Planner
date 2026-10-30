@@ -9,7 +9,7 @@ rclpy = pytest.importorskip('rclpy')
 msgs = pytest.importorskip('curobo_bridge_msgs.srv')
 Box = pytest.importorskip('curobo_bridge_msgs.msg').Box
 
-from curobo_bridge.planner import PlanResult  # noqa: E402
+from curobo_bridge.planner import IkResult, PlanResult  # noqa: E402
 from curobo_bridge.ros_node import CuroboPlannerNode  # noqa: E402
 from geometry_msgs.msg import Pose  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
@@ -37,6 +37,22 @@ class FakePlanner:
     def plan_pose(self, start, position, quat_wxyz):
         self.pose_args = (tuple(position), tuple(quat_wxyz))
         return PlanResult(success=True, joint_names=self.joint_names, positions=[list(start)], dt=0.1)
+
+    def solve_ik(self, position, quat_wxyz, seed=None):
+        self.ik_args = (tuple(position), tuple(quat_wxyz), list(seed or []))
+        if position[0] > 5.0:
+            return IkResult(failure_reason_code='no_solution', failure_stage='planning', message='none')
+        return IkResult(success=True, joint_names=self.joint_names, joints=[0.1, 0.2], position_error=1e-4)
+
+    def check_states(self, states):
+        for q in states:
+            if len(q) != 2:
+                raise ValueError('wrong joint count')
+        return [q[0] < 1.0 for q in states]
+
+    def check_motion(self, waypoints, max_step=0.05):
+        self.motion_args = (len(waypoints), max_step)
+        return waypoints[-1][1] < 1.0
 
     def set_world(self, boxes=(), points=None, point_voxel=0.05):
         if len(boxes) > self.max_boxes:
@@ -205,3 +221,37 @@ def test_esdf_parameters():
     assert esdf_from_parameters([2.0, 2.0, 1.0], 0.05, []).center == (0.0, 0.0, 0.0)
     with pytest.raises(ValueError):
         esdf_from_parameters([2.0, 2.0], 0.05, [])
+
+
+def _states(*rows):
+    from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+    return JointTrajectory(points=[JointTrajectoryPoint(positions=list(r)) for r in rows])
+
+
+def test_solve_ik_converts_the_pose_and_returns_joints(harness):
+    fake, call = harness
+    pose = Pose()
+    pose.position.x = 0.4
+    pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w = 0.1, 0.2, 0.3, 0.9
+    r = call(msgs.SolveIk, 'solve_ik', msgs.SolveIk.Request(pose=pose, seed=[0.5, 0.5]))
+    assert r.success and list(r.joints) == [0.1, 0.2] and list(r.joint_names) == ['j1', 'j2']
+    assert r.position_error == pytest.approx(1e-4)
+    assert fake.ik_args == ((0.4, 0.0, 0.0), (0.9, 0.1, 0.2, 0.3), [0.5, 0.5])   # xyzw in, wxyz out
+    pose.position.x = 9.0
+    r = call(msgs.SolveIk, 'solve_ik', msgs.SolveIk.Request(pose=pose))
+    assert not r.success and (r.failure_reason_code, r.failure_stage) == ('no_solution', 'planning')
+
+
+def test_check_motion_reports_per_state_and_sampled_motion(harness):
+    fake, call = harness
+    r = call(msgs.CheckMotion, 'check_motion',
+             msgs.CheckMotion.Request(states=_states([0.0, 0.0], [2.0, 0.0])))
+    assert r.success and list(r.state_valid) == [True, False] and not r.collision_free
+    r = call(msgs.CheckMotion, 'check_motion',
+             msgs.CheckMotion.Request(states=_states([0.0, 0.0], [0.5, 0.5]), max_step=0.1))
+    assert r.success and r.collision_free and fake.motion_args == (2, pytest.approx(0.1))
+    r = call(msgs.CheckMotion, 'check_motion',
+             msgs.CheckMotion.Request(states=_states([0.0, 0.0], [2.0, 0.5]), max_step=0.1))
+    assert r.success and list(r.state_valid) == [True, False] and not r.collision_free
+    r = call(msgs.CheckMotion, 'check_motion', msgs.CheckMotion.Request(states=_states([0.0])))
+    assert not r.success and 'wrong joint count' in r.message

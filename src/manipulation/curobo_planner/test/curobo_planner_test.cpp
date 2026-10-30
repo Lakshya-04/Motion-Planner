@@ -1,22 +1,27 @@
 // A real client talking to a stand-in cuRobo planner node (same process, real ROS services).
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <sstream>
 #include <thread>
 
+#include <curobo_bridge_msgs/srv/check_motion.hpp>
 #include <curobo_bridge_msgs/srv/plan_joint.hpp>
 #include <curobo_bridge_msgs/srv/plan_pose.hpp>
 #include <curobo_bridge_msgs/srv/set_world.hpp>
+#include <curobo_bridge_msgs/srv/solve_ik.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include "curobo_planner/curobo_planner.hpp"
 
+using curobo_bridge_msgs::srv::CheckMotion;
 using curobo_bridge_msgs::srv::PlanJoint;
 using curobo_bridge_msgs::srv::PlanPose;
 using curobo_bridge_msgs::srv::SetWorld;
+using curobo_bridge_msgs::srv::SolveIk;
 namespace mp = motion_planner;
 
 namespace
@@ -59,6 +64,30 @@ public:
         r->trajectory.joint_names = {"j1", "j2"};
         r->trajectory.points.resize(1);
       });
+    ik_srv = node->create_service<SolveIk>(
+      "~/solve_ik", [this](const SolveIk::Request::SharedPtr q, SolveIk::Response::SharedPtr r) {
+        last_ik = *q;
+        if (q->pose.position.x > 5.0) {
+          r->failure_reason_code = "no_solution";
+          r->failure_stage = "planning";
+          r->message = "none";
+          return;
+        }
+        r->success = true;
+        r->failure_reason_code = "none";
+        r->joints = {0.1, 0.2};
+      });
+    check_srv = node->create_service<CheckMotion>(
+      "~/check_motion", [this](const CheckMotion::Request::SharedPtr q, CheckMotion::Response::SharedPtr r) {
+        last_check = *q;
+        r->success = true;
+        r->collision_free = true;
+        for (const auto & p : q->states.points) {
+          const bool ok = p.positions[0] < 1.0;
+          r->state_valid.push_back(ok);
+          r->collision_free = r->collision_free && ok;
+        }
+      });
     world = node->create_service<SetWorld>(
       "~/set_world", [this](const SetWorld::Request::SharedPtr q, SetWorld::Response::SharedPtr r) {
         last_world = *q;
@@ -69,6 +98,10 @@ public:
   }
 
   std::shared_ptr<rclcpp::Node> node;
+  rclcpp::Service<SolveIk>::SharedPtr ik_srv;
+  rclcpp::Service<CheckMotion>::SharedPtr check_srv;
+  SolveIk::Request last_ik;
+  CheckMotion::Request last_check;
   rclcpp::Service<PlanJoint>::SharedPtr joint;
   rclcpp::Service<PlanPose>::SharedPtr pose;
   rclcpp::Service<SetWorld>::SharedPtr world;
@@ -165,8 +198,59 @@ TEST(CuroboClient, RejectsRequestsItCannotServe)
   ambiguous.start_joint_state = {0.0, 0.0};
   ambiguous.target_poses = {core_types::Pose{}, core_types::Pose{}};
   EXPECT_EQ(f.planner->plan(ambiguous).failure_reason_code, "invalid_request");
-  EXPECT_EQ(f.planner->ik(mp::IkRequest{}).failure_reason_code, "unsupported");
-  EXPECT_EQ(f.planner->collision(mp::CollisionRequest{}).failure_reason_code, "unsupported");
+}
+
+TEST(CuroboClient, IkConvertsPosesAndReturnsJoints)
+{
+  Fixture f;
+  mp::IkRequest r;
+  r.target_pose = {0.4, 0.0, 0.3, 0.1, 0.2, 0.3, 0.9};
+  r.joint_seed = {0.5, 0.5};
+  auto res = f.planner->ik(r);
+  ASSERT_TRUE(res.success) << res.message;
+  EXPECT_EQ(res.joint_solution, (std::vector<double>{0.1, 0.2}));
+  EXPECT_DOUBLE_EQ(f.server->last_ik.pose.orientation.w, 0.9);
+  EXPECT_EQ(f.server->last_ik.seed, (std::vector<double>{0.5, 0.5}));
+
+  r.target_pose = {0.4, 0.0, 0.3, 0.0, 0.0, M_PI / 2};   // rpy: yaw 90 degrees
+  ASSERT_TRUE(f.planner->ik(r).success);
+  EXPECT_NEAR(f.server->last_ik.pose.orientation.z, std::sqrt(0.5), 1e-9);
+  EXPECT_NEAR(f.server->last_ik.pose.orientation.w, std::sqrt(0.5), 1e-9);
+
+  r.target_pose = {9.0, 0.0, 0.3, 0, 0, 0, 1};
+  res = f.planner->ik(r);
+  EXPECT_FALSE(res.success);
+  EXPECT_EQ(res.failure_reason_code, "no_solution");
+  EXPECT_EQ(res.failure_stage, mp::FailureStage::kPlanning);
+
+  r.target_pose = {1.0, 2.0};
+  EXPECT_EQ(f.planner->ik(r).failure_reason_code, "invalid_request");
+}
+
+TEST(CuroboClient, CollisionChecksStatesAndMotions)
+{
+  Fixture f;
+  mp::CollisionRequest c;
+  c.joint_values = {0.5, 0.0};
+  auto res = f.planner->collision(c);
+  ASSERT_TRUE(res.success) << res.message;
+  EXPECT_TRUE(res.collision_free);
+  EXPECT_DOUBLE_EQ(f.server->last_check.max_step, 0.0);
+
+  c.joint_values = {2.0, 0.0};
+  EXPECT_FALSE(f.planner->collision(c).collision_free);
+
+  mp::CollisionRequest t;
+  t.trajectory_joint_values = {{0.0, 0.0}, {0.5, 0.0}, {0.9, 0.0}};
+  res = f.planner->collision(t);
+  EXPECT_TRUE(res.collision_free);
+  EXPECT_GT(f.server->last_check.max_step, 0.0);   // a trajectory also asks for the motions
+  EXPECT_EQ(f.server->last_check.states.points.size(), 3U);
+
+  EXPECT_EQ(f.planner->collision(mp::CollisionRequest{}).failure_reason_code, "invalid_request");
+  mp::CollisionRequest pose_based;
+  pose_based.target_pose = {0, 0, 0, 0, 0, 0};
+  EXPECT_EQ(f.planner->collision(pose_based).failure_reason_code, "unsupported");
 }
 
 TEST(CuroboClient, WorldCarriesBoxesAndTransformedPoints)
@@ -263,6 +347,56 @@ TEST(CuroboClientIntegration, PlansOnTheRealNode)
   ASSERT_TRUE(world_ok) << message;
   EXPECT_FALSE(blocked.success);
   EXPECT_EQ(blocked.failure_reason_code, "no_path");
+}
+
+// IK and validity checks against the same real node. CUROBO_TOOL holds the tool pose at CUROBO_START
+// as "x y z qx qy qz qw".
+TEST(CuroboClientIntegration, IkAndCollisionOnTheRealNode)
+{
+  const char * start_env = std::getenv("CUROBO_START");
+  const char * tool_env = std::getenv("CUROBO_TOOL");
+  if (!start_env || !tool_env) {
+    GTEST_SKIP() << "CUROBO_START / CUROBO_TOOL not set";
+  }
+  std::vector<double> start, tool;
+  {std::istringstream in(start_env); for (double v; in >> v;) {start.push_back(v);}}
+  {std::istringstream in(tool_env); for (double v; in >> v;) {tool.push_back(v);}}
+  ASSERT_EQ(tool.size(), 7U);
+  auto node = std::make_shared<rclcpp::Node>("integration_client_ik");
+  rclcpp::executors::SingleThreadedExecutor exec;
+  exec.add_node(node);
+  std::thread spinner([&exec] {exec.spin();});
+  curobo_planner::Options o;
+  o.wait_for_service_sec = 120.0;
+  o.timeout_sec = 120.0;
+  curobo_planner::CuroboClientPlanner planner(node, o);
+
+  mp::IkRequest ik;
+  ik.target_pose = tool;
+  ik.joint_seed = start;
+  const auto solved = planner.ik(ik);
+  mp::CollisionRequest ok;
+  ok.joint_values = solved.joint_solution;
+  const auto ok_res = planner.collision(ok);
+  mp::CollisionRequest out_of_limits;
+  out_of_limits.joint_values = start;
+  out_of_limits.joint_values[0] = 10.0;
+  const auto bad_res = planner.collision(out_of_limits);
+  mp::CollisionRequest path;
+  path.trajectory_joint_values = {start, start};
+  for (auto & v : path.trajectory_joint_values.back()) {v += 0.1;}
+  const auto path_res = planner.collision(path);
+  exec.cancel();
+  spinner.join();
+
+  ASSERT_TRUE(solved.success) << solved.failure_reason_code << ": " << solved.message;
+  ASSERT_EQ(solved.joint_solution.size(), start.size());
+  ASSERT_TRUE(ok_res.success) << ok_res.message;
+  EXPECT_TRUE(ok_res.collision_free);
+  ASSERT_TRUE(bad_res.success);
+  EXPECT_FALSE(bad_res.collision_free);
+  ASSERT_TRUE(path_res.success) << path_res.message;
+  EXPECT_TRUE(path_res.collision_free);
 }
 
 int main(int argc, char ** argv)

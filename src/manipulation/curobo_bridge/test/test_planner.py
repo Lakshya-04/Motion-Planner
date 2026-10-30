@@ -43,7 +43,9 @@ def planner():
     if not torch.cuda.is_available():
         pytest.skip('no CUDA device')
     from curobo_bridge import CuroboPlanner
-    return CuroboPlanner('franka.yml')
+    p = CuroboPlanner('franka.yml')
+    yield p
+    p.close()
 
 
 @needs_gpu
@@ -123,98 +125,58 @@ def test_generated_robot_config_plans_and_respects_obstacles():
     assert p.plan_joint(start, goal).success
 
 
-# ---- ESDF -----------------------------------------------------------------------------------
-scipy = pytest.importorskip('scipy')
-from curobo_bridge.planner import EsdfSpec, points_to_esdf  # noqa: E402
-
-
-def test_esdf_spec_needs_even_voxel_counts():
-    assert EsdfSpec((2.0, 2.0, 2.0), 0.1).shape() == (20, 20, 20)
-    with pytest.raises(ValueError):
-        EsdfSpec((1.0, 2.0, 2.0), 0.4).shape()     # 1.0 / 0.4 -> 2 (ok) but 2.0/0.4 = 5 (odd)
-
-
-def test_esdf_signs_and_values_match_a_brute_force_distance():
-    spec = EsdfSpec((1.0, 1.0, 1.0), 0.1)           # 10^3 voxels, cell centre = (i + 0.5 - 5) * 0.1
-    pts = np.array([[0.05, 0.05, 0.05]])            # inside cell (5, 5, 5)
-    f = points_to_esdf(pts, spec)
-    assert f.shape == (10, 10, 10)
-    assert f[5, 5, 5] < 0                            # occupied voxel is inside
-    assert f[5, 5, 6] == pytest.approx(0.1, abs=1e-6)   # next cell along z is one voxel away
-    assert f[5, 8, 5] == pytest.approx(0.3, abs=1e-6)   # three voxels along y
-    assert f[0, 0, 0] == pytest.approx(0.1 * np.sqrt(75), abs=1e-5)   # Euclidean, not city-block
-    assert np.all(f[np.arange(10) != 5, 0, 0] > 0)
-
-
-def test_esdf_ignores_points_outside_the_grid_and_clamps():
-    spec = EsdfSpec((1.0, 1.0, 1.0), 0.1)
-    far = points_to_esdf(np.array([[5.0, 5.0, 5.0]]), spec)
-    assert np.all(far == 1.0)                       # nothing inside: everything is far from obstacles
-    assert np.max(points_to_esdf(np.array([[0.05, 0.05, 0.05]]), spec, max_distance=0.25)) <= 0.25
-
-
-def test_esdf_grid_follows_its_centre():
-    a = points_to_esdf(np.array([[0.05, 0.05, 0.05]]), EsdfSpec((1.0, 1.0, 1.0), 0.1))
-    b = points_to_esdf(np.array([[1.05, 0.05, 0.05]]), EsdfSpec((1.0, 1.0, 1.0), 0.1, (1.0, 0.0, 0.0)))
-    assert np.array_equal(a, b)                     # same point relative to the grid centre
-
-
-@pytest.fixture(scope='module')
-def esdf_planner():
-    if not torch.cuda.is_available():
-        pytest.skip('no CUDA device')
-    from curobo_bridge import CuroboPlanner
-    return CuroboPlanner('franka.yml', esdf=EsdfSpec((2.0, 2.0, 2.0), 0.05, (0.3, 0.0, 0.5)))
-
-
-def _tool_position(planner):
+@needs_gpu
+def test_ik_recovers_the_default_pose_and_respects_obstacles(planner):
+    from curobo_bridge import Box
     ks = planner._planner.compute_kinematics(planner._state(planner.default_joint_state))
-    return ks.tool_poses.position.reshape(-1, 3)[0].detach().cpu().numpy()
-
-
-def _blob(center, half=0.06, step=0.02):
-    g = np.arange(-half, half + 1e-9, step)
-    return np.array([[center[0] + x, center[1] + y, center[2] + z] for x in g for y in g for z in g])
-
-
-@needs_gpu
-def test_esdf_obstacle_at_the_tool_blocks_and_axes_are_right(esdf_planner):
-    p = esdf_planner
-    tool = _tool_position(p)
-    assert abs(tool[0] - tool[2]) > 0.1, 'test needs distinct x and z to catch swapped axes'
-    goal = list(np.array(p.default_joint_state) + 0.15)
-
-    # a blob around the tool at the start pose: the start is in collision
-    assert p.set_world(points=_blob(tool)) == 1
-    blocked = p.plan_joint(p.default_joint_state, goal)
-    # the same blob with x and z swapped is somewhere else: not touching the robot
-    p.set_world(points=_blob(tool[[2, 1, 0]]))
-    elsewhere = p.plan_joint(p.default_joint_state, goal)
-    p.clear_world()
-    assert not blocked.success, 'an ESDF obstacle at the tool position must block the start'
-    assert elsewhere.success, f'swapped-axes blob should be free: {elsewhere.message}'
+    pos = ks.tool_poses.position.reshape(-1, 3)[0].tolist()
+    quat = ks.tool_poses.quaternion.reshape(-1, 4)[0].tolist()
+    r = planner.solve_ik(pos, quat)
+    assert r.success, r.message
+    assert len(r.joints) == planner.dimension and r.joint_names == planner.joint_names
+    assert r.position_error < 5e-3
+    assert planner.check_states([r.joints]) == [True]
+    # an obstacle sitting on the target pose leaves no collision-free solution
+    planner.set_world([Box('on_target', tuple(pos), (0.3, 0.3, 0.3))])
+    blocked = planner.solve_ik(pos, quat)
+    planner.clear_world()
+    assert not blocked.success and blocked.failure_reason_code == 'no_solution'
 
 
 @needs_gpu
-def test_clear_world_really_removes_the_esdf(esdf_planner):
-    p = esdf_planner
-    tool = _tool_position(p)
-    goal = list(np.array(p.default_joint_state) + 0.15)
-    p.set_world(points=_blob(tool))
-    assert not p.plan_joint(p.default_joint_state, goal).success
-    p.clear_world()
-    assert p.plan_joint(p.default_joint_state, goal).success
+def test_ik_rejects_a_wrong_sized_seed(planner):
+    r = planner.solve_ik((0.4, 0.0, 0.4), seed=[0.0, 0.0])
+    assert not r.success and r.failure_reason_code == 'invalid_request'
 
 
 @needs_gpu
-def test_ready_made_esdf_and_shape_checks(esdf_planner):
-    p = esdf_planner
-    field = points_to_esdf(_blob(_tool_position(p)), p.esdf)
-    assert p.set_world(esdf=field) == 1
-    assert not p.plan_joint(p.default_joint_state, list(np.array(p.default_joint_state) + 0.15)).success
-    p.clear_world()
+def test_state_validity_covers_limits_self_collision_and_world(planner):
+    from curobo_bridge import Box
+    d = planner.default_joint_state
+    out_of_limits = list(d)
+    out_of_limits[0] = 10.0
+    folded = [0.0, 1.7, 0.0, -3.0, 0.0, 3.5, 0.0]
+    assert planner.check_states([d, out_of_limits, folded]) == [True, False, False]
+    planner.set_world([Box('swallow', (0.0, 0.0, 0.4), (3.0, 3.0, 3.0))])
+    assert planner.check_states([d]) == [False]
+    planner.clear_world()
+    assert planner.check_states([d]) == [True]
+    assert planner.check_states([]) == []
     with pytest.raises(ValueError):
-        p.set_world(esdf=np.zeros((4, 4, 4), dtype=np.float32))
+        planner.check_states([[0.0, 0.0]])
+
+
+@needs_gpu
+def test_motion_check_samples_between_waypoints(planner):
+    d = np.array(planner.default_joint_state)
+    assert planner.check_motion([list(d), list(d + 0.1)])
+    # a straight joint-space motion into a joint limit must be reported invalid
+    beyond = list(d)
+    beyond[0] = 10.0
+    assert not planner.check_motion([list(d), beyond])
+    assert planner.check_motion([])
+    with pytest.raises(ValueError):
+        planner.check_motion([list(d)], max_step=0.0)
 
 
 @needs_gpu

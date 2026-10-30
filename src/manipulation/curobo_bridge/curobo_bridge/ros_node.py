@@ -15,7 +15,7 @@ can take a minute); until then the services answer `unavailable` instead of bloc
 import numpy as np
 import rclpy
 from builtin_interfaces.msg import Duration
-from curobo_bridge_msgs.srv import PlanJoint, PlanPose, SetWorld
+from curobo_bridge_msgs.srv import CheckMotion, PlanJoint, PlanPose, SetWorld, SolveIk
 from rclpy.node import Node
 from sensor_msgs_py import point_cloud2
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
@@ -79,6 +79,8 @@ class CuroboPlannerNode(Node):
         self.create_service(PlanJoint, '~/plan_joint', self._plan_joint)
         self.create_service(PlanPose, '~/plan_pose', self._plan_pose)
         self.create_service(SetWorld, '~/set_world', self._set_world)
+        self.create_service(SolveIk, '~/solve_ik', self._solve_ik)
+        self.create_service(CheckMotion, '~/check_motion', self._check_motion)
 
     def _unavailable(self, response):
         return fill(response, PlanResult(failure_reason_code='unavailable', failure_stage='precheck',
@@ -95,6 +97,42 @@ class CuroboPlannerNode(Node):
         p, q = request.goal.position, request.goal.orientation
         return fill(response, self._planner.plan_pose(
             list(request.start), (p.x, p.y, p.z), (q.w, q.x, q.y, q.z)))   # ROS xyzw -> cuRobo wxyz
+
+    def _solve_ik(self, request, response):
+        if self._planner is None:
+            response.failure_reason_code = 'unavailable'
+            response.failure_stage = 'precheck'
+            response.message = 'cuRobo planner is not running'
+            return response
+        p, q = request.pose.position, request.pose.orientation
+        result = self._planner.solve_ik((p.x, p.y, p.z), (q.w, q.x, q.y, q.z), list(request.seed))
+        response.success = result.success
+        response.failure_reason_code = result.failure_reason_code
+        response.failure_stage = result.failure_stage
+        response.message = result.message
+        response.joint_names = list(result.joint_names)
+        response.joints = [float(v) for v in result.joints]
+        response.position_error = result.position_error
+        response.rotation_error = result.rotation_error
+        return response
+
+    def _check_motion(self, request, response):
+        if self._planner is None:
+            response.message = 'cuRobo planner is not running'
+            return response
+        states = [list(pt.positions) for pt in request.states.points]
+        try:
+            valid = self._planner.check_states(states)
+            ok = all(valid)
+            if ok and request.max_step > 0.0 and len(states) > 1:
+                ok = self._planner.check_motion(states, request.max_step)
+        except ValueError as e:
+            response.message = str(e)
+            return response
+        response.success = True
+        response.state_valid = valid
+        response.collision_free = ok
+        return response
 
     def _set_world(self, request, response):
         if self._planner is None:

@@ -38,6 +38,18 @@ class PlanResult:
         return self.dt * max(0, len(self.positions) - 1)
 
 
+@dataclass
+class IkResult:
+    success: bool = False
+    failure_reason_code: str = 'none'
+    failure_stage: str = 'none'
+    message: str = ''
+    joint_names: List[str] = field(default_factory=list)
+    joints: List[float] = field(default_factory=list)
+    position_error: float = 0.0           # m
+    rotation_error: float = 0.0           # rad
+
+
 def voxelize_points(points: np.ndarray, voxel: float = 0.05, max_boxes: int = 2000) -> List[Box]:
     """Turn a point cloud into occupied-voxel boxes (cuRobo's scene has no raw point cloud type).
 
@@ -126,6 +138,12 @@ class CuroboPlanner:
         if warmup:
             self._planner.warmup(enable_graph=True, num_warmup_iterations=3)
         self._world_set = False
+
+    def close(self) -> None:
+        """Releases the GPU resources. Use one planner per process, or close one before building
+        another with a different collision-cache layout (an ESDF grid): Warp specialises its collision
+        kernels on that layout, and a planner built earlier then fails with illegal memory accesses."""
+        self._planner.destroy()
 
     # ---- robot info -------------------------------------------------------------------------
     @property
@@ -227,6 +245,63 @@ class CuroboPlanner:
             position=t.tensor([[[[list(position)]]]], device='cuda', dtype=t.float32),
             quaternion=t.tensor([[[[list(quat_wxyz)]]]], device='cuda', dtype=t.float32))
         return self._wrap(self._planner.plan_pose(goal, self._state(start)))
+
+    # ---- IK and validity ---------------------------------------------------------------------
+    def solve_ik(self, position: Sequence[float], quat_wxyz: Sequence[float] = (1.0, 0.0, 0.0, 0.0),
+                 seed: Optional[Sequence[float]] = None) -> IkResult:
+        """Collision-free joint solution for a tool pose (robot base frame). `seed` biases the
+        solution toward a configuration (default: the robot's default state)."""
+        seed = list(seed) if seed is not None and len(seed) else self.default_joint_state
+        bad = self._check_state(seed, 'seed')
+        if bad:
+            return IkResult(failure_reason_code=bad.failure_reason_code, failure_stage='precheck',
+                            message=bad.message)
+        from curobo.types import GoalToolPose
+        t = self._torch
+        goal = GoalToolPose(
+            tool_frames=self._planner.tool_frames,
+            position=t.tensor([[[[list(position)]]]], device='cuda', dtype=t.float32),
+            quaternion=t.tensor([[[[list(quat_wxyz)]]]], device='cuda', dtype=t.float32))
+        res = self._planner.ik_solver.solve_pose(goal, current_state=self._state(seed))
+        out = IkResult(joint_names=self.joint_names)
+        if not bool(res.success.any()):
+            out.failure_reason_code = 'no_solution'
+            out.failure_stage = 'planning'
+            out.message = 'cuRobo found no collision-free IK solution for this pose'
+            return out
+        out.success = True
+        out.joints = res.solution.reshape(-1, self.dimension)[0].detach().cpu().numpy().tolist()
+        for name, attr in (('position_error', 'position_error'), ('rotation_error', 'rotation_error')):
+            value = getattr(res, attr, None)
+            if value is not None:
+                setattr(out, name, float(value.reshape(-1)[0]))
+        return out
+
+    def check_states(self, states: Sequence[Sequence[float]]) -> List[bool]:
+        """Per-state validity: inside joint limits, no self-collision, clear of the world."""
+        for i, q in enumerate(states):
+            if len(q) != self.dimension:
+                raise ValueError(f'state {i} has {len(q)} joints, expected {self.dimension}')
+        if not len(states):
+            return []
+        t = self._torch
+        mask = self._planner.graph_planner.check_samples_feasibility(
+            t.tensor([list(q) for q in states], device='cuda', dtype=t.float32))
+        # a single state comes back as a 0-d tensor
+        return [bool(v) for v in np.atleast_1d(mask.detach().cpu().numpy()).tolist()]
+
+    def check_motion(self, waypoints: Sequence[Sequence[float]], max_step: float = 0.05) -> bool:
+        """True if every waypoint and every interpolated state between them (largest joint step
+        `max_step` rad) is valid. A sampled check: gaps thinner than `max_step` can be missed."""
+        if max_step <= 0:
+            raise ValueError('max_step must be positive')
+        pts = [np.asarray(q, dtype=np.float64) for q in waypoints]
+        dense = []
+        for a, b in zip(pts, pts[1:]):
+            n = max(1, int(np.ceil(np.max(np.abs(b - a)) / max_step)))
+            dense += [a + (b - a) * k / n for k in range(n)]
+        dense.append(pts[-1]) if pts else None
+        return all(self.check_states([list(q) for q in dense])) if dense else True
 
     # ---- internals --------------------------------------------------------------------------
     def _state(self, q: Sequence[float]):

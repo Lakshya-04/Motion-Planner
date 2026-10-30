@@ -41,8 +41,12 @@ public:
   /// Joint-space move start_joint_state -> target_joint_state. With no target joint state and one
   /// target pose, plans to that pose (position + quaternion, robot base frame).
   motion_planner::PlanningResult plan(const motion_planner::PlanningRequest & request) override;
-  /// Not provided by this client (failure code "unsupported").
+  /// Collision-free IK for `target_pose` (xyz + quaternion x y z w, or xyz + roll pitch yaw), robot
+  /// base frame; `joint_seed` optional. `end_effector_link` / `planning_group` are ignored: cuRobo
+  /// solves for its configured tool frame.
   motion_planner::IkResult ik(const motion_planner::IkRequest & request) override;
+  /// Validity (joint limits, self-collision, world) of `joint_values` and/or the states and sampled
+  /// motions of `trajectory_joint_values`. Pose-based inputs are not supported.
   motion_planner::CollisionResult collision(const motion_planner::CollisionRequest & request) override;
 
 private:
