@@ -137,3 +137,28 @@ never links cuRobo directly.
   mesh-convertible only and verify against the current docs before depending on it.
 - Mobile base + lift + arm as one kinematic chain vs. arm-only planning with base fixed.
 - Contact (wall touching) semantics under cuRobo's collision cost.
+
+## Status: `curobo_bridge` (first adapter, verified on an RTX 3050 4 GB)
+
+`src/manipulation/curobo_bridge` is a ROS-free Python core over cuRobo v2 (`78fd485`):
+`CuroboPlanner.plan_joint` (`plan_cspace`), `plan_pose` (`plan_pose`), `set_world` / `clear_world`,
+structured `PlanResult` (success, failure code, failure stage, message, joint names, rows, dt) in
+the same shape as the motion_planner ports. A ROS node and a C++ `Planner` client go on top of it.
+Tested in the `gpu` image (`docker run --gpus all ... pytest`); the GPU tests skip without CUDA.
+
+Facts learned integrating it:
+
+- cuRobo v2 needs no nvcc: it uses NVIDIA Warp kernels, JIT-compiled on first use (the first
+  `warmup()` took ~40 s, cached afterwards in `~/.cache/warp`).
+- The obstacle cache is allocated when the planner is built: pass `collision_cache={"cuboid": N}`
+  to `MotionPlannerCfg.create` or `update_world` fails with `'NoneType' ... load_collision_model`.
+  We expose it as `max_boxes`; explicit boxes beyond it raise.
+- `SceneCfg` (exported as `curobo.scene.Scene`) has no raw point-cloud field. Sparse, already
+  filtered points are voxelized into cubes that only ever grow when capped (conservative). Dense
+  sensing should use cuRobo's own ESDF mapper (`Mapper`) instead.
+- Interpolated plans include locked joints (Franka's two finger joints, 9 columns for a 7-DOF arm);
+  the bridge returns only the active joints, in planner order.
+- Poses and quaternions are `[x y z]` + `[w x y z]`; results come back as `(1, 1, T, dof)` tensors.
+
+Not done: a cuRobo robot config for our mobile manipulator (URDF + sphere fit via cuRobo's
+`robot_builder`), the point-cloud ESDF path, and the ROS / C++ client.
