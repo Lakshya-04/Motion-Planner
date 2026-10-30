@@ -206,6 +206,18 @@ bool CuroboClientPlanner::clearWorld(std::string * message)
   return setWorld(mp::WorldGeometryUpdate{}, message);
 }
 
+bool CuroboClientPlanner::updateWorldGeometry(const mp::WorldGeometryUpdate & update, std::string & error_message)
+{
+  error_message.clear();
+  return setWorld(update, &error_message);
+}
+
+bool CuroboClientPlanner::clearWorldGeometry(std::string & error_message)
+{
+  error_message.clear();
+  return clearWorld(&error_message);
+}
+
 mp::IkResult CuroboClientPlanner::ik(const mp::IkRequest & request)
 {
   mp::IkResult out;

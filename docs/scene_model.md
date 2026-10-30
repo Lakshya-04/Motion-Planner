@@ -54,3 +54,21 @@ bounds and merges scenes.
 ROS shell (topics, services, `PlanningScene` / `PointCloud2` conversion), TSDF fusion and mesh
 extraction on CPU, ESDF slicing, sliding-window ESDF, and the MoveIt / VAMP / coverage
 adapters. See [architecture.md](architecture.md).
+
+## Feeding the planners: `scene_adapters`
+
+`scene_adapters::toWorldGeometry(scene, options, &report)` turns a `SceneModel` into the
+`WorldGeometryUpdate` every backend consumes through `ScenePort` (MoveIt, VAMP, cuRobo client).
+The split follows the object's **role**, because a contact segment may exclude only one blob from
+collision checking:
+
+- `kContactSurface` -> `points` (any shape: clouds as is, meshes sampled at `surface_spacing`,
+  occupied voxels as centres, boxes / primitives sampled on their faces);
+- `kObstacle` -> `boxes`, never excludable: boxes keep pose and size; spheres / cylinders / capsules
+  become their bounding box; clouds, meshes and voxel grids become occupied cubes (`obstacle_voxel`,
+  doubled until at most `max_obstacle_boxes`, so the obstacle only ever grows).
+- Every approximation is listed in the `ConversionReport` (`approximated`, `coarsened`); an
+  `EsdfGrid` has no box / point form and is `skipped` (it goes through the planner's ESDF channel).
+
+`VampPlanner` and `CuroboClientPlanner` implement `ScenePort` as well, so the same scene feeds any
+backend. Geometry is taken as already in the robot base frame.

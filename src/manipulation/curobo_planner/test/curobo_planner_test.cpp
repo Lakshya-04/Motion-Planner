@@ -286,6 +286,26 @@ TEST(CuroboClient, WorldCarriesBoxesAndTransformedPoints)
   EXPECT_EQ(message, "too many boxes");
 }
 
+TEST(CuroboClient, IsAScenePortToo)
+{
+  Fixture f;
+  mp::ScenePort & port = *f.planner;
+  mp::WorldGeometryUpdate w;
+  mp::WorldGeometryBox b;
+  b.id = "crate";
+  b.orientation_w = 1.0;
+  w.boxes.push_back(b);
+  std::string error;
+  ASSERT_TRUE(port.updateWorldGeometry(w, error)) << error;
+  ASSERT_EQ(f.server->last_world.boxes.size(), 1U);
+  EXPECT_EQ(f.server->last_world.boxes[0].id, "crate");
+  ASSERT_TRUE(port.clearWorldGeometry(error)) << error;
+  EXPECT_TRUE(f.server->last_world.boxes.empty());
+  w.boxes.assign(6, b);                       // the stub refuses 5 or more
+  EXPECT_FALSE(port.updateWorldGeometry(w, error));
+  EXPECT_EQ(error, "too many boxes");
+}
+
 TEST(CuroboClient, MissingServerIsReportedNotHung)
 {
   auto node = std::make_shared<rclcpp::Node>("lonely_client");

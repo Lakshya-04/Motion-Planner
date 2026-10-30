@@ -29,7 +29,7 @@ struct Options
 
 /// Free-space planner and collision checker over one compiled-in VAMP robot.
 /// Not thread-safe: use one instance per thread.
-class VampPlanner : public motion_planner::Planner
+class VampPlanner : public motion_planner::Planner, public motion_planner::ScenePort
 {
 public:
   explicit VampPlanner(const Options & options, std::shared_ptr<core_types::Logger> logger = nullptr);
@@ -48,6 +48,12 @@ public:
   void setWorld(const motion_planner::WorldGeometryUpdate & world);
   void clearWorld();
   bool hasWorld() const;
+
+  /// ScenePort: the same operations, so a SceneModel (via scene_adapters) can feed this backend
+  /// like any other. Geometry must already be in the robot base frame; these never fail.
+  bool updateWorldGeometry(
+    const motion_planner::WorldGeometryUpdate & update, std::string & error_message) override;
+  bool clearWorldGeometry(std::string & error_message) override;
 
   std::string name() const override {return "vamp";}
 

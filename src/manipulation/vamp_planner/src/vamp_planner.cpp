@@ -107,6 +107,20 @@ void VampPlanner::setWorld(const mp::WorldGeometryUpdate & world)
   impl_->world_set = true;
 }
 
+bool VampPlanner::updateWorldGeometry(const mp::WorldGeometryUpdate & update, std::string & error_message)
+{
+  error_message.clear();
+  setWorld(update);
+  return true;
+}
+
+bool VampPlanner::clearWorldGeometry(std::string & error_message)
+{
+  error_message.clear();
+  clearWorld();
+  return true;
+}
+
 mp::PlanningResult VampPlanner::plan(const mp::PlanningRequest & request)
 {
   const auto t0 = std::chrono::steady_clock::now();

@@ -24,7 +24,7 @@ struct Options
   double timeout_sec{30.0};                  ///< Per-call deadline; the first plan can be slow.
 };
 
-class CuroboClientPlanner : public motion_planner::Planner
+class CuroboClientPlanner : public motion_planner::Planner, public motion_planner::ScenePort
 {
 public:
   CuroboClientPlanner(
@@ -37,6 +37,12 @@ public:
   /// Replaces the planner's world (boxes + points, `points_origin` applied). False on failure.
   bool setWorld(const motion_planner::WorldGeometryUpdate & world, std::string * message = nullptr);
   bool clearWorld(std::string * message = nullptr);
+
+  /// ScenePort: the same two operations, so a SceneModel (via scene_adapters) can feed cuRobo like
+  /// any other backend.
+  bool updateWorldGeometry(
+    const motion_planner::WorldGeometryUpdate & update, std::string & error_message) override;
+  bool clearWorldGeometry(std::string & error_message) override;
 
   /// Joint-space move start_joint_state -> target_joint_state. With no target joint state and one
   /// target pose, plans to that pose (position + quaternion, robot base frame).
