@@ -5,6 +5,7 @@
 
 #include "reachability/core/io.hpp"
 #include "reachability/core/lift_bands.hpp"
+#include "reachability/core/stands.hpp"
 
 namespace reachability
 {
@@ -36,6 +37,16 @@ ReachabilityNode::ReachabilityNode(const rclcpp::NodeOptions & options)
     return;
   }
   RCLCPP_INFO(get_logger(), "loaded map %s (%zu non-zero cells)", file.c_str(), map_->nonzeroCells());
+  const auto base_file = declare_parameter<std::string>("base_profile", "");
+  if (!base_file.empty()) {
+    try {
+      base_ = loadBaseProfile(base_file);
+      RCLCPP_INFO(get_logger(), "base profile %s: %s", base_file.c_str(), base_->name.c_str());
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(get_logger(), "cannot load base profile '%s': %s; planning stands without a base model",
+        base_file.c_str(), e.what());
+    }
+  }
 
   using namespace reachability_msgs::srv;
   is_reachable_ = create_service<IsReachable>(
@@ -89,6 +100,62 @@ ReachabilityNode::ReachabilityNode(const rclcpp::NodeOptions & options)
       res->success = plan.unreachable.empty();
       if (!res->success) {
         res->message = std::to_string(plan.unreachable.size()) + " target(s) unreachable from this station";
+      }
+    });
+  stands_ = create_service<PlanStands>(
+    "~/plan_stands",
+    [this](const PlanStands::Request::SharedPtr req, PlanStands::Response::SharedPtr res) {
+      if (req->targets_world.empty()) {
+        res->message = "no targets";
+        return;
+      }
+      const Eigen::Vector3d n(req->wall_normal.x, req->wall_normal.y, req->wall_normal.z);
+      if (n.norm() < 1e-9) {
+        res->message = "wall_normal must be non-zero";
+        return;
+      }
+      StationRequest r;
+      for (const auto & p : req->targets_world) {r.targets_world.push_back(toIso(p));}
+      r.wall_point = Vec3(req->wall_point.x, req->wall_point.y, req->wall_point.z);
+      r.wall_normal = n.normalized();
+      auto pos = [](double v, double dflt) {return v > 0.0 ? v : dflt;};
+      const StationRequest d;
+      r.min_clearance = pos(req->min_clearance, d.min_clearance);
+      r.max_standoff = pos(req->max_standoff, d.max_standoff);
+      r.grid_step = pos(req->grid_step, d.grid_step);
+      r.lateral_margin = pos(req->lateral_margin, d.lateral_margin);
+      r.lift_min = req->lift_min;
+      r.lift_max = req->lift_max > req->lift_min ? req->lift_max : d.lift_max;
+      r.lift_step = pos(req->lift_step, d.lift_step);
+      r.arm_mount_offset_z = req->arm_mount_offset_z;
+      r.base = base_;
+      std::optional<Stand> start;
+      if (req->has_start) {
+        start = Stand{Eigen::Vector2d(req->start_x, req->start_y), req->start_yaw};
+      }
+      const StandPlan plan = planStands(*map_, r, start);
+      for (const auto & a : plan.stands) {
+        reachability_msgs::msg::Stand m;
+        m.x = a.stand.arm_xy.x();
+        m.y = a.stand.arm_xy.y();
+        m.yaw = a.stand.yaw;
+        m.standoff = a.station.standoff;
+        m.footprint_clearance = a.station.footprint_clearance;
+        m.travel_s = a.travel_s;
+        m.target_indices.assign(a.targets.begin(), a.targets.end());
+        for (const auto & b : a.station.plan.bands) {
+          reachability_msgs::msg::LiftBand lb;
+          lb.lift_height = b.lift_height;
+          lb.pose_indices.assign(b.pose_indices.begin(), b.pose_indices.end());
+          m.bands.push_back(lb);
+        }
+        res->stands.push_back(m);
+      }
+      res->unreachable.assign(plan.unreachable.begin(), plan.unreachable.end());
+      res->total_travel_s = plan.total_travel_s;
+      res->success = plan.unreachable.empty() && !plan.stands.empty();
+      if (!res->success) {
+        res->message = std::to_string(plan.unreachable.size()) + " target(s) no stand reaches";
       }
     });
 }

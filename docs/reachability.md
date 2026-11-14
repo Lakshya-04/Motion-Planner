@@ -122,7 +122,7 @@ A 7 m wide, 1.9 m high wall (360 targets), UR10e map, start at one end, 0.3 m cl
 Limits: greedy cover can leave a few stragglers that cost an extra stand and a backtrack (the Husky
 row); a final pass that merges small stands into a neighbour, or a cover chosen for total time instead
 of count, would fix it. Each stand is chosen on its own, so the order is "nearest next", not the best
-tour. Not done: a yaw preference for contact work, passing the base footprint to the ROS shell services.
+tour. Not done: a yaw preference for contact work.
 
 ## Limits and next steps
 
@@ -172,8 +172,9 @@ built with `rm4d_tool` and serves it:
 | `~/is_reachable` | tool pose in the arm base frame | reachable, sample count |
 | `~/get_base_candidates` | tool pose in the world, arm base height | base (x, y) candidates |
 | `~/plan_lift_bands` | wall targets, base station, lift range and step | bands + unreachable targets |
+| `~/plan_stands` | wall targets and plane, lift range, optional start stand | stands in visiting order (arm base x, y, base yaw, targets, lift bands, travel time) + unreachable targets |
 
-Parameters: `map_file` (required), `robot_fingerprint` (rejects a map built for another robot).
+Parameters: `map_file` (required), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored).
 The map does not know which side of a wall is free, so base candidates come back on both sides of
 the target plane; the caller (stationing logic) picks the free side.
 
