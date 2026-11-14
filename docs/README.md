@@ -16,5 +16,6 @@
 | [reachability.md](reachability.md) | RM4D reachability / inverse reachability module: base stationing, lift bands, feasibility pre-filter |
 | [robot_self_filter.md](robot_self_filter.md) | Generic module that removes the robot's own body from sensor data: port, implementations, contact-mode and time-alignment rules, evaluation |
 | [learned_recovery.md](learned_recovery.md) | Research on recovery to a known state: RL, imitation learning, MPC, safety filters; recommended staged architecture |
+| [robot_assets.md](robot_assets.md) | One command from a robot profile to every per-robot artefact (URDF, SRDF, spheres, VAMP header, cuRobo config, reachability map, manifest); stages, images, skipping |
 | [docker.md](docker.md) | Reproducible Docker environment: targets, dependency lists, GPU, VAMP SIMD build |
 | [adr/](adr/) | Decision records (modular pipeline, upstream backends, core/ros split, C++ standard) |
