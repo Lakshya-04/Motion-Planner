@@ -196,16 +196,15 @@ class SphereModel:
                 hit[np.flatnonzero(near)[(d < w[near][..., 3] + self.buffer).any(axis=1)]] = True
         return hit
 
-    def in_collision(self, q, boxes, self_check=True):
-        out = np.zeros(len(q), bool)
+    def in_collision(self, q, boxes, self_check=True, split=False):
+        """Per-state flag (world or self). split=True returns (world, self) separately."""
+        w_out, s_out = np.zeros(len(q), bool), np.zeros(len(q), bool)
         for i in range(0, len(q), 400):
-            tfs = self.arm.link_tfs(q[i:i + 400])
-            ws = self.world_spheres(tfs)
-            h = self.world_collision(ws, boxes)
+            ws = self.world_spheres(self.arm.link_tfs(q[i:i + 400]))
+            w_out[i:i + 400] = self.world_collision(ws, boxes)
             if self_check:
-                h |= self.self_collision(ws)
-            out[i:i + 400] = h
-        return out
+                s_out[i:i + 400] = self.self_collision(ws)
+        return (w_out, s_out) if split else (w_out | s_out)
 
 
 def box_frame(b):
@@ -472,6 +471,16 @@ def cmd_buffer_cfg(a):
     import yaml
     doc = yaml.safe_load(pathlib.Path(a.cfg).read_text())
     doc['kinematics']['collision_sphere_buffer'] = a.buffer
+    if a.ignore_hops:
+        # cuRobo pads self-collision spheres with the same buffer, so nearby links start to overlap:
+        # skip pairs up to N joints apart, as for FOAM spheres
+        sys.path.insert(0, str(HERE))
+        from rigid_pairs_srdf import pairs
+        ign = doc['kinematics']['self_collision_ignore']
+        for x, y in pairs(a.urdf, (), a.ignore_hops):
+            for u, v in ((x, y), (y, x)):
+                if v not in ign.setdefault(u, []):
+                    ign[u].append(v)
     pathlib.Path(a.out).write_text(yaml.safe_dump(doc, sort_keys=False))
     print(f'wrote {a.out} (buffer {a.buffer} m)')
 
@@ -542,7 +551,9 @@ def cmd_report(a):
         dense = densify(q_path, step)
         flags = {'mesh': bool(oracle.world_collision(dense, sc['boxes']).any())}
         for n, m in models.items():
-            flags[n] = bool(m.in_collision(dense, sc['boxes']).any())
+            w, sf = m.in_collision(dense, sc['boxes'], split=True)
+            flags[n] = bool((w | sf).any())
+            flags[n + '_w'] = bool(w.any())      # world only: the part that does not depend on self-collision policy
         return flags
 
     # candidate witnesses per problem: every returned path + the straight line
@@ -585,6 +596,7 @@ def cmd_report(a):
             fail = [p for p in ps if not p['success']]
             mesh_bad = [p for p in ok if p['flags']['mesh']]
             other = {n: sum(p['flags'][n] for p in ok) for n in models}
+            other_w = {n: sum(p['flags'][n + '_w'] for p in ok) for n in models}
             own = other.get(r['set'], 0)
             # failed although a mesh-clean path exists (from another config or the straight line):
             # blocked by this set's own spheres (every witness collides under them) vs a planner miss
@@ -599,7 +611,7 @@ def cmd_report(a):
                 'success': len(ok) / len(ps), 'time_ms_median': pct(wall, 50), 'time_ms_p95': pct(wall, 95),
                 'time_ms_median_all': pct(allwall, 50),
                 'len_median': pct([p['length'] for p in ok], 50),
-                'mesh_collide_paths': len(mesh_bad), 'collide_under': other,
+                'mesh_collide_paths': len(mesh_bad), 'collide_under': other, 'collide_world_only': other_w,
                 'fail_feasible': len(fail_feasible), 'fail_blocked_by_own_spheres': blocked_by_set,
                 'first_call_s': r.get('first_call_s'),
                 'endpoints_invalid': sum(not all(p['endpoints_valid']) for p in ps)})
@@ -621,13 +633,13 @@ def cmd_report(a):
         print('run', {k: (round(v, 4) if isinstance(v, float) else v) for k, v in info.items()})
     names = list(models)
     head = ['backend', 'set', 'scene', 'ok/n', 'success', 'med ms', 'p95 ms', 'len rad', 'mesh-hit'] + \
-           [f'hit {n}' for n in names] + ['fail,feasible', 'of which blocked by set', 'endpoint invalid']
+           [f'hit {n} (world only)' for n in names] + ['fail,feasible', 'of which blocked by set', 'endpoint invalid']
     print('| ' + ' | '.join(head) + ' |')
     print('|' + '---|' * len(head))
     for r in rows:
         print(f"| {r['backend']} | {r['set']} | {r['family']} | {r['ok']}/{r['n']} | {r['success']*100:.0f}% | "
               f"{r['time_ms_median']:.1f} | {r['time_ms_p95']:.1f} | {r['len_median']:.2f} | {r['mesh_collide_paths']} | "
-              + ' | '.join(str(r['collide_under'][n]) for n in names)
+              + ' | '.join(str(r['collide_world_only'][n]) for n in names)
               + f" | {r['fail_feasible']} | {r['fail_blocked_by_own_spheres']} | {r['endpoints_invalid']} |")
 
 
@@ -679,6 +691,8 @@ def main():
     p = sub.add_parser('buffer-cfg')
     p.add_argument('--cfg', required=True)
     p.add_argument('--buffer', type=float, required=True)
+    p.add_argument('--ignore-hops', type=int, default=0)
+    p.add_argument('--urdf', help='needed with --ignore-hops')
     p.add_argument('--out', required=True)
     p.set_defaults(fn=cmd_buffer_cfg)
 
