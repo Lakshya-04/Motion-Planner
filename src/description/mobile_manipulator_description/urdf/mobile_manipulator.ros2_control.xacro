@@ -6,6 +6,10 @@
                             compliant JtacController drives) plus a force/torque sensor from
                             ft_bridge_hardware in injection mode, so a wall contact can be scripted
                             without a real sensor. The sensor's name is `ft_sensor`.
+       hardware:=mujoco     sim_mujoco/MujocoSystemInterface: the same joints as jtac_mock (position and
+                            velocity command) stepped by MuJoCo, plus the tool force/torque as the sensor
+                            `ft_sensor` in the same system block. The MJCF path comes from the
+                            environment variable SIM_MUJOCO_MJCF (see docs/sim_mujoco.md).
      A real or simulated backend replaces this one block, nothing else changes.
      The mimic lift stages are not commanded: robot_state_publisher resolves them. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
@@ -23,16 +27,20 @@
   </xacro:macro>
 
   <xacro:macro name="mobile_manipulator_ros2_control" params="hardware:=mock">
-    <xacro:property name="vel_cmd" value="${hardware == 'jtac_mock'}"/>
+    <xacro:property name="vel_cmd" value="${hardware in ('jtac_mock', 'mujoco')}"/>
     <!-- Fail loudly instead of emitting a <hardware> block with no plugin; a backend adds itself to the
          tuple here and below. The dict lookup raises a KeyError that names the bad value. -->
-    <xacro:unless value="${hardware in ('mock', 'jtac_mock')}">
+    <xacro:unless value="${hardware in ('mock', 'jtac_mock', 'mujoco')}">
       <xacro:if value="${dict()['unknown hardware: ' + hardware + ' (add a branch in mobile_manipulator.ros2_control.xacro)']}"/>
     </xacro:unless>
     <ros2_control name="mobile_manipulator_system" type="system">
       <hardware>
         <xacro:if value="${hardware in ('mock', 'jtac_mock')}">
           <plugin>mock_components/GenericSystem</plugin>
+        </xacro:if>
+        <xacro:if value="${hardware == 'mujoco'}">
+          <plugin>sim_mujoco/MujocoSystemInterface</plugin>
+          <param name="mjcf">$(optenv SIM_MUJOCO_MJCF)</param>
         </xacro:if>
       </hardware>
       <xacro:if value="${lift_actuated}">
@@ -44,6 +52,16 @@
       <xacro:position_joint name="${arm_joint_names[3]}" initial="${home_arm[3]}" velocity_command="${vel_cmd}"/>
       <xacro:position_joint name="${arm_joint_names[4]}" initial="${home_arm[4]}" velocity_command="${vel_cmd}"/>
       <xacro:position_joint name="${arm_joint_names[5]}" initial="${home_arm[5]}" velocity_command="${vel_cmd}"/>
+      <xacro:if value="${hardware == 'mujoco'}">
+        <sensor name="ft_sensor">
+          <state_interface name="force.x"/>
+          <state_interface name="force.y"/>
+          <state_interface name="force.z"/>
+          <state_interface name="torque.x"/>
+          <state_interface name="torque.y"/>
+          <state_interface name="torque.z"/>
+        </sensor>
+      </xacro:if>
     </ros2_control>
     <xacro:if value="${hardware == 'jtac_mock'}">
       <ros2_control name="ft_sensor_bridge" type="sensor">

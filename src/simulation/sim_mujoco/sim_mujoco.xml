@@ -1,0 +1,10 @@
+<library path="sim_mujoco_hardware">
+  <class name="sim_mujoco/MujocoSystemInterface"
+         type="sim_mujoco::MujocoSystemInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Steps a MuJoCo 4.x model as a ros2_control system: joint position and velocity commands,
+      position / velocity / effort state, and the tool force/torque as a sensor. hardware:=mujoco.
+    </description>
+  </class>
+</library>
