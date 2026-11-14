@@ -19,7 +19,7 @@ find_library(MUJOCO_LIBRARY NAMES mujoco HINTS ${MUJOCO_ROOT}/lib /opt/mujoco/li
 
 ament_python_install_package(${PROJECT_NAME})
 
-install(PROGRAMS scripts/generate_mjcf scripts/smoke_test.py scripts/viewer.py
+install(PROGRAMS scripts/generate_mjcf scripts/smoke_test.py scripts/viewer.py scripts/run_smoke.sh
   DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch config test/data DESTINATION share/${PROJECT_NAME})
 
