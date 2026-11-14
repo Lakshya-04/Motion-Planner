@@ -121,6 +121,24 @@ TEST(Stands, EquallyGoodStationsGoToTheOneTheBaseReachesSoonest)
   EXPECT_LE(std::abs(near_from.y - 1.0), std::abs(middle.y - 1.0) + 1e-9);
 }
 
+TEST(Stands, LiftBandIndicesAreGlobalAndMatchTheStandsTargets)
+{
+  const auto r = request(wall({-3.0, -1.5, 0.0, 1.5, 3.0}, {0.8, 1.4}));
+  const auto plan = planStands(sharedMap(), r);
+  ASSERT_GE(plan.stands.size(), 2U);
+  for (const auto & s : plan.stands) {
+    const std::set<size_t> mine(s.targets.begin(), s.targets.end());
+    size_t in_bands = 0;
+    for (const auto & b : s.station.plan.bands) {
+      for (const size_t k : b.pose_indices) {
+        EXPECT_EQ(mine.count(k), 1U) << "band index " << k << " is not one of this stand's targets";
+        ++in_bands;
+      }
+    }
+    EXPECT_EQ(in_bands, s.targets.size());
+  }
+}
+
 TEST(Stands, UnreachableTargetsAreReportedNotLooped)
 {
   const auto plan = planStands(sharedMap(), request(wall({0.0}, {5.0})));   // far above reach

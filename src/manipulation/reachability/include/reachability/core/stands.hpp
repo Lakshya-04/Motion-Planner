@@ -16,7 +16,8 @@ namespace reachability
 
 struct StandAssignment
 {
-  Station station;                 ///< Arm base position, standoff, lift bands for these targets.
+  Station station;                 ///< Arm base position, standoff, lift bands (pose indices are into
+                                   ///< request.targets_world, like `targets`).
   Stand stand;                     ///< Arm base position and base yaw (yaw 0 without a base model).
   std::vector<size_t> targets;     ///< Indices into request.targets_world covered from this stand.
   double travel_s{0.0};            ///< Driving time from the previous stand (0 without a base model).

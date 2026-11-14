@@ -29,6 +29,11 @@ StandPlan planStands(
     }
     if (a.targets.empty()) {break;}
     std::sort(a.targets.begin(), a.targets.end());
+    // chooseStation numbered targets within the remaining set; make every index global
+    for (auto & band : a.station.plan.bands) {
+      for (auto & k : band.pose_indices) {k = left[k];}
+    }
+    for (auto & k : a.station.plan.unreachable) {k = left[k];}
     a.stand = Stand{Eigen::Vector2d(st.x, st.y), st.yaw};
     if (request.base && at) {
       a.travel_s = travelTime(*request.base, *at, a.stand);
