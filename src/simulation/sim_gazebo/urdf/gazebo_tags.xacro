@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<!-- Gazebo-only tags, pulled in by mobile_manipulator.ros2_control.xacro for hardware:=gazebo.
+       - the robot is pinned to the world (a static base; wall pushes must not move it)
+       - gz_ros2_control plugin with the controller_manager parameters
+       - force_torque sensor `ft_sensor` on tool_mount_joint (the joint is kept, not lumped)
+       - contact friction and no self collision for the primitive collision geometry -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="sim_gazebo_tags" params="ft_joint:=tool_mount_joint tool_link:=tool_mount_link tool_mu:=0.8">
+    <link name="world"/>
+    <joint name="sim_world_joint" type="fixed">
+      <parent link="world"/>
+      <child link="base_footprint"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <gazebo>
+      <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(find sim_gazebo)/config/controllers.yaml</parameters>
+      </plugin>
+    </gazebo>
+
+    <!-- A fixed joint is lumped into its parent by the URDF to SDF conversion unless it is
+         preserved; the sensor needs the joint. The measurement is the load the tool carries,
+         expressed in the child (tool) frame, from the child into the parent. -->
+    <gazebo reference="${ft_joint}">
+      <preserveFixedJoint>true</preserveFixedJoint>
+      <disableFixedJointLumping>true</disableFixedJointLumping>
+      <sensor name="ft_sensor" type="force_torque">
+        <always_on>true</always_on>
+        <update_rate>200</update_rate>
+        <visualize>false</visualize>
+        <topic>ft_sensor/wrench</topic>
+        <force_torque>
+          <frame>child</frame>
+          <measure_direction>child_to_parent</measure_direction>
+        </force_torque>
+      </sensor>
+    </gazebo>
+
+    <gazebo reference="${tool_link}">
+      <mu1>${tool_mu}</mu1>
+      <mu2>${tool_mu}</mu2>
+      <kp>1000000.0</kp>
+      <kd>100.0</kd>
+    </gazebo>
+  </xacro:macro>
+</robot>
