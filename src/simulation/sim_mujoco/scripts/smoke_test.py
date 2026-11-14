@@ -119,6 +119,8 @@ def main():
     ap.add_argument('--controller', default='combined_arm_lift_controller')
     ap.add_argument('--tcp-z', type=float, default=0.165, help='sensor-to-TCP offset along z')
     ap.add_argument('--timeout', type=float, default=90.0)
+    ap.add_argument('--release-timeout', type=float, default=8.0,
+                    help='how long after the retreat trajectory ends the force may take to vanish')
     args = ap.parse_args()
     rclpy.init()
     node = Smoke(args.controller)
@@ -199,10 +201,26 @@ def main():
     check('raw torque = truth torque + lever arm x force + payload torque', dt < tol_t,
           f'raw {[round(v, 2) for v in raw[3:]]} vs {[round(v, 2) for v in exp_t]} (max diff {dt:.2f} N m)')
 
-    # retreat: the force goes away
+    # retreat: the force goes away. The controller decides how fast: a JointTrajectoryController follows
+    # the reference at once, JTAC's admittance rule relaxes its compliance offset (accumulated while the
+    # wall blocked the tool) with time constant ~D/K = 2 s even with no axis selected, so the commanded
+    # pose stays inside the wall for ~3 s after the reference left (docs/sim_mujoco.md, "Retreat").
     node.move(FREE, 4.0)
-    rel = mean([s[2] for s in node.hold(1.5)])
-    check('force released on retreat', abs(rel[2]) < 0.5, f'truth Fz = {rel[2]:.2f} N')
+    t_ret, released, quiet_since = time.monotonic(), None, None
+    while time.monotonic() - t_ret < args.release_timeout:
+        now = time.monotonic()
+        if abs(node.state()[2][2]) < 0.5:   # released = quiet for 0.5 s (a single zero sample is a bounce)
+            quiet_since = quiet_since or now
+            if now - quiet_since >= 0.5:
+                released = quiet_since - t_ret
+                break
+        else:
+            quiet_since = None
+        time.sleep(0.02)
+    rel = mean([s[2] for s in node.hold(1.0)])
+    check('force released on retreat', released is not None and abs(rel[2]) < 0.5,
+          f'truth |Fz| < 0.5 N {released:.2f} s after the retreat trajectory ended, then Fz = {rel[2]:.2f} N'
+          if released is not None else f'still {node.state()[2][2]:.1f} N after {args.release_timeout:.0f} s')
 
     print('SMOKE', 'FAILED: ' + ', '.join(failures) if failures else 'PASSED', flush=True)
     sys.stdout.flush()

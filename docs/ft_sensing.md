@@ -66,6 +66,17 @@ The simulation backends ([simulation.md](simulation.md)) publish what a real sen
 the sensor's own frame, with the payload's weight, plus a ground-truth contact wrench at `tcp_link` for
 evaluation. The same conditioner then runs on simulated and real data, and the ground truth checks it.
 
+MuJoCo, measured ([sim_mujoco.md](sim_mujoco.md), `scripts/contact_test.py`): the chain raw sensor ->
+`ft_conditioner` -> `ft_bridge_hardware` (sensor `ft_sensor_tcp`) -> JTAC. Calibrating with six free-space
+wrist poses through `capture_pose` / `identify` recovers the tool's 0.5 kg to 0.2 % and a centre of gravity
+within 1 mm; after that the conditioned wrench is 0.000 N in free space. Pressing the wall with a 10 N
+target through the bridge's `~/target_wrench` held 10.13 N (ground truth, std 0.03 N); over the 10 s of
+contact the conditioned wrench differed from the ground truth by at most 0.004 N and 0.001 N m (rms
+0.001 N, 0.0005 N m). Those are the limits of a noise-free rigid simulation, not of a real sensor; they
+confirm the sign, the TF-derived orientation and lever arm, and the payload term, not noise, drift or
+tool flex. The steady force is `target + K * d` for a reference `d` past the surface (the admittance spring
+pulls toward the reference), so references belong on the surface.
+
 ## The ROS node: `ft_conditioner`
 
 `src/control/ft_conditioner` wraps the conditioner: `wrench_conditioner_node` takes a raw
