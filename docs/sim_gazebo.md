@@ -18,12 +18,16 @@ ros2 launch sim_gazebo sim.launch.py wall_scene:=<wall_scene.json> wall_id:=0 st
 ros2 launch sim_gazebo sim.launch.py controller:=jtac                         # compliant JTAC controller
 ros2 launch sim_gazebo sim.launch.py profile:=ur10e_telescopic gui:=true      # gz GUI needs a display
 ros2 run sim_gazebo smoke_test.py [--controller jtc|jtac]                     # headless smoke test
+ros2 launch sim_gazebo sim.launch.py controller:=jtac ft_conditioner:=true    # force path (see below)
+ros2 run sim_gazebo contact_control_test.py                                   # contact test, about 3 minutes
 ros2 run sim_gazebo wall_world_gen.py scene.json -o wall.sdf --standoff 0.9   # world only
 ```
 
 Launch arguments: `profile` (name in `config/profiles` or a path; its `robot.xacro_args`, joint
 names, frames and home pose drive everything), `world`, `wall_scene`/`wall_id`/`standoff`, `gui`,
-`controller` (`jtc` | `jtac` | `none`). Several containers on one Docker bridge share DDS
+`controller` (`jtc` | `jtac` | `none`), `ft_conditioner` (`true` starts the conditioner and points JTAC at
+the sensor `ft_sensor_tcp`), `payload_mass_kg` (initial payload for the conditioner, 0: calibrate),
+`ft_filter` (JTAC `ft_sensor.filter_coefficient`). Several containers on one Docker bridge share DDS
 multicast: give each simulation its own `ROS_DOMAIN_ID` (or `ROS_LOCALHOST_ONLY=1`), otherwise
 another stack's `/robot_description` can reach the gz controller manager.
 
@@ -34,6 +38,33 @@ controller manager lives inside the gz server (`gz_ros2_control`). `jtc` uses
 `joint_trajectory_controller`; `jtac` loads `config/jtac_controller.yaml` of
 `compliant_trajectory_controller` with joints and frames replaced from the profile and the sensor
 `ft_sensor` in frame `ft_sensor_link`. No wrench axis is selected there, so it tracks like a JTC.
+
+## The force path (`ft_conditioner:=true`)
+
+```
+gz force_torque sensor -> ft_sensor (gz system) -> force_torque_sensor_broadcaster
+   /force_torque_sensor_broadcaster/wrench  (raw, ft_sensor_link, includes the payload weight)
+ -> ft_conditioner   payload from ~/capture_pose + ~/identify, sign +1, tool offset from TF
+   /ft_conditioner/wrench_conditioned  (contact wrench at tcp_link)
+ -> ft_bridge_hardware, sensor `ft_sensor_tcp` (block `ft_conditioned_bridge`), biased by ~/target_wrench
+ -> JTAC (ft_sensor.name ft_sensor_tcp, frame tcp_link, control frame tcp_link)
+```
+
+**How the bridge sits in Gazebo.** `gz_ros2_control`'s resource manager loads every `<ros2_control>` block
+of the robot description through its own plugin loader with the base class
+`gz_ros2_control::GazeboSimSystemInterface`. A second, non-Gazebo hardware component (the plain
+`FtBridgeHardwareInterface`, a `SensorInterface`) is refused: `class ft_bridge_hardware/FtBridgeHardwareInterface
+with base class type gz_ros2_control::GazeboSimSystemInterface does not exist`, its interfaces never appear and
+JTAC cannot activate (`state interface 'ft_sensor_tcp/force.x' is not available`). Tried and rejected: a second
+controller manager (JTAC has to live in the one that owns the joints). Arrangement used: a thin class
+`ft_bridge_hardware/FtBridgeSimSystem` (package `ft_bridge_hardware`, built only when `gz_ros2_control` and
+gz-sim8 are found) that derives from that base class and forwards lifecycle, `read()` and the state interfaces
+to an embedded `FtBridgeHardwareInterface`, so the bridge itself is unchanged (`~/target_wrench` is
+`/ft_bridge_hardware_ft_sensor_tcp/target_wrench`). In the description it is a second
+`<ros2_control name="ft_conditioned_bridge" type="system">` block for `hardware:=gazebo` only, with the
+sensor `ft_sensor_tcp` (the raw sim sensor stays `ft_sensor`) and `source_topic`
+`/ft_conditioner/wrench_conditioned`. The block exists whether or not the conditioner runs; without it the
+sensor reads minus the setpoint.
 
 ## What is modelled
 
@@ -79,10 +110,43 @@ into the wall, then the raw wrench is converted with plain math (payload weight,
 rotation) and compared with the ground truth: force within 3 N or 15 percent, torque within
 0.5 Nm or 20 percent. Observed: force difference 0.05 N of 209 N, torque 0.00 of 9.3 Nm.
 
+## Contact-controlled test
+
+`ros2 run sim_gazebo contact_control_test.py` (starts the simulation itself, `--no-launch` to use a running one).
+Steps and results (profile `generic_6dof_telescopic`, wall 0.9 m in front of the base, tool contact at tcp x = 0.965 m):
+
+1. **Calibration** of the conditioner with six still, contact-free wrist poses (`~/capture_pose`, `~/identify`):
+   mass 0.8003 kg (URDF inertials 0.8000), centre of gravity (0, 0, 0.0075) m (known 0.0075), bias zero, fit
+   residual 0.0000 N. In free space the conditioned wrench is then 0.000 N / 0.0000 Nm.
+2. **Conditioned vs ground truth in steady contact** (JTAC with no wrench axis, tool pressed 5 mm and 35 mm past
+   the wall; ground truth about 108 N along the tool, 120 N lateral from friction and a contact torque of about
+   11 Nm about the tcp, so the lever-arm and payload terms are both exercised): force error |dF| mean 0.001 N
+   (max 0.002) at 5 mm and 0.005 N (max 0.011) at 35 mm; torque error |dT| mean 0.0002 Nm (max 0.0005) and
+   0.0010 Nm (max 0.003). The checks use 1 N and 0.2 Nm.
+3. **Force control with the tool-z admittance axis** (target 10 N through `~/target_wrench`, K 300 N/m, mass 8,
+   damping ratio 6, offset clamp 3 mm, approach 2 mm/s): **not reached.** Ground-truth force over the last 4 s:
+   mean 160 N, standard deviation 121 N, peaks 470 to 580 N, in contact 84 percent of the samples; the tool
+   bounces about 3 mm off the wall at about 2 Hz. The same happens with gains from K 100 to 300 N/m, mass 8 to 1e5 kg,
+   damping up to D = 1e7 Ns/m, approach 1 to 5 mm/s, a 0.02 to 0.05 JTAC low-pass and offset clamps from 3 mm to
+   the 50 mm default.
+   What the measurements show: in free space the admittance behaves as designed (offset converges to F/K,
+   33 mm for K 300 and 10 N, no overshoot). The wall is effectively rigid and the arm's servo-driven joints push
+   with a force that does not follow the penetration: a position hold 0.05 mm to 10 mm past the wall gives a
+   constant 104 to 108 N (the smoke test's JTC run read 209 N at 3.5 cm), and 0 N below that. A force of 10 N sits inside the first 0.05 mm, so the
+   loop sees either 10 N (free) or 300 to 500 N impulses (contact) and cycles between them; slow gains only
+   lengthen the cycle. This is a property of the simulated contact and the velocity-servo joint interface, not of
+   the conditioner. By default the script only reports this result; `--require-hold` turns it into a failing check.
+4. **Release:** target to zero, disengage, retreat to the standoff: ground-truth force 0.000 N after the retreat.
+
+What would be needed to make 10 N reachable: a contact with real compliance (a softer tool tip, e.g. a spring
+joint in the tool, or contact parameters of a physics engine that supports them) or joint effort control
+instead of the velocity servo. Not done.
+
 ## Limits
 
-- Contact is stiff: position control into a wall gives about 200 N for 3.5 cm of commanded
-  penetration, so force control tests should use the compliant controller with a selected wrench axis.
+- Contact is stiff and impulsive: position control into a wall gives about 108 N for any commanded
+  penetration from 0.05 mm up to 35 mm, and the compliant controller with a selected wrench axis
+  does not hold 10 N (see the contact-controlled test above).
 - Joint dynamics are idealised: `gz_ros2_control` position/velocity interfaces, no gearbox
   friction, backlash, motor limits (URDF limits are not enforced) or sensor noise, bias and drift.
 - The tool and wall are rigid primitives with Coulomb friction; no compliance of the tool, no

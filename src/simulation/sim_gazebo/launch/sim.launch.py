@@ -49,7 +49,7 @@ def _jtc_params(joints):
         'constraints': {'stopped_velocity_tolerance': 0.05, 'goal_time': 2.0}}}}
 
 
-def _jtac_params(profile, joints, robot_description, conditioned=False):
+def _jtac_params(profile, joints, robot_description, conditioned=False, ft_filter=1.0):
     """The existing JTAC config with names/frames taken from the profile instead of the demo's."""
     cfg_path = os.path.join(get_package_share_directory('compliant_trajectory_controller'),
                             'config', 'jtac_controller.yaml')
@@ -66,6 +66,7 @@ def _jtac_params(profile, joints, robot_description, conditioned=False):
     else:
         params['ft_sensor'] = {**params.get('ft_sensor', {}), 'name': 'ft_sensor',
                                'frame': {'id': FT_FRAME}}
+    params['ft_sensor']['filter_coefficient'] = ft_filter
     params['control'] = {'frame': {'id': fr['tcp']}}
     params['fixed_world_frame'] = {'frame': {'id': fr['base']}}
     params.setdefault('gravity_compensation', {})['frame'] = {'id': fr['tcp']}
@@ -135,7 +136,8 @@ def _launch(context):
     if lc('controller') != 'none':
         name = CONTROLLER_NAMES[lc('controller')]
         params = (_jtc_params(joints) if lc('controller') == 'jtc'
-                  else _jtac_params(profile, joints, robot_description, conditioned))
+                  else _jtac_params(profile, joints, robot_description, conditioned,
+                                    float(lc('ft_filter'))))
         jsb = _spawner('joint_state_broadcaster')
         ftb = _spawner('force_torque_sensor_broadcaster', _write_yaml(
             {'force_torque_sensor_broadcaster': {'ros__parameters': {
@@ -163,6 +165,8 @@ def generate_launch_description():
         DeclareLaunchArgument('ft_conditioner', default_value='false',
                               description='true: start ft_conditioner (raw wrench -> tcp contact wrench) and '
                                           'point JTAC at the ft_conditioned_bridge sensor ft_sensor_tcp'),
+        DeclareLaunchArgument('ft_filter', default_value='1.0',
+                              description='JTAC ft_sensor.filter_coefficient (1.0: no low-pass; smaller: smoother)'),
         DeclareLaunchArgument('payload_mass_kg', default_value='0.0',
                               description='initial payload mass for ft_conditioner (0: calibrate with ~/identify)'),
         OpaqueFunction(function=_launch),

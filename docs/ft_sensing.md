@@ -111,6 +111,21 @@ Gazebo's wrench is `/force_torque_sensor_broadcaster/wrench` (frame `ft_sensor_l
 `/sim_mujoco/ft_raw`; both are raw readings of the form environment wrench plus weight, so `sign` stays
 `1.0`. Launch: `ros2 launch ft_conditioner ft_conditioner.launch.py input_topic:=... payload_mass_kg:=0.8`.
 
+### Measured in Gazebo
+
+The Gazebo backend runs this chain end to end (`ros2 launch sim_gazebo sim.launch.py controller:=jtac
+ft_conditioner:=true`, test `contact_control_test.py`, [sim_gazebo.md](sim_gazebo.md)). Calibration with six
+contact-free wrist poses recovers the tool's mass (0.8003 against 0.8000 kg) and centre of gravity to better than
+0.1 mm, bias zero. Against the ground-truth contact wrench at the tcp, the conditioned wrench differs by 0.001 to
+0.005 N in force and 0.2 to 1 mNm in torque in steady contact of about 108 N along the tool with 120 N of
+friction and a contact torque near 11 Nm about the tcp, which is the case where a missing lever arm term would
+show (it would be off by several Nm). In free space it is 0.000 N. The sim sensor is noise-free and has no bias,
+so these are the errors of the model, not of a real sensor. JTAC reads the result as the sensor `ft_sensor_tcp`
+with `ft_sensor.frame.id` and `control.frame.id` equal to `tcp_link` (no rotate-only mismatch). In Gazebo the bridge is
+loaded as `ft_bridge_hardware/FtBridgeSimSystem`, because `gz_ros2_control` accepts no other hardware base class.
+The admittance axis did not hold a 10 N contact there; that is a limit of the simulated contact (rigid wall,
+velocity-servo joints), see [sim_gazebo.md](sim_gazebo.md).
+
 ## Not done yet
 
 - Reading the sensor-to-tool offset and the payload from the robot profile / URDF, so no parameter has to
