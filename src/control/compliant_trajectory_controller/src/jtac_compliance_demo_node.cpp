@@ -36,11 +36,13 @@
 #include "geometry_msgs/msg/point.hpp"
 #include "geometry_msgs/msg/wrench.hpp"
 #include "kinematics_interface/kinematics_interface.hpp"
+#include "mobile_manipulator_profile/profile.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "trajectory_msgs/msg/joint_trajectory_point.hpp"
+#include "urdf/model.h"
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
@@ -49,7 +51,6 @@ using namespace std::chrono_literals;
 namespace
 {
 
-constexpr size_t kNumJoints = 7;
 constexpr double kDt = 0.01;  // 100 Hz -- same as combined_arm_lift_controllers.yaml.
 
 // Same diagnostic gains as the T4a gtest suite, satisfying M > K*(zeta*dt)^2 on every Cartesian
@@ -72,8 +73,33 @@ constexpr double kStiffnessXYZ = 300.0;
 // AdmittanceRule-driven baseline comparable.
 constexpr double kJointDamping = 5.0;
 
-const std::vector<std::string> kJointNames{
-  "lift_prismatic_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"};
+// Moving joints of the URDF chain base -> tip, in chain order: the DOF of the demo and the names
+// it commands. Fixed and mimic joints do not count. Throws if `tip` is not below `base`.
+std::vector<std::string> chainJointNames(
+  const std::string & urdf_xml, const std::string & base, const std::string & tip)
+{
+  urdf::Model model;
+  if (!model.initString(urdf_xml)) {
+    throw std::runtime_error("robot_description is not a valid URDF");
+  }
+  auto link = model.getLink(tip);
+  if (!link) {
+    throw std::runtime_error("kinematics_tip '" + tip + "' is not a link of the URDF");
+  }
+  std::vector<std::string> names;
+  while (link && link->name != base) {
+    const auto joint = link->parent_joint;
+    if (!joint) {
+      throw std::runtime_error("'" + base + "' is not an ancestor of '" + tip + "'");
+    }
+    if (joint->type != urdf::Joint::FIXED && !joint->mimic) {
+      names.push_back(joint->name);
+    }
+    link = link->getParent();
+  }
+  std::reverse(names.begin(), names.end());
+  return names;
+}
 
 // Default reference pose for the REAL robot_description chain (rendered via
 // robot.urdf.xacro), vetted with pose_conditioning_probe (this package): condition number
@@ -200,8 +226,8 @@ trajectory_msgs::msg::JointTrajectoryPoint makePoint(const std::vector<double> &
 {
   trajectory_msgs::msg::JointTrajectoryPoint point;
   point.positions = positions;
-  point.velocities.assign(kNumJoints, 0.0);
-  point.accelerations.assign(kNumJoints, 0.0);
+  point.velocities.assign(positions.size(), 0.0);
+  point.accelerations.assign(positions.size(), 0.0);
   return point;
 }
 
@@ -226,7 +252,9 @@ public:
     // launch/jtac_compliance_demo.launch.py's real_robot argument, which renders
     // robot.urdf.xacro at launch time and passes the result here.
     declare_parameter("robot_description", std::string(""));
-    declare_parameter("reference_pose", kDefaultReferencePose);
+    // Empty reference_pose: kDefaultReferencePose for a 7-joint chain, else the profile's home pose.
+    declare_parameter("reference_pose", std::vector<double>{});
+    declare_parameter("profile", std::string(mobile_manipulator_profile::kDefaultProfile));
     declare_parameter("kinematics_tip", std::string("link6"));
     // "redundancy_split" (default): the original kSchedule, base-frame axis pushes at whatever
     // reference_pose is given. "wall_ceiling": kWallCeilingSchedule, tool-local-frame pushes at
@@ -248,8 +276,8 @@ public:
     // depends on this specific ratio. See force_control_backend_admittance_vs_diffik.md for the
     // full rationale and the literature (Whitney 1969, Khatib's dynamically-consistent
     // generalized inverse, Chan & Dubey 1995) this mechanism is drawn from.
-    declare_parameter(
-      "redundancy_weights", std::vector<double>{10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
+    // Empty = the lift (joint 0) weighted 10x every other joint, sized to the chain's DOF.
+    declare_parameter("redundancy_weights", std::vector<double>{});
 
     std::string urdf = get_parameter("robot_description").as_string();
     if (urdf.empty()) {
@@ -267,14 +295,40 @@ public:
       throw std::runtime_error("missing URDF");
     }
 
+    kinematics_tip_ = get_parameter("kinematics_tip").as_string();
+    // DOF and joint names come from the URDF chain, not from a constant.
+    joint_names_ = chainJointNames(urdf, "base_link", kinematics_tip_);
+    num_joints_ = joint_names_.size();
+    if (num_joints_ == 0) {
+      RCLCPP_FATAL(get_logger(), "No moving joints between base_link and '%s'.",
+        kinematics_tip_.c_str());
+      throw std::runtime_error("empty chain");
+    }
+    RCLCPP_INFO(get_logger(), "Chain base_link -> %s has %zu joints.", kinematics_tip_.c_str(),
+      num_joints_);
+
     reference_pose_ = get_parameter("reference_pose").as_double_array();
-    if (reference_pose_.size() != kNumJoints) {
+    if (reference_pose_.empty()) {
+      std::string profile_warning;
+      const auto profile = mobile_manipulator_profile::loadProfileOrDefaults(
+        get_parameter("profile").as_string(), profile_warning);
+      if (num_joints_ == kDefaultReferencePose.size()) {
+        reference_pose_ = kDefaultReferencePose;
+      } else if (profile.dof() == num_joints_ && profile.joints() == joint_names_) {
+        reference_pose_ = profile.homePositions();
+      } else {
+        RCLCPP_FATAL(
+          get_logger(), "Chain has %zu joints: pass reference_pose with %zu values.",
+          num_joints_, num_joints_);
+        throw std::runtime_error("no default reference_pose for this DOF");
+      }
+    }
+    if (reference_pose_.size() != num_joints_) {
       RCLCPP_FATAL(
-        get_logger(), "reference_pose must have %zu elements, got %zu.", kNumJoints,
+        get_logger(), "reference_pose must have %zu elements, got %zu.", num_joints_,
         reference_pose_.size());
       throw std::runtime_error("bad reference_pose size");
     }
-    kinematics_tip_ = get_parameter("kinematics_tip").as_string();
     pose_set_ = get_parameter("pose_set").as_string();
     if (pose_set_ == "wall_ceiling") {
       // kHomeWallPose/kCeilingPose were only vetted (pose_conditioning_probe,
@@ -282,6 +336,13 @@ public:
       // point once the mop tool is attached, per this repo's own convention. A run against
       // link6 or the synthetic demo chain would be pushing on an unvetted, and likely
       // self-colliding or wrong-frame, pose.
+      if (num_joints_ != kHomeWallPose.size()) {
+        RCLCPP_FATAL(
+          get_logger(),
+          "pose_set:=wall_ceiling uses poses vetted for a %zu-joint chain; this one has %zu.",
+          kHomeWallPose.size(), num_joints_);
+        throw std::runtime_error("wall_ceiling pose_set needs a 7-joint chain");
+      }
       if (kinematics_tip_ != "link_tcp") {
         RCLCPP_FATAL(
           get_logger(),
@@ -294,15 +355,19 @@ public:
 
     enable_redundancy_weighting_ = get_parameter("enable_redundancy_weighting").as_bool();
     redundancy_weights_ = get_parameter("redundancy_weights").as_double_array();
+    if (redundancy_weights_.empty()) {
+      redundancy_weights_.assign(num_joints_, 1.0);
+      redundancy_weights_[0] = 10.0;
+    }
     if (enable_redundancy_weighting_) {
       if (pose_set_ != "wall_ceiling") {
         RCLCPP_FATAL(
           get_logger(), "enable_redundancy_weighting:=true requires pose_set:=wall_ceiling.");
         throw std::runtime_error("redundancy weighting requires pose_set=wall_ceiling");
       }
-      if (redundancy_weights_.size() != kNumJoints) {
+      if (redundancy_weights_.size() != num_joints_) {
         RCLCPP_FATAL(
-          get_logger(), "redundancy_weights must have %zu elements, got %zu.", kNumJoints,
+          get_logger(), "redundancy_weights must have %zu elements, got %zu.", num_joints_,
           redundancy_weights_.size());
         throw std::runtime_error("bad redundancy_weights size");
       }
@@ -313,10 +378,10 @@ public:
         }
       }
     }
-    weighted_joint_vel_.assign(kNumJoints, 0.0);
+    weighted_joint_vel_.assign(num_joints_, 0.0);
 
     rclcpp::NodeOptions rule_node_options;
-    rule_node_options.parameter_overrides(buildParameters(urdf, kinematics_tip_));
+    rule_node_options.parameter_overrides(buildParameters(urdf, kinematics_tip_, joint_names_));
     rule_node_ =
       std::make_shared<rclcpp_lifecycle::LifecycleNode>(
       "jtac_demo_admittance_rule",
@@ -325,7 +390,7 @@ public:
     param_listener_ = std::make_shared<admittance_controller::ParamListener>(
       rule_node_->get_node_parameters_interface(), rule_node_->get_logger());
     rule_ = std::make_unique<admittance_controller::AdmittanceRule>(param_listener_);
-    if (rule_->configure(rule_node_, kNumJoints, urdf) != controller_interface::return_type::OK) {
+    if (rule_->configure(rule_node_, num_joints_, urdf) != controller_interface::return_type::OK) {
       RCLCPP_FATAL(get_logger(), "AdmittanceRule::configure() failed.");
       throw std::runtime_error("configure failed");
     }
@@ -390,11 +455,12 @@ public:
 
 private:
   static std::vector<rclcpp::Parameter> buildParameters(
-    const std::string & urdf, const std::string & tip)
+    const std::string & urdf, const std::string & tip,
+    const std::vector<std::string> & joint_names)
   {
     return {
       rclcpp::Parameter("robot_description", urdf),
-      rclcpp::Parameter("joints", kJointNames),
+      rclcpp::Parameter("joints", joint_names),
       rclcpp::Parameter("command_interfaces", std::vector<std::string>{"position", "velocity"}),
       rclcpp::Parameter("state_interfaces", std::vector<std::string>{"position", "velocity"}),
       rclcpp::Parameter(
@@ -447,7 +513,7 @@ private:
   {
     Eigen::VectorXd q =
       Eigen::VectorXd::Map(reference_pose_.data(), static_cast<long>(reference_pose_.size()));
-    Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian(6, kNumJoints);
+    Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian(6, num_joints_);
     if (!kinematics_->calculate_jacobian(q, kinematics_tip_, jacobian)) {
       throw std::runtime_error("calculate_jacobian failed at startup");
     }
@@ -501,13 +567,13 @@ private:
   {
     Eigen::VectorXd q =
       Eigen::VectorXd::Map(current_.positions.data(), static_cast<long>(current_.positions.size()));
-    Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian(6, kNumJoints);
+    Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian(6, num_joints_);
     if (!kinematics_->calculate_jacobian(q, kinematics_tip_, jacobian)) {
       return 0.0;
     }
     double total_abs = 0.0;
     double lift_abs = 0.0;
-    for (size_t i = 0; i < kNumJoints; ++i) {
+    for (size_t i = 0; i < num_joints_; ++i) {
       const double offset = current_.positions[i] - reference_pose_[i];
       const double contribution = jacobian(axis, static_cast<long>(i)) * offset;
       total_abs += std::abs(contribution);
@@ -526,13 +592,13 @@ private:
   {
     Eigen::VectorXd q =
       Eigen::VectorXd::Map(current_.positions.data(), static_cast<long>(current_.positions.size()));
-    Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian(6, kNumJoints);
+    Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian(6, num_joints_);
     if (!kinematics_->calculate_jacobian(q, kinematics_tip_, jacobian)) {
       return 0.0;
     }
     double total_abs = 0.0;
     double lift_abs = 0.0;
-    for (size_t i = 0; i < kNumJoints; ++i) {
+    for (size_t i = 0; i < num_joints_; ++i) {
       const double offset = current_.positions[i] - reference_pose_[i];
       const double contribution = direction_in_base.dot(jacobian.block<3, 1>(0, i)) * offset;
       total_abs += std::abs(contribution);
@@ -571,9 +637,9 @@ private:
       // every reference_pose_-derived quantity before the next phase pushes against it.
       reference_pose_ = *currentWallCeilingPlan().target_pose;
       current_.positions = reference_pose_;
-      current_.velocities.assign(kNumJoints, 0.0);
+      current_.velocities.assign(num_joints_, 0.0);
       reference_.positions = reference_pose_;
-      weighted_joint_vel_.assign(kNumJoints, 0.0);
+      weighted_joint_vel_.assign(num_joints_, 0.0);
       recomputeBaseToSensorRotation();
     }
     schedule_index_ = (schedule_index_ + 1) % kWallCeilingSchedule.size();
@@ -623,12 +689,12 @@ private:
       // avoiding any transient from suddenly relocating an active spring's own reference.
       const double t = std::clamp(elapsed_in_phase_s / plan.duration_s, 0.0, 1.0);
       const auto & target = *plan.target_pose;
-      std::vector<double> interpolated(kNumJoints);
-      for (size_t i = 0; i < kNumJoints; ++i) {
+      std::vector<double> interpolated(num_joints_);
+      for (size_t i = 0; i < num_joints_; ++i) {
         interpolated[i] = reference_pose_[i] + t * (target[i] - reference_pose_[i]);
       }
       current_.positions = interpolated;
-      current_.velocities.assign(kNumJoints, 0.0);
+      current_.velocities.assign(num_joints_, 0.0);
       reference_.positions = interpolated;
 
       publishJointStates();
@@ -692,7 +758,7 @@ private:
     kinematics_->calculate_link_transform(q_reference, kinematics_tip_, reference_tf);
     const Eigen::Vector3d x = current_tf.translation() - reference_tf.translation();
 
-    Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian(6, kNumJoints);
+    Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian(6, num_joints_);
     kinematics_->calculate_jacobian(q_current, kinematics_tip_, jacobian);
     const Eigen::Matrix<double, 3, Eigen::Dynamic> j_lin = jacobian.topRows<3>();
 
@@ -717,7 +783,7 @@ private:
     joint_vel += joint_acc * kDt;
     const Eigen::VectorXd joint_pos = q_current + joint_vel * kDt;
 
-    for (size_t i = 0; i < kNumJoints; ++i) {
+    for (size_t i = 0; i < num_joints_; ++i) {
       current_.positions[i] = joint_pos[i];
       current_.velocities[i] = joint_vel[i];
       weighted_joint_vel_[i] = joint_vel[i];
@@ -735,13 +801,13 @@ private:
 
     sensor_msgs::msg::JointState actual_msg;
     actual_msg.header.stamp = stamp;
-    actual_msg.name = kJointNames;
+    actual_msg.name = joint_names_;
     actual_msg.position = current_.positions;
     actual_joint_state_pub_->publish(actual_msg);
 
     sensor_msgs::msg::JointState reference_msg;
     reference_msg.header.stamp = stamp;
-    reference_msg.name = kJointNames;
+    reference_msg.name = joint_names_;
     reference_msg.position = reference_pose_;
     reference_joint_state_pub_->publish(reference_msg);
   }
@@ -825,6 +891,8 @@ private:
   Eigen::Matrix3d base_to_sensor_rotation_;
   std::vector<double> reference_pose_;
   std::string kinematics_tip_;
+  std::vector<std::string> joint_names_;  ///< Moving joints of the chain base_link -> tip.
+  size_t num_joints_{0};                    ///< Their number (the DOF), from the URDF.
   std::string pose_set_;
   bool enable_redundancy_weighting_{false};
   std::vector<double> redundancy_weights_;

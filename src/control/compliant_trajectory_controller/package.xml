@@ -27,6 +27,7 @@
   <depend>kinematics_interface</depend>
   <depend>core_types</depend>
   <depend>force_core</depend>
+  <depend>mobile_manipulator_profile</depend>
   <depend>ros_adapters</depend>
   <depend>moveit_core</depend>
   <depend>moveit_msgs</depend>
@@ -44,6 +45,7 @@
   <depend>tf2</depend>
   <depend>tf2_eigen</depend>
   <depend>trajectory_msgs</depend>
+  <depend>urdf</depend>
   <depend>visualization_msgs</depend>
 
   <!-- The KDL kinematics plugin is resolved at runtime by name; the demo node and the

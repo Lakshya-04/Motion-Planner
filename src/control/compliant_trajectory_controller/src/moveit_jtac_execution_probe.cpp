@@ -23,13 +23,14 @@
 #include <vector>
 
 #include "moveit/move_group_interface/move_group_interface.h"
+#include "mobile_manipulator_profile/profile.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace
 {
-const std::vector<std::string> kJointNames{
-  "lift_prismatic_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"};
-// Same validated pose used throughout T7/T8/T9's own raw-trajectory tests.
+// Default target, in the group's joint order (lift, then 6 arm joints): the validated pose used
+// throughout T7/T8/T9's own raw-trajectory tests. Another DOF needs the `target_joint_pose`
+// parameter (or the profile's home pose via `use_profile_home`).
 const std::vector<double> kValidatedPose{0.40, 0.0, -0.15, -0.15, 0.0, -0.15, 0.0};
 }  // namespace
 
@@ -42,8 +43,26 @@ int main(int argc, char ** argv)
   // alone already picks up a matching -p override as its initial value -- no extra flag needed.
   auto node = rclcpp::Node::make_shared("moveit_jtac_execution_probe");
 
-  node->declare_parameter("planning_group", std::string("arm_7dof"));
+  // Names come from the robot profile (`profile` parameter, config/profiles/<name>.yaml); the
+  // explicit parameters below still win when set.
+  node->declare_parameter("profile", std::string(mobile_manipulator_profile::kDefaultProfile));
+  std::string profile_warning;
+  const auto profile = mobile_manipulator_profile::loadProfileOrDefaults(
+    node->get_parameter("profile").as_string(), profile_warning);
+  if (!profile_warning.empty()) {
+    RCLCPP_WARN(node->get_logger(), "%s", profile_warning.c_str());
+  }
+  node->declare_parameter("planning_group", profile.whole_body_group);
+  node->declare_parameter("target_joint_pose", std::vector<double>{});
+  node->declare_parameter("use_profile_home", false);
   const auto planning_group = node->get_parameter("planning_group").as_string();
+  std::vector<double> target_pose = node->get_parameter("target_joint_pose").as_double_array();
+  if (target_pose.empty() && node->get_parameter("use_profile_home").as_bool()) {
+    target_pose = profile.homePositions();
+  }
+  if (target_pose.empty()) {
+    target_pose = kValidatedPose;
+  }
 
   // MoveGroupInterface needs its node spinning (planning scene monitor, action clients) on a
   // separate thread -- standard requirement, documented in every MoveGroupInterface example.
@@ -70,9 +89,21 @@ int main(int argc, char ** argv)
   }
   RCLCPP_INFO(node->get_logger(), "Before: [ %s]", before_str.c_str());
 
+  const auto kJointNames = move_group.getActiveJoints();
+  if (kJointNames.size() != target_pose.size()) {
+    RCLCPP_FATAL(
+      node->get_logger(),
+      "Group '%s' has %zu joints but the target pose has %zu values: pass target_joint_pose "
+      "(or use_profile_home:=true).", planning_group.c_str(), kJointNames.size(),
+      target_pose.size());
+    executor.cancel();
+    spin_thread.join();
+    rclcpp::shutdown();
+    return 1;
+  }
   std::map<std::string, double> target;
   for (size_t i = 0; i < kJointNames.size(); ++i) {
-    target[kJointNames[i]] = kValidatedPose[i];
+    target[kJointNames[i]] = target_pose[i];
   }
   move_group.setJointValueTarget(target);
 

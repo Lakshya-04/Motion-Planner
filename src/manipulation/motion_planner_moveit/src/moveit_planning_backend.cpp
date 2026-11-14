@@ -30,9 +30,10 @@ namespace motion_planner
 namespace
 {
 
-// CLAUDE.md flags this exact planning-group string as a recurring hardcoded-fallback footgun --
-// named here (rather than an inline literal) for discoverability alongside any future defaults.
-constexpr char kDefaultPlanningGroup[] = "arm_7dof";
+// Used only when a request carries no planning group. It is the whole-body group of
+// mobile_manipulator_description's SRDF (the profile's `groups.whole_body`); the nodes pass the
+// profile's name explicitly, so this is just the last-resort fallback.
+constexpr char kDefaultPlanningGroup[] = "lift_arm";
 
 }  // namespace
 

@@ -18,6 +18,7 @@ find_package(kinematics_interface REQUIRED)
 find_package(core_types REQUIRED)
 find_package(ros_adapters REQUIRED)
 find_package(force_core REQUIRED)
+find_package(mobile_manipulator_profile REQUIRED)
 find_package(moveit_core REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(moveit_ros_planning REQUIRED)
@@ -32,6 +33,7 @@ find_package(realtime_tools REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
+find_package(urdf REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
 # The real core_types::CompliancePort implementation backing this package's JTAC prototype --
@@ -122,6 +124,7 @@ add_executable(jtac_compliance_demo_node
 target_link_libraries(jtac_compliance_demo_node
   admittance_controller::admittance_controller
   admittance_controller::admittance_controller_parameters
+  mobile_manipulator_profile::mobile_manipulator_profile
 )
 ament_target_dependencies(jtac_compliance_demo_node
   ament_index_cpp
@@ -134,6 +137,7 @@ ament_target_dependencies(jtac_compliance_demo_node
   rclcpp_lifecycle
   sensor_msgs
   trajectory_msgs
+  urdf
   visualization_msgs
 )
 
@@ -155,6 +159,7 @@ ament_target_dependencies(pose_conditioning_probe
 add_executable(reference_pose_collision_probe
   src/reference_pose_collision_probe.cpp
 )
+target_link_libraries(reference_pose_collision_probe mobile_manipulator_profile::mobile_manipulator_profile)
 ament_target_dependencies(reference_pose_collision_probe
   moveit_core
   moveit_ros_planning
@@ -166,6 +171,7 @@ ament_target_dependencies(reference_pose_collision_probe
 add_executable(moveit_jtac_execution_probe
   src/moveit_jtac_execution_probe.cpp
 )
+target_link_libraries(moveit_jtac_execution_probe mobile_manipulator_profile::mobile_manipulator_profile)
 ament_target_dependencies(moveit_jtac_execution_probe
   moveit_ros_planning_interface
   rclcpp
@@ -176,6 +182,7 @@ ament_target_dependencies(moveit_jtac_execution_probe
 add_executable(moveit_pose_finder
   src/moveit_pose_finder.cpp
 )
+target_link_libraries(moveit_pose_finder mobile_manipulator_profile::mobile_manipulator_profile)
 ament_target_dependencies(moveit_pose_finder
   geometry_msgs
   moveit_core
@@ -263,6 +270,7 @@ target_link_libraries(jtac_wall_approach_test_node
   force_core::force_core
   core_types::core_types
   wall_octomap_probe
+  mobile_manipulator_profile::mobile_manipulator_profile
 )
 ament_target_dependencies(jtac_wall_approach_test_node
   control_msgs

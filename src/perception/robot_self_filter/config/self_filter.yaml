@@ -10,8 +10,11 @@ self_filter:
       cylinder_radius: 0.02
       cylinder_height: 0.02
     # Links that need their own padding (thin clips vs large housings): list the names, then give
-    # each one a block below.
-    padding_overrides: [arm_wrist_3_link]
+    # each one a block below. Empty by default: link names depend on the arm (the last arm link is
+    # `arm_wrist_3_link` on a UR, `arm_link7` on the Panda-like arm), so name yours here, e.g.
+    #   padding_overrides: [<last arm link>]
+    #   padding_overrides.<last arm link>.sphere: 0.01
+    padding_overrides: []
     min_sensor_distance: 0.0      # drop points this close to the sensor (its own mount, cables)
     shadow: false                 # also drop points hidden behind a link (deletes real surfaces)
     contact_link: tool_mount_link # reduced padding on this link while ~/contact_mode is true

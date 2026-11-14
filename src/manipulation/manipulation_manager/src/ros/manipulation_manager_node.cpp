@@ -27,6 +27,7 @@
 #include "motion_planner_moveit/moveit_planning_backend.hpp"
 #include "motion_planner_moveit/cartesian_planner.hpp"
 #include "motion_planner_moveit/ompl_planner.hpp"
+#include "mobile_manipulator_profile/profile.hpp"
 #include "ros_adapters/rclcpp_logger.hpp"
 
 #include "manipulation_manager/core/manipulation_manager.hpp"
@@ -88,8 +89,21 @@ public:
   ManipulationManagerNode()
   : Node("manipulation_manager")
   {
-    frame_id_ = this->declare_parameter<std::string>("frame_id", "base_footprint");
-    planning_group_ = this->declare_parameter<std::string>("planning_group", "arm_7dof");
+    // Names come from the robot profile (`profile` parameter); the explicit frame_id and
+    // planning_group parameters still win when set (an empty planning_group means "profile").
+    std::string profile_warning;
+    const auto profile = mobile_manipulator_profile::loadProfileOrDefaults(
+      this->declare_parameter<std::string>("profile", mobile_manipulator_profile::kDefaultProfile),
+      profile_warning);
+    if (!profile_warning.empty()) {
+      RCLCPP_WARN(this->get_logger(), "%s", profile_warning.c_str());
+    }
+    frame_id_ = this->declare_parameter<std::string>(
+      "frame_id", profile.frameOr("world_base", "base_footprint"));
+    planning_group_ = this->declare_parameter<std::string>("planning_group", "");
+    if (planning_group_.empty()) {
+      planning_group_ = profile.whole_body_group;
+    }
     coverage_json_path_ = this->declare_parameter<std::string>(
       "coverage_json_path", "/tmp/wall_export/coverage_output.json");
     // base_link -> base_footprint fixed offset (see coverage_pass_demo_node.cpp's own frame_id

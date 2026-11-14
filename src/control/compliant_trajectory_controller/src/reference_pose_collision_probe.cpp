@@ -25,6 +25,7 @@
 #include "moveit/planning_scene/planning_scene.h"
 #include "moveit/robot_model_loader/robot_model_loader.h"
 #include "moveit/robot_state/robot_state.h"
+#include "mobile_manipulator_profile/profile.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace
@@ -45,18 +46,35 @@ int main(int argc, char ** argv)
 
   node->declare_parameter("urdf_file", std::string(""));
   node->declare_parameter("srdf_file", std::string(""));
-  node->declare_parameter("group", std::string("arm_7dof"));
-  node->declare_parameter(
-    "joint_names", std::vector<std::string>{
-      "lift_prismatic_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"});
-  node->declare_parameter(
-    "joint_pose", std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+  // Names come from the robot profile (`profile` parameter, config/profiles/<name>.yaml); the
+  // explicit parameters below still win when set.
+  node->declare_parameter("profile", std::string(mobile_manipulator_profile::kDefaultProfile));
+  std::string profile_warning;
+  const auto profile = mobile_manipulator_profile::loadProfileOrDefaults(
+    node->get_parameter("profile").as_string(), profile_warning);
+  if (!profile_warning.empty()) {
+    RCLCPP_WARN(node->get_logger(), "%s", profile_warning.c_str());
+  }
+  // Empty group / joint_names / joint_pose: the profile's whole-body group, its joints in
+  // order, and its home pose.
+  node->declare_parameter("group", std::string(""));
+  node->declare_parameter("joint_names", std::vector<std::string>{});
+  node->declare_parameter("joint_pose", std::vector<double>{});
 
   const auto urdf_path = node->get_parameter("urdf_file").as_string();
   const auto srdf_path = node->get_parameter("srdf_file").as_string();
-  const auto group = node->get_parameter("group").as_string();
-  const auto joint_names = node->get_parameter("joint_names").as_string_array();
-  const auto pose = node->get_parameter("joint_pose").as_double_array();
+  std::string group = node->get_parameter("group").as_string();
+  if (group.empty()) {
+    group = profile.whole_body_group;
+  }
+  auto joint_names = node->get_parameter("joint_names").as_string_array();
+  auto pose = node->get_parameter("joint_pose").as_double_array();
+  if (joint_names.empty() && !profile.lift_joint.empty()) {
+    joint_names = profile.joints();
+    if (pose.empty()) {
+      pose = profile.homePositions();
+    }
+  }
 
   if (urdf_path.empty() || srdf_path.empty()) {
     std::cerr << "Pass -p urdf_file:=<path> -p srdf_file:=<path> (both flat, xacro-rendered)\n";
