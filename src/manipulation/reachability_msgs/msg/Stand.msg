@@ -6,4 +6,4 @@ float64 standoff                # arm base distance from the wall plane
 float64 footprint_clearance     # footprint to wall distance (0 without a base model)
 float64 travel_s                # driving time from the previous stand (0 without a base model)
 uint32[] target_indices         # indices into the request's targets_world reached from here
-reachability_msgs/LiftBand[] bands   # lift bands for those targets (pose_indices index target_indices)
+reachability_msgs/LiftBand[] bands   # lift bands for those targets (pose_indices are indices into the request's targets_world)

@@ -188,6 +188,12 @@ TEST(ReachabilityNode, PlanStandsCoversAWideWallAndAssignsEveryTargetOnce)
   EXPECT_EQ(seen.size(), 10U);
   for (uint32_t i = 0; i < 10; ++i) {EXPECT_EQ(seen.count(i), 1U) << i;}
   EXPECT_EQ(res->total_travel_s, 0.0);   // no base profile: no travel time
+  for (const auto & s : res->stands) {    // lift band indices refer to the request's targets
+    const std::set<uint32_t> mine(s.target_indices.begin(), s.target_indices.end());
+    for (const auto & b : s.bands) {
+      for (const auto k : b.pose_indices) {EXPECT_EQ(mine.count(k), 1U);}
+    }
+  }
 }
 
 TEST(ReachabilityNode, PlanStandsUsesTheBaseProfile)

@@ -120,8 +120,9 @@ A 7 m wide, 1.9 m high wall (360 targets), UR10e map, start at one end, 0.3 m cl
 | Husky (skid-steer) | 4 | 11.1 s | its 0.99 m footprint puts the arm 0.7 m from the wall: less reach, 7 bands per stand, and a fourth stand for 4 leftover targets |
 
 Limits: greedy cover can leave a few stragglers that cost an extra stand and a backtrack (the Husky
-row); a final pass that merges small stands into a neighbour, or a cover chosen for total time instead
-of count, would fix it. Each stand is chosen on its own, so the order is "nearest next", not the best
+row). Folding such a stand into a neighbour does not help there: its targets lie outside what the
+neighbours reach. A cover chosen for total time instead of count, or a finer stand grid near the gaps,
+might. Each stand is chosen on its own, so the order is "nearest next", not the best
 tour. Not done: a yaw preference for contact work.
 
 ## Limits and next steps
