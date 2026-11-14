@@ -103,7 +103,8 @@ bool primitiveExtents(const sm::Geometry & g, Vec3 & size, std::string & what)
 
 // World-space points of any point-like geometry (cloud, mesh surface, occupied voxels).
 bool worldPoints(
-  const sm::SceneObject & o, const WorldGeometryOptions & opt, std::vector<Vec3> & out)
+  const sm::SceneObject & o, const WorldGeometryOptions & opt, std::vector<Vec3> & out,
+  size_t * bad_faces = nullptr)
 {
   if (const auto * pc = std::get_if<sm::PointCloud>(&o.geometry)) {
     for (const auto & p : pc->points) {out.push_back(o.pose * p);}
@@ -111,8 +112,13 @@ bool worldPoints(
   }
   if (const auto * m = std::get_if<sm::Mesh>(&o.geometry)) {
     std::vector<Vec3> local;
+    const auto n = static_cast<long>(m->vertices.size());
     for (const auto & f : m->faces) {
-      sampleTriangle(m->vertices.at(f[0]), m->vertices.at(f[1]), m->vertices.at(f[2]), opt.surface_spacing, local);
+      if (f[0] < 0 || f[1] < 0 || f[2] < 0 || f[0] >= n || f[1] >= n || f[2] >= n) {
+        if (bad_faces) {++*bad_faces;}
+        continue;
+      }
+      sampleTriangle(m->vertices[f[0]], m->vertices[f[1]], m->vertices[f[2]], opt.surface_spacing, local);
     }
     for (const auto & p : local) {out.push_back(o.pose * p);}
     return true;
@@ -133,18 +139,60 @@ bool worldPoints(
   return false;
 }
 
-// Occupied-cube boxes for a set of points. The cube doubles until it fits `max_boxes`, so the
+struct Aabb
+{
+  Vec3 lo;
+  Vec3 hi;
+};
+
+// World-space extent of every occupied voxel (a voxel is centred on origin + voxel_size * (i, j, k)).
+void voxelExtents(
+  const sm::SceneObject & o, const sm::VoxelGrid & v, const WorldGeometryOptions & opt,
+  std::vector<Aabb> & out)
+{
+  const double h = v.voxel_size / 2.0;
+  for (int k = 0; k < v.nz; ++k) {
+    for (int j = 0; j < v.ny; ++j) {
+      for (int i = 0; i < v.nx; ++i) {
+        const uint8_t s = v.occupied[v.index(i, j, k)];
+        if (!(s == sm::kVoxelOccupied || (s == sm::kVoxelUnknown && opt.unknown_voxels_occupied))) {
+          continue;
+        }
+        const Vec3 c = v.origin + v.voxel_size * Vec3(i, j, k);
+        Aabb box{Vec3::Constant(1e300), Vec3::Constant(-1e300)};
+        for (int corner = 0; corner < 8; ++corner) {   // rotated voxel: take the box of its corners
+          const Vec3 w = o.pose * (c + Vec3((corner & 1) ? h : -h, (corner & 2) ? h : -h, (corner & 4) ? h : -h));
+          box.lo = box.lo.cwiseMin(w);
+          box.hi = box.hi.cwiseMax(w);
+        }
+        out.push_back(box);
+      }
+    }
+  }
+}
+
+// Occupied-cube boxes for a set of extents, on a world-aligned lattice. Every lattice cell the
+// extents touch becomes a cube, and the cube doubles until the count fits `max_boxes`, so the
 // obstacle only ever gets bigger, never smaller.
 std::vector<mp::WorldGeometryBox> cubesFor(
-  const std::string & id, const std::vector<Vec3> & pts, double voxel, size_t max_boxes, double * used)
+  const std::string & id, const std::vector<Aabb> & extents, double voxel, size_t max_boxes, double * used)
 {
   std::set<std::array<long, 3>> cells;
   double size = std::max(voxel, 1e-6);
   for (int attempt = 0; attempt < 16; ++attempt) {
     cells.clear();
-    for (const auto & p : pts) {
-      cells.insert({std::lround(std::floor(p.x() / size)), std::lround(std::floor(p.y() / size)),
-          std::lround(std::floor(p.z() / size))});
+    for (const auto & e : extents) {
+      std::array<long, 3> lo, hi;
+      for (int a = 0; a < 3; ++a) {
+        lo[a] = std::lround(std::floor(e.lo[a] / size));
+        hi[a] = std::max(lo[a], std::lround(std::ceil(e.hi[a] / size)) - 1);
+      }
+      for (long x = lo[0]; x <= hi[0] && cells.size() <= max_boxes; ++x) {
+        for (long y = lo[1]; y <= hi[1] && cells.size() <= max_boxes; ++y) {
+          for (long z = lo[2]; z <= hi[2] && cells.size() <= max_boxes; ++z) {cells.insert({x, y, z});}
+        }
+      }
+      if (cells.size() > max_boxes) {break;}
     }
     if (cells.size() <= max_boxes) {break;}
     size *= 2.0;
@@ -162,13 +210,24 @@ std::vector<mp::WorldGeometryBox> cubesFor(
 }  // namespace
 
 mp::WorldGeometryUpdate toWorldGeometry(
-  const sm::SceneModel & scene, const WorldGeometryOptions & options, ConversionReport * report)
+  const sm::SceneModel & scene, const WorldGeometryOptions & requested, ConversionReport * report)
 {
   mp::WorldGeometryUpdate out;
   out.frame_id = scene.frameId();
   ConversionReport local;
   ConversionReport & rep = report ? *report : local;
   rep = ConversionReport{};
+
+  WorldGeometryOptions options = requested;
+  const WorldGeometryOptions defaults;
+  if (!(options.surface_spacing > 0.0)) {
+    options.surface_spacing = defaults.surface_spacing;
+    rep.approximated.push_back("surface_spacing must be > 0, using " + std::to_string(defaults.surface_spacing));
+  }
+  if (!(options.obstacle_voxel > 0.0)) {
+    options.obstacle_voxel = defaults.obstacle_voxel;
+    rep.approximated.push_back("obstacle_voxel must be > 0, using " + std::to_string(defaults.obstacle_voxel));
+  }
 
   for (const auto & o : scene.objects()) {
     std::vector<Vec3> pts;
@@ -192,7 +251,11 @@ mp::WorldGeometryUpdate toWorldGeometry(
         for (const auto & p : local) {pts.push_back(o.pose * p);}
         rep.approximated.push_back(o.id + ": " + prim_what + " (surface points)");
       } else {
-        worldPoints(o, options, pts);
+        size_t bad = 0;
+        worldPoints(o, options, pts, &bad);
+        if (bad > 0) {
+          rep.skipped.push_back(o.id + ": " + std::to_string(bad) + " mesh faces with out-of-range vertex indices");
+        }
       }
       for (const auto & p : pts) {out.points.push_back({p.x(), p.y(), p.z()});}
       rep.points += pts.size();
@@ -207,9 +270,23 @@ mp::WorldGeometryUpdate toWorldGeometry(
       out.boxes.push_back(makeBox(o.id, o.pose, prim_size));
       ++rep.boxes;
       rep.approximated.push_back(o.id + ": " + prim_what);
-    } else if (worldPoints(o, options, pts)) {
+    } else {
+      std::vector<Aabb> extents;
+      if (const auto * v = std::get_if<sm::VoxelGrid>(&o.geometry)) {
+        voxelExtents(o, *v, options, extents);   // the whole voxel, not just its centre
+      } else {
+        size_t bad = 0;
+        if (!worldPoints(o, options, pts, &bad)) {
+          rep.skipped.push_back(o.id + ": " + sm::geometryName(o.geometry) + " has no box/point form");
+          continue;
+        }
+        if (bad > 0) {
+          rep.skipped.push_back(o.id + ": " + std::to_string(bad) + " mesh faces with out-of-range vertex indices");
+        }
+        for (const auto & p : pts) {extents.push_back({p, p});}
+      }
       double used = options.obstacle_voxel;
-      auto cubes = cubesFor(o.id, pts, options.obstacle_voxel, options.max_obstacle_boxes, &used);
+      auto cubes = cubesFor(o.id, extents, options.obstacle_voxel, options.max_obstacle_boxes, &used);
       if (used > options.obstacle_voxel) {
         rep.coarsened.push_back(o.id + ": cubes grown to " + std::to_string(used) + " m");
       }

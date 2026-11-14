@@ -113,11 +113,13 @@ def points_to_esdf(points: np.ndarray, spec: EsdfSpec, max_distance: float = 1.0
     return np.clip(outside - inside_d, -max_distance, max_distance).astype(np.float32)
 
 
-def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[float]):
+def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[float],
+                     limits: Optional[Tuple[Sequence[float], Sequence[float]]] = None):
     """Pick the successful IK solution nearest `seed` out of a batch (cuRobo solves many seeds at once
     and returns all of them; the first row is not the closest). Each joint is shifted by whole turns
     toward the seed, but only when it is more than pi away, so metre-scale prismatic joints (a lift)
-    are never touched. Returns (joints, distance), or None when nothing succeeded."""
+    are never touched. With `limits=(lower, upper)` a shift that would leave the limits is not applied (the
+    solver's own value is kept for that joint). Returns (joints, distance), or None when nothing succeeded."""
     solutions = np.asarray(solutions, dtype=float).reshape(-1, len(seed))
     success = np.asarray(success, dtype=bool).reshape(-1)
     if success.shape[0] != solutions.shape[0]:      # unexpected layout: trust the first row only
@@ -128,6 +130,10 @@ def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[
     for row in solutions[success]:
         diff = row - seed
         shifted = np.where(np.abs(diff) > np.pi, row - 2 * np.pi * np.round(diff / (2 * np.pi)), row)
+        if limits is not None:
+            lower, upper = np.asarray(limits[0], dtype=float), np.asarray(limits[1], dtype=float)
+            outside = (shifted < lower - 1e-9) | (shifted > upper + 1e-9)
+            shifted = np.where(outside, row, shifted)
         distance = float(np.linalg.norm(shifted - seed))
         if distance < best_distance:
             best, best_distance = shifted, distance
@@ -278,6 +284,14 @@ class CuroboPlanner:
             quaternion=t.tensor([[[[list(quat_wxyz)]]]], device='cuda', dtype=t.float32))
         return self._wrap(self._planner.plan_pose(goal, self._state(start)))
 
+    def _joint_limits(self):
+        """(lower, upper) joint limits from cuRobo, or None if this cuRobo build does not expose them."""
+        try:
+            pos = self._planner.kinematics.get_joint_limits().position.detach().cpu().numpy()
+            return pos[0].tolist(), pos[1].tolist()
+        except Exception:
+            return None
+
     # ---- IK and validity ---------------------------------------------------------------------
     def solve_ik(self, position: Sequence[float], quat_wxyz: Sequence[float] = (1.0, 0.0, 0.0, 0.0),
                  seed: Optional[Sequence[float]] = None) -> IkResult:
@@ -297,7 +311,7 @@ class CuroboPlanner:
         res = self._planner.ik_solver.solve_pose(goal, current_state=self._state(seed))
         out = IkResult(joint_names=self.joint_names)
         picked = closest_solution(res.solution.detach().cpu().numpy(),
-                                  res.success.detach().cpu().numpy(), seed)
+                                  res.success.detach().cpu().numpy(), seed, self._joint_limits())
         if picked is None:
             out.failure_reason_code = 'no_solution'
             out.failure_stage = 'planning'

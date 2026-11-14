@@ -180,6 +180,51 @@ TEST(WorldGeometry, VoxelGridUsesOccupiedCellsAndHonoursUnknown)
   EXPECT_EQ(toWorldGeometry(scene, opt).points.size(), 2U);
 }
 
+TEST(WorldGeometry, ObstacleVoxelGridIsCoveredWholeNotJustAtItsCentre)
+{
+  // one 0.1 m voxel converted with 0.02 m cubes: every point of the voxel must stay inside a cube
+  sm::SceneModel scene("base");
+  sm::VoxelGrid g;
+  g.voxel_size = 0.1;
+  g.origin = sm::Vec3(0.013, -0.007, 0.0);
+  g.nx = g.ny = g.nz = 1;
+  g.occupied = {sm::kVoxelOccupied};
+  scene.add(object("map", g));
+  WorldGeometryOptions opt;
+  opt.obstacle_voxel = 0.02;
+  const auto w = toWorldGeometry(scene, opt);
+  ASSERT_FALSE(w.boxes.empty());
+  for (const double fx : {-0.05, 0.0, 0.0499}) {
+    for (const double fy : {-0.05, 0.0, 0.0499}) {
+      for (const double fz : {-0.05, 0.0, 0.0499}) {
+        const double px = g.origin.x() + fx, py = g.origin.y() + fy, pz = g.origin.z() + fz;
+        bool covered = false;
+        for (const auto & b : w.boxes) {
+          covered = covered || (std::abs(px - b.center_x) <= b.size_x / 2 + 1e-9 &&
+            std::abs(py - b.center_y) <= b.size_y / 2 + 1e-9 &&
+            std::abs(pz - b.center_z) <= b.size_z / 2 + 1e-9);
+        }
+        EXPECT_TRUE(covered) << fx << " " << fy << " " << fz;
+      }
+    }
+  }
+}
+
+TEST(WorldGeometry, BadMeshIndexAndSpacingDoNotThrowOrHang)
+{
+  sm::SceneModel scene("base");
+  sm::Mesh m;
+  m.vertices = {sm::Vec3(0, 0, 0), sm::Vec3(1, 0, 0), sm::Vec3(0, 1, 0)};
+  m.faces = {{0, 1, 2}, {0, 1, 7}};
+  scene.add(object("tri", m));
+  WorldGeometryOptions opt;
+  opt.surface_spacing = 0.0;
+  ConversionReport rep;
+  EXPECT_NO_THROW(toWorldGeometry(scene, opt, &rep));
+  EXPECT_FALSE(rep.skipped.empty());
+  EXPECT_FALSE(rep.approximated.empty());
+}
+
 TEST(WorldGeometry, EsdfIsSkippedAndReported)
 {
   sm::SceneModel scene("base");

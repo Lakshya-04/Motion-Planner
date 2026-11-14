@@ -23,3 +23,10 @@ def test_closest_solution_wraps_turns_but_not_a_lift():
 
 def test_closest_solution_none_when_nothing_succeeds():
     assert closest_solution(np.zeros((2, 3)), np.array([False, False]), [0, 0, 0]) is None
+
+
+def test_closest_solution_does_not_shift_out_of_limits():
+    sols = np.array([[2.5]])
+    # seed at -3.5 would pull 2.5 to 2.5 - 2*pi = -3.78, outside [-2.9, 2.9]: keep the solver's value
+    joints, _ = closest_solution(sols, np.array([True]), [-3.5], ([-2.9], [2.9]))
+    assert joints == pytest.approx([2.5])

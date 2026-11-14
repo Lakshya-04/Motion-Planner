@@ -139,5 +139,28 @@ TEST(SeedPreferringIk, AllFailuresReportFailure)
   EXPECT_EQ(inner->calls, 3);
 }
 
+TEST(SeedPreferringIk, NoiseSkipsNonTurnJointsAndStaysInLimits)
+{
+  std::vector<std::vector<double>> seeds;
+  auto inner = std::make_shared<FakeIk>([&seeds](const IkRequest & r) {
+      seeds.push_back(r.joint_seed);
+      return ok(r.joint_seed);
+    });
+  SeedPreferringIkConfig cfg;
+  cfg.extra_seeds = 20;
+  cfg.perturbation = 1.0;
+  cfg.wrap_joint = {false, true};
+  cfg.lower_limits = {0.0, -0.1};
+  cfg.upper_limits = {0.5, 0.1};
+  SeedPreferringIk ik(inner, cfg);
+  ik.ik(withSeed({0.25, 0.0}));
+  ASSERT_EQ(seeds.size(), 21u);
+  for (const auto & s : seeds) {
+    EXPECT_DOUBLE_EQ(s[0], 0.25);          // lift untouched
+    EXPECT_GE(s[1], -0.1 - 1e-12);         // turn joint clamped to its limits
+    EXPECT_LE(s[1], 0.1 + 1e-12);
+  }
+}
+
 }  // namespace
 }  // namespace motion_planner

@@ -1,5 +1,6 @@
 #include "motion_planner/core/planners/seed_preferring_ik.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <random>
@@ -73,7 +74,17 @@ IkResult SeedPreferringIk::ik(const IkRequest & request)
   for (int attempt = 0; attempt <= config_.extra_seeds; ++attempt) {
     IkRequest trial = request;
     if (attempt > 0) {
-      for (double & q : trial.joint_seed) {q += noise(rng);}
+      const bool have_limits = config_.lower_limits.size() >= trial.joint_seed.size() &&
+        config_.upper_limits.size() >= trial.joint_seed.size();
+      for (size_t i = 0; i < trial.joint_seed.size(); ++i) {
+        // Noise is in radians: keep it off joints that are not turns (a lift is in metres).
+        if (!config_.wrap_joint.empty() && !(i < config_.wrap_joint.size() && config_.wrap_joint[i])) {
+          continue;
+        }
+        double q = trial.joint_seed[i] + noise(rng);
+        if (have_limits) {q = std::min(std::max(q, config_.lower_limits[i]), config_.upper_limits[i]);}
+        trial.joint_seed[i] = q;
+      }
     }
     IkResult result = inner_->ik(trial);
     if (!result.success) {
@@ -95,7 +106,7 @@ IkResult SeedPreferringIk::ik(const IkRequest & request)
       best_distance = d;
       best = std::move(result);
     }
-    if (best_distance <= config_.accept_distance) {break;}
+    if (config_.accept_distance > 0.0 && best_distance <= config_.accept_distance) {break;}
   }
 
   if (best.success) {return best;}

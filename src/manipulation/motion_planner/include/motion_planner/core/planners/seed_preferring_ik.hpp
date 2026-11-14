@@ -24,7 +24,7 @@ namespace motion_planner
 struct SeedPreferringIkConfig
 {
   int extra_seeds{8};                 ///< Perturbed seeds tried besides the caller's own.
-  double perturbation{0.3};           ///< Half-width of the uniform noise per joint [rad or m].
+  double perturbation{0.3};           ///< Half-width of the uniform seed noise [rad], on wrappable joints only.
   double accept_distance{0.0};        ///< Stop early once a solution is this close; 0 = try all.
   uint32_t rng_seed{1};               ///< Fixed so a query gives the same answer every time.
   std::vector<double> lower_limits;   ///< Optional; with upper_limits, solutions outside are dropped.

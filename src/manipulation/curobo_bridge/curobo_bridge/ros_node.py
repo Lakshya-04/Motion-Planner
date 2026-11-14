@@ -121,6 +121,8 @@ class CuroboPlannerNode(Node):
             response.success = True
         except ValueError as e:
             response.message = str(e)
+        except Exception as e:      # a CUDA / cuRobo failure must come back as a failed response
+            response.message = f'ESDF update failed: {e}'
         return response
 
     def _solve_ik(self, request, response):
