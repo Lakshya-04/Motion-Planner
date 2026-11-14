@@ -481,6 +481,8 @@ IkResult MoveItPlanningBackend::ik(const IkRequest & request)
   if (!ik_seeding_overridden_ && node_) {
     if (!node_->has_parameter("ik_extra_seeds")) {
       node_->declare_parameter<int>("ik_extra_seeds", 0);
+    }
+    if (!node_->has_parameter("ik_seed_perturbation")) {
       node_->declare_parameter<double>("ik_seed_perturbation", 0.3);
     }
     ik_extra_seeds_ = node_->get_parameter("ik_extra_seeds").as_int();

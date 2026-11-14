@@ -40,8 +40,11 @@ class Model:
         self.spheres = {}
         for link in root.iter('link'):
             for c in link.findall('collision'):
-                radius = float(c.find('.//sphere').get('radius'))
-                centre = np.array(list(map(float, c.find('origin').get('xyz').split())))
+                sphere, origin = c.find('.//sphere'), c.find('origin')
+                if sphere is None:
+                    continue        # not a sphere model element
+                radius = float(sphere.get('radius'))
+                centre = np.array(list(map(float, (origin.get('xyz') if origin is not None else '0 0 0').split())))
                 self.spheres.setdefault(link.get('name'), []).append((centre, radius))
         self.allowed = set()
         if srdf:
@@ -91,6 +94,9 @@ if __name__ == '__main__':
     m = Model(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
     poses = {'home': [0, -1.57, 1.57, -1.57, -1.57, 0], 'ready': [0, -1.2, 1.4, -1.8, -1.57, 0],
              'folded (should collide)': [0, 0, 3.1, 0, 0, 0]}
+    if len(m.dof) != 6:
+        print(f'{len(m.dof)} revolute joints found, the named 6-joint poses are UR10e-only: skipped')
+        poses = {}
     for name, q in poses.items():
         print(name, m.colliding_pairs(q))
     rng = np.random.default_rng(0)

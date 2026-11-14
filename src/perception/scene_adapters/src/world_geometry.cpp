@@ -185,7 +185,7 @@ std::vector<mp::WorldGeometryBox> cubesFor(
       std::array<long, 3> lo, hi;
       for (int a = 0; a < 3; ++a) {
         lo[a] = std::lround(std::floor(e.lo[a] / size));
-        hi[a] = std::max(lo[a], std::lround(std::ceil(e.hi[a] / size)) - 1);
+        hi[a] = std::max(lo[a], std::lround(std::ceil(e.hi[a] / size - 1e-9)) - 1);
       }
       for (long x = lo[0]; x <= hi[0] && cells.size() <= max_boxes; ++x) {
         for (long y = lo[1]; y <= hi[1] && cells.size() <= max_boxes; ++y) {
@@ -284,6 +284,14 @@ mp::WorldGeometryUpdate toWorldGeometry(
           rep.skipped.push_back(o.id + ": " + std::to_string(bad) + " mesh faces with out-of-range vertex indices");
         }
         for (const auto & p : pts) {extents.push_back({p, p});}
+      }
+      const size_t before = extents.size();
+      extents.erase(
+        std::remove_if(extents.begin(), extents.end(), [](const Aabb & e) {
+          return !(e.lo.allFinite() && e.hi.allFinite());
+        }), extents.end());
+      if (extents.size() != before) {
+        rep.skipped.push_back(o.id + ": " + std::to_string(before - extents.size()) + " non-finite points or voxels dropped");
       }
       double used = options.obstacle_voxel;
       auto cubes = cubesFor(o.id, extents, options.obstacle_voxel, options.max_obstacle_boxes, &used);

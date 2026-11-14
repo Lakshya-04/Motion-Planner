@@ -7,6 +7,7 @@ lazily: importing this module works without a GPU stack, constructing a CuroboPl
 Frames: everything is in the robot base frame, the same convention as the VAMP adapter. Poses are
 [x, y, z] + quaternion [w, x, y, z] (cuRobo's order).
 """
+import logging
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
@@ -119,15 +120,18 @@ def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[
     and returns all of them; the first row is not the closest). Each joint is shifted by whole turns
     toward the seed, but only when it is more than pi away, so metre-scale prismatic joints (a lift)
     are never touched. With `limits=(lower, upper)` a shift that would leave the limits is not applied (the
-    solver's own value is kept for that joint). Returns (joints, distance), or None when nothing succeeded."""
+    solver's own value is kept for that joint). Returns (joints, distance, row), `row` being the index into `solutions` it came from, or None when
+    nothing succeeded. Without limits, a joint that is not a turn but spans more than pi could be shifted
+    wrongly; cuRobo's limits are passed in solve_ik so such shifts stay inside the real range."""
     solutions = np.asarray(solutions, dtype=float).reshape(-1, len(seed))
     success = np.asarray(success, dtype=bool).reshape(-1)
     if success.shape[0] != solutions.shape[0]:      # unexpected layout: trust the first row only
         success = np.zeros(solutions.shape[0], dtype=bool)
         success[:1] = True
     seed = np.asarray(seed, dtype=float)
-    best, best_distance = None, np.inf
-    for row in solutions[success]:
+    best, best_distance, best_row = None, np.inf, -1
+    for index in np.flatnonzero(success):
+        row = solutions[index]
         diff = row - seed
         shifted = np.where(np.abs(diff) > np.pi, row - 2 * np.pi * np.round(diff / (2 * np.pi)), row)
         if limits is not None:
@@ -136,8 +140,8 @@ def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[
             shifted = np.where(outside, row, shifted)
         distance = float(np.linalg.norm(shifted - seed))
         if distance < best_distance:
-            best, best_distance = shifted, distance
-    return None if best is None else (best.tolist(), best_distance)
+            best, best_distance, best_row = shifted, distance, int(index)
+    return None if best is None else (best.tolist(), best_distance, best_row)
 
 
 class CuroboPlanner:
@@ -289,7 +293,11 @@ class CuroboPlanner:
         try:
             pos = self._planner.kinematics.get_joint_limits().position.detach().cpu().numpy()
             return pos[0].tolist(), pos[1].tolist()
-        except Exception:
+        except Exception as e:
+            if not getattr(self, '_warned_limits', False):
+                self._warned_limits = True
+                logging.getLogger(__name__).warning(
+                    'cuRobo joint limits unavailable (%s): IK turn shifts are not limit-checked', e)
             return None
 
     # ---- IK and validity ---------------------------------------------------------------------
@@ -321,8 +329,9 @@ class CuroboPlanner:
         out.joints = picked[0]
         for name, attr in (('position_error', 'position_error'), ('rotation_error', 'rotation_error')):
             value = getattr(res, attr, None)
-            if value is not None:
-                setattr(out, name, float(value.reshape(-1)[0]))
+            if value is not None:       # the error of the row we picked, not row 0
+                flat = value.reshape(-1)
+                setattr(out, name, float(flat[picked[2]] if flat.shape[0] > picked[2] else flat[0]))
         return out
 
     def check_states(self, states: Sequence[Sequence[float]]) -> List[bool]:

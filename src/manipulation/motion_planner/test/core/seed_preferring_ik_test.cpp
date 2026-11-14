@@ -162,5 +162,37 @@ TEST(SeedPreferringIk, NoiseSkipsNonTurnJointsAndStaysInLimits)
   }
 }
 
+TEST(SeedPreferringIk, FirstFailureReasonIsKept)
+{
+  int n = 0;
+  auto inner = std::make_shared<FakeIk>([&n](const IkRequest &) {
+      if (++n == 1) {
+        IkResult r;
+        r.failure_reason_code = "ik_in_collision";
+        return r;
+      }
+      return ok({9.0});   // later attempts land outside the limits
+    });
+  SeedPreferringIkConfig cfg;
+  cfg.extra_seeds = 3;
+  cfg.wrap_joint = {false};
+  cfg.lower_limits = {-1.0};
+  cfg.upper_limits = {1.0};
+  SeedPreferringIk ik(inner, cfg);
+  auto r = ik.ik(withSeed({0.0}));
+  EXPECT_FALSE(r.success);
+  EXPECT_EQ(r.failure_reason_code, "ik_in_collision");
+}
+
+TEST(SeedPreferringIk, NegativePerturbationIsTreatedAsItsMagnitude)
+{
+  auto inner = std::make_shared<FakeIk>([](const IkRequest & r) {return ok(r.joint_seed);});
+  SeedPreferringIkConfig cfg;
+  cfg.extra_seeds = 2;
+  cfg.perturbation = -0.1;
+  SeedPreferringIk ik(inner, cfg);
+  EXPECT_TRUE(ik.ik(withSeed({0.0})).success);
+}
+
 }  // namespace
 }  // namespace motion_planner

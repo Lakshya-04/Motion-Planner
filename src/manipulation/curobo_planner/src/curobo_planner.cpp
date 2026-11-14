@@ -207,8 +207,12 @@ bool CuroboClientPlanner::setWorld(const mp::WorldGeometryUpdate & world, std::s
 
 bool CuroboClientPlanner::setEsdf(const scene_model::EsdfGrid & grid, std::string * message)
 {
-  const size_t n = static_cast<size_t>(grid.nx) * grid.ny * grid.nz;
-  if (grid.nx <= 0 || grid.ny <= 0 || grid.nz <= 0 || grid.distance.size() != n) {
+  if (grid.nx <= 0 || grid.ny <= 0 || grid.nz <= 0) {
+    if (message) {*message = "ESDF grid dimensions must be positive";}
+    return false;
+  }
+  const size_t n = static_cast<size_t>(grid.nx) * static_cast<size_t>(grid.ny) * static_cast<size_t>(grid.nz);
+  if (grid.distance.size() != n) {
     if (message) {*message = "ESDF grid has inconsistent dimensions";}
     return false;
   }

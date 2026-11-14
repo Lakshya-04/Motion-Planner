@@ -17,6 +17,8 @@ constexpr double kTwoPi = 6.283185307179586476925286766559;
 SeedPreferringIk::SeedPreferringIk(std::shared_ptr<IkPort> inner, SeedPreferringIkConfig config)
 : inner_(std::move(inner)), config_(std::move(config))
 {
+  // The noise half-width is a magnitude: a negative or NaN value would be undefined for the distribution.
+  config_.perturbation = std::isfinite(config_.perturbation) ? std::fabs(config_.perturbation) : 0.0;
 }
 
 double SeedPreferringIk::distance(const std::vector<double> & a, const std::vector<double> & b) const
@@ -88,16 +90,18 @@ IkResult SeedPreferringIk::ik(const IkRequest & request)
     }
     IkResult result = inner_->ik(trial);
     if (!result.success) {
-      last_failure = std::move(result);
+      if (!any_attempt_failed) {last_failure = std::move(result);}   // the first reason is the real one
       any_attempt_failed = true;
       continue;
     }
     if (!wrapToSeed(result.joint_solution, request.joint_seed)) {
-      last_failure = result;
-      last_failure.success = false;
-      last_failure.message = "IK solution is outside the joint limits.";
-      last_failure.failure_reason_code = "ik_outside_limits";
-      last_failure.joint_solution.clear();
+      if (!any_attempt_failed) {
+        last_failure = result;
+        last_failure.success = false;
+        last_failure.message = "IK solution is outside the joint limits.";
+        last_failure.failure_reason_code = "ik_outside_limits";
+        last_failure.joint_solution.clear();
+      }
       any_attempt_failed = true;
       continue;
     }
