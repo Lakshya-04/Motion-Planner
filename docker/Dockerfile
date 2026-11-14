@@ -8,6 +8,7 @@
 #   dev   : deps + developer tools + non-root user matching the host UID
 #   build : deps + the workspace built and tested with colcon (CI-style, no GPU needed)
 #   gpu   : dev + CUDA-enabled PyTorch + cuRobo v2 pinned (needs the NVIDIA container runtime)
+#   sim-gazebo : deps + Gazebo Harmonic (ros_gz, gz_ros2_control) for the headless simulation backend
 #   vamp  : upstream VAMP (SIMD CPU planner) built from a pinned commit, installed to /opt/vamp
 #   full  : gpu + vamp  (the "everything" image)
 #
@@ -126,6 +127,18 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     /opt/venv/bin/pip install -r /tmp/requirements-sim.txt \
     && chown -R ${USERNAME}: /opt/venv
 USER ${USERNAME}
+
+############################ sim-gazebo #######################
+# Thin layer: Gazebo Harmonic + the ROS bridges and gz_ros2_control (src/simulation/sim_gazebo).
+# Runs headless (gz sim -s), no GPU or display needed.
+FROM deps AS sim-gazebo
+ARG ROS_DISTRO
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-ros-gz-sim ros-${ROS_DISTRO}-ros-gz-bridge \
+      ros-${ROS_DISTRO}-gz-ros2-control \
+    && rm -rf /var/lib/apt/lists/*
 
 ############################ vamp #############################
 # Upstream VAMP, unmodified, at a pinned commit. Built for a portable SIMD baseline
