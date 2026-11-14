@@ -49,7 +49,7 @@ def _jtc_params(joints):
         'constraints': {'stopped_velocity_tolerance': 0.05, 'goal_time': 2.0}}}}
 
 
-def _jtac_params(profile, joints, robot_description):
+def _jtac_params(profile, joints, robot_description, conditioned=False):
     """The existing JTAC config with names/frames taken from the profile instead of the demo's."""
     cfg_path = os.path.join(get_package_share_directory('compliant_trajectory_controller'),
                             'config', 'jtac_controller.yaml')
@@ -59,8 +59,13 @@ def _jtac_params(profile, joints, robot_description):
     params['joints'] = joints
     params['robot_description'] = robot_description
     params['kinematics'].update({'base': fr['base'], 'tip': fr['tcp']})
-    params['ft_sensor'] = {**params.get('ft_sensor', {}), 'name': 'ft_sensor',
-                           'frame': {'id': FT_FRAME}}
+    if conditioned:
+        # contact wrench at the tcp from ft_conditioner through the ft_bridge_hardware sensor
+        params['ft_sensor'] = {**params.get('ft_sensor', {}), 'name': 'ft_sensor_tcp',
+                               'frame': {'id': fr['tcp']}}
+    else:
+        params['ft_sensor'] = {**params.get('ft_sensor', {}), 'name': 'ft_sensor',
+                               'frame': {'id': FT_FRAME}}
     params['control'] = {'frame': {'id': fr['tcp']}}
     params['fixed_world_frame'] = {'frame': {'id': fr['base']}}
     params.setdefault('gravity_compensation', {})['frame'] = {'id': fr['tcp']}
@@ -115,10 +120,22 @@ def _launch(context):
                  parameters=[{'use_sim_time': True, 'tcp_frame': fr['tcp']}])
 
     actions = [gz, rsp, bridge, truth, spawn]
+    conditioned = lc('ft_conditioner') == 'true'
+    if conditioned:
+        # raw wrench (ft_sensor_link, with the payload weight) -> contact wrench at the tcp. The
+        # payload is not set: calibrate it with ~/capture_pose + ~/identify (or pass payload_mass_kg).
+        actions.append(Node(
+            package='ft_conditioner', executable='wrench_conditioner_node', name='ft_conditioner',
+            output='screen',
+            parameters=[{'use_sim_time': True,
+                         'input_topic': '/force_torque_sensor_broadcaster/wrench',
+                         'output_topic': '/ft_conditioner/wrench_conditioned',
+                         'world_frame': fr['base'], 'tool_frame': fr['tcp'],
+                         'payload_mass_kg': float(lc('payload_mass_kg'))}]))
     if lc('controller') != 'none':
         name = CONTROLLER_NAMES[lc('controller')]
         params = (_jtc_params(joints) if lc('controller') == 'jtc'
-                  else _jtac_params(profile, joints, robot_description))
+                  else _jtac_params(profile, joints, robot_description, conditioned))
         jsb = _spawner('joint_state_broadcaster')
         ftb = _spawner('force_torque_sensor_broadcaster', _write_yaml(
             {'force_torque_sensor_broadcaster': {'ros__parameters': {
@@ -143,5 +160,10 @@ def generate_launch_description():
         DeclareLaunchArgument('standoff', default_value='0.9', description='wall distance in front of the base (m)'),
         DeclareLaunchArgument('gui', default_value='false', description='true opens the gz GUI (server only otherwise)'),
         DeclareLaunchArgument('controller', default_value='jtc', description='jtc | jtac | none'),
+        DeclareLaunchArgument('ft_conditioner', default_value='false',
+                              description='true: start ft_conditioner (raw wrench -> tcp contact wrench) and '
+                                          'point JTAC at the ft_conditioned_bridge sensor ft_sensor_tcp'),
+        DeclareLaunchArgument('payload_mass_kg', default_value='0.0',
+                              description='initial payload mass for ft_conditioner (0: calibrate with ~/identify)'),
         OpaqueFunction(function=_launch),
     ])
