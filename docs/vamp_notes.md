@@ -144,7 +144,7 @@ cmake ... -DVAMP_PLANNER_ROBOT_DIR=build/vamp_robots   # every <Name>.hh there i
 - Joint order and names in the header follow the URDF (`arm_joint1..6` for the generic arm), and
   the header's world frame is the URDF root, so planning scenes must be in the robot base frame.
 
-## UR10e: cuRobo works, VAMP/Cricket model is an open problem
+## UR10e: cuRobo works, VAMP/Cricket model fixed (root cause below)
 
 Pipeline used for the real arm: `xacro ... arm:=ur10e lift_fixed_height:=0.5` ->
 `docker/tools/resolve_package_uris.py` (copies the 7 `package://ur_description` collision meshes and
@@ -154,11 +154,48 @@ cuRobo's `RobotBuilder` picks links from visuals even with `use_collision_mesh=T
 - cuRobo: 716 spheres on 13 links, 44% of random poses collision-free, plans in 1.5 s and fails with
   `no_path` through an obstacle. Needed `--batch-size 1000` (its default 10000 wants >7 GB of GPU
   memory; the 4 GB card ran out).
-- VAMP/Cricket: header generates (55 spheres, real joint names) but **every sampled configuration is
-  reported in collision (0 of 2000), including home poses**, while the same arm is fine in cuRobo and
-  the generic 6-DOF arm is fine in VAMP. Tried and ruled out: Cricket's guessed allowed pairs, an SRDF
-  with every rigid/adjacent pair (`rigid_pairs_srdf.py`), an SRDF built from cuRobo's computed matrix
-  (and the union), more spheres per link (`FOAM_ARGS="--branch 24"`, 84 spheres). A reduced model
-  with the static chain removed crashes Cricket's guess ("pair.second is larger than the number of
-  geometries"). Next steps: dump Cricket's per-link sphere ownership to see which checked pair
-  overlaps at home, or feed cuRobo's fitted spheres into Cricket so both backends share one model.
+- VAMP/Cricket (before the fix): header generated (55 spheres, real joint names) but every sampled
+  configuration was reported in collision (0 of 2000), including home poses, while cuRobo and the
+  generic 6-DOF arm were fine.
+
+### Root cause and fix
+
+Cause: in the sphere model two non-adjacent link pairs overlap at every configuration, so every
+configuration is invalid whatever else is allowed. Evaluating the spherized URDF with
+`docker/tools/sphere_self_collision.py` and the previous SRDF (rigid + parent/child pairs only)
+leaves exactly:
+
+- `arm_base_link_inertia` / `arm_upper_arm_link` (100% of poses): the upper arm's first sphere sits on
+  the shoulder-lift axis, about 0.13 m above the base sphere, with radii 0.13 + 0.11. The shoulder
+  link is between them, so they are two joints apart, not parent/child. The source SRDF lists such
+  pairs as "never collides".
+- `lift_carriage_link` / `arm_shoulder_link` (100%): the carriage is rigidly attached to the arm base
+  (through sphere-less mount links) and the shoulder is the base's child, but the SRDF had only
+  per-link parent/child pairs, not parent/child between rigid groups.
+
+The earlier attempts (Cricket's sampled pairs, an SRDF from cuRobo's matrix, more spheres) all kept
+these two pairs, so none changed the result. It was not the base or tool frame, and not the radii.
+
+Fix: `rigid_pairs_srdf.py` now treats each rigid group as one body (the neighbours of a group are
+neighbours of every member) and takes `--hops N`, allowing links up to N joints apart. Use `--hops 2`
+for a serial 6-DOF arm, then hand the SRDF to Cricket instead of `-`:
+
+```
+python3 docker/tools/rigid_pairs_srdf.py --hops 2 spherized.urdf > robot.srdf
+```
+
+Verified on the same spherized UR10e arm-only URDF (lift fixed), by compiling the generated header
+with VAMP and calling `validate_motion<UR10eArm, FloatVectorWidth, 1>(q, q, empty env)`, the same
+call `vamp_planner` uses:
+
+| | old header | new header (`--hops 2` SRDF) |
+|---|---|---|
+| home `[0,-1.57,1.57,-1.57,-1.57,0]` | collision | free |
+| ready `[0,-1.2,1.4,-1.8,-1.57,0]` | collision | free |
+| elbow folded back `[0,0,3.1,0,0,0]` | collision | collision |
+| arm driven into the lift column `[0,1.5,0,0,0,0]` | collision | collision |
+| 2000 random poses free | 0 | 1023 (51%; cuRobo model: 44%) |
+
+`sphere_self_collision.py` independently gives 254 of 500 free with the same pose results. With
+`--hops 2` the upper arm is never reported touching the base or wrist 1, which matches the stock UR
+SRDF.
