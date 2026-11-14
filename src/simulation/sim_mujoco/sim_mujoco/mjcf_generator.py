@@ -228,6 +228,7 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
 
     mesh_assets = {}
     colliding_links = []
+    tree_joints = []  # actuated joints in MuJoCo's qpos order (depth-first over the body tree)
 
     def add_geoms(body, link):
         for k, c in enumerate(link.collisions):
@@ -290,6 +291,7 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
             if joint.friction:
                 attrs['frictionloss'] = str(joint.friction)
             ET.SubElement(body, 'joint', **attrs)
+            tree_joints.append(joint)
         add_geoms(body, link)
         if link_name == ft_link:
             ET.SubElement(body, 'site', name='ft_sensor', size='0.01', group='4')
@@ -344,9 +346,7 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
 
     if home:
         qpos = []
-        for j in robot.joints:
-            if j.type not in ACTUATED:
-                continue
+        for j in tree_joints:
             if j.mimic:
                 base = home.get(j.mimic[0], 0.0)
                 qpos.append(j.mimic[2] + j.mimic[1] * base)
