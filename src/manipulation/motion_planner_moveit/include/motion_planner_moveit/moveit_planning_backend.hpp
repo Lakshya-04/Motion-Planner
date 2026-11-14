@@ -49,6 +49,7 @@ class PlanningSceneInterface;
 
 namespace moveit::core
 {
+class JointModelGroup;
 class RobotState;
 }  // namespace moveit::core
 
@@ -77,6 +78,13 @@ public:
   /// from perturbed seeds and returns the solution closest to the seed, wrapped by whole turns
   /// and inside the joint limits (SeedPreferringIk). Otherwise one plain solve, as before.
   IkResult ik(const IkRequest & request) override;
+
+  /// Fills limits and the revolute mask of `config` from the group's active joints, in group order.
+  /// Prismatic joints are not wrapped; a joint without position bounds (continuous) gets infinite
+  /// limits. False for a group containing a multi-variable joint. Public so it is testable with
+  /// a bare RobotModel, no live node.
+  static bool seedingConfigFromGroup(
+    const moveit::core::JointModelGroup * group, SeedPreferringIkConfig & config);
 
   /// Overrides the ik_extra_seeds / ik_seed_perturbation parameters. 0 extra seeds = off.
   void setIkSeeding(int extra_seeds, double perturbation);

@@ -439,27 +439,37 @@ void MoveItPlanningBackend::setIkSeeding(int extra_seeds, double perturbation)
   ik_seeding_overridden_ = true;
 }
 
-bool MoveItPlanningBackend::seedingConfigForGroup(SeedPreferringIkConfig & config)
+bool MoveItPlanningBackend::seedingConfigFromGroup(
+  const moveit::core::JointModelGroup * group, SeedPreferringIkConfig & config)
 {
-  const auto robot_model = move_group_ ? move_group_->getRobotModel() : nullptr;
-  const auto * group = robot_model ? robot_model->getJointModelGroup(move_group_name_) : nullptr;
   if (!group) {
     return false;
   }
+  SeedPreferringIkConfig filled = config;
+  filled.wrap_joint.clear();
+  filled.lower_limits.clear();
+  filled.upper_limits.clear();
   for (const auto * joint : group->getActiveJointModels()) {
     if (joint->getVariableCount() != 1) {
       return false;  // multi-DOF joint: not a plain vector of scalars, skip seed preferring
     }
-    const auto type = joint->getType();
-    config.wrap_joint.push_back(type == moveit::core::JointModel::REVOLUTE);
+    filled.wrap_joint.push_back(joint->getType() == moveit::core::JointModel::REVOLUTE);
     const auto & bounds = joint->getVariableBounds()[0];
     const bool bounded = bounds.position_bounded_;  // a continuous joint has no position bounds
-    config.lower_limits.push_back(
+    filled.lower_limits.push_back(
       bounded ? bounds.min_position_ : -std::numeric_limits<double>::infinity());
-    config.upper_limits.push_back(
+    filled.upper_limits.push_back(
       bounded ? bounds.max_position_ : std::numeric_limits<double>::infinity());
   }
+  config = std::move(filled);
   return true;
+}
+
+bool MoveItPlanningBackend::seedingConfigForGroup(SeedPreferringIkConfig & config)
+{
+  const auto robot_model = move_group_ ? move_group_->getRobotModel() : nullptr;
+  return robot_model &&
+         seedingConfigFromGroup(robot_model->getJointModelGroup(move_group_name_), config);
 }
 
 IkResult MoveItPlanningBackend::ik(const IkRequest & request)
