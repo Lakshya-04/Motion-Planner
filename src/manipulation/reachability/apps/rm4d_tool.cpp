@@ -7,6 +7,7 @@
 //                            [--lift-max H] [--lift-step dh] [--mount-z dz] [--base-x bx] [--base-y by]
 //   rm4d_tool station map.rm4d --wall-x X --z-min Z0 --z-max Z1 [--width W] [--z-step dz] [--y-step dy]
 //                              [--lift-max H] [--mount-z dz] [--min-clearance c] [--grid-step g] [--base-profile profile.yaml]
+//                              [--multi 1 --start-x X --start-y Y]   several stands with travel time
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -19,6 +20,7 @@
 #include "reachability/core/io.hpp"
 #include "reachability/core/lift_bands.hpp"
 #include "reachability/core/station.hpp"
+#include "reachability/core/stands.hpp"
 
 using namespace reachability;
 
@@ -142,6 +144,17 @@ int main(int argc, char ** argv)
         }
         std::printf("base %s (%s%s)\n", r.base->name.c_str(), r.base->can_strafe ? "strafes" : "no strafe",
           r.base->drive == DriveType::kDiff || r.base->drive == DriveType::kSkid ? ", diff/skid" : "");
+      }
+      if (num(o, "multi", 0) != 0) {
+        const Stand start{Eigen::Vector2d(num(o, "start-x", 0.0), num(o, "start-y", -half)), 0.0};
+        const StandPlan sp = planStands(map, r, start);
+        std::printf("%zu stand(s) for %zu targets, %zu unreachable, %.1f s driving\n", sp.stands.size(),
+          r.targets_world.size(), sp.unreachable.size(), sp.total_travel_s);
+        for (const auto & a : sp.stands) {
+          std::printf("  arm base (%.2f, %.2f) yaw %.0f deg: %zu targets, %zu band(s), +%.1f s\n", a.station.x,
+            a.station.y, a.station.yaw * 180.0 / M_PI, a.targets.size(), a.station.plan.bands.size(), a.travel_s);
+        }
+        return sp.unreachable.empty() ? 0 : 1;
       }
       const Station s = chooseStation(map, r);
       if (!s.found) {

@@ -52,7 +52,9 @@ Station chooseStation(const Map4D & map, const StationRequest & q)
       if (plan.reachable_count == 0) {
         continue;
       }
-      const Key key{plan.unreachable.size(), plan.bands.size(), std::abs(a - u_mid), d};
+      const double tie = (q.base && q.from) ?
+        travelTime(*q.base, *q.from, Stand{Eigen::Vector2d(p.x(), p.y()), yaw}) : std::abs(a - u_mid);
+      const Key key{plan.unreachable.size(), plan.bands.size(), tie, d};
       if (!best.found || key < best_key) {
         best_key = key;
         best.found = true;
