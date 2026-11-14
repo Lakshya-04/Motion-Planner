@@ -33,7 +33,9 @@ CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::Hardware
     RCLCPP_FATAL(kLogger, "No MJCF: set the 'mjcf' hardware parameter or SIM_MUJOCO_MJCF.");
     return CallbackReturn::ERROR;
   }
-  ft_tare_ = param(info_, "ft_tare", "true") != "false";
+  ft_tare_ = param(info_, "ft_tare", "false") == "true";
+  ft_frame_id_ = param(info_, "ft_frame_id", "tool_mount_link");
+  tcp_frame_id_ = param(info_, "tcp_frame_id", "tcp_link");
 
   if (info_.sensors.size() > 1) {
     RCLCPP_FATAL(kLogger, "At most one <sensor> (the tool F/T) is supported.");
@@ -53,7 +55,8 @@ CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::Hardware
     initial_position_.push_back(initial);
   }
   try {
-    sim_ = std::make_unique<MujocoSim>(mjcf, joints, param(info_, "ft_site", "ft_site"));
+    sim_ = std::make_unique<MujocoSim>(mjcf, joints, param(info_, "ft_site", "ft_sensor"),
+      param(info_, "tcp_site", "tcp_site"));
   } catch (const std::exception & e) {
     RCLCPP_FATAL(kLogger, "%s", e.what());
     return CallbackReturn::ERROR;
@@ -64,6 +67,11 @@ CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::Hardware
   state_effort_.assign(n, 0.0);
   command_position_.assign(n, std::numeric_limits<double>::quiet_NaN());
   command_velocity_.assign(n, std::numeric_limits<double>::quiet_NaN());
+  node_ = rclcpp::Node::make_shared("mujoco_system_" + info_.name);
+  raw_pub_ = node_->create_publisher<geometry_msgs::msg::WrenchStamped>(
+    "sim_mujoco/ft_raw", rclcpp::SensorDataQoS());
+  truth_pub_ = node_->create_publisher<geometry_msgs::msg::WrenchStamped>(
+    "sim_mujoco/ft_ground_truth", rclcpp::SensorDataQoS());
   RCLCPP_INFO(
     kLogger, "MuJoCo %s: '%s', %zu joints, timestep %.4f s, F/T sensor '%s' (tare %s)",
     mj_versionString(), mjcf.c_str(), n, sim_->timestep(), sensor_name_.c_str(),
@@ -135,6 +143,21 @@ hardware_interface::return_type MujocoSystemInterface::read(
     state_effort_[i] = sim_->effort(i);
   }
   ft_ = sim_->wrench();
+  const auto stamp = node_->now();
+  auto fill = [&stamp](const std::string & frame, const Wrench & w) {
+      geometry_msgs::msg::WrenchStamped m;
+      m.header.stamp = stamp;
+      m.header.frame_id = frame;
+      m.wrench.force.x = w[0];
+      m.wrench.force.y = w[1];
+      m.wrench.force.z = w[2];
+      m.wrench.torque.x = w[3];
+      m.wrench.torque.y = w[4];
+      m.wrench.torque.z = w[5];
+      return m;
+    };
+  raw_pub_->publish(fill(ft_frame_id_, ft_));
+  truth_pub_->publish(fill(tcp_frame_id_, sim_->groundTruthWrench()));
   return hardware_interface::return_type::OK;
 }
 

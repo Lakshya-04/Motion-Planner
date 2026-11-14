@@ -15,7 +15,8 @@ What is generated
   * `<equality><joint>` constraints for URDF `<mimic>` joints (the telescopic lift stages);
   * one position actuator per commanded joint. kp / kv come from the joint effort limit, the force
     range is the effort limit; the plugin drives them with position + velocity feed-forward;
-  * a force and a torque sensor on the site `ft_site` (at the tool mount) and a site `tcp_site`,
+  * a force and a torque sensor on the site `ft_sensor` (at the wrist, the origin of the tool mount, with
+    the tool, its weight and inertia beyond it) and a site `tcp_site`,
     plus a thin contact pad at the TCP so a wall touch happens where coverage poses are defined;
   * a `home` keyframe from the profile.
 """
@@ -261,13 +262,15 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
         if link.collisions:
             colliding_links.append(link.name)
 
-    def add_body(parent_elem, link_name, joint):
+    def add_body(parent_elem, link_name, joint, in_tool=False):
+        in_tool = in_tool or link_name == ft_link
         link = robot.links[link_name]
         body = ET.SubElement(parent_elem, 'body', name=link_name)
         if joint is not None:
             body.set('pos', _fmt(joint.pos))
             body.set('quat', _fmt(quat_from_rpy(*joint.rpy)))
-        if opt['gravcomp']:
+        if opt['gravcomp'] and not in_tool:
+            # Everything beyond the F/T site keeps its real weight so the sensor reads it.
             body.set('gravcomp', '1')
         if link.inertial and link.inertial['mass'] > 0:
             i = link.inertial
@@ -289,7 +292,7 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
             ET.SubElement(body, 'joint', **attrs)
         add_geoms(body, link)
         if link_name == ft_link:
-            ET.SubElement(body, 'site', name='ft_site', size='0.01', group='4')
+            ET.SubElement(body, 'site', name='ft_sensor', size='0.01', group='4')
             if opt['tool_pad_radius'] > 0:
                 # The TCP frame sits ahead of the tool body; a thin pad there makes the wall touch
                 # happen at the point coverage poses target.
@@ -304,7 +307,7 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
         if link_name == tcp_link:
             ET.SubElement(body, 'site', name='tcp_site', size='0.01', group='4')
         for child in robot.child_joints.get(link_name, []):
-            add_body(body, child.child, child)
+            add_body(body, child.child, child, in_tool)
 
     add_body(world, robot.root, None)
     for g in world_geoms:
@@ -313,10 +316,6 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
     # contacts between nearby links are meaningless for meshes that overlap at joints
     contact = ET.SubElement(mj, 'contact')
     for a, b in robot.ignored_pairs(colliding_links, opt['ignore_hops']):
-        if robot.joint_by_child.get(a, None) is not None and robot.joint_by_child[a].parent == b:
-            continue  # parent-child is filtered by MuJoCo itself
-        if robot.joint_by_child.get(b, None) is not None and robot.joint_by_child[b].parent == a:
-            continue
         ET.SubElement(contact, 'exclude', body1=a, body2=b)
 
     mimics = [j for j in robot.joints if j.mimic and j.type in ACTUATED]
@@ -340,8 +339,8 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
                       kv=_fmt([kp * opt['kv_over_kp']]), forcerange=_fmt([-effort, effort]))
 
     sensors = ET.SubElement(mj, 'sensor')
-    ET.SubElement(sensors, 'force', name='ft_force', site='ft_site')
-    ET.SubElement(sensors, 'torque', name='ft_torque', site='ft_site')
+    ET.SubElement(sensors, 'force', name='ft_force', site='ft_sensor')
+    ET.SubElement(sensors, 'torque', name='ft_torque', site='ft_sensor')
 
     if home:
         qpos = []

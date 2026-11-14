@@ -11,6 +11,9 @@ const std::string kModel = std::string(SIM_MUJOCO_TEST_DATA) + "/slide_wall.xml"
 
 using sim_mujoco::MujocoSim;
 
+// static sag of the 2.001 kg carriage on a kp = 1000 N/m actuator
+constexpr double kSag = 2.001 * 9.81 / 1000.0;
+
 TEST(MujocoSim, ThrowsOnMissingJointOrSite)
 {
   EXPECT_THROW(MujocoSim(kModel, {"nope"}), std::runtime_error);
@@ -24,9 +27,9 @@ TEST(MujocoSim, TracksPositionTargetInFreeSpace)
   sim.setJointPositions({0.0});
   sim.setCommand(0, 0.1, 0.0);
   sim.advance(3.0);
-  EXPECT_NEAR(sim.position(0), 0.1, 1e-3);
+  EXPECT_NEAR(sim.position(0), 0.1 - kSag, 1e-3);  // the carriage is not gravity compensated
   EXPECT_NEAR(sim.velocity(0), 0.0, 1e-3);
-  // gravity compensated and free: no contact, so almost no force on the sensor after the tare
+  // free, no contact: after the tare the sensor reads nothing
   sim.tareWrench();
   sim.advance(0.5);
   EXPECT_NEAR(sim.wrench()[2], 0.0, 0.5);
@@ -49,7 +52,7 @@ TEST(MujocoSim, NaNCommandHoldsTargetAndNaNVelocityIsZero)
   sim.advance(2.0);
   sim.setCommand(0, std::nan(""), std::nan(""));
   sim.advance(1.0);
-  EXPECT_NEAR(sim.position(0), 0.05, 1e-3);
+  EXPECT_NEAR(sim.position(0), 0.05 - kSag, 1e-3);
 }
 
 TEST(MujocoSim, VelocityFeedForwardReducesRampLag)
@@ -65,7 +68,7 @@ TEST(MujocoSim, VelocityFeedForwardReducesRampLag)
         sim.setCommand(0, -0.2 + v * t, feedforward ? v : 0.0);
         sim.advance(0.01);
         if (t > 4.0 && t < 5.0) {
-          worst = std::max(worst, std::abs(-0.2 + v * t - sim.position(0)));
+          worst = std::max(worst, std::abs(-0.2 + v * t - sim.position(0)) - kSag);
         }
       }
       return worst;
@@ -76,24 +79,44 @@ TEST(MujocoSim, VelocityFeedForwardReducesRampLag)
   EXPECT_LT(with, 0.5 * without);
 }
 
-TEST(MujocoSim, SignOfWallReaction)
+TEST(MujocoSim, WeightAndPush)
 {
+  // carriage: 2 kg with its centre of mass 0.05 m in +x of the sensor, follower 1 g; z is up.
+  const double m = 2.001;
+  const double g = 9.81;
   MujocoSim sim(kModel, {"slide"});
   sim.setJointPositions({0.0});
-  sim.advance(0.5);
-  sim.tareWrench();
-  // Pad top is at z = 0.05; wall face at z = 0.25. Command 0.30: about 0.05 m of "push" through
-  // the wall, so the actuator pushes with up to kp * (0.30 - z) ~ 50 N against the contact.
+  sim.setCommand(0, 0.0, 0.0);
+  sim.advance(4.0);
+  ASSERT_EQ(sim.contactCount(), 0);
+
+  // 1. Known weight hanging: the tool side loads the sensor with (0, 0, -m g), torque r x W.
+  const auto w0 = sim.wrench();
+  EXPECT_NEAR(w0[0], 0.0, 0.2);
+  EXPECT_NEAR(w0[2], -m * g, 0.3);
+  EXPECT_NEAR(w0[4], 0.05 * 2.0 * g, 0.1);  // ty = rz Wx - rx Wz = +0.05 * 2 g
+
+  // 2. Known push: pad face (tcp) is at z = 0.05 + sag, wall face at 0.25; command through it.
   sim.setCommand(0, 0.30, 0.0);
-  sim.advance(3.0);
-  EXPECT_GT(sim.contactCount(), 0);
-  const auto w = sim.wrench();
-  // the tool presses along +z, so the environment pushes back along -z
-  EXPECT_LT(w[2], -20.0);
-  EXPECT_GT(w[2], -300.0);
-  EXPECT_NEAR(w[0], 0.0, 1.0);
-  EXPECT_NEAR(w[1], 0.0, 1.0);
-  EXPECT_NEAR(std::abs(w[2]), std::abs(sim.effort(0)), 0.2 * std::abs(sim.effort(0)));
+  sim.advance(4.0);
+  ASSERT_GT(sim.contactCount(), 0);
+  const auto raw = sim.wrench();
+  const auto truth = sim.groundTruthWrench();
+  EXPECT_LT(truth[2], -20.0);   // the wall pushes the tool back along -z
+  EXPECT_GT(truth[2], -400.0);
+  EXPECT_NEAR(truth[0], 0.0, 1.0);
+  // raw = truth + weight at the sensor; torque about the sensor = torque at tcp + r_tcp x F + weight torque
+  const double r[3] = {0.1, 0.0, 0.05};
+  const double f[3] = {truth[0], truth[1], truth[2]};
+  const double expected_f[3] = {f[0] + w0[0], f[1] + w0[1], f[2] + w0[2]};
+  const double expected_t[3] = {
+    truth[3] + (r[1] * f[2] - r[2] * f[1]) + w0[3],
+    truth[4] + (r[2] * f[0] - r[0] * f[2]) + w0[4],
+    truth[5] + (r[0] * f[1] - r[1] * f[0]) + w0[5]};
+  for (int k = 0; k < 3; ++k) {
+    EXPECT_NEAR(raw[k], expected_f[k], 0.03 * std::abs(truth[2]) + 0.3) << "force " << k;
+    EXPECT_NEAR(raw[3 + k], expected_t[k], 0.03 * std::abs(truth[2]) * 0.15 + 0.3) << "torque " << k;
+  }
 }
 
 TEST(MujocoSim, ReleasingTheCommandReleasesTheForce)
@@ -101,6 +124,7 @@ TEST(MujocoSim, ReleasingTheCommandReleasesTheForce)
   MujocoSim sim(kModel, {"slide"});
   sim.setJointPositions({0.0});
   sim.advance(0.5);
+  sim.advance(3.5);
   sim.tareWrench();
   sim.setCommand(0, 0.30, 0.0);
   sim.advance(2.0);

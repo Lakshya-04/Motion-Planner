@@ -6,11 +6,19 @@
  *          <ros2_control> block (`ft_sensor`, state interfaces force.x .. torque.z), which is the
  *          shape ft_bridge_hardware and the JTAC / admittance controllers read.
  *
+ *          The sensor values are RAW (see mujoco_sim.hpp): the load of everything beyond the wrist
+ *          site `ft_sensor` (tool, weight, inertia) in the sensor frame, nothing compensated. The same
+ *          wrench is published as geometry_msgs/WrenchStamped on `sim_mujoco/ft_raw` (frame
+ *          `ft_frame_id`), and the ground-truth contact wrench on the tool, at the TCP in the tcp frame,
+ *          on `sim_mujoco/ft_ground_truth` (frame `tcp_frame_id`) for evaluation only.
+ *
  *          Hardware parameters (xacro: <param name="..."> inside <hardware>):
- *            mjcf        path of the MJCF (default: environment variable SIM_MUJOCO_MJCF)
- *            ft_site     MJCF site carrying the force/torque sensors (default "ft_site")
- *            ft_tare     true (default): subtract the wrench read at activation (tool weight)
- *            gravity_comp is a property of the MJCF (bodies carry gravcomp), not of this plugin.
+ *            mjcf          path of the MJCF (default: environment variable SIM_MUJOCO_MJCF)
+ *            ft_site       MJCF site carrying the force/torque sensors (default "ft_sensor")
+ *            tcp_site      MJCF site of the TCP for the ground truth (default "tcp_site")
+ *            ft_frame_id   frame_id of the raw topic (default "tool_mount_link")
+ *            tcp_frame_id  frame_id of the ground-truth topic (default "tcp_link")
+ *            ft_tare       "true": subtract the reading at activation (default "false")
  *
  *          Threading: read() and write() run on the controller manager thread; the model is stepped
  *          in write() by the controller period, so simulated time follows the update rate.
@@ -22,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include <geometry_msgs/msg/wrench_stamped.hpp>
 #include <hardware_interface/handle.hpp>
 #include <hardware_interface/hardware_info.hpp>
 #include <hardware_interface/system_interface.hpp>
@@ -55,7 +64,12 @@ public:
 private:
   std::unique_ptr<MujocoSim> sim_;
   std::string sensor_name_;
-  bool ft_tare_{true};
+  bool ft_tare_{false};
+  std::string ft_frame_id_;
+  std::string tcp_frame_id_;
+  rclcpp::Node::SharedPtr node_;
+  rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr raw_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr truth_pub_;
 
   std::vector<double> initial_position_;
   std::vector<double> state_position_;

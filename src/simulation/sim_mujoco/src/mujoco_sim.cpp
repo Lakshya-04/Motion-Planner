@@ -8,14 +8,14 @@ namespace sim_mujoco
 
 namespace
 {
-// Multiplies MuJoCo's site force / torque to give "environment on tool". Verified against a wall
-// push in test_mujoco_sim.cpp (SignOfWallReaction).
+// Multiplies MuJoCo's site force / torque to give the load the tool side puts on the sensor
+// (F_env + weight). Measured with a known weight and a known push in test_mujoco_sim.cpp.
 constexpr double kSensorSign = -1.0;
 }  // namespace
 
 MujocoSim::MujocoSim(
   const std::string & mjcf_path, const std::vector<std::string> & joints,
-  const std::string & ft_site)
+  const std::string & ft_site, const std::string & tcp_site)
 {
   char error[1000] = "";
   model_ = mj_loadXML(mjcf_path.c_str(), nullptr, error, sizeof(error));
@@ -64,6 +64,20 @@ MujocoSim::MujocoSim(
     const int site = mj_name2id(model_, mjOBJ_SITE, ft_site.c_str());
     if (site < 0) {
       throw std::runtime_error("F/T site '" + ft_site + "' is not in the MJCF");
+    }
+    tcp_site_ = mj_name2id(model_, mjOBJ_SITE, tcp_site.c_str());
+    if (tcp_site_ < 0) {
+      throw std::runtime_error("TCP site '" + tcp_site + "' is not in the MJCF");
+    }
+    // tool subtree = the F/T site's body and everything below it
+    tool_body_.assign(model_->nbody, 0);
+    for (int b = 0; b < model_->nbody; ++b) {
+      for (int k = b; k > 0; k = model_->body_parentid[k]) {
+        if (k == model_->site_bodyid[site]) {
+          tool_body_[b] = 1;
+          break;
+        }
+      }
     }
     for (int s = 0; s < model_->nsensor; ++s) {
       if (model_->sensor_objtype[s] != mjOBJ_SITE || model_->sensor_objid[s] != site) {
@@ -177,6 +191,49 @@ Wrench MujocoSim::wrench() const
 void MujocoSim::tareWrench()
 {
   tare_ = rawWrench();
+}
+
+Wrench MujocoSim::groundTruthWrench() const
+{
+  const mjtNum * origin = data_->site_xpos + 3 * tcp_site_;
+  const mjtNum * rot = data_->site_xmat + 9 * tcp_site_;  // columns are the site axes in world
+  double f_w[3] = {0, 0, 0};
+  double t_w[3] = {0, 0, 0};
+  for (int i = 0; i < data_->ncon; ++i) {
+    const mjContact & c = data_->contact[i];
+    if (c.exclude != 0) {
+      continue;
+    }
+    const bool a = tool_body_[model_->geom_bodyid[c.geom1]];
+    const bool b = tool_body_[model_->geom_bodyid[c.geom2]];
+    if (a == b) {
+      continue;  // not a tool/environment contact
+    }
+    mjtNum local[6];
+    mj_contactForce(model_, data_, i, local);
+    // contact frame rows are its axes; force acts on geom2 along +normal, on geom1 along -normal
+    mjtNum fw[3], tw[3];
+    mju_mulMatTVec(fw, c.frame, local, 3, 3);
+    mju_mulMatTVec(tw, c.frame, local + 3, 3, 3);
+    const double sign = b ? 1.0 : -1.0;  // want the force ON the tool geom
+    const double r[3] = {c.pos[0] - origin[0], c.pos[1] - origin[1], c.pos[2] - origin[2]};
+    const double f[3] = {sign * fw[0], sign * fw[1], sign * fw[2]};
+    for (int k = 0; k < 3; ++k) {
+      f_w[k] += f[k];
+      t_w[k] += sign * tw[k];
+    }
+    t_w[0] += r[1] * f[2] - r[2] * f[1];
+    t_w[1] += r[2] * f[0] - r[0] * f[2];
+    t_w[2] += r[0] * f[1] - r[1] * f[0];
+  }
+  Wrench out{};
+  for (int k = 0; k < 3; ++k) {
+    for (int j = 0; j < 3; ++j) {
+      out[k] += rot[3 * j + k] * f_w[j];       // R^T f
+      out[3 + k] += rot[3 * j + k] * t_w[j];   // R^T t
+    }
+  }
+  return out;
 }
 
 }  // namespace sim_mujoco

@@ -19,6 +19,7 @@
   <depend>pluginlib</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
+  <depend>geometry_msgs</depend>
 
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>mobile_manipulator_description</exec_depend>
@@ -30,7 +31,6 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>control_msgs</exec_depend>
-  <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>trajectory_msgs</exec_depend>
 

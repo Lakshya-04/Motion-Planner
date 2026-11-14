@@ -10,11 +10,19 @@
  *          which, for the actuator force kp (ctrl - q) - kv qdot, equals the PD law
  *          kp (q* - q) + kv (v* - qdot): velocity feed-forward without a second actuator.
  *
- *          Wrench: the model's force and torque sensors on the F/T site, in the site frame. MuJoCo
- *          reports the load carried through the site; the sign is flipped so that the result is the
- *          force and torque the environment applies to the tool (a wall pushing back on a tool
- *          that presses along +z_site reads a negative z force; see docs/sim_mujoco.md). The reading at
- *          activation can be removed (tare), which cancels the tool's own weight.
+ *          Raw sensor wrench (what a real F/T sensor reports): MuJoCo's force and torque sensors on
+ *          the site `ft_sensor` (the wrist, origin of the tool mount), in the SITE frame, multiplied by
+ *          -1. Measured convention (test_mujoco_sim.cpp, WeightAndPush): the result is the force the
+ *          tool side exerts on the sensor, i.e. F_env + m g (environment force on the tool plus the
+ *          weight, plus inertial terms, of everything beyond the sensor), torque about the site
+ *          origin. A tool hanging free at rest reads (0, 0, -m g) when the site z axis points up.
+ *          Nothing is compensated or moved to another frame; that is the job of a downstream
+ *          conditioner. An optional tare only subtracts a stored reading.
+ *
+ *          Ground truth (evaluation only): sum of mj_contactForce over contacts between a geom of
+ *          the tool subtree (bodies at and beyond the F/T site's body) and any other geom, as the
+ *          wrench the environment exerts on the tool, referred to the origin of site `tcp_site`
+ *          and expressed in that site's frame (the tcp_link convention).
  */
 
 #pragma once
@@ -36,7 +44,8 @@ public:
   /// Loads the MJCF at `mjcf_path`. Throws std::runtime_error on any model or name error.
   MujocoSim(
     const std::string & mjcf_path, const std::vector<std::string> & joints,
-    const std::string & ft_site = "ft_site");
+    const std::string & ft_site = "ft_sensor",
+    const std::string & tcp_site = "tcp_site");
   ~MujocoSim();
   MujocoSim(const MujocoSim &) = delete;
   MujocoSim & operator=(const MujocoSim &) = delete;
@@ -62,11 +71,14 @@ public:
   double effort(size_t i) const {return data_->actuator_force[joint_[i].actuator];}
   double target(size_t i) const {return joint_[i].target;}
 
-  /// Tool wrench (environment on tool, site frame), tare removed.
+  /// Raw F/T sensor wrench (see above), tare removed.
   Wrench wrench() const;
   /// Store the current raw reading as the zero point.
   void tareWrench();
   void clearTare() {tare_.fill(0.0);}
+
+  /// Ground-truth contact wrench on the tool at tcp_site, in the tcp_site frame (not for control).
+  Wrench groundTruthWrench() const;
 
   double time() const {return data_->time;}
   int contactCount() const {return data_->ncon;}
@@ -89,6 +101,8 @@ private:
   mjData * data_{nullptr};
   std::vector<Joint> joint_;
   std::vector<double> velocity_command_;
+  int tcp_site_{-1};
+  std::vector<char> tool_body_;
   int force_adr_{-1};
   int torque_adr_{-1};
   Wrench tare_{};
