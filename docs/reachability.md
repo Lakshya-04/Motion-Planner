@@ -60,6 +60,39 @@ Measured on this machine (8 threads): 3 million samples in 0.5 s. UR10e, a 3 m w
 front of the base: **2 bands** (lift 0.95 m covers 25 of 30 targets, 1.45 m the other 5). The same
 wall 3 m away: all targets unreachable. Generic arm: 3 bands.
 
+## Base-aware stationing
+
+The map is indexed by the **arm base** position, but what must stay clear of a wall is the whole
+**footprint**. `BaseModel` (`core/base_model.hpp`) carries the footprint polygon, where the arm sits on
+it (`arm_mount_xy`, default the footprint origin), the drive type and the velocity limits, and loads from
+the `base:` section of a robot profile (`loadBaseProfile`; every profile in
+`mobile_manipulator_description/config/profiles` parses, a test checks it).
+
+- **Clearance.** With `StationRequest::base` set, `min_clearance` applies to the nearest footprint
+  point, not the arm base. `chooseStation` picks the base yaw that leaves the most clearance (ties go to
+  facing the wall), skips stands where the footprint would not fit, and reports `yaw` and
+  `footprint_clearance`. `standoff` and `max_standoff` still refer to the arm base. Without a base model
+  nothing changes.
+- **Travel.** `travelTime(base, from, to)` models the drive type: a base that can strafe (omni,
+  four-wheel steering) translates and turns together; diff and skid-steer bases turn toward the goal, drive
+  and turn to the final yaw, and reverse when that is quicker. `orderStands` visits stands greedily by that
+  time, so a wall covered from several stands is ordered by what the base can actually do.
+- **Try it.**
+
+```bash
+rm4d_tool station ur10e.rm4d --wall-x 3.0 --z-min 0.3 --z-max 2.2 --width 2.0 \
+  --base-profile config/profiles/ur10e_husky_telescopic.yaml
+```
+
+Same 2 m x 1.9 m wall 3 m ahead, UR10e map, `min_clearance` 0.3 m: with no base model the arm base
+stands 0.50 m from the wall; with a base model 0.60 m (Ranger Mini, MiR100, MPO-500) or 0.70 m (Husky),
+every base turned side-on (yaw 90 degrees, short side to the wall), footprint clearance 0.31 to 0.36 m.
+Footprints are nominal rectangles from the profiles.
+
+Not done: choosing several stands for a wide wall with travel cost in the objective (the pieces are
+there: `chooseStation` per panel and `orderStands`), a yaw preference for contact work, and passing the
+base footprint to the ROS shell services.
+
 ## Limits and next steps
 
 - **Sampling density.** Uniform joint sampling leaves cells empty at fine resolution: 3 M samples
