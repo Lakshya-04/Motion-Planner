@@ -17,7 +17,9 @@ EXPECTED = {
     'jtac_mock': ['ft_bridge_hardware/FtBridgeHardwareInterface', 'mock_components/GenericSystem'],
     # mujoco adds a second F/T bridge for the conditioned wrench (sensor ft_sensor_tcp)
     'mujoco': ['ft_bridge_hardware/FtBridgeHardwareInterface', 'sim_mujoco/MujocoSystemInterface'],
-    'gazebo': ['gz_ros2_control/GazeboSimSystem'],
+    # gazebo adds the F/T bridge for the conditioned wrench (sensor `ft_sensor_tcp`), under
+    # gz_ros2_control's own plugin base class, the only one its resource manager loads
+    'gazebo': ['ft_bridge_hardware/FtBridgeSimSystem', 'gz_ros2_control/GazeboSimSystem'],
 }
 
 
@@ -64,3 +66,11 @@ def test_mujoco_exports_the_conditioned_sensor_next_to_the_raw_one():
     assert '<param name="source_topic">/ft_conditioner/wrench_conditioned</param>' in xml
     # the raw name stays unique: the conditioned sensor must not reuse it
     assert xml.count('<sensor name="ft_sensor">') == 1
+
+
+def test_gazebo_conditioned_sensor_does_not_clash_with_the_raw_one():
+    if not _installed('sim_gazebo'):
+        pytest.skip('sim_gazebo is not installed')
+    xml = _render('gazebo')
+    assert xml.count('<sensor name="ft_sensor_tcp">') == 1
+    assert '/ft_conditioner/wrench_conditioned' in xml

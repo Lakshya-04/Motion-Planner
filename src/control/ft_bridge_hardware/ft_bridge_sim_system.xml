@@ -1,0 +1,10 @@
+<library path="ft_bridge_hardware_gz">
+  <class name="ft_bridge_hardware/FtBridgeSimSystem"
+         type="ft_bridge_hardware::FtBridgeSimSystem"
+         base_class_type="gz_ros2_control::GazeboSimSystemInterface">
+    <description>
+      FtBridgeHardwareInterface loadable by gz_ros2_control's resource manager (which only
+      accepts its own system base class), so the conditioned wrench can reach JTAC in Gazebo.
+    </description>
+  </class>
+</library>
