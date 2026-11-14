@@ -124,6 +124,9 @@ excess), so the difference only shows on larger moves, where KDL can return a fa
   mean excess 0.132 -> 0.069 rad, worst move 2.26 -> 1.70 rad, jumps 2 -> 2 (of 20); `arm` 0.007 -> 0.000,
   0 jumps. It trims the redundant group's drift but does not remove the two branch jumps, and each
   extra seed costs one more solve.
+- Switch it on from the launch line: `ros2 launch motion_planner_moveit coverage_pass_demo.launch.py ik_seeds:=8`
+  (`ik_seed_perturbation:=0.3` sets the noise in rad). The parameters are written for a wildcard node name, so
+  they reach the backend's own `motion_planner_backend` node.
 - The 7-DOF `lift_arm` group is redundant, so even TRAC-IK still jumps branch on a couple of poses;
   a solver-agnostic "several seeds around the current state, return the closest valid solution" wrapper
   at the `IkPort` level is the next step if that matters.
