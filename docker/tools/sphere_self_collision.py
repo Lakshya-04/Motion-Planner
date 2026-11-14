@@ -34,7 +34,7 @@ def transform(origin):
 class Model:
     def __init__(self, urdf, srdf=None):
         root = ET.parse(urdf).getroot()
-        self.joints = list(root.iter('joint'))
+        self.joints = root.findall('joint')   # not iter(): <transmission> holds <joint> names too
         self.by_child = {j.find('child').get('link'): j for j in self.joints}
         self.dof = [j.get('name') for j in self.joints if j.get('type') == 'revolute']
         self.spheres = {}

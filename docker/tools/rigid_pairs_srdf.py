@@ -30,7 +30,7 @@ def pairs(urdf_path, extra_srdfs=(), hops=1):
     parent = {}
     fixed_edges = []
     allowed = set()
-    for j in root.iter('joint'):
+    for j in root.findall('joint'):   # direct children only: <transmission> also holds <joint> names
         p, c = j.find('parent').get('link'), j.find('child').get('link')
         allowed.add(frozenset((p, c)))                      # neighbours
         if j.get('type') == 'fixed':
@@ -52,7 +52,7 @@ def pairs(urdf_path, extra_srdfs=(), hops=1):
             allowed.add(frozenset((a, b)))
     # body graph: each rigid group is a node, joints between groups are edges
     edges = {}
-    for j in root.iter('joint'):
+    for j in root.findall('joint'):
         a, b = find(j.find('parent').get('link')), find(j.find('child').get('link'))
         if a != b:
             edges.setdefault(a, set()).add(b)
