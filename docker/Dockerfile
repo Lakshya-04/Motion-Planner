@@ -115,6 +115,18 @@ ENV PATH=/opt/venv/bin:$PATH \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility
 USER ${USERNAME}
 
+############################ sim ##############################
+# MuJoCo 4 + MJX (JAX) on top of the gpu image. Optional: not needed for planning.
+#   docker build -f docker/Dockerfile --target sim -t motion-planner:sim .
+FROM gpu AS sim
+ARG USERNAME=dev
+USER root
+COPY docker/requirements-sim.txt /tmp/requirements-sim.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    /opt/venv/bin/pip install -r /tmp/requirements-sim.txt \
+    && chown -R ${USERNAME}: /opt/venv
+USER ${USERNAME}
+
 ############################ vamp #############################
 # Upstream VAMP, unmodified, at a pinned commit. Built for a portable SIMD baseline
 # (x86-64-v3 + AVX2) instead of -march=native, so the image runs on any AVX2 machine and

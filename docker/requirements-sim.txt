@@ -1,0 +1,11 @@
+# Simulation stack on top of the gpu image (docker build --target sim). MuJoCo 4 ships as
+# mujoco-core (headless C library + bindings, numpy only); mujoco / mujoco-studio add the viewer
+# and Filament renderer and are not needed in a container. MJX needs Python >= 3.11.
+# 4.0 removed the `composite` element, the `cable` plugin and `flexvert` equality constraints:
+# models that still use them need updating.
+mujoco-core==4.0.1
+mujoco-mjx==4.0.1
+# Resolved and verified together in the `sim` image (Python 3.12, torch 2.8 cu128): jax 0.12.0.1
+# with numpy 2.5.4. That is newer than the numpy<2.3 pin in requirements-gpu.txt; torch, cuRobo
+# (planner tests) and an MJX step all run on it, and `pip check` is clean.
+jax[cuda12]==0.12.0.1
