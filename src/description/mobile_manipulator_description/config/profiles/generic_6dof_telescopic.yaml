@@ -9,6 +9,15 @@ robot:
     lift_max_velocity: 0.2
     tcp_xyz: "0 0 0.165"
 
+groups:
+  arm: arm
+  whole_body: lift_arm
+  tool: tool
+
+arm:
+  dof: 6
+  controller_family: generic_6dof
+
 frames:
   world_base: base_footprint
   base: base_link

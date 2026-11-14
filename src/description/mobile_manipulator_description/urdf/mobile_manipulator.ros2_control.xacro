@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<!-- ros2_control hardware block for the lift and the six arm joints.
+<!-- ros2_control hardware block for the lift and the arm joints (N, from the profile).
        hardware:=mock       mock_components/GenericSystem (position command, position and velocity
                             state) started at the home pose.
        hardware:=jtac_mock  the same joints with position AND velocity command interfaces (what the
@@ -44,14 +44,21 @@
         </xacro:if>
       </hardware>
       <xacro:if value="${lift_actuated}">
-        <xacro:position_joint name="lift_joint" initial="${home_lift}" velocity_command="${vel_cmd}"/>
+        <xacro:position_joint name="${lift_joint_name}" initial="${home_lift}" velocity_command="${vel_cmd}"/>
       </xacro:if>
-      <xacro:position_joint name="${arm_joint_names[0]}" initial="${home_arm[0]}" velocity_command="${vel_cmd}"/>
-      <xacro:position_joint name="${arm_joint_names[1]}" initial="${home_arm[1]}" velocity_command="${vel_cmd}"/>
-      <xacro:position_joint name="${arm_joint_names[2]}" initial="${home_arm[2]}" velocity_command="${vel_cmd}"/>
-      <xacro:position_joint name="${arm_joint_names[3]}" initial="${home_arm[3]}" velocity_command="${vel_cmd}"/>
-      <xacro:position_joint name="${arm_joint_names[4]}" initial="${home_arm[4]}" velocity_command="${vel_cmd}"/>
-      <xacro:position_joint name="${arm_joint_names[5]}" initial="${home_arm[5]}" velocity_command="${vel_cmd}"/>
+      <!-- One entry per arm joint of the profile (xacro has no loop; up to 12 joints). -->
+      <xacro:if value="${arm_dof > 0}"><xacro:position_joint name="${arm_joint_names[0]}" initial="${home_arm[0]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 1}"><xacro:position_joint name="${arm_joint_names[1]}" initial="${home_arm[1]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 2}"><xacro:position_joint name="${arm_joint_names[2]}" initial="${home_arm[2]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 3}"><xacro:position_joint name="${arm_joint_names[3]}" initial="${home_arm[3]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 4}"><xacro:position_joint name="${arm_joint_names[4]}" initial="${home_arm[4]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 5}"><xacro:position_joint name="${arm_joint_names[5]}" initial="${home_arm[5]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 6}"><xacro:position_joint name="${arm_joint_names[6]}" initial="${home_arm[6]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 7}"><xacro:position_joint name="${arm_joint_names[7]}" initial="${home_arm[7]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 8}"><xacro:position_joint name="${arm_joint_names[8]}" initial="${home_arm[8]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 9}"><xacro:position_joint name="${arm_joint_names[9]}" initial="${home_arm[9]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 10}"><xacro:position_joint name="${arm_joint_names[10]}" initial="${home_arm[10]}" velocity_command="${vel_cmd}"/></xacro:if>
+      <xacro:if value="${arm_dof > 11}"><xacro:position_joint name="${arm_joint_names[11]}" initial="${home_arm[11]}" velocity_command="${vel_cmd}"/></xacro:if>
       <xacro:if value="${hardware == 'mujoco'}">
         <sensor name="ft_sensor">
           <state_interface name="force.x"/>

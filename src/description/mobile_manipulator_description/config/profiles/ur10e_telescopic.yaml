@@ -10,6 +10,16 @@ robot:
     lift_max_velocity: 0.2
     tcp_xyz: "0 0 0.165"
 
+# Planning-group names (defined in srdf/mobile_manipulator.srdf.xacro); code reads them here.
+groups:
+  arm: arm              # arm joints only, lift locked
+  whole_body: lift_arm  # lift + arm
+  tool: tool
+
+arm:
+  dof: 6
+  controller_family: ur   # moveit_config/config/<family>/ controller files
+
 frames:
   world_base: base_footprint
   base: base_link

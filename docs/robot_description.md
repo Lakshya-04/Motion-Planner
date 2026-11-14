@@ -1,9 +1,11 @@
 # Robot description (`mobile_manipulator_description`)
 
-A generic mobile-manipulator model: **base + lift + 6-DOF arm + tool = 7 actuated DOF**.
-Every part is swappable behind a small contract, so the same planners, reachability maps and
-controllers run on any combination. Starter configuration: a **telescopic lift** and a
-**UR10e** arm. A dependency-free generic 6-DOF arm ships for tests and CI.
+A generic mobile-manipulator model: **base + lift + N-DOF arm + tool = 1 + N actuated DOF**
+(7 for the 6-DOF arms, 8 for the 7-DOF one). Every part is swappable behind a small contract, so
+the same planners, reachability maps and controllers run on any combination. Starter
+configuration: a **telescopic lift** and a **UR10e** arm. A dependency-free generic 6-DOF arm
+and a 7-DOF Panda-like arm (primitives, published kinematics and limits, no vendor meshes) ship
+for tests and CI, so the stack is exercised on two DOF counts.
 
 Package: [`src/description/mobile_manipulator_description`](../src/description/mobile_manipulator_description).
 
@@ -17,12 +19,15 @@ urdf/
   lift/telescopic_lift.xacro      master prismatic joint + 0..3 mimic stages
   lift/scissor_lift.xacro         master prismatic joint + visual scissor linkage on mimic joints
   arms/arm.xacro                  arm selector + the arm contract
-  arms/generic_6dof_arm.xacro     reference arm, primitives only
+  arms/generic_6dof_arm.xacro     reference 6-DOF arm, primitives only
+  arms/panda_arm.xacro            7-DOF Franka Panda-like arm, primitives only
   arms/ur_arm.xacro               UR family via ur_description (not bundled)
   tools/generic_tool.xacro        tool mount + TCP
-srdf/mobile_manipulator.srdf.xacro   groups as chains: arm (6), lift_arm (7), tool
-config/profiles/*.yaml           single source of joint names, order, limits, frames, home pose
-test/test_description.py         contract tests (no install needed)
+srdf/mobile_manipulator.srdf.xacro   groups as chains (names from the profile): arm (N), lift_arm (1 + N), tool
+srdf/acm_<arm>.xacro             generated allowed-collision matrix per arm (scripts/generate_acm.py)
+config/profiles/*.yaml           single source of group names, joint names + order (so the DOF), frames, home pose
+mobile_manipulator_description/  Python profile loader (load_profile)
+test/                            contract, profile and arm-swap tests (no install needed)
 ```
 
 Frame chain: `base_footprint > base_link > lift_mount_link > lift_base_link > (lift_joint) >
@@ -35,12 +40,27 @@ lift_carriage_link > lift_output_link > arm_base_link > ... > arm_flange_link > 
 |---|---|
 | Base | macro `(prefix:='')`; `base_footprint` (ground, x forward), `base_link`, `lift_mount_link` (top face, z up); no actuated joint inside the base (wheels and steering are fixed links) |
 | Lift | `lift_base_link` (fixed to parent), `lift_joint` (prismatic, +z, lower 0, upper = stroke), `lift_output_link` (arm attaches here). Mimic stage joints are optional and never commanded |
-| Arm | macro `(parent *origin prefix:='arm_')`; links `arm_base_link` (z up) and `arm_flange_link` (z out of the last link); exactly six actuated revolute joints between them |
+| Arm | macro `(parent *origin prefix:='arm_')`; links `arm_base_link` (z up) and `arm_flange_link` (z out of the last link); N actuated revolute joints between them, in kinematic order (N is what the arm has: 6 for UR and the generic arm, 7 for the Panda-like arm). The profile lists them in `joints.arm`, which is where N is stated |
 | Tool | `tool_mount_link` and `tcp_link`; the TCP is what coverage poses and planners target |
 
 Planning groups are **chains** (`arm_base_link -> tcp_link`, `base_link -> tcp_link`), so they
 stay valid for any arm or lift without editing joint names. The profile YAML is the one place
-that lists joint names and order; code and configs read it instead of repeating lists.
+that lists group names, joint names and order; code and configs read it instead of repeating
+lists:
+
+```yaml
+groups: {arm: arm, whole_body: lift_arm, tool: tool}   # planning-group names
+arm:    {dof: 6, controller_family: ur}                # dof is checked against joints.arm
+joints: {lift: lift_joint, arm: [...N names...], mimic: [...]}
+home:   {lift_joint: 0.4, <arm joint>: ..., ...}       # every actuated joint
+```
+
+Readers: the xacro files (`urdf/arm_joint_names.xacro`: SRDF groups, home state, ros2_control
+block), the Python loader (`mobile_manipulator_description.load_profile(name_or_path)`, fields
+`arm_joints`, `arm_dof`, `dof`, `joints`, `whole_body_group`, `arm_group`, `tcp_link`,
+`home_positions`, `frames`) and the header-only C++ loader in `mobile_manipulator_profile`
+(`loadProfile`, same fields). The xacro `profile` argument selects the file; when empty it follows
+`arm` (`ur*` -> `ur10e_telescopic`, otherwise `<arm>_telescopic`).
 
 ## Swapping parts
 
@@ -49,14 +69,31 @@ that lists joint names and order; code and configs read it instead of repeating 
   satisfies the base contract (the shared `wheeled_base_common.xacro` has the four-wheel and
   two-wheel building blocks), add one branch in `urdf/base/base.xacro`, add the include in
   `mobile_manipulator.urdf.xacro`, and give the profile a `base:` section.
-- **Arm:** write `urdf/arms/<name>.xacro` with a macro that follows the contract and add one
-  branch in `arm.xacro`. Select with `arm:=<name>`. For the UR family use `arm:=ur10e`, `ur5e`,
-  `ur20`, etc. (needs `ur_description`: `ros-<distro>-ur-description`, BSD-3, installed by the
-  Docker image). An unknown arm name fails loudly instead of rendering a robot without an arm.
+- **Arm:** see "Adding an arm" below. Select with `arm:=<name>` (the `ur*` names need
+  `ur_description`: `ros-<distro>-ur-description`, BSD-3, installed by the Docker image). An
+  unknown arm name fails loudly instead of rendering a robot without an arm.
 - **Lift:** `lift:=telescopic|scissor|fixed|none`, see [Lift variants](#lift-variants). All of them
   keep the three lift outputs, so a different lift (chain-driven, ...) is a new macro with the same
   outputs plus one branch in `lift/lift.xacro`. An unknown name fails loudly.
 - **Tool:** change `tcp_xyz` / `tcp_rpy`, or provide a tool macro with the two links.
+
+## Adding an arm
+
+1. `urdf/arms/<name>.xacro`: a macro `<name>_arm(parent *origin prefix)` that follows the contract
+   above (any number N of revolute joints). Include it from `mobile_manipulator.urdf.xacro` and add
+   one branch for it in `arms/arm.xacro`.
+2. `config/profiles/<name>_telescopic.yaml`: copy a shipped profile, set `robot.xacro_args.arm`,
+   the joint names in `joints.arm`, `arm.dof`, `arm.controller_family`, and a collision-free `home`
+   pose with a value for every joint.
+3. `scripts/generate_acm.py --arm <name> --out srdf/acm_<name>.xacro` (the SRDF includes
+   `acm_<name>.xacro`; the UR range shares `acm_ur.xacro`). A test fails if it is stale.
+4. `mobile_manipulator_moveit_config/config/<controller_family>/`: `moveit_controllers.yaml`,
+   `ros2_controllers.yaml`, `jtac_controllers.yaml` with the lift joint and the arm joints, and a
+   `joint_limits.yaml` if the arm's limits differ from the shared file.
+
+The swap tests (`test/test_arm_swap.py`, and `test_moveit_swap.py` in the MoveIt package) then cover
+the new profile as soon as its name is in their profile lists. The ros2_control and SRDF blocks
+support up to 12 arm joints.
 
 ## Bases
 
@@ -162,6 +199,7 @@ relay, or let the planner resolve mimics.
 
 ```bash
 xacro urdf/mobile_manipulator.urdf.xacro arm:=ur10e -o robot.urdf
+xacro urdf/mobile_manipulator.urdf.xacro arm:=panda -o robot.urdf   # 7-DOF arm
 ros2 launch mobile_manipulator_description display.launch.py arm:=generic_6dof
 python3 -m pytest src/description/mobile_manipulator_description/test
 ```
@@ -175,5 +213,7 @@ python3 -m pytest src/description/mobile_manipulator_description/test
   geometry-specific pairs can be added by sampling, see [moveit_config.md](moveit_config.md).
 - `hardware:=mock` adds a ros2_control block (mock components); add real and sim backends as
   further branches of that one xacro.
-- Verified here with `check_urdf` and the contract tests for the generic arm and UR10e (rendered
+- The Panda-like arm uses cylinders along the real segments, so its collision geometry is an
+  approximation; check it before relying on tight clearances.
+- Verified here with `check_urdf` and the contract tests for the generic arm, the Panda-like arm and UR10e (rendered
   with the Humble xacro). Loaded into MoveIt and planned with on Jazzy, see [moveit_config.md](moveit_config.md).
