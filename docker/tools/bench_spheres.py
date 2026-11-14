@@ -166,18 +166,34 @@ class SphereModel:
     def self_collision(self, ws):
         n = next(iter(ws.values())).shape[0]
         hit = np.zeros(n, bool)
+        ball = {}
+        for l, w in ws.items():          # per-state bounding sphere of each link: cheap broadphase
+            c = w[..., :3].mean(axis=1)
+            ball[l] = (c, (np.linalg.norm(w[..., :3] - c[:, None], axis=2) + w[..., 3]).max(axis=1))
         for a, b in self.pairs:
-            d = np.linalg.norm(ws[a][:, :, None, :3] - ws[b][:, None, :, :3], axis=3)
-            hit |= (d < ws[a][:, :, None, 3] + ws[b][:, None, :, 3]).any(axis=(1, 2))
+            near = (np.linalg.norm(ball[a][0] - ball[b][0], axis=1) < ball[a][1] + ball[b][1]) & ~hit
+            if not near.any():
+                continue
+            wa, wb = ws[a][near], ws[b][near]
+            d = np.linalg.norm(wa[:, :, None, :3] - wb[:, None, :, :3], axis=3)
+            hit[np.flatnonzero(near)[(d < wa[:, :, None, 3] + wb[:, None, :, 3]).any(axis=(1, 2))]] = True
         return hit
 
     def world_collision(self, ws, boxes):
         n = next(iter(ws.values())).shape[0]
         hit = np.zeros(n, bool)
         for b in boxes:
+            c, half, _ = box_frame(b)
+            reach = np.linalg.norm(half) + self.buffer
             for l in self.links:
-                d = box_distance(ws[l][..., :3], b)
-                hit |= (d < ws[l][..., 3] + self.buffer).any(axis=1)
+                w = ws[l]
+                ctr = w[..., :3].mean(axis=1)       # broadphase: link bounding sphere vs box bounding sphere
+                rho = (np.linalg.norm(w[..., :3] - ctr[:, None], axis=2) + w[..., 3]).max(axis=1)
+                near = (np.linalg.norm(ctr - c, axis=1) < rho + reach) & ~hit
+                if not near.any():
+                    continue
+                d = box_distance(w[near][..., :3], b)
+                hit[np.flatnonzero(near)[(d < w[near][..., 3] + self.buffer).any(axis=1)]] = True
         return hit
 
     def in_collision(self, q, boxes, self_check=True):
@@ -355,6 +371,9 @@ def cmd_run_curobo(a):
     sys.path.insert(0, a.bridge)
     from curobo_bridge.planner import Box, CuroboPlanner
     doc = json.loads(pathlib.Path(a.problems).read_text())
+    if a.limit:
+        for sc in doc['scenes']:
+            sc['problems'] = sc['problems'][:a.limit]
     t0 = time.perf_counter()
     planner = CuroboPlanner(robot=a.cfg, max_boxes=16, warmup=True)
     construct_s = time.perf_counter() - t0
@@ -506,7 +525,16 @@ def cmd_report(a):
     scenes = {sc['id']: sc for sc in doc['scenes']}
     prob_scene = {p['id']: sc for sc in doc['scenes'] for p in sc['problems']}
     prob = {p['id']: p for sc in doc['scenes'] for p in sc['problems']}
+    if a.first_k:
+        for sc in doc['scenes']:
+            sc['problems'] = sc['problems'][:a.first_k]
+        prob_scene = {p['id']: sc for sc in doc['scenes'] for p in sc['problems']}
+        prob = {p['id']: p for sc in doc['scenes'] for p in sc['problems']}
     runs = load_runs(a.results, doc)
+    if a.first_k:
+        for r in runs:
+            for rs in r['scenes']:
+                rs['problems'] = [p for p in rs['problems'] if p['id'] in prob]
     step = a.step
 
     def judge(q_path, sc):
@@ -625,6 +653,7 @@ def main():
     p.add_argument('--cfg', required=True, help='cuRobo robot yml (as seen inside the container)')
     p.add_argument('--name', required=True)
     p.add_argument('--out', required=True)
+    p.add_argument('--limit', type=int, default=0, help='only the first N problems of each scene')
     p.add_argument('--bridge', default='/bridge', help='dir holding the curobo_bridge package')
     p.set_defaults(fn=cmd_run_curobo)
 
@@ -658,6 +687,7 @@ def main():
     p.add_argument('--urdf', required=True)
     p.add_argument('--set', action='append', required=True, metavar='NAME=PATH')
     p.add_argument('--results', nargs='+', required=True)
+    p.add_argument('--first-k', type=int, default=0, help='restrict every run to the first K problems per scene')
     p.add_argument('--step', type=float, default=0.02, help='oracle path sampling, largest joint step in rad')
     p.set_defaults(fn=cmd_report)
 
