@@ -21,7 +21,7 @@ ament_python_install_package(${PROJECT_NAME})
 
 install(PROGRAMS scripts/generate_mjcf scripts/smoke_test.py scripts/viewer.py scripts/run_smoke.sh
   DESTINATION lib/${PROJECT_NAME})
-install(DIRECTORY launch config test/data DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY launch test/data DESTINATION share/${PROJECT_NAME})
 
 if(MUJOCO_INCLUDE_DIR AND MUJOCO_LIBRARY)
   message(STATUS "sim_mujoco: MuJoCo found: ${MUJOCO_LIBRARY}")
