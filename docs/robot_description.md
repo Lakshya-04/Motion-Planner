@@ -13,7 +13,9 @@ Package: [`src/description/mobile_manipulator_description`](../src/description/m
 urdf/
   mobile_manipulator.urdf.xacro   top level; args: arm, lift_stroke, lift_stages, tcp_xyz, ...
   base/generic_base.xacro         box base (replace with a real base)
+  lift/lift.xacro                 lift selector: telescopic | scissor | fixed | none
   lift/telescopic_lift.xacro      master prismatic joint + 0..3 mimic stages
+  lift/scissor_lift.xacro         master prismatic joint + visual scissor linkage on mimic joints
   arms/arm.xacro                  arm selector + the arm contract
   arms/generic_6dof_arm.xacro     reference arm, primitives only
   arms/ur_arm.xacro               UR family via ur_description (not bundled)
@@ -51,8 +53,9 @@ that lists joint names and order; code and configs read it instead of repeating 
   branch in `arm.xacro`. Select with `arm:=<name>`. For the UR family use `arm:=ur10e`, `ur5e`,
   `ur20`, etc. (needs `ur_description`: `ros-<distro>-ur-description`, BSD-3, installed by the
   Docker image). An unknown arm name fails loudly instead of rendering a robot without an arm.
-- **Lift:** `lift_stroke`, `lift_stages` (1-3) and `lift_max_velocity` are xacro args; a
-  different lift (scissor, chain-driven, ...) is a new macro with the same three outputs.
+- **Lift:** `lift:=telescopic|scissor|fixed|none`, see [Lift variants](#lift-variants). All of them
+  keep the three lift outputs, so a different lift (chain-driven, ...) is a new macro with the same
+  outputs plus one branch in `lift/lift.xacro`. An unknown name fails loudly.
 - **Tool:** change `tcp_xyz` / `tcp_rpy`, or provide a tool macro with the two links.
 
 ## Bases
@@ -108,13 +111,48 @@ description packages (for example `ranger_ros2`, `husky_description`, `turtlebot
 are not used; a branch that uses one when installed can be added the way `ur_arm.xacro` does for
 UR, provided the vendor frames are re-parented to the three contract links.
 
+## Lift variants
+
+Selected with `lift:=<type>`; the profile's `lift:` section is the one place that states the values
+(`scripts/profile_xacro_args.py` turns it into xacro args, and the asset command and the tests
+use it). Every variant has `lift_base_link`, `lift_carriage_link`, `lift_joint`, `lift_output_link`,
+so SRDF chains, reachability and planners do not change.
+
+| `lift:` | `lift_joint` | Extra links | Notes |
+|---|---|---|---|
+| `telescopic` | prismatic, 0..`stroke` | `lift_stage_N_link` (`stages` 0-3, mimic) | default; `stages:=0` is the recipe for a chain / column lift below |
+| `scissor` | prismatic, 0..`stroke` | `lift_scissor_K_{center,a,b}` per X-level (`stages` levels, mimic) | box primitives; angles are linearly interpolated, so the linkage is a visual / conservative envelope, the platform height is exact |
+| `fixed` | fixed, pinned at `lift_fixed_height` (default 0.4) above retracted | the telescopic column | the older `lift_fixed_height:=<m>` on any variant does the same; this is the unified name |
+| `none` | fixed | a pedestal | arm mounted directly on the base at `lift_mount_height` (default 0.3) |
+
+Profile `lift:` keys: `type`, `stroke_m`, `stages`, `mount_height_m` (`lift_mount_height`: height of
+`lift_output_link` above `lift_base_link` when retracted; for a scissor this is the minimum height),
+`max_velocity_mps`, `max_acceleration_mps2` (URDF cannot carry an acceleration: it is written to
+`lift_limits.yaml` by the asset command for the MoveIt joint limits), and `payload_kg` (a note about
+the real lift's rating, not used by the model). With `none` / `fixed` the lift joint is not actuated:
+the SRDF omits it from the home state, the ros2_control block does not command it, `lift_arm` has the
+same six joints as `arm`, and the profile sets `joints.lift: null`.
+
+The structural collision matrix has its own files for `none` and `scissor`
+(`srdf/acm_<family>_<lift>.xacro`, `scripts/generate_acm.py --lift`); `telescopic` and `fixed` share the
+column's. Profiles: `ur10e_telescopic`, `ur10e_scissor`, `ur10e_nolift`, `generic_6dof_telescopic`.
+
+**Recipe: chain / column lift.** A chain-driven or rigid-chain column lift behaves, to the planner,
+like any single-axis vertical lift: one prismatic joint, `lower 0`, `upper = stroke`. Use
+`lift:=telescopic lift_stages:=0` (a column with one carriage, no visible stages), set `lift_stroke`,
+`lift_max_velocity` and `lift_max_acceleration` from the datasheet, and put the rated payload in
+`lift.payload_kg`. For a column whose geometry matters (a chain housing, a guide rail), copy
+`lift/telescopic_lift.xacro`, replace the visuals / collision boxes, keep the four contract names, and
+add a branch to `lift/lift.xacro`; mimic joints are only needed for parts that visibly follow the
+carriage. Leave the stroke honest: chain lifts often have a mechanical limit above the usable stroke.
+
 ## Lift modelling
 
 One controlled joint carries the arm over the full stroke; the visible telescoping stages follow
 it through `<mimic>` joints (each `stroke / stages` relative to the stage below). This keeps a
 single commanded lift DOF for planning and control, avoids re-implementing a 50/50 split in
 code, and is the same modelling pattern used by production telescopic lifts. Defaults: 1.5 m
-stroke, two stages, 0.2 m/s (check these against your actual lift and set the args).
+stroke, two stages, 0.2 m/s (check these against your actual lift and set them in the profile).
 
 Note: mimic joints must appear in `/joint_states` (or be resolved by the planner), otherwise
 collision geometry on the stage links sits at the wrong height. Publish them with a small
