@@ -1,6 +1,10 @@
 #include "motion_planner_moveit/moveit_planning_backend.hpp"
 
 #include <exception>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <utility>
 
 #include <Eigen/Geometry>
 
@@ -29,6 +33,21 @@ namespace
 // named here (rather than an inline literal) for discoverability alongside any future defaults.
 constexpr char kDefaultPlanningGroup[] = "arm_7dof";
 
+}  // namespace
+
+namespace
+{
+/// IkPort view of one plain MoveIt solve, for SeedPreferringIk to call repeatedly.
+class SingleSolveIk : public IkPort
+{
+public:
+  explicit SingleSolveIk(std::function<IkResult(const IkRequest &)> solve)
+  : solve_(std::move(solve)) {}
+  IkResult ik(const IkRequest & request) override {return solve_(request);}
+
+private:
+  std::function<IkResult(const IkRequest &)> solve_;
+};
 }  // namespace
 
 MoveItPlanningBackend::MoveItPlanningBackend() = default;
@@ -300,7 +319,7 @@ const std::string & MoveItPlanningBackend::activeMoveGroupName() const
   return move_group_name_;
 }
 
-IkResult MoveItPlanningBackend::ik(const IkRequest & request)
+IkResult MoveItPlanningBackend::solveIkOnce(const IkRequest & request)
 {
   IkResult result;
 
@@ -411,6 +430,61 @@ IkResult MoveItPlanningBackend::ik(const IkRequest & request)
     ik_state.copyJointGroupPositions(joint_model_group, result.joint_solution);
   }
   return result;
+}
+
+void MoveItPlanningBackend::setIkSeeding(int extra_seeds, double perturbation)
+{
+  ik_extra_seeds_ = extra_seeds;
+  ik_seed_perturbation_ = perturbation;
+  ik_seeding_overridden_ = true;
+}
+
+bool MoveItPlanningBackend::seedingConfigForGroup(SeedPreferringIkConfig & config)
+{
+  const auto robot_model = move_group_ ? move_group_->getRobotModel() : nullptr;
+  const auto * group = robot_model ? robot_model->getJointModelGroup(move_group_name_) : nullptr;
+  if (!group) {
+    return false;
+  }
+  for (const auto * joint : group->getActiveJointModels()) {
+    if (joint->getVariableCount() != 1) {
+      return false;  // multi-DOF joint: not a plain vector of scalars, skip seed preferring
+    }
+    const auto type = joint->getType();
+    config.wrap_joint.push_back(type == moveit::core::JointModel::REVOLUTE);
+    const auto & bounds = joint->getVariableBounds()[0];
+    const bool bounded = bounds.position_bounded_;  // a continuous joint has no position bounds
+    config.lower_limits.push_back(
+      bounded ? bounds.min_position_ : -std::numeric_limits<double>::infinity());
+    config.upper_limits.push_back(
+      bounded ? bounds.max_position_ : std::numeric_limits<double>::infinity());
+  }
+  return true;
+}
+
+IkResult MoveItPlanningBackend::ik(const IkRequest & request)
+{
+  std::string error;
+  if (request.joint_seed.empty() || !ensureMoveGroup(request.planning_group, error)) {
+    return solveIkOnce(request);  // no seed to prefer, or the precheck reports the error
+  }
+  if (!ik_seeding_overridden_ && node_) {
+    if (!node_->has_parameter("ik_extra_seeds")) {
+      node_->declare_parameter<int>("ik_extra_seeds", 0);
+      node_->declare_parameter<double>("ik_seed_perturbation", 0.3);
+    }
+    ik_extra_seeds_ = node_->get_parameter("ik_extra_seeds").as_int();
+    ik_seed_perturbation_ = node_->get_parameter("ik_seed_perturbation").as_double();
+  }
+  SeedPreferringIkConfig config;
+  config.extra_seeds = ik_extra_seeds_;
+  config.perturbation = ik_seed_perturbation_;
+  if (config.extra_seeds <= 0 || !seedingConfigForGroup(config)) {
+    return solveIkOnce(request);
+  }
+  SeedPreferringIk seeded(std::make_shared<SingleSolveIk>(
+      [this](const IkRequest & r) {return solveIkOnce(r);}), std::move(config));
+  return seeded.ik(request);
 }
 
 CollisionResult MoveItPlanningBackend::collision(const CollisionRequest & request)
