@@ -113,6 +113,27 @@ def points_to_esdf(points: np.ndarray, spec: EsdfSpec, max_distance: float = 1.0
     return np.clip(outside - inside_d, -max_distance, max_distance).astype(np.float32)
 
 
+def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[float]):
+    """Pick the successful IK solution nearest `seed` out of a batch (cuRobo solves many seeds at once
+    and returns all of them; the first row is not the closest). Each joint is shifted by whole turns
+    toward the seed, but only when it is more than pi away, so metre-scale prismatic joints (a lift)
+    are never touched. Returns (joints, distance), or None when nothing succeeded."""
+    solutions = np.asarray(solutions, dtype=float).reshape(-1, len(seed))
+    success = np.asarray(success, dtype=bool).reshape(-1)
+    if success.shape[0] != solutions.shape[0]:      # unexpected layout: trust the first row only
+        success = np.zeros(solutions.shape[0], dtype=bool)
+        success[:1] = True
+    seed = np.asarray(seed, dtype=float)
+    best, best_distance = None, np.inf
+    for row in solutions[success]:
+        diff = row - seed
+        shifted = np.where(np.abs(diff) > np.pi, row - 2 * np.pi * np.round(diff / (2 * np.pi)), row)
+        distance = float(np.linalg.norm(shifted - seed))
+        if distance < best_distance:
+            best, best_distance = shifted, distance
+    return None if best is None else (best.tolist(), best_distance)
+
+
 class CuroboPlanner:
     """Joint-goal and pose-goal planning with cuRobo v2 on the GPU."""
 
@@ -275,13 +296,15 @@ class CuroboPlanner:
             quaternion=t.tensor([[[[list(quat_wxyz)]]]], device='cuda', dtype=t.float32))
         res = self._planner.ik_solver.solve_pose(goal, current_state=self._state(seed))
         out = IkResult(joint_names=self.joint_names)
-        if not bool(res.success.any()):
+        picked = closest_solution(res.solution.detach().cpu().numpy(),
+                                  res.success.detach().cpu().numpy(), seed)
+        if picked is None:
             out.failure_reason_code = 'no_solution'
             out.failure_stage = 'planning'
             out.message = 'cuRobo found no collision-free IK solution for this pose'
             return out
         out.success = True
-        out.joints = res.solution.reshape(-1, self.dimension)[0].detach().cpu().numpy().tolist()
+        out.joints = picked[0]
         for name, attr in (('position_error', 'position_error'), ('rotation_error', 'rotation_error')):
             value = getattr(res, attr, None)
             if value is not None:

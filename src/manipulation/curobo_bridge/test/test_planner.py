@@ -183,3 +183,4 @@ def test_motion_check_samples_between_waypoints(planner):
 def test_esdf_needs_a_configured_grid(planner):
     with pytest.raises(ValueError):
         planner.set_world(esdf=np.zeros((4, 4, 4), dtype=np.float32))
+
