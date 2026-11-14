@@ -118,6 +118,12 @@ excess), so the difference only shows on larger moves, where KDL can return a fa
   stays available as `ik:=kdl`. The plugin is an `exec_depend`, so the Docker deps layer installs it.
 - `pick_ik` is kept as an opt-in config but performed poorly here (tolerances / scales untuned for
   these poses); do not use it without tuning.
+- **Seed preferring (`SeedPreferringIk`, parameter `ik_extra_seeds`, off by default):** N extra solves from
+  seeds perturbed by up to 0.3 rad, wrapped by whole turns toward the real seed, closest kept. With
+  TRAC-IK `Distance`, R = 1.2 rad, `--seeds=8` (same algorithm, applied in `smoke_plan.py`): `lift_arm`
+  mean excess 0.132 -> 0.069 rad, worst move 2.26 -> 1.70 rad, jumps 2 -> 2 (of 20); `arm` 0.007 -> 0.000,
+  0 jumps. It trims the redundant group's drift but does not remove the two branch jumps, and each
+  extra seed costs one more solve.
 - The 7-DOF `lift_arm` group is redundant, so even TRAC-IK still jumps branch on a couple of poses;
   a solver-agnostic "several seeds around the current state, return the closest valid solution" wrapper
   at the `IkPort` level is the next step if that matters.

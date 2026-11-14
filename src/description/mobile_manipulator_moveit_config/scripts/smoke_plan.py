@@ -15,6 +15,7 @@ the seed, IK started from the seed; prints the success rate, how far the solutio
 seed, and the *excess* over the generating configuration's own distance (a seed-preferring solver
 has little excess; one that jumps branches has a lot).
 """
+import math
 import sys
 
 from moveit_msgs.action import MoveGroup
@@ -29,6 +30,7 @@ TIMEOUT = 60.0
 EXECUTE = '--execute' in sys.argv
 STRICT_SEED = '--strict-seed' in sys.argv
 STRESS = '--stress' in sys.argv
+SEEDS = next((int(a.split('=')[1]) for a in sys.argv if a.startswith('--seeds=')), 0)
 SPREAD = next((float(a.split('=')[1]) for a in sys.argv if a.startswith('--spread=')), 0.4)
 STRICT_MAX_MOVE = 0.3     # rad: a 5 cm target move should not move any joint further than this
 ARRIVAL_TOLERANCE = 0.03  # rad / m
@@ -180,27 +182,47 @@ class Smoke(Node):
             fk = self.call(self.fk, fk_req)
             if fk.error_code.val != 1:
                 continue
-            ik_req = GetPositionIK.Request()
-            ik_req.ik_request.group_name = group
-            ik_req.ik_request.robot_state.joint_state = self.joint_state
-            ik_req.ik_request.pose_stamped = fk.pose_stamped[0]
-            ik_req.ik_request.ik_link_name = tip
-            ik_req.ik_request.avoid_collisions = False
-            ik_req.ik_request.timeout.sec = 1
-            res = self.call(self.ik, ik_req)
-            if res.error_code.val != 1:
+            # --seeds=N mirrors motion_planner::SeedPreferringIk: N extra solves from perturbed
+            # seeds, each solution wrapped by whole turns toward the real seed (revolute joints
+            # only), keep the closest.
+            best = None
+            for attempt in range(SEEDS + 1):
+                seed = JointState()
+                seed.name = list(self.joint_state.name)
+                seed.position = [v + (rng.uniform(-0.3, 0.3) if attempt and nm in joints else 0.0)
+                                 for nm, v in zip(self.joint_state.name, self.joint_state.position)]
+                ik_req = GetPositionIK.Request()
+                ik_req.ik_request.group_name = group
+                ik_req.ik_request.robot_state.joint_state = seed
+                ik_req.ik_request.pose_stamped = fk.pose_stamped[0]
+                ik_req.ik_request.ik_link_name = tip
+                ik_req.ik_request.avoid_collisions = False
+                ik_req.ik_request.timeout.sec = 1
+                res = self.call(self.ik, ik_req)
+                if res.error_code.val != 1:
+                    continue
+                js = res.solution.joint_state
+                positions = list(js.position)
+                for i, (nm, v) in enumerate(zip(js.name, positions)):
+                    if nm in joints and 'lift' not in nm:
+                        turns = round((current[nm] - v) / (2 * math.pi))
+                        positions[i] = v + 2 * math.pi * turns
+                dist = max((abs(v - current[nm]) for nm, v in zip(js.name, positions)
+                            if nm in joints), default=0.0)
+                if best is None or dist < best[0]:
+                    best = (dist, js.name, positions)
+            if best is None:
                 continue
             solved += 1
             generating = max(abs(a - current[nm]) for nm, a in zip(sample.name, sample.position)
                              if nm in joints)
-            moved = max(abs(v - current[nm]) for nm, v in zip(
-                res.solution.joint_state.name, res.solution.joint_state.position) if nm in joints)
+            moved = best[0]
             worst = max(worst, moved)
             total += moved
             excess += max(0.0, moved - generating)
             jumps += (moved - generating) > 0.5
         mean = total / solved if solved else float('nan')
-        print(f'[{group}] STRESS spread {SPREAD}: solved {solved}/{n}, mean distance from seed '
+        print(f'[{group}] STRESS spread {SPREAD} seeds {SEEDS}: solved {solved}/{n}, mean distance from seed '
               f'{mean:.3f} rad, worst {worst:.3f}, mean excess over the generating config '
               f'{excess / max(solved, 1):.3f}, branch jumps (>0.5 rad excess) {jumps}')
 
