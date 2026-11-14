@@ -102,13 +102,18 @@ def test_unknown_option_rejected(tmp_path):
         urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, bogus=1)
 
 
-mujoco = pytest.importorskip('mujoco')
+try:
+    import mujoco
+except ImportError:  # the build image has no MuJoCo python package
+    mujoco = None
+needs_mujoco = pytest.mark.skipif(mujoco is None, reason='mujoco python package not installed')
 
 
 def load(path):
     return mujoco.MjModel.from_xml_path(str(path))
 
 
+@needs_mujoco
 def test_compiles_with_joint_limits_and_keyframe(mjcf):
     m = load(mjcf)
     assert m.njnt == 4 and m.nu == 3 and m.nsensor == 2
@@ -120,6 +125,7 @@ def test_compiles_with_joint_limits_and_keyframe(mjcf):
     assert d.qpos[m.jnt_qposadr[m.joint('joint2').id]] == pytest.approx(-0.4)
 
 
+@needs_mujoco
 def test_forward_kinematics_matches_urdf_spec(mjcf):
     m = load(mjcf)
     d = mujoco.MjData(m)
@@ -137,6 +143,7 @@ def test_forward_kinematics_matches_urdf_spec(mjcf):
         assert s.xmat.reshape(3, 3) == pytest.approx(t[:3, :3], abs=1e-9)
 
 
+@needs_mujoco
 def test_inertial_is_carried_over(mjcf):
     m = load(mjcf)
     i = m.body('link1').id
@@ -144,6 +151,7 @@ def test_inertial_is_carried_over(mjcf):
     assert m.body_ipos[i] == pytest.approx([0.2, 0, 0])
 
 
+@needs_mujoco
 def test_position_actuator_tracks_and_gravity_is_held(mjcf):
     m = load(mjcf)
     d = mujoco.MjData(m)
@@ -160,6 +168,7 @@ def test_position_actuator_tracks_and_gravity_is_held(mjcf):
     assert d.qpos[m.jnt_qposadr[m.joint('stage_joint').id]] == pytest.approx(0.15, abs=0.01)
 
 
+@needs_mujoco
 def test_sensor_reads_tool_weight(mjcf):
     m = load(mjcf)
     d = mujoco.MjData(m)

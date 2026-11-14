@@ -92,9 +92,14 @@ def test_bad_scene_is_rejected(tmp_path):
         load_scene(bad)
 
 
-mujoco = pytest.importorskip('mujoco')
+try:
+    import mujoco
+except ImportError:  # the build image has no MuJoCo python package
+    mujoco = None
+needs_mujoco = pytest.mark.skipif(mujoco is None, reason='mujoco python package not installed')
 
 
+@needs_mujoco
 def test_world_compiles_and_blocks_a_falling_ball(tmp_path):
     geoms, _, _ = wall_world_geoms(SMOKE)
     root = ET.Element('mujoco')

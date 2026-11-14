@@ -5,18 +5,13 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-pytest.importorskip('ament_index_python')
-if shutil.which('xacro') is None:
-    pytest.skip('xacro not available', allow_module_level=True)
-
-from ament_index_python.packages import PackageNotFoundError, get_package_share_directory  # noqa: E402
-
-from sim_mujoco.generate import command_joints, load_profile, render_urdf  # noqa: E402
-
 try:
+    from ament_index_python.packages import get_package_share_directory
     DESC = get_package_share_directory('mobile_manipulator_description')
-except PackageNotFoundError:
-    pytest.skip('mobile_manipulator_description not installed', allow_module_level=True)
+except Exception:  # no ROS environment, or the description is not installed
+    DESC = None
+needs_ros = pytest.mark.skipif(DESC is None or shutil.which('xacro') is None,
+                               reason='needs a sourced ROS environment with xacro and the description')
 
 
 def render(hardware):
@@ -25,6 +20,7 @@ def render(hardware):
     return ET.fromstring(out)
 
 
+@needs_ros
 def test_mujoco_branch_has_plugin_joints_and_ft_sensor():
     root = ET.fromstring(subprocess.run(
         ['xacro', f'{DESC}/urdf/mobile_manipulator.urdf.xacro', 'arm:=generic_6dof', 'hardware:=mujoco'],
@@ -43,6 +39,7 @@ def test_mujoco_branch_has_plugin_joints_and_ft_sensor():
         'force.x', 'force.y', 'force.z', 'torque.x', 'torque.y', 'torque.z']
 
 
+@needs_ros
 def test_other_backends_are_unchanged():
     mock = render('mock')
     assert mock.find('.//ros2_control/hardware/plugin').text == 'mock_components/GenericSystem'
@@ -51,10 +48,11 @@ def test_other_backends_are_unchanged():
     assert len([r for r in jtac.iter('ros2_control')]) == 2
 
 
+@needs_ros
 def test_profile_drives_joint_names_and_generation(tmp_path):
+    from sim_mujoco.generate import command_joints, generate, load_profile, render_urdf
     profile = load_profile('generic_6dof_telescopic')
     assert command_joints(profile)[0] == 'lift_joint'
-    from sim_mujoco.generate import generate
     path, _ = generate(profile, render_urdf(profile), tmp_path)
     root = ET.parse(path).getroot()
     assert [a.get('joint') for a in root.find('actuator')] == command_joints(profile)
