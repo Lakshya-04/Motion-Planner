@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 namespace ft_conditioner
@@ -33,9 +34,13 @@ Mat3 fromRpy(double roll, double pitch, double yaw)    // URDF convention: Rz(ya
   return r;
 }
 
-Vec3 vec(const std::vector<double> & v)
+Vec3 vec(const char * name, const std::vector<double> & v)
 {
-  return v.size() >= 3 ? Vec3{v[0], v[1], v[2]} : Vec3{};
+  if (v.size() != 3) {
+    throw std::invalid_argument(
+      std::string("parameter '") + name + "' needs 3 values, got " + std::to_string(v.size()));
+  }
+  return Vec3{v[0], v[1], v[2]};
 }
 
 Mat3 toMat(const geometry_msgs::msg::Quaternion & q)
@@ -64,9 +69,9 @@ WrenchConditionerNode::WrenchConditionerNode(const rclcpp::NodeOptions & options
   const auto off_rpy = declare_parameter<std::vector<double>>("tool_in_sensor_rpy", {0.0, 0.0, 0.0});
   config_.sign = declare_parameter<double>("sign", 1.0);
   config_.payload.mass_kg = declare_parameter<double>("payload_mass_kg", 0.0);
-  config_.payload.cog = vec(declare_parameter<std::vector<double>>("payload_cog_xyz", {0.0, 0.0, 0.0}));
+  config_.payload.cog = vec("payload_cog_xyz", declare_parameter<std::vector<double>>("payload_cog_xyz", {0.0, 0.0, 0.0}));
   const auto bias = declare_parameter<std::vector<double>>("bias", {0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
-  config_.gravity_world = vec(declare_parameter<std::vector<double>>("gravity_world", {0.0, 0.0, -9.80665}));
+  config_.gravity_world = vec("gravity_world", declare_parameter<std::vector<double>>("gravity_world", {0.0, 0.0, -9.80665}));
   if (bias.size() >= 6) {
     config_.bias.force_x = bias[0]; config_.bias.force_y = bias[1]; config_.bias.force_z = bias[2];
     config_.bias.torque_x = bias[3]; config_.bias.torque_y = bias[4]; config_.bias.torque_z = bias[5];
@@ -77,9 +82,11 @@ WrenchConditionerNode::WrenchConditionerNode(const rclcpp::NodeOptions & options
     RCLCPP_WARN(get_logger(), "sign must be +1 or -1, got %g: using +1", config_.sign);
     config_.sign = 1.0;
   }
-  offset_param_.p = vec(off_xyz);
+  offset_param_.p = vec("tool_in_sensor_xyz", off_xyz);
   offset_param_.R = off_rpy.size() >= 3 ? fromRpy(off_rpy[0], off_rpy[1], off_rpy[2]) : Mat3{};
 
+  param_cb_ = add_on_set_parameters_callback(
+    [this](const std::vector<rclcpp::Parameter> & p) {return onParameters(p);});
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
   pub_ = create_publisher<geometry_msgs::msg::WrenchStamped>(out_topic, rclcpp::SensorDataQoS());
@@ -94,6 +101,42 @@ WrenchConditionerNode::WrenchConditionerNode(const rclcpp::NodeOptions & options
   clear_srv_ = create_service<Trigger>("~/clear_samples", [this](const Req q, Res r) {clearSamples(q, r);});
   RCLCPP_INFO(get_logger(), "conditioning %s -> %s in frame '%s' (world '%s')", in_topic.c_str(),
     out_topic.c_str(), tool_frame_.c_str(), world_frame_.c_str());
+}
+
+rcl_interfaces::msg::SetParametersResult WrenchConditionerNode::onParameters(
+  const std::vector<rclcpp::Parameter> & params)
+{
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+  auto fail = [&result](const std::string & why) {result.successful = false; result.reason = why;};
+  force_core::ConditionerConfig next;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    next = config_;
+  }
+  for (const auto & p : params) {
+    const auto & n = p.get_name();
+    if (n == "payload_mass_kg") {
+      next.payload.mass_kg = p.as_double();
+    } else if (n == "sign") {
+      if (std::abs(p.as_double()) != 1.0) {fail("sign must be +1 or -1"); return result;}
+      next.sign = p.as_double();
+    } else if (n == "payload_cog_xyz" || n == "gravity_world") {
+      const auto v = p.as_double_array();
+      if (v.size() != 3) {fail(n + " needs 3 values"); return result;}
+      (n == "gravity_world" ? next.gravity_world : next.payload.cog) = Vec3{v[0], v[1], v[2]};
+    } else if (n == "bias") {
+      const auto v = p.as_double_array();
+      if (v.size() != 6) {fail("bias needs 6 values"); return result;}
+      next.bias.force_x = v[0]; next.bias.force_y = v[1]; next.bias.force_z = v[2];
+      next.bias.torque_x = v[3]; next.bias.torque_y = v[4]; next.bias.torque_z = v[5];
+    }
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto offset = config_.tool_in_sensor;
+  config_ = next;
+  config_.tool_in_sensor = offset;
+  return result;
 }
 
 std::size_t WrenchConditionerNode::samples() const
@@ -144,16 +187,18 @@ bool WrenchConditionerNode::toolOffset(const std::string & sensor_frame, force_c
     out = offset_param_;
     return true;
   }
-  if (offset_cached_) {
-    out = offset_cache_;
+  const auto hit = offset_cache_.find(sensor_frame);
+  if (hit != offset_cache_.end()) {
+    out = hit->second;
     return true;
   }
   try {
     const auto t = tf_buffer_->lookupTransform(sensor_frame, tool_frame_, tf2::TimePointZero).transform;
-    offset_cache_.p = {t.translation.x, t.translation.y, t.translation.z};
-    offset_cache_.R = toMat(t.rotation);
-    offset_cached_ = true;        // the sensor is rigidly mounted to the tool: look it up once
-    out = offset_cache_;
+    force_core::FrameOffset o;
+    o.p = {t.translation.x, t.translation.y, t.translation.z};
+    o.R = toMat(t.rotation);
+    offset_cache_[sensor_frame] = o;      // the sensor is rigidly mounted to the tool: look it up once per frame
+    out = o;
     return true;
   } catch (const tf2::TransformException &) {
     return false;
@@ -261,23 +306,29 @@ void WrenchConditionerNode::clearSamples(
 void WrenchConditionerNode::identify(
   const std::shared_ptr<std_srvs::srv::Trigger::Request>, std::shared_ptr<std_srvs::srv::Trigger::Response> res)
 {
-  std::lock_guard<std::mutex> lock(mutex_);
-  const auto r = force_core::identifyPayload(samples_, config_.gravity_world, config_.sign);
-  if (!r.ok) {
-    res->message = r.message;
-    return;
+  force_core::CalibrationResult r;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    r = force_core::identifyPayload(samples_, config_.gravity_world, config_.sign);
+    if (!r.ok) {
+      res->message = r.message;
+      return;
+    }
   }
-  config_.payload = r.payload;
-  config_.bias = r.bias;
-  set_parameters({
-    rclcpp::Parameter("payload_mass_kg", r.payload.mass_kg),
-    rclcpp::Parameter("payload_cog_xyz", std::vector<double>{r.payload.cog.x, r.payload.cog.y, r.payload.cog.z}),
-    rclcpp::Parameter("bias", std::vector<double>{r.bias.force_x, r.bias.force_y, r.bias.force_z,
-        r.bias.torque_x, r.bias.torque_y, r.bias.torque_z})});
-  char buf[640];
+  // The parameter callback updates config_ (it takes the mutex itself, so not under the lock here).
+  const auto set = set_parameters({
+      rclcpp::Parameter("payload_mass_kg", r.payload.mass_kg),
+      rclcpp::Parameter("payload_cog_xyz", std::vector<double>{r.payload.cog.x, r.payload.cog.y, r.payload.cog.z}),
+      rclcpp::Parameter("bias", std::vector<double>{r.bias.force_x, r.bias.force_y, r.bias.force_z,
+          r.bias.torque_x, r.bias.torque_y, r.bias.torque_z})});
+  for (const auto & s : set) {
+    if (!s.successful) {res->message = "fit ok but could not apply it: " + s.reason; return;}
+  }
+  char buf[720];
   std::snprintf(buf, sizeof(buf),
     "fit from %zu poses, residual %.4f N / %.5f N m. Parameters now in use; to keep them:\n"
-    "payload_mass_kg: %.5f\npayload_cog_xyz: [%.5f, %.5f, %.5f]\nbias: [%.5f, %.5f, %.5f, %.5f, %.5f, %.5f]",
+    "payload_mass_kg: %.5f\npayload_cog_xyz: [%.5f, %.5f, %.5f]\nbias: [%.5f, %.5f, %.5f, %.5f, %.5f, %.5f]\n"
+    "The captured poses are kept: call ~/clear_samples before calibrating another tool.",
     r.samples, r.rms_force_n, r.rms_torque_nm, r.payload.mass_kg, r.payload.cog.x, r.payload.cog.y,
     r.payload.cog.z, r.bias.force_x, r.bias.force_y, r.bias.force_z, r.bias.torque_x, r.bias.torque_y,
     r.bias.torque_z);

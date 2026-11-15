@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -73,8 +74,9 @@ private:
   std::string world_frame_, tool_frame_, sensor_frame_param_;
   bool offset_from_tf_{true};
   force_core::FrameOffset offset_param_;
-  bool offset_cached_{false};
-  force_core::FrameOffset offset_cache_;
+  std::map<std::string, force_core::FrameOffset> offset_cache_;     // by sensor frame
+  rcl_interfaces::msg::SetParametersResult onParameters(const std::vector<rclcpp::Parameter> & params);
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
 
   mutable std::mutex mutex_;
   force_core::ConditionerConfig config_;

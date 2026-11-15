@@ -273,6 +273,23 @@ TEST(WrenchConditionerNode, CapturePoseRefusesAStaleInputAndAveragesTheWindow)
   EXPECT_EQ(rig.node->calibrationSamples().size(), 1U);
 }
 
+TEST(WrenchConditionerNode, RuntimeParameterChangesAreUsedAndBadOnesRejected)
+{
+  Rig rig;
+  EXPECT_TRUE(rig.node->set_parameter(rclcpp::Parameter("payload_mass_kg", 0.5)).successful);
+  EXPECT_NEAR(rig.node->config().payload.mass_kg, 0.5, 1e-12);
+  EXPECT_FALSE(rig.node->set_parameter(rclcpp::Parameter("gravity_world", std::vector<double>{0.0, -9.81})).successful);
+  EXPECT_NEAR(rig.node->config().gravity_world.z, -9.80665, 1e-12);
+  EXPECT_FALSE(rig.node->set_parameter(rclcpp::Parameter("sign", 2.0)).successful);
+}
+
+TEST(WrenchConditionerNode, AShortVectorParameterFailsInsteadOfBecomingZero)
+{
+  rclcpp::NodeOptions o;
+  o.parameter_overrides({{"gravity_world", std::vector<double>{0.0, -9.81}}});
+  EXPECT_THROW(ft_conditioner::WrenchConditionerNode node(o), std::invalid_argument);
+}
+
 TEST(TfFreshEnough, LimitsTheAgeAndTreatsStaticAsFresh)
 {
   using ft_conditioner::tfFreshEnough;
