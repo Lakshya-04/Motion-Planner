@@ -164,7 +164,7 @@ without code, when we can implement it.
 ## 11. The end-to-end gap (the main remaining work)
 
 - [ ] **One launch per simulator**: sim + move_group + controllers + conditioner + coverage + manager, executing a wall pass
-- [~] **A scorecard** for that run: `scoreRun` computes coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); nothing records a simulator run into it yet, and collisions are not counted
+- [~] **A scorecard** for that run: `scoreRun` / `score_run` compute coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); `run_contact.sh --record` feeds it a MuJoCo contact run (`docs/sim_mujoco.md`); a full wall pass is not recorded yet and collisions are not counted
 - [ ] Manager interface: an action or service to start, stop and monitor a coverage task (it runs once from `main` today). *Reuse: BehaviorTree.CPP (MIT) for the
       task flow, the way Nav2 does; keep the force FSM*
 - [ ] Scenario set: empty wall, wall with obstacles, panels needing several stands, each robot profile
