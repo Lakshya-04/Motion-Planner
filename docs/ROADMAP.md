@@ -123,7 +123,7 @@ without code, when we can implement it.
 - [x] Verified in MuJoCo: 10.13 N for a 10 N target (std 0.03); conditioner error vs ground truth under 0.005 N in both simulators
 - [~] JTAC compliance offset accumulates on every axis while blocked and releases over about 3 s after the reference retreats (`docs/sim_mujoco.md`)
 - [~] **Force-CBF limiter on JTAC** (arXiv 2405.04859 idea, no code used): `force_core::ForceLimiter` bounds the velocity into the wall by `alpha (F_max - F) / k` with an online stiffness estimate and a free-space speed cap; closed-loop tests keep the force under the limit on 1-40 kN/m walls (`docs/ft_sensing.md`). Not wired into JTAC's command path yet (needs a simulator run), and there is no energy tank around the slow release; the existing `max_offset_m` clamp stays
-- [ ] **Hardware parameter template**: gains, sensor name, source topic, payload and bias live in yaml comments marked "diagnostic"
+- [~] **Hardware parameter template**: `compliant_trajectory_controller/config/hardware_template.yaml` lists every value to set (conditioner, bridge, JTAC, tool profile) with safe defaults marked; documented only, no launch file loads it yet and nothing is tested on hardware
 - [ ] Payload identification with safe excitation trajectories and bounds (arXiv 2504.21486, about 1.5 weeks; its code, `roahmlab/OnlineSafeSysID`, has no licence file, so implement from the paper) and bias/temperature drift tracking (3-5 days);
       optionally replace the gravity step with the `control_toolbox` gravity-compensation filter (Apache-2.0; gravity and centre-of-gravity torque only, so sign, bias and the lever arm stay ours)
 - [ ] Gain auto-tuning by Bayesian optimisation on the MuJoCo twin (cost: force RMS + overshoot + windup; method reference arXiv 2512.03772: SAASBO tuning of a torque-level MPC on a UR10e with a digital twin, not admittance gains, no code; 1-2 weeks)
@@ -176,7 +176,7 @@ without code, when we can implement it.
 ## 12. Hardware readiness
 
 - [~] UFACTORY path: `ft_bridge` default topic, JTAC yaml for `uf_ft_sensor`, a real-robot branch in the compliance demo; nothing verified on hardware
-- [ ] Hardware bring-up guide and commissioning tests (slow first contact, sign checks, payload identification, stiffness check, limits)
+- [~] Hardware bring-up guide: `docs/hardware_bringup.md` (procedure, abort thresholds, sim-vs-real differences); written from the code and simulations, no commissioning test exists and nothing was run on hardware
 - [ ] `hardware:=real` description branch and vendor-driver selection
 - [ ] Calibration procedures in one place: payload (services exist), tool TCP, wall plane, base-to-wall
 
@@ -186,16 +186,16 @@ without code, when we can implement it.
 - [x] Root README: overview, workflow, package map, Docker build and test, simulators, quickstart pointing at the one-command sim scripts
 - [x] **Getting started**: one command to a simulated wall pass (`sim_mujoco/scripts/run_wall_pass.sh`, `run_manager_pass.sh`; `sim_gazebo/scripts/run_manager_pass.sh`)
 - [x] `THIRD_PARTY.md` (licences, use, nothing vendored); revisit as adopted software lands (a few licences are marked unverified there; cddlib GPL-2.0 in the VAMP stage: reviewed 2026-11-15, source and recipes only, no binaries shipped, see THIRD_PARTY.md)
-- [~] CHANGELOG and CONTRIBUTING written; real package versions still all `0.0.0`
+- [x] CHANGELOG (#5 to #61) and CONTRIBUTING written; every package is at `0.1.0` (checked: nothing depends on an exact version; `colcon list` over all 28 packages works)
 - [x] `docs/docker.md` covers the `sim` and `sim-gazebo` targets
-- [ ] CI: none by decision; instead one documented "run all checks" command (`docker/build.sh test` + sim smoke tests)
+- [x] CI: none by decision; one documented "run all checks" section in `docs/docker.md` (`docker/build.sh test`, tool tests, public-readiness scan, sim scripts); the sim scripts are still not in `colcon test`
 - [ ] **Public-readiness cleanup**
   - [x] References to documents that are not in the repo: none left in code or docs (checked 2026-11-16 with a script over every `*.md` mention in tracked files; `docker/tools/check_public_readiness.py` keeps checking)
   - [x] Earlier-project base and application names are removed (no `serum` anywhere; "mop" is a real tool in `coverage_planner/config/tool_profiles.yaml`, not a leftover)
   - [x] Launch files that looked up packages that do not exist are fixed or removed (every remaining `*.launch.py` uses `mobile_manipulator_description` / `mobile_manipulator_moveit_config`)
   - [x] `.claude/` is in `.gitignore`
   - [ ] Decide about the maintainer's email, which is in 97 files (70 `@author` tags plus `package.xml` maintainer entries; their own address: keep or drop)
-  - [ ] Final scan before making the repo public (names, paths, secrets); the visibility change itself is your command
+  - [ ] Final scan before making the repo public (names, paths, secrets): the procedure is `docs/release_checklist.md`, not yet run; the visibility change itself is your command
 
 ## 14. Docs that no longer match the code
 

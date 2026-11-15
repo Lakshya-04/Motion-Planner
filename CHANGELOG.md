@@ -1,13 +1,13 @@
 # Changelog
 
 All notable changes are recorded here, in the style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-There are no tagged releases yet and every package version is still `0.0.0`. The status of each capability,
+There are no tagged releases yet; every package is at version `0.1.0` (set together, nothing depends on an exact version). The status of each capability,
 with evidence, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## [Unreleased]
 
-First entry: the stack as it stands, covering the pull-request stack (#5 to #22 and the
-documentation on top of it), summarised by area. Not included: a launch that runs perception to execution,
+The stack as it stands, covering the merged pull requests #5 to #61, summarised by area (the first block is
+#5 to #22 and the documentation on top of it; "Since #22" below it covers #23 to #61). Not included: a launch that runs perception to execution,
 anything verified on hardware.
 
 ### Added
@@ -63,13 +63,47 @@ anything verified on hardware.
   root README with an overview.
 - Sphere-set planning benchmark (partial: cuRobo on a 110-problem subset) and the FOAM versus cuRobo sphere comparison.
 
-### Changed
+### Since #22 (pull requests #23 to #61)
+
+**Added**
+- Backend selection by YAML through pluginlib (#29, see `docs/backend_selection.md`); weighted IK.
+- Tool profiles: `coverage_planner/config/tool_profiles.yaml` (contact wiper, spray gun), profile loading with
+  overrides, a parametric spray swath model, `tool_profiles_file` / `tool_name` on the coverage launch files,
+  `docs/tools.md` (#30, #31).
+- Coverage verification and scoring: `CoverageVerifier` (per-cell raster of what executed strokes covered),
+  `scoreRun` scorecard, `score_run` CLI with CSV/JSON formats (#36, #37, #39).
+- `force_core::ForceLimiter`, a control-barrier bound on the velocity into the wall with an online
+  stiffness estimate; library only, not wired into JTAC (#38).
+- MuJoCo: `contact_test --record`, a scripted wall pass with scoring (`run_wall_pass.sh`), the manager in the
+  loop (`run_manager_pass.sh`), a planar-velocity base (`base_motion:=true`) and a stand-navigation check (#40,
+  #43, #47, #56, #57).
+- `stand_navigator`: `NavigateToStand` action and a ROS-free controller (omni/diff, limits) (#57).
+- Manager: `wall_direction`, `controller_name`, `base_check` (off|warn|enforce) parameters (#35, #46, #54);
+  press-then-stroke with a settle and force release before disengage (#49, #51).
+- Gazebo: compliant tool tip (5 N/mm spring-damper) so JTAC holds 10 N, and a manager pass
+  (`sim_gazebo/scripts/run_manager_pass.sh`) (#55, #59).
+- `plan_stands` `max_stands` request field (#34).
+
+**Changed**
+- MuJoCo wall pass default stroke speed 0.02 m/s (in-band fraction 34 to 81 percent, force RMS 2.8 to 1.5 N);
+  pass stroke speed 0.01 m/s in the manager pass (#44, #51).
+- Octomap: link the same copy MoveIt links (a second copy in the process aborted at exit) (#32).
+- The ACM keeps links bolted to the lift from colliding with the lift stages (#48); profiles carry the base in
+  `xacro_args` and `arm_mount_xy` where needed (#52).
+- Docs refreshed several times to match the code (#23 to #26, #45, #50, #53, #60, #61); launch files that
+  referenced packages that do not exist were fixed or removed (#27).
+
+**Documentation**
+- Hardware parameter template, hardware bring-up guide, release checklist and a single "run all checks" section
+  in `docs/docker.md`.
+
+### Changed (first block)
 - TRAC-IK with `Distance` is the default MoveIt IK solver.
 - Docs that said "planned" or "not done" for things that now exist were brought in line with the code
   (architecture status table, reachability, cuRobo, MoveIt config, scene model, self filter, coverage planner).
 
 ### Known gaps (see the roadmap)
-- No end-to-end run; the manager hard-wires MoveIt Cartesian + OMPL and has no runtime backend selection.
-- No live sensor ingest, no tool profiles shipped, no time parameterisation, base motion not simulated.
-- Gazebo cannot hold a 10 N contact; MuJoCo can (10.13 N for a 10 N target).
+- No launch that runs perception through execution; the simulator passes start from a coverage file.
+- No live sensor ingest, no time parameterisation.
+- Both simulators hold a 10 N contact (MuJoCo 10.13 N; Gazebo 9.69 N with the compliant tip).
 - Nothing verified on hardware.

@@ -82,6 +82,33 @@ Set a different distro with `ROS_DISTRO=humble` (the packages build as C++17 on 
 | Python / GPU stack (torch, cuRobo, trimesh, ...) with pins | `docker/requirements-gpu.txt` |
 | Pinned third-party commits | `Dockerfile` args (`VAMP_REF`), `requirements-gpu.txt` (cuRobo), `docker/tools/build_robot_tools.sh` (FOAM, Cricket) |
 
+## Run all checks
+
+There is no CI by decision ([CONTRIBUTING.md](../CONTRIBUTING.md)); this is the one set of commands to run
+before a pull request. Each line is independent; the sim lines need their image and skip what they lack.
+
+```bash
+# 1. Everything colcon builds and tests (C++ and Python packages, no GPU)
+docker compose -f docker/compose.yaml run --rm test           # = docker/build.sh test
+
+# 2. Python tool tests (the MuJoCo cross-check tests skip without MuJoCo)
+docker compose -f docker/compose.yaml run --rm dev bash -lc 'python3 -m pytest docker/tools/tests'
+
+# 3. Public-readiness scan (links to documents, absolute home paths)
+python3 docker/tools/check_public_readiness.py
+
+# 4. Simulator scripts, only when you touched a simulator or the force path.
+#    MuJoCo (needs the `sim` image and the MuJoCo SDK, see sim_mujoco.md):
+#      src/simulation/sim_mujoco/scripts/run_smoke.sh      run_contact.sh
+#      src/simulation/sim_mujoco/scripts/run_wall_pass.sh  run_manager_pass.sh
+#    Gazebo (needs the `sim-gazebo` image, see the section above and sim_gazebo.md):
+#      ros2 run sim_gazebo smoke_test.py    ros2 run sim_gazebo contact_control_test.py
+#      src/simulation/sim_gazebo/scripts/run_manager_pass.sh
+```
+
+Give each simulator run its own `ROS_DOMAIN_ID`. The simulator scripts are not part of `colcon test`.
+A pass of lines 1 to 3 says nothing about GPU planning, the simulators or hardware.
+
 ## VAMP and SIMD
 
 VAMP defaults to `-march=native`, which bakes the build machine's CPU into the binary. The
