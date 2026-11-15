@@ -134,8 +134,8 @@ ScanCoverageResult planCoverageFromScan(
 
   // 3. Plan on the wall plane (obstacle inflation is already part of the rasterized grid).
   CoveragePlannerParams params;
-  params.swath = tool.coverage.swath_m;
-  params.step = tool.coverage.swath_m * (1.0 - tool.coverage.overlap_pct / 100.0);
+  params.swath = toolSwath(tool);
+  params.step = toolLineSpacing(tool);
   params.sweep_direction = tool.coverage.sweep_direction;
   params.start_corner = options.start_corner;
   params.obstacle_inflation_radius = 0.0;

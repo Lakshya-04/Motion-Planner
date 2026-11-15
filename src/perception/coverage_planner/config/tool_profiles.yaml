@@ -1,0 +1,119 @@
+# Tool profiles shipped with coverage_planner (installed to share/coverage_planner/config/).
+#
+# The coverage nodes pick one entry with the parameters
+#   tool_profiles_file : path to a file like this one (default: this file)
+#   tool_name          : key under `tools:` (default: contact_wiper)
+# Explicit node parameters (swath_m, overlap_pct, standoff_m, ...) override single fields.
+# Loader checks (ros_adapters/tool_profile_yaml_loader.hpp): contact <=> admittance_chain,
+# wrench_reference_z_n == target_force_n, a non-contact tool needs standoff_m > 0 and no
+# contact_allowed_links, a contact tool needs reachability_tilt_deg_max == 0, spray_half_angle_deg
+# only on non-contact tools. Every value below is a starting point to tune on the real tool.
+#
+# Units: m, s, N, Nm, deg, percent. Fields that are not listed take the ToolProfile default (0).
+schema_version: 1
+
+tools:
+
+  # Contact tool: a mop-like wiper pressed on the wall with a controlled normal force.
+  contact_wiper:
+    geometry:
+      mesh: ""                         # mesh file in the tool package; empty = none
+      mesh_origin_xyz: [0.0, 0.0, 0.0] # m, mesh origin translation
+      mesh_origin_rpy: [0.0, 0.0, 0.0] # rad, mesh origin rotation
+      tcp_xyz: [0.0, 0.0, 0.0]         # m, flange -> link_tcp; replace with the real mounting offset
+      tcp_rpy: [0.0, 0.0, 0.0]         # rad, flange -> link_tcp
+      contact_allowed_links: [link_tcp] # links allowed to touch the wall (collision-matrix exclusion)
+    task:
+      contact: true                    # touches the wall; path stays on the surface
+      target_force_n: 15.0             # N, normal force along tool +Z
+      force_band_n: 3.0                # N, band around the target that counts as settled
+      force_zero_threshold_n: 1.0      # N, below this the tool counts as unloaded
+      standoff_m: 0.0                  # m, 0 for a contact tool
+      ee_speed_mps: 0.10               # m/s, constant speed along the surface
+      approach_standoff_m: [0.10, 0.03] # m, approach waypoints in front of the wall
+      approach_speed_mps: 0.05         # m/s, speed during the approach
+      tool_normal_policy: constant     # tool Z stays along -normal ("tilt_at_edges" is non-contact only)
+      max_edge_tilt_deg: 0.0           # deg, only used by tilt_at_edges
+      tool_frame_yaw_deg: 0.0          # deg, rotates tool X/Y about its own Z to pick which tool axis follows the wall's up direction
+      reachability_tilt_deg_max: 0.0   # deg, must stay 0 for a contact tool
+      settle_timeout_s: 5.0            # s, force settle watchdog
+      overload_abort_n: 60.0           # N, instantaneous abort above this
+      tangential_torque_abort_nm: 8.0  # Nm, abort above this tangential torque
+      tool_command: none               # none | pump | valve
+    coverage:
+      swath_m: 0.20                    # m, width of the wiped strip
+      overlap_pct: 20.0                # percent; strip spacing = swath * (1 - overlap/100) = 0.16 m
+      passes:                          # one entry per pass over each strip
+        - {standoff_delta_m: 0.0, reverse_direction: false}
+        - {standoff_delta_m: 0.0, reverse_direction: true}   # second pass, opposite direction
+      sweep_direction: vertical        # vertical | horizontal
+      enable_boundary_pass: false      # extra pass along the region boundary
+      boundary_offset_m: 0.0           # m, boundary pass offset
+      obstacle_inflation: uniform      # grow obstacles equally in u and v
+      obstacle_inflation_radius_m: 0.10 # m, margin around obstacles (half the swath)
+      ensure_coverage_within_boundary: false
+      uniform_direction: false         # false = alternate direction every strip
+    control:
+      controller: admittance_chain     # force control on the normal axis
+      admittance:
+        selected_axes: [false, false, true, false, false, false]  # x y z rx ry rz: only Z complies
+        mass: [2.0, 2.0, 2.0]          # kg
+        damping: [60.0, 60.0, 60.0]    # Ns/m
+        stiffness: [0.0, 0.0, 0.0]     # N/m
+        wrench_reference_z_n: 15.0     # N, must equal task.target_force_n
+        trim_ki: 0.05                  # integral gain of the force trim
+        trim_integral_max_n: 3.0       # N, trim integral limit
+        contact_threshold_n: 2.0       # N, contact detected above this
+        max_offset_m: 0.05             # m, largest compliance offset
+      ft:
+        lpf_cutoff_hz: 10.0            # Hz, force-torque low-pass cutoff
+        deadband_n: 0.3                # N, readings below this are zeroed
+        clamp_n: 100.0                 # N, readings are clamped to +-this
+        tare_per_goal: true            # re-zero the sensor before each goal
+
+  # Non-contact tool: a spray gun held at a standoff. The swath follows the standoff:
+  #   swath = effective_width_fraction * 2 * standoff * tan(spray_half_angle) = 0.175 m at 0.30 m.
+  spray_gun:
+    geometry:
+      mesh: ""
+      mesh_origin_xyz: [0.0, 0.0, 0.0]
+      mesh_origin_rpy: [0.0, 0.0, 0.0]
+      tcp_xyz: [0.0, 0.0, 0.0]         # m, replace with the nozzle offset from the flange
+      tcp_rpy: [0.0, 0.0, 0.0]
+      contact_allowed_links: []        # a non-contact tool must not touch the wall
+    task:
+      contact: false
+      standoff_m: 0.30                 # m, nozzle to wall along the normal (> 0)
+      standoff_tolerance_m: 0.02       # m, allowed standoff error
+      ee_speed_mps: 0.15               # m/s, constant speed along the strip
+      approach_standoff_m: [0.50, 0.30] # m, approach waypoints
+      approach_speed_mps: 0.10         # m/s, speed during the approach
+      tool_normal_policy: constant     # constant | tilt_at_edges (may tilt at a wall corner)
+      max_edge_tilt_deg: 0.0           # deg, only used by tilt_at_edges
+      tool_frame_yaw_deg: 0.0          # deg
+      reachability_tilt_deg_max: 0.0   # deg, tilt allowed when the ideal pose is unreachable; 0 = off
+      unexpected_contact_abort_n: 10.0 # N, any force above this means a collision
+      tool_command: valve              # none | pump | valve
+      tool_off_lead_s: 0.10            # s, close the valve this long before the strip ends (not planned yet)
+      tool_on_at_speed_ratio: 0.90     # open once speed reaches this fraction of ee_speed_mps (not planned yet)
+    coverage:
+      swath_m: 0.175                   # m, informational; ignored while spray_half_angle_deg > 0
+      spray_half_angle_deg: 20.0       # deg, cone half-angle; swath is derived from the standoff
+      effective_width_fraction: 0.80   # usable share of the cone width (Gaussian-like deposit)
+      overlap_pct: 20.0                # percent; spacing = swath * (1 - overlap/100)
+      passes:
+        - {standoff_delta_m: 0.0, reverse_direction: false}
+      sweep_direction: horizontal      # long fan perpendicular to travel
+      enable_boundary_pass: false
+      boundary_offset_m: 0.0
+      obstacle_inflation: primary_axis # shift only along the sweep direction
+      obstacle_inflation_radius_m: 0.0875 # m, half the derived swath
+      ensure_coverage_within_boundary: true
+      uniform_direction: true          # every strip in the same direction (consistent spray bias)
+    control:
+      controller: jtc_only             # trajectory control only, no force loop
+      ft:
+        lpf_cutoff_hz: 10.0
+        deadband_n: 0.3
+        clamp_n: 100.0
+        tare_per_goal: true
