@@ -191,8 +191,10 @@ ros2 launch reachability reachability.launch.py map_file:=/path/ur10e.rm4d
 ## Checking the base stance from the manager
 
 `manipulation_manager` can ask `~/plan_stands` whether the base, where it stands, reaches the whole coverage plan
-(`base_check:=off|warn|enforce`, default `off`). It sends the plan's poses in the base frame with the wall on the
-+y side (the assumption the dock pose already makes) and accepts the stance only when exactly one stand covers
+(`base_check:=off|warn|enforce`, default `off`). It sends the plan's poses in the base frame with the wall in the
+direction of `wall_direction` (a vector in the planning frame, default `[0, 1, 0]` = +y; the MuJoCo and Gazebo scenes
+have the wall at `[1, 0, 0]`; the dock standoff, the contact overshoot and the wall reference orientation use the
+same direction) and accepts the stance only when exactly one stand covers
 every target and that stand is within `base_check_tol_xy_m` (0.15) and `base_check_tol_yaw_rad` (0.1) of the
 origin. Otherwise it reports where the base would have to be, or that several stands are needed. `warn` logs and
 runs the plan; `enforce` does not run it, and also refuses when the service is unreachable. Set
