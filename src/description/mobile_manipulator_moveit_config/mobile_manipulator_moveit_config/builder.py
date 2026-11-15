@@ -42,11 +42,17 @@ def build_moveit_config(arm=None, hardware='mock', ik='trac_ik', profile=None):
 
     `profile` (name or path, default ur10e_telescopic) says which arm, how many joints and what
     the groups are called; `arm` alone picks the matching profile, and an explicit `arm` also
-    overrides the profile's arm. `ik` picks the kinematics solver: 'trac_ik' (default: stays on
+    overrides the profile's arm only where the joint names stay the same (ur5e on a UR profile);
+    otherwise a ValueError says they disagree. `ik` picks the kinematics solver: 'trac_ik' (default: stays on
     the seed's branch on large moves), 'kdl' (ships with MoveIt) or 'pick_ik' (opt-in, untuned);
     see docs/moveit_config.md. Use resolve_profile(arm, profile) for the same profile object.
     """
     prof = resolve_profile(arm, profile)
+    if arm and arm != prof.arm and profile and \
+            load_profile(profile_for_arm(arm)).joints != prof.joints:
+        raise ValueError(
+            f"arm '{arm}' does not match profile '{prof.name}' (arm '{prof.arm}', joints "
+            f'{prof.joints}); drop `arm` or pick the matching profile')
     arm = arm or prof.arm
     description = get_package_share_directory(DESCRIPTION)
     family = prof.controller_family
@@ -58,10 +64,11 @@ def build_moveit_config(arm=None, hardware='mock', ik='trac_ik', profile=None):
         MoveItConfigsBuilder(prof.robot_name, package_name=PACKAGE)
         .robot_description(
             file_path=os.path.join(description, 'urdf', 'mobile_manipulator.urdf.xacro'),
-            mappings=dict(prof.xacro_mappings(), arm=arm, profile=prof.name, hardware=hardware))
+            mappings=dict(prof.xacro_mappings(), arm=arm, profile=prof.path or prof.name,
+                          hardware=hardware))
         .robot_description_semantic(
             file_path=os.path.join(description, 'srdf', 'mobile_manipulator.srdf.xacro'),
-            mappings={'arm': arm, 'profile': prof.name})
+            mappings={'arm': arm, 'profile': prof.path or prof.name})
         .robot_description_kinematics(file_path=KINEMATICS[ik])
         .joint_limits(file_path=limits)
         .trajectory_execution(file_path=f'config/{family}/moveit_controllers.yaml')

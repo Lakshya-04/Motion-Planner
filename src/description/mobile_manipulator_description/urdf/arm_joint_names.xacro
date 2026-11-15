@@ -12,7 +12,9 @@
   <xacro:arg name="arm" default="ur10e"/>
   <xacro:arg name="profile" default=""/>
   <xacro:property name="profile_name" value="${'$(arg profile)' if '$(arg profile)' else ('ur10e_telescopic' if '$(arg arm)'.startswith('ur') else '$(arg arm)_telescopic')}"/>
-  <xacro:property name="profile" value="${load_yaml('$(find mobile_manipulator_description)/config/profiles/' + profile_name + '.yaml')}"/>
+  <!-- `profile` is a name in config/profiles, or the path of a profile file (contains / or ends in .yaml) -->
+  <xacro:property name="profile_file" value="${profile_name if ('/' in profile_name or profile_name.endswith('.yaml')) else '$(find mobile_manipulator_description)/config/profiles/' + profile_name + '.yaml'}"/>
+  <xacro:property name="profile" value="${load_yaml(profile_file)}"/>
   <xacro:property name="arm_joint_names" value="${profile['joints']['arm']}"/>
   <xacro:property name="arm_dof" value="${len(profile['joints']['arm'])}"/>
   <xacro:property name="home_arm" value="${[profile['home'][j] for j in profile['joints']['arm']]}"/>

@@ -7,6 +7,7 @@ files read it instead of repeating names. The C++ twin is mobile_manipulator_pro
     p = load_profile('ur10e_telescopic')      # or a path to a .yaml file
     p.whole_body_group, p.arm_dof, p.joints   # 'lift_arm', 6, ['lift_joint', ...]
 """
+import dataclasses
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -55,6 +56,7 @@ class Profile:
     groups: Dict[str, str]
     controller_family: str
     raw: dict = field(repr=False, compare=False, default_factory=dict)
+    path: str = field(default='', compare=False)  # YAML file it was read from (empty for parse_profile)
 
     @property
     def arm(self):
@@ -153,4 +155,5 @@ def load_profile(name_or_path=DEFAULT_PROFILE):
         raise ProfileError(f'profile not found: {path}')
     with open(path) as f:
         data = yaml.safe_load(f)
-    return parse_profile(data, os.path.splitext(os.path.basename(path))[0])
+    profile = parse_profile(data, os.path.splitext(os.path.basename(path))[0])
+    return dataclasses.replace(profile, path=os.path.abspath(path))

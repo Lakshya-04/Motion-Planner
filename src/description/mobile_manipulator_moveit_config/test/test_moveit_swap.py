@@ -75,3 +75,25 @@ def test_fk_ik_through_moveit(name):
             # IK from a nearby seed must recover the pose for most samples.
             assert int(got['ik_ok']) >= 12, out.stdout
             assert float(got['max_pose_error']) < 0.01, out.stdout
+
+
+def test_profile_given_as_a_path_is_used_for_the_urdf_and_srdf(tmp_path):
+    """A profile file whose basename matches an installed one must still win over the installed one."""
+    import shutil
+    import xml.etree.ElementTree as ET
+    src = os.path.join(get_package_share_directory('mobile_manipulator_description'), 'config',
+                       'profiles', 'panda_telescopic.yaml')
+    custom = tmp_path / 'ur10e_telescopic.yaml'       # same name as an installed UR profile
+    shutil.copy(src, custom)
+    p = load_profile(str(custom))
+    cfg = build_moveit_config(profile=str(custom), ik='kdl')
+    urdf = ET.fromstring(cfg.robot_description['robot_description'])
+    assert [j.get('name') for j in urdf.find('ros2_control').findall('joint')] == p.joints
+    srdf = ET.fromstring(cfg.robot_description_semantic['robot_description_semantic'])
+    home = [s for s in srdf.findall('group_state') if s.get('name') == 'home'][0]
+    assert {j.get('name') for j in home.findall('joint')} >= set(p.arm_joints)
+
+
+def test_arm_that_disagrees_with_the_profile_is_rejected():
+    with pytest.raises(ValueError, match='does not match'):
+        build_moveit_config(arm='ur10e', profile='panda_telescopic', ik='kdl')
