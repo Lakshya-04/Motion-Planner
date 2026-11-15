@@ -163,8 +163,8 @@ without code, when we can implement it.
 
 ## 11. The end-to-end gap (the main remaining work)
 
-- [~] **One launch per simulator**: MuJoCo has `run_wall_pass.sh` (sim + move_group + JTAC + conditioner, scripted strokes planned by MoveIt, recorded and scored; `docs/sim_mujoco.md`); `run_manager_pass.sh` puts the coverage planner and the manager in the loop (column 0 executes, the pass still fails the scorer: coverage 0.48, peak 94 N), Gazebo has none, and the contact force along the stroke is better at the slower default stroke but still not good (peak 18.6 N, RMS 1.5 N, 81 percent in band; 34 percent at the first, faster setting)
-- [~] **A scorecard** for that run: `scoreRun` / `score_run` compute coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); `run_contact.sh --record` feeds it a MuJoCo contact run (`docs/sim_mujoco.md`); a full wall pass is not recorded yet and collisions are not counted
+- [~] **One launch per simulator**: MuJoCo has `run_wall_pass.sh` (scripted strokes planned by MoveIt, recorded and scored) and `run_manager_pass.sh` (coverage planner + manager + MoveIt + JTAC: both columns dock, press, stroke and retract; scorer passes with coverage 0.93, peak 20.5 N, RMS 3.6 N, in-band 0.48; `docs/sim_mujoco.md`). Gazebo has none yet; force along the stroke is still looser than the scripted pass (RMS 1.5 N, 81 percent in band)
+- [~] **A scorecard** for that run: `scoreRun` / `score_run` compute coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); `run_contact.sh --record` feeds it a MuJoCo contact run (`docs/sim_mujoco.md`); `run_manager_pass.sh` records and scores a full manager pass; collisions are not counted
 - [ ] Manager interface: an action or service to start, stop and monitor a coverage task (it runs once from `main` today). *Reuse: BehaviorTree.CPP (MIT) for the
       task flow, the way Nav2 does; keep the force FSM*
 - [ ] Scenario set: empty wall, wall with obstacles, panels needing several stands, each robot profile
