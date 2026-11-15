@@ -185,7 +185,7 @@ without code, when we can implement it.
 - [x] Apache-2.0 licence; docs index; architecture, robot, reachability, simulation, F/T docs; Docker with nine targets
 - [~] Root README: overview, workflow, package map, Docker build and test, simulators; no one-command quickstart (none exists)
 - [ ] **Getting started**: one command to a running simulated wall pass
-- [x] `THIRD_PARTY.md` (licences, use, nothing vendored); revisit as adopted software lands (a few licences are marked unverified there; the cddlib GPL-2.0 header copy in the VAMP stage needs a review)
+- [x] `THIRD_PARTY.md` (licences, use, nothing vendored); revisit as adopted software lands (a few licences are marked unverified there; cddlib GPL-2.0 in the VAMP stage: reviewed 2026-11-15, source and recipes only, no binaries shipped, see THIRD_PARTY.md)
 - [~] CHANGELOG and CONTRIBUTING written; real package versions still all `0.0.0`
 - [x] `docs/docker.md` covers the `sim` and `sim-gazebo` targets
 - [ ] CI: none by decision; instead one documented "run all checks" command (`docker/build.sh test` + sim smoke tests)
