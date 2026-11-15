@@ -492,6 +492,25 @@ def pct(v, p):
     return float(np.percentile(v, p)) if len(v) else float('nan')
 
 
+def summarize_problems(ps):
+    """Success and time figures of one result group (one backend/set/scene family).
+
+    `success` divides by ALL problems, so a problem whose endpoints are invalid under this set counts
+    as a failure; `success_valid` leaves those out. The time medians cover successful plans only
+    (`time_ms_median`, `time_ms_p95`); `time_ms_median_all` covers every run, failures included.
+    """
+    ok = [p for p in ps if p['success']]
+    valid = [p for p in ps if all(p['endpoints_valid'])]
+    valid_ok = [p for p in valid if p['success']]
+    wall = [p['wall_s'] * 1e3 for p in ok]
+    return {
+        'n': len(ps), 'ok': len(ok), 'success': len(ok) / len(ps),
+        'n_valid': len(valid), 'success_valid': len(valid_ok) / len(valid) if valid else float('nan'),
+        'time_ms_median': pct(wall, 50), 'time_ms_p95': pct(wall, 95),
+        'time_ms_median_all': pct([p['wall_s'] * 1e3 for p in ps], 50),
+        'endpoints_invalid': len(ps) - len(valid)}
+
+
 def load_runs(files, doc):
     """Raw result files -> uniform run dicts. cuRobo writes one json; VAMP writes json lines."""
     runs = []
@@ -590,9 +609,8 @@ def cmd_report(a):
             ps = [pr for rs in r['scenes'] if scenes[rs['id']]['family'] == fam for pr in rs['problems']]
             if not ps:
                 continue
+            summ = summarize_problems(ps)
             ok = [p for p in ps if p['success']]
-            wall = [p['wall_s'] * 1e3 for p in ok]
-            allwall = [p['wall_s'] * 1e3 for p in ps]
             fail = [p for p in ps if not p['success']]
             mesh_bad = [p for p in ok if p['flags']['mesh']]
             other = {n: sum(p['flags'][n] for p in ok) for n in models}
@@ -607,14 +625,11 @@ def cmd_report(a):
                     clean = [f for f in witness[p['id']] if not f['mesh']]
                     blocked_by_set += all(f[r['set']] for f in clean)
             rows.append({
-                'backend': r['backend'], 'set': r['set'], 'family': fam, 'n': len(ps), 'ok': len(ok),
-                'success': len(ok) / len(ps), 'time_ms_median': pct(wall, 50), 'time_ms_p95': pct(wall, 95),
-                'time_ms_median_all': pct(allwall, 50),
+                'backend': r['backend'], 'set': r['set'], 'family': fam, **summ,
                 'len_median': pct([p['length'] for p in ok], 50),
                 'mesh_collide_paths': len(mesh_bad), 'collide_under': other, 'collide_world_only': other_w,
                 'fail_feasible': len(fail_feasible), 'fail_blocked_by_own_spheres': blocked_by_set,
-                'first_call_s': r.get('first_call_s'),
-                'endpoints_invalid': sum(not all(p['endpoints_valid']) for p in ps)})
+                'first_call_s': r.get('first_call_s')})
     runinfo = []
     for r in runs:
         ms = [rs['micro'] for rs in r['scenes'] if rs.get('micro')]
@@ -628,17 +643,19 @@ def cmd_report(a):
                                                    'n_problems': len(prob), 'step_rad': step,
                                                    'vamp_probe_agreement': agreement}, indent=1))
     print('VAMP probe-state validity vs numpy model of the same set [agree, total]:', agreement)
-    print(f'{len(feasible)}/{len(prob)} problems have at least one mesh-clean witness path (any config or straight line)')
+    print(f'{len(feasible)}/{len(prob)} problems have at least one world-feasible (mesh-clean; self-collision not checked) witness path (any config or straight line)')
     for info in runinfo:
         print('run', {k: (round(v, 4) if isinstance(v, float) else v) for k, v in info.items()})
     names = list(models)
-    head = ['backend', 'set', 'scene', 'ok/n', 'success', 'med ms', 'p95 ms', 'len rad', 'mesh-hit'] + \
+    head = ['backend', 'set', 'scene', 'ok/n', 'success (all)', 'success (valid endpoints)', 'med ms (ok only)',
+            'p95 ms (ok only)', 'med ms (all runs)', 'len rad', 'mesh-hit'] + \
            [f'hit {n} (world only)' for n in names] + ['fail,feasible', 'of which blocked by set', 'endpoint invalid']
     print('| ' + ' | '.join(head) + ' |')
     print('|' + '---|' * len(head))
     for r in rows:
         print(f"| {r['backend']} | {r['set']} | {r['family']} | {r['ok']}/{r['n']} | {r['success']*100:.0f}% | "
-              f"{r['time_ms_median']:.1f} | {r['time_ms_p95']:.1f} | {r['len_median']:.2f} | {r['mesh_collide_paths']} | "
+              f"{r['success_valid']*100:.0f}% ({r['n_valid']}) | {r['time_ms_median']:.1f} | {r['time_ms_p95']:.1f} | "
+              f"{r['time_ms_median_all']:.1f} | {r['len_median']:.2f} | {r['mesh_collide_paths']} | "
               + ' | '.join(str(r['collide_world_only'][n]) for n in names)
               + f" | {r['fail_feasible']} | {r['fail_blocked_by_own_spheres']} | {r['endpoints_invalid']} |")
 

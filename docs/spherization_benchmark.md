@@ -16,8 +16,10 @@ run in full for set B, see "Not run" below.
   the base at a random azimuth. Seed 0.
 - Problems: 100 per family (empty 100x1 scene; boxes and slab 20 per scene x 5). Start and goal are uniform
   random joints in [-pi, pi], accepted only if free under the **reference**: sets A and Bb2 (each with its
-  own self-collision policy) and the true link meshes against the boxes. So every pair is valid for every
-  planner, and endpoint rejections are not mixed into the success rate (they are counted separately).
+  own self-collision policy) and the true link meshes against the boxes. A pair can still be
+  invalid for a set that was not part of the reference (Bb2 with its buffer, C's header): such a problem
+  counts as a failure in `success`, and is counted in the "endpoints invalid" column. The report also
+  prints `success (valid endpoints)`, which leaves those problems out.
 - Backends. cuRobo: `CuroboPlanner.plan_joint` (`plan_cspace`), RTX 3050 4 GB, one planner per process, all
   other settings default. VAMP: RRT-Connect then shortcut/B-spline simplify, same call as
   `vamp_planner` (max 100000 iterations, range 2.0), upstream `27cb9b6` in `motion-planner:full`, headers
@@ -27,6 +29,9 @@ run in full for set B, see "Not run" below.
   otherwise), cuRobo's own B matrix ignores only neighbours (1 hop), so it also rejects some
   2-hop-apart overlaps. cuRobo FOAM config: `generate_curobo_robot.py --spheres-urdf ... --ignore-hops 2`.
   VAMP B header: B spheres converted to a spherized URDF (all 370, no thinning) + 1-hop SRDF.
+- Time columns ("median ms", "p95 ms") cover successful plans only; the report also prints the median
+  over all runs, failures included. cuRobo B fails 34 to 45% of its runs, so its successful-plan times
+  describe a different, easier subset than the all-runs time and than A's.
 - Timing: wall clock (`perf_counter` / `steady_clock`) around the planner call only; the first call after
   warmup is reported separately and not in the medians. The GPU and CPU were shared with other jobs at
   times (see caveats).
@@ -37,7 +42,7 @@ run in full for set B, see "Not run" below.
 - "mesh-hit" = returned paths that touch a box at mesh level (false "free"). "hit X" = paths that
   intersect a box in X's spheres (world only; self-collision excluded because policies differ).
   "fail, feasible" = failures for which another config's path or the straight line is mesh-clean
-  (a feasible path exists); "of which blocked by set" = every such witness collides under the set's own
+  (a world-feasible path exists; self-collision is not checked for the witness); "of which blocked by set" = every such witness collides under the set's own
   model including its self-collision policy.
 
 Reproduce (needs `motion-planner:gpu`, `motion-planner:full`, the FOAM and Cricket tool images; host python
@@ -111,10 +116,10 @@ they say little about the in-solver cost. VAMP numbers are its SIMD kernel on th
 ## What the data says
 
 - **VAMP is insensitive to the set in success (899 of 900 runs, the one miss being an invalid endpoint)
-  but very sensitive in time.** 370 spheres cost about 20x per state and about 5x in median plan time
+  but very sensitive in time.** 370 spheres cost about 20x per state and about 4x in median plan time
   against 21 spheres (boxes: 1.3 ms vs 0.3 ms median, p95 8.6 vs 1.3 ms). Still milliseconds.
 - **B in VAMP gives false "free" paths.** 7/100 boxes and 4/100 slab paths touch a box at mesh level
-  (sets A and C: 0 of 600 paths). That is the 1 to 3 cm gap of the fit, found by the oracle, not assumed. A
+  (sets A and C: 0 of 600 paths). The oracle found the mesh hits; the likely cause is the 1 to 3 cm gap of the fit, but that is a hypothesis until the VAMP B disagreement below is explained. A
   buffered B was not run in VAMP.
 - **Conservative sets are safe but eat space**: paths planned with A or C intersect B's spheres only
   rarely, the reverse is much more common (VAMP-B paths intersect A's spheres in 36/100 boxes and 19/100
@@ -150,8 +155,8 @@ they say little about the in-solver cost. VAMP numbers are its SIMD kernel on th
   mesh-level self-collision of returned paths.
 - Subset medians over 10 to 50 problems have wide error bars; success differences below about 15 points
   are not significant.
-- The VAMP B model disagrees with the numpy model of the same sphere set on 14% of random probe states
-  (2831/3300); A and C agree on 3300/3300. Cause not found (Cricket handling of the 370-sphere model
+- The VAMP B model agrees with the numpy model of the same sphere set on 2831 of 3300 random probe states
+  (86%); A and C agree on 3300/3300. Cause not found (Cricket handling of the 370-sphere model
   or its SRDF); B's VAMP rows are therefore less certain than A's and C's.
 - Another GPU/CPU job ran during parts of the runs (a simulation and build container), so absolute
   times, cuRobo's most, may be pessimistic. VAMP was timed while a cuRobo process ran on another core.
