@@ -77,6 +77,14 @@
     <xacro:property name="n" value="${int(stages)}"/>
     <xacro:property name="plate_t" value="0.04"/>
     <xacro:property name="hmin" value="${float(mount_height)}"/>
+    <!-- Fail loudly (like lift.xacro's unknown-lift check) instead of a ZeroDivisionError or a
+         negative arm angle below the joint limit. -->
+    <xacro:if value="${n &lt; 1}">
+      <xacro:if value="${dict()['scissor lift needs at least 1 stage (lift_stages)']}"/>
+    </xacro:if>
+    <xacro:if value="${hmin &lt; plate_t}">
+      <xacro:if value="${dict()['scissor lift mount height must leave room for the top plate (lift_mount_height minus the arm mount z must be at least 0.04 m)']}"/>
+    </xacro:if>
     <xacro:property name="stroke_f" value="${float(stroke)}"/>
     <xacro:property name="theta_max" value="1.2217"/>  <!-- 70 degrees -->
     <!-- Arm length so that the stack of `n` X-levels spans the full height at theta_max. -->

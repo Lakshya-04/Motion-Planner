@@ -170,6 +170,16 @@ def test_telescopic_default_is_unchanged():
     assert {'lift_stage_1_link', 'lift_stage_2_link'} <= {l.name for l in robot.links}
 
 
+@pytest.mark.parametrize('mappings, message', [
+    ({'lift_stages': 0}, 'at least 1 stage'),
+    ({'lift_mount_height': 0.05}, 'mount height'),
+])
+def test_scissor_rejects_inputs_it_cannot_render(mappings, message):
+    with pytest.raises(Exception) as err:
+        _render(arm='generic_6dof', lift='scissor', **mappings)
+    assert message in str(err.value)
+
+
 def test_unknown_lift_fails_loudly():
     with pytest.raises(Exception) as err:
         _render(arm='generic_6dof', lift='not_a_lift')
