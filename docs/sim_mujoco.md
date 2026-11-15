@@ -201,8 +201,8 @@ Last run (MuJoCo 4.0.1, 100 Hz controller, JTAC gains of `jtac_controller.yaml`)
 | identified payload | 0.5012 kg (known 0.5), centre of gravity (0, 0, 0.7 mm) (known 0), bias < 2e-4; fit residual 0 |
 | conditioned wrench in free space, after calibration | 0.000 N, 0.000 N m (uncalibrated it reads the 4.91 N payload) |
 | steady contact force, target 10 N | ground truth 10.13 N, std 0.03 N over 10 s (tolerance +-1.5 N); lateral 0.18 N, 0.05 N |
-| conditioned minus ground truth, 1002 samples | force: mean 0.000, rms <= 0.001 N, max 0.004 N; torque: rms <= 0.0005 N m, max 0.001 N m |
-| release after disengage | force < 0.5 N as the retreat trajectory ends (4.1 s after its start), 0.000 N after |
+| conditioned minus ground truth, 1002 samples | force: mean 0.000, rms <= 0.001 N, max 0.004 N; torque: rms <= 0.0005 N m, max 0.001 N m (the script checks rms against a loose tolerance and the maxima against 0.05 N and 0.02 N m, `--err-force-max` / `--err-torque-max`) |
+| release after disengage | measured from a trace sampled during the retreat: the last sample at or above 0.5 N is at the end of the 4 s trajectory (4.1 s after its start), then 0.000 N; the check needs 0.5 s of quiet after it, not a single low sample |
 
 The steady force depends on where the reference is, because the admittance spring pulls toward it:
 `F = target + K * d` with K = 300 N/m (Z) and `d` the reference depth past the surface. Measured for a 10 N target
