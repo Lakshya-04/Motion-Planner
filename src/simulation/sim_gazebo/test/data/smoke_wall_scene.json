@@ -1,0 +1,24 @@
+{
+  "frame_id": "map",
+  "note": "Synthetic wall for the Gazebo smoke test: 3 m x 2 m wall, one 5 cm obstacle. v points down like the mapped scenes.",
+  "walls": [
+    {
+      "id": 0,
+      "plane_abcd": [-1.0, 0.0, 0.0, 2.0],
+      "origin_xyz": [2.0, 0.0, 2.0],
+      "basis_u": [0.0, 1.0, 0.0],
+      "basis_v": [0.0, 0.0, -1.0],
+      "normal_outward": [-1.0, 0.0, 0.0],
+      "u_range_m": [-1.5, 1.5],
+      "v_range_m": [0.0, 2.0]
+    }
+  ],
+  "obstacles": [
+    {
+      "id": 0,
+      "parent_wall": 0,
+      "protrusion_max_m": 0.05,
+      "uv_on_wall": {"u": [0.6, 0.9], "v": [0.5, 0.8]}
+    }
+  ]
+}

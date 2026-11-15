@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>sim_gazebo</name>
+  <version>0.1.0</version>
+  <description>
+    Gazebo Harmonic simulation backend for the mobile manipulator: hardware:=gazebo tags
+    (gz_ros2_control, F/T sensor at the tool), launch files driven by the description profile
+    YAML, a wall world generator fed by wall_scene.json / SceneModel YAML, and a headless smoke
+    test.
+  </description>
+  <maintainer email="100lakshyaagarwal@gmail.com">Lakshya Agarwal</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <exec_depend>mobile_manipulator_description</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
+  <exec_depend>force_torque_sensor_broadcaster</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <!-- Gazebo Harmonic itself (ros_gz_sim, ros_gz_bridge, gz_ros2_control) is deliberately not a
+       rosdep dependency: it is installed by the `sim-gazebo` Docker target so the common deps
+       image stays small. Without it, only the generator and the xacro rendering work. -->
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

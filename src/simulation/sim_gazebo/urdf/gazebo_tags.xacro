@@ -1,0 +1,86 @@
+<?xml version="1.0"?>
+<!-- Gazebo-only tags, pulled in by mobile_manipulator.ros2_control.xacro for hardware:=gazebo.
+       - the robot is pinned to the world (a static base; wall pushes must not move it)
+       - gz_ros2_control plugin with the controller_manager parameters
+       - ft_sensor_link: the F/T sensor body between the arm flange and the tool (same pose as the
+         flange, so the kinematics equal the other backends); the tool hangs behind it, offset by
+         tcp_xyz along the tool axis
+       - force_torque sensor `ft_sensor` on ft_sensor_joint, raw, in the sensor frame
+       - contact sensor on the tool collision (ground truth contact wrench, evaluation only)
+
+     F/T sign convention (documented in docs/sim_gazebo.md): frame = child (ft_sensor_link) and
+     measure_direction = child_to_parent, i.e. the reading is what the tool side exerts on the arm
+     side. At rest it is the weight of everything beyond the sensor (sensor body + tool); in
+     contact it adds the force the environment exerts on the tool (statics: f_reading = f_env + m g).
+     Nothing is compensated or moved to the tcp here. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="sim_gazebo_tags" params="sensor_mass:=0.3 sensor_com_z:=0.02 sensor_radius:=0.04 sensor_length:=0.04 tool_mu:=0.8">
+    <link name="world"/>
+    <joint name="sim_world_joint" type="fixed">
+      <parent link="world"/>
+      <child link="base_footprint"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <gazebo>
+      <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(find sim_gazebo)/config/controllers.yaml</parameters>
+      </plugin>
+    </gazebo>
+
+    <link name="ft_sensor_link">
+      <visual>
+        <origin xyz="0 0 ${sensor_length / 2.0}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${sensor_radius}" length="${sensor_length}"/></geometry>
+        <material name="ft_sensor_dark"><color rgba="0.1 0.1 0.12 1"/></material>
+      </visual>
+      <inertial>
+        <origin xyz="0 0 ${sensor_com_z}" rpy="0 0 0"/>
+        <mass value="${sensor_mass}"/>
+        <inertia ixx="0.0002" ixy="0" ixz="0" iyy="0.0002" iyz="0" izz="0.0002"/>
+      </inertial>
+    </link>
+    <joint name="ft_sensor_joint" type="fixed">
+      <parent link="arm_flange_link"/>
+      <child link="ft_sensor_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <!-- A fixed joint is lumped into its parent by the URDF to SDF conversion unless it is
+         preserved; the sensor needs the joint. -->
+    <gazebo reference="ft_sensor_joint">
+      <preserveFixedJoint>true</preserveFixedJoint>
+      <disableFixedJointLumping>true</disableFixedJointLumping>
+      <sensor name="ft_sensor" type="force_torque">
+        <always_on>true</always_on>
+        <update_rate>200</update_rate>
+        <visualize>false</visualize>
+        <topic>ft_sensor/wrench</topic>
+        <force_torque>
+          <frame>child</frame>
+          <measure_direction>child_to_parent</measure_direction>
+        </force_torque>
+      </sensor>
+    </gazebo>
+
+    <!-- Keep the tool as its own link so its collision can carry the contact sensor. -->
+    <gazebo reference="tool_mount_joint">
+      <preserveFixedJoint>true</preserveFixedJoint>
+      <disableFixedJointLumping>true</disableFixedJointLumping>
+    </gazebo>
+    <gazebo reference="tool_mount_link">
+      <mu1>${tool_mu}</mu1>
+      <mu2>${tool_mu}</mu2>
+      <kp>1000000.0</kp>
+      <kd>100.0</kd>
+      <sensor name="tool_contact" type="contact">
+        <always_on>true</always_on>
+        <update_rate>200</update_rate>
+        <contact>
+          <topic>/tool_contact/contacts</topic>
+          <collision>tool_mount_link_collision</collision>
+        </contact>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+</robot>
