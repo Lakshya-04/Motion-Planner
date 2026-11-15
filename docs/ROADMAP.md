@@ -105,7 +105,8 @@ without code, when we can implement it.
 - [x] `chooseStation` (free side of the wall, footprint clearance, yaw), `planStands`, `orderStands`, drive-type travel time
 - [x] ROS service `~/plan_stands` with a base profile (`reachability_node`)
 - [~] **Reachability -> manager**: verify-only stance check (`base_check:=warn|enforce`, `docs/reachability.md`); the manager still never moves the base or asks for a different stand
-- [ ] Stand -> navigation goal (`NavigateToPose`, `NavigateThroughPoses`) with the arm-base vs `base_footprint` frame conversion. *Reuse: Nav2*
+- [~] Stand -> navigation goal with the arm-base vs `base_footprint` frame conversion: `stand_navigator` (`NavigateToStand` action, `NavigateToPose`-shaped; ROS-free core, unit-tested; `docs/stand_navigation.md`).
+      Done in MuJoCo: `plan_stands` -> first stand -> arrival within 1 cm. Not done: `NavigateThroughPoses`, obstacle avoidance, a Nav2 bridge. *Reuse: Nav2 (not installed in any image; the node is the stand-in)*
 - [ ] Docking approach to the wall. *Reuse: Nav2 `opennav_docking` (Jazzy branch, v1.3.14) with a custom `NonChargingDock` plugin: `configure` / `cleanup` / `activate` / `deactivate`, `getStagingPose(pose, frame)`, `getRefinedPose(pose, id)` (where the plane detector overwrites the dock pose) and `isDocked()`*
 - [ ] Wall-plane standoff and yaw servoing for the last metres from the fitted plane (about 1-2 weeks; no off-the-shelf package, published
       wall-painting robots do exactly this)
@@ -141,7 +142,8 @@ without code, when we can implement it.
       pin). Not done: Gazebo (planar/velocity plugin), wheel physics and floor contact, 4-wheel-steering kinematics, odom noise*
 - [ ] `ros2_control` drive controllers per base profile. *Reuse: `diff_drive_controller`, `mecanum_drive_controller` (Apache-2.0; the mecanum one takes a `TwistStamped` on `<name>/reference` and one velocity command per wheel); the 4-wheel-steering
       Ranger needs a small custom controller or the vendor `ranger_ros2` driver (BSD-3)*
-- [ ] Nav2 integration: costmap from the base footprint, goals from the stands, `odom`. *Reuse: Nav2 (Smac lattice/Hybrid-A*, MPPI omni/diff/Ackermann)*
+- [~] Nav2 integration: costmap from the base footprint, goals from the stands, `odom`. Goals from the stands and `odom` are done without Nav2 (`stand_navigator`, a straight-line proportional controller with
+      velocity and acceleration limits per drive type, no costmap, no planning around obstacles); Nav2 (`nav2_msgs`, `nav2_bringup`) is not in the docker images and was not added. Swap path in `docs/stand_navigation.md`. *Reuse: Nav2 (Smac lattice/Hybrid-A*, MPPI omni/diff/Ackermann)*
 - [ ] Localisation against the building and the wall. *Reuse: `robot_localization` (Apache-2.0); Nav2 AMCL and slam_toolbox are LGPL-2.1 (separate ROS nodes, licence review);
       KISS-ICP, KISS-SLAM, GLIM, PIN-SLAM (MIT) if a 3D lidar is added; avoid FAST-LIO2, FAST-LIVO2 and iG-LIO (GPL-2.0)*
 
@@ -233,7 +235,7 @@ Licences, versions and last-push dates were read from each repository's own file
 | Self filter | ours; `robot_body_filter` (BSD-3, `ros2` branch active since 2026-04 but not in the Jazzy or Kilted rosdistro: source build); `leggedrobotics/robot_self_filter` (BSD-3, ROS 2, 2026-10) | sphere-based filter with inflation margin (2-3 days) | learned filters |
 | Odometry / SLAM / localisation | `robot_localization` (Apache-2.0); KISS-ICP, KISS-SLAM, GLIM, PIN-SLAM (all MIT; the last three need a 3D lidar and, for GLIM, an IMU is usual); Nav2 AMCL and slam_toolbox are LGPL-2.1, run as separate nodes after a licence review | | FAST-LIO2, FAST-LIVO2, iG-LIO (GPL-2.0); Cartographer (barely maintained) |
 | Last metres to the wall | Nav2 `opennav_docking` (Apache-2.0, Jazzy branch v1.3.14) with a custom `NonChargingDock` plugin (the plane detector feeds `getRefinedPose`) | plane-distance and yaw servo (1-2 weeks) | |
-| Navigation | Nav2 (Apache-2.0): Smac lattice / Hybrid-A*, MPPI (omni, diff, Ackermann), costmap footprint | stand -> goal bridge, footprint per base | |
+| Navigation | Nav2 (Apache-2.0): Smac lattice / Hybrid-A*, MPPI (omni, diff, Ackermann), costmap footprint | stand -> goal bridge, footprint per base (`stand_navigator` is the interim version, `docs/stand_navigation.md`) | |
 | Base motion in sim | `mujoco_ros2_control` (Apache-2.0, v0.1.4: `base_velocity`, camera, 3D lidar; needs MuJoCo 3.12 through `mujoco_vendor`, MuJoCo 4 untested); ros2_controllers `diff_drive` and `mecanum_drive` (Apache-2.0); Ranger driver `ranger_ros2` (BSD-3) over `ugv_sdk` (Apache-2.0) | small 4-wheel-steering controller | |
 | Planar coverage | ours; Fields2Cover (BSD-3) and `opennav_coverage` (Apache-2.0, `jazzy-v2` branch, 2D only) as references | cellular decomposition | |
 | Mesh coverage | Noether (Apache-2.0, last commit 2026-01, tag 0.16.0, no GitHub release; `noether_ros2` separate, Apache-2.0, tag 0.2.0; `noether_tpp` is ROS-free; plane-slice and cross-hatch raster planners, mesh modifiers incl. RANSAC primitive fits, offset / approach / lead-in path modifiers). `industrial_reconstruction` (Apache-2.0, ROS 2, Open3D) builds a mesh from RGB-D plus TF; `scan_n_plan_workshop` (Apache-2.0, now under `ros-industrial-consortium`) is the reference pipeline | parameterise-then-sweep with adaptive spacing (geometry-central MIT or pmp-library MIT, 2-3 weeks; the DLR freeform-finishing paper, Schneyer et al., RA-L 2023, has no code); spray and standoff on top of Noether (line spacing from swath, offset modifier for standoff) | CGAL (GPL/LGPL); libigl unless per-file licences are checked (MPL-2.0 core, GPL modules); Tesseract / Descartes as a replacement (heavy; Tesseract 0.35.0 mixed Apache / BSD, Jazzy unconfirmed); RL coverage |
@@ -323,7 +325,7 @@ calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
   verification raster**, plus the force-CBF limiter and a compliant tip for Gazebo. MuJoCo first. *Exit:* an automated wall pass in MuJoCo with the scorecard
   recorded on two robot profiles; Gazebo holds 10 N (done with the compliant tip).
 - **M3 Base motion and docking, by reuse**: planar-velocity bases, then ros2_control drive controllers; Nav2 with stands as goals; `opennav_docking` with a
-  wall-dock plugin; global stand selection by set cover + TSP; then local refinement. *Exit:* the base drives to a stand in sim and the pass succeeds from where it stopped.
+  wall-dock plugin; global stand selection by set cover + TSP; then local refinement. *Exit:* the base drives to a stand in sim (done, `run_stand_navigation.sh`) and the pass succeeds from where it stopped (not done: the manager still docks at a fixed offset assuming the base at the origin, see `docs/stand_navigation.md`).
 - **M4 Live perception, by reuse**: MoveIt octomap + `octomap_server`, PCL wall detection, our self filter on the live cloud, simulated depth/lidar, then a
   mapper (cuRobo Mapper or wavemap) and AMCL / KISS-ICP localisation. *Exit:* M2's scenario runs from a sensed wall, not a file.
 - **M5 Tools and surfaces**: spray model and the non-contact path; floors and ceilings as planar patches; Noether for meshes. *Exit:* a spray pass over a wall

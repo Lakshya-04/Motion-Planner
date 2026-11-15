@@ -43,6 +43,10 @@
   <exec_depend>manipulation_manager</exec_depend>
   <exec_depend>motion_planner_moveit</exec_depend>
   <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>reachability</exec_depend>
+  <exec_depend>reachability_msgs</exec_depend>
+  <exec_depend>stand_navigator</exec_depend>
+  <exec_depend>stand_navigator_msgs</exec_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_cmake_pytest</test_depend>
