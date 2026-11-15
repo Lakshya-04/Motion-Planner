@@ -118,35 +118,44 @@ Steps and results (profile `generic_6dof_telescopic`, wall 0.9 m in front of the
 1. **Calibration** of the conditioner with six still, contact-free wrist poses (`~/capture_pose`, `~/identify`):
    mass 0.8003 kg (URDF inertials 0.8000), centre of gravity (0, 0, 0.0075) m (known 0.0075), bias zero, fit
    residual 0.0000 N. In free space the conditioned wrench is then 0.000 N / 0.0000 Nm.
-2. **Conditioned vs ground truth in steady contact** (JTAC with no wrench axis, tool pressed 5 mm and 35 mm past
-   the wall; ground truth about 108 N along the tool, 120 N lateral from friction and a contact torque of about
-   11 Nm about the tcp, so the lever-arm and payload terms are both exercised): force error |dF| mean 0.001 N
-   (max 0.002) at 5 mm and 0.005 N (max 0.011) at 35 mm; torque error |dT| mean 0.0002 Nm (max 0.0005) and
-   0.0010 Nm (max 0.003). The checks use 1 N and 0.2 Nm.
+2. **Conditioned vs ground truth in steady contact** (JTAC with no wrench axis selected and its default 0.1 m
+   offset clamp, tool pressed 5 mm and 35 mm past the wall; ground truth about 108 N along the tool, 120 N lateral
+   from friction and a contact torque of about 11 Nm about the tcp, so the lever-arm and payload terms are both
+   exercised): force error |dF| mean 0.001 N (max 0.002) at 5 mm and 0.005 N (max 0.011) at 35 mm; torque error
+   |dT| mean 0.0002 Nm (max 0.0005) and 0.0010 Nm (max 0.003). The checks gate the mean with 1 N and 0.2 Nm; the
+   maxima are printed, not checked.
 3. **Force control with the tool-z admittance axis** (target 10 N through `~/target_wrench`, K 300 N/m, mass 8,
    damping ratio 6, offset clamp 3 mm, approach 2 mm/s): **not reached.** Ground-truth force over the last 4 s:
    mean 160 N, standard deviation 121 N, peaks 470 to 580 N, in contact 84 percent of the samples; the tool
    bounces about 3 mm off the wall at about 2 Hz. The same happens with gains from K 100 to 300 N/m, mass 8 to 1e5 kg,
    damping up to D = 1e7 Ns/m, approach 1 to 5 mm/s, a 0.02 to 0.05 JTAC low-pass and offset clamps from 3 mm to
-   the 50 mm default.
-   What the measurements show: in free space the admittance behaves as designed (offset converges to F/K,
-   33 mm for K 300 and 10 N, no overshoot). The wall is effectively rigid and the arm's servo-driven joints push
-   with a force that does not follow the penetration: a position hold 0.05 mm to 10 mm past the wall gives a
-   constant 104 to 108 N (the smoke test's JTC run read 209 N at 3.5 cm), and 0 N below that. A force of 10 N sits inside the first 0.05 mm, so the
-   loop sees either 10 N (free) or 300 to 500 N impulses (contact) and cycles between them; slow gains only
-   lengthen the cycle. This is a property of the simulated contact and the velocity-servo joint interface, not of
-   the conditioner. By default the script only reports this result; `--require-hold` turns it into a failing check.
+   the controller's 0.1 m default (those sweeps are earlier runs: the committed script runs one setting, set by its
+   options).
+   What the script itself measures: with JTAC and no axis, a position hold 5 mm and 35 mm past the wall gives
+   about 108 N at both depths. The smoke test, which uses plain `joint_trajectory_controller`, reads 209 N at
+   3.5 cm. So the push is not a property of the wall alone: it differs by a factor of two between the two
+   controllers, and in MuJoCo the same JTAC compliance offset cut a 208 N push to 50 N
+   ([sim_mujoco.md](sim_mujoco.md)). In free space the admittance converges to F/K (33 mm for K 300 and 10 N,
+   by that arithmetic; no overshoot seen).
+   **Why 10 N is not held is not established.** A force that stays near 108 N while the penetration grows by a
+   factor of seven fits a very stiff contact driven by servo-controlled joints, but it fits a controller-side limit
+   (the JTAC offset clamp or the velocity servo) at least as well. An earlier measurement, not recorded and not
+   reproduced by the committed script, gave a constant 104 to 108 N for position holds from 0.05 mm to 10 mm past
+   the wall and 0 N below that; if that holds, 10 N sits inside the first 0.05 mm and the loop would see either
+   10 N (free) or 300 to 500 N impulses (contact). Tracing the penetration sweep and JTAC's `~/debug_offset`
+   would separate the explanations; the script does not do it yet. By default the script only reports the hold
+   result; `--require-hold` turns it into a failing check.
 4. **Release:** target to zero, disengage, retreat to the standoff: ground-truth force 0.000 N after the retreat.
 
-What would be needed to make 10 N reachable: a contact with real compliance (a softer tool tip, e.g. a spring
-joint in the tool, or contact parameters of a physics engine that supports them) or joint effort control
-instead of the velocity servo. Not done.
+Things to try, depending on the cause: a contact with real compliance (a softer tool tip, e.g. a spring joint in
+the tool, or contact parameters of a physics engine that supports them), or joint effort control instead of the
+velocity servo. Neither is done, and neither is justified until the cause is established.
 
 ## Limits
 
-- Contact is stiff and impulsive: position control into a wall gives about 108 N for any commanded
-  penetration from 0.05 mm up to 35 mm, and the compliant controller with a selected wrench axis
-  does not hold 10 N (see the contact-controlled test above).
+- Contact is stiff and impulsive: JTAC with no wrench axis gives about 108 N at 5 mm and 35 mm past the wall
+  (plain trajectory control read 209 N at 3.5 cm), and the compliant controller with a selected wrench axis
+  does not hold 10 N. The cause is not established (see the contact-controlled test above).
 - Joint dynamics are idealised: `gz_ros2_control` position/velocity interfaces, no gearbox
   friction, backlash, motor limits (URDF limits are not enforced) or sensor noise, bias and drift.
 - The tool and wall are rigid primitives with Coulomb friction; no compliance of the tool, no
