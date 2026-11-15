@@ -30,6 +30,7 @@ add_library(coverage_planner_core
   src/core/coverage_patterns.cpp
   src/core/coverage_from_scan.cpp
   src/core/tool_coverage_profile.cpp
+  src/core/coverage_verification.cpp
   src/core/tool_profile_loading.cpp
 )
 target_include_directories(coverage_planner_core PUBLIC
@@ -156,6 +157,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_coverage_from_scan test/core/coverage_from_scan_test.cpp)
   target_link_libraries(test_coverage_from_scan coverage_planner_core)
+
+  ament_add_gtest(test_coverage_verification test/core/coverage_verification_test.cpp)
+  target_link_libraries(test_coverage_verification coverage_planner_core)
 
   ament_add_gtest(test_tool_profiles test/core/tool_profiles_test.cpp)
   target_link_libraries(test_tool_profiles coverage_planner_core ros_adapters::ros_adapters)

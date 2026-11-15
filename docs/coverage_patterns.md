@@ -73,3 +73,15 @@ surface abstraction in [architecture.md](architecture.md) (`SurfaceModel`: `proj
 - **What does not:** the `CoveragePlannerBase` contract, pattern logic and segment semantics.
 
 Learned or non-grid planners (including RL) are further implementations of the same port.
+
+## Verifying what a run covered
+
+`CoverageVerifier` (`coverage_planner/core/coverage_verification.hpp`, ROS-free) rasterises a wall's (u, v)
+rectangle and marks the cells each executed stroke reached: a band of `swath_m` around the stroke's path, counted
+once per stroke per cell, only where the tool was working (`engaged`: contact held or valve open). `report()` gives
+the covered fraction of the target cells (a mask excludes obstacles), the mean number of strokes per covered cell
+(overlap), the number of worked cells outside the target (overspray) and the indices of the missed cells.
+
+It is a geometric model: no deposition thickness, spray falloff or timing. It is not wired to execution yet: nothing
+converts the executed tool poses from a run into wall (u, v) strokes, which is the next step toward a scorecard.
+
