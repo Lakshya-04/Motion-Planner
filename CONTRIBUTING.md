@@ -41,7 +41,8 @@ GPU tests (cuRobo) need the `gpu` image and skip without CUDA; simulator tests n
 ## There is deliberately no CI
 
 No workflow files are kept in this repository, by decision. The replacement is that every contributor
-runs the checks locally before opening a pull request. "Run all checks" today is:
+runs the checks locally before opening a pull request. The commands are collected in
+[docs/docker.md](docs/docker.md#run-all-checks); "run all checks" today is:
 
 1. `docker compose -f docker/compose.yaml run --rm test` (all colcon tests, C++ and Python).
 2. Python tool tests: `python -m pytest docker/tools/tests` (the MuJoCo cross-check tests skip without MuJoCo).
@@ -49,7 +50,8 @@ runs the checks locally before opening a pull request. "Run all checks" today is
    `ros2 run sim_gazebo smoke_test.py` and `contact_control_test.py` ([docs/sim_gazebo.md](docs/sim_gazebo.md)),
    `scripts/run_smoke.sh` and `run_contact.sh` of `sim_mujoco` ([docs/sim_mujoco.md](docs/sim_mujoco.md)).
    These are not part of `colcon test` yet (roadmap section 10).
-4. A link check over the Markdown you touched (relative links must resolve).
+4. `python3 docker/tools/check_public_readiness.py` and a link check over the Markdown you touched
+   (relative links must resolve). Before a release: [docs/release_checklist.md](docs/release_checklist.md).
 
 ## Code style
 
