@@ -52,8 +52,13 @@ Station chooseStation(const Map4D & map, const StationRequest & q)
       if (plan.reachable_count == 0) {
         continue;
       }
-      const double tie = (q.base && q.from) ?
-        travelTime(*q.base, *q.from, Stand{Eigen::Vector2d(p.x(), p.y()), yaw}) : std::abs(a - u_mid);
+      // A strafing base can have every nearby station cost the same (the final turn dominates),
+      // so the distance breaks that tie.
+      double tie = std::abs(a - u_mid);
+      if (q.base && q.from) {
+        const Stand to{Eigen::Vector2d(p.x(), p.y()), yaw};
+        tie = travelTime(*q.base, *q.from, to) + 1e-3 * (to.arm_xy - q.from->arm_xy).norm();
+      }
       const Key key{plan.unreachable.size(), plan.bands.size(), tie, d};
       if (!best.found || key < best_key) {
         best_key = key;

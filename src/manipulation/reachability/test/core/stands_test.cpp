@@ -123,6 +123,19 @@ TEST(Stands, EquallyGoodStationsGoToTheOneTheBaseReachesSoonest)
   EXPECT_NEAR(near_from.y, 0.6, 0.11);              // the +y end of the search window
 }
 
+TEST(Stands, AStrafingBaseStillPrefersTheNearerStationWhenTurningDominates)
+{
+  auto r = request(wall({0.0}, {0.8}));
+  r.base = box(true);
+  r.grid_step = 0.1;
+  r.lateral_margin = 0.6;
+  // the best yaw for the box is side-on (90 deg): the turn (1.57 s) outlasts every drive, so travel time alone ties
+  r.from = Stand{Eigen::Vector2d(2.7, -0.3), 0.0};
+  const auto st = chooseStation(sharedMap(), r);
+  ASSERT_TRUE(st.found);
+  EXPECT_NEAR(st.y, -0.3, 0.11);                 // beside `from`, not the end the scan starts at
+}
+
 TEST(Stands, LiftBandIndicesAreGlobalAndMatchTheStandsTargets)
 {
   const auto r = request(wall({-3.0, -1.5, 0.0, 1.5, 3.0}, {0.8, 1.4}));
