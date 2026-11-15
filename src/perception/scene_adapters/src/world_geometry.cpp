@@ -276,7 +276,11 @@ mp::WorldGeometryUpdate toWorldGeometry(
         voxelExtents(o, *v, options, extents);   // the whole voxel, not just its centre
       } else {
         size_t bad = 0;
-        if (!worldPoints(o, options, pts, &bad)) {
+        // surface_spacing is a contact-surface option; an obstacle surface sampled coarser than its
+        // cubes would leave holes, so it is never sampled coarser than obstacle_voxel.
+        WorldGeometryOptions obstacle_opt = options;
+        obstacle_opt.surface_spacing = std::min(options.surface_spacing, options.obstacle_voxel);
+        if (!worldPoints(o, obstacle_opt, pts, &bad)) {
           rep.skipped.push_back(o.id + ": " + sm::geometryName(o.geometry) + " has no box/point form");
           continue;
         }

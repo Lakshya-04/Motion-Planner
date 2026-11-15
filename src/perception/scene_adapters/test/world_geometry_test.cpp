@@ -264,3 +264,33 @@ TEST(WorldGeometry, BoxIdsStayUniqueAfterASceneMergeRenamesObjects)
   EXPECT_EQ(ids.size(), w.boxes.size());
   EXPECT_EQ(w.boxes.size(), 3U);
 }
+
+TEST(WorldGeometry, ObstacleMeshIsSampledNoCoarserThanItsVoxel)
+{
+  // surface_spacing is the contact-surface option; with 0.2 it used to sample an obstacle mesh at
+  // 0.2 m and then cube it at 0.05 m, leaving holes of several centimetres.
+  sm::SceneModel scene("base");
+  sm::Mesh m;
+  m.vertices = {{0, 0, 0}, {0.4, 0, 0}, {0, 0.4, 0}};
+  m.faces = {{0, 1, 2}};
+  scene.add(object("plate", m));
+  WorldGeometryOptions opt;
+  opt.surface_spacing = 0.2;
+  opt.obstacle_voxel = 0.05;
+  const auto w = toWorldGeometry(scene, opt);
+  double worst = 0.0;
+  for (double u = 0.0; u <= 1.0; u += 0.02) {
+    for (double v = 0.0; u + v <= 1.0; v += 0.02) {
+      const double px = 0.4 * u, py = 0.4 * v;
+      double best = 1e9;
+      for (const auto & b : w.boxes) {   // distance to the axis-aligned cube
+        const double dx = std::max(0.0, std::abs(px - b.center_x) - b.size_x / 2);
+        const double dy = std::max(0.0, std::abs(py - b.center_y) - b.size_y / 2);
+        const double dz = std::max(0.0, std::abs(b.center_z) - b.size_z / 2);
+        best = std::min(best, std::sqrt(dx * dx + dy * dy + dz * dz));
+      }
+      worst = std::max(worst, best);
+    }
+  }
+  EXPECT_LT(worst, 0.5 * opt.obstacle_voxel);
+}
