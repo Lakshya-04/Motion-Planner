@@ -256,6 +256,8 @@ ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}}"
 - **Test.** `scripts/run_base_motion.sh` (`base_motion_test.py`) drives 0.3 m forward and checks odom, TF,
   the held arm and lift joints, F/T, the hold and the command timeout. Generator tests are in
   `test/test_mjcf_generator.py`.
+- **Stand navigation.** `scripts/run_stand_navigation.sh` adds the reachability node and `stand_navigator`: plan stands for
+  the smoke wall, drive the arm base to the first one, check arrival, arm, F/T (`docs/stand_navigation.md`).
 
 ## MuJoCo 4 notes
 
