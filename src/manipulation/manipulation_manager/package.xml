@@ -29,6 +29,8 @@
   <depend>motion_planner_moveit</depend>
   <depend>mobile_manipulator_profile</depend>
   <depend>nlohmann-json-dev</depend>
+  <!-- manipulation_manager.launch.py builds the node's MoveIt parameters -->
+  <exec_depend>mobile_manipulator_moveit_config</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

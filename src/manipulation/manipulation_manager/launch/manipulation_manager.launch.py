@@ -1,38 +1,26 @@
-"""Launches manipulation_manager_node with the same MoveIt config params move_group.launch.py
-supplies -- see motion_planner/launch/coverage_pass_demo.launch.py's own header for why.
+"""Launches manipulation_manager_node with this robot's MoveIt parameters.
+
+The node's MoveGroupInterface reads robot_description, the semantic description and kinematics
+off its own node's parameters, so it needs the same parameters move_group gets; they come from
+mobile_manipulator_moveit_config's shared builder, as in motion_planner_moveit's
+coverage_pass_demo.launch.py. Frame and planning-group names come from the profile.
 
     ros2 launch manipulation_manager manipulation_manager.launch.py
+    ros2 launch manipulation_manager manipulation_manager.launch.py profile:=panda_telescopic
 """
 
-import os
-
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
-from moveit_configs_utils import MoveItConfigsBuilder
+from mobile_manipulator_moveit_config import build_moveit_config, resolve_profile
 
 
-def generate_launch_description():
-    description_share = get_package_share_directory("description")
-    urdf_xacro_path = os.path.join(description_share, "urdf", "robot.urdf.xacro")
-
-    moveit_config = (
-        MoveItConfigsBuilder("robot", package_name="moveit_config")
-        .robot_description(
-            file_path=urdf_xacro_path,
-            mappings={"base_type": "ranger_mini", "manipulation": "true"},
-        )
-        .robot_description_semantic(file_path="srdf/robot.srdf.xacro")
-        .robot_description_kinematics(file_path="config/kinematics.yaml")
-        .joint_limits(file_path="config/joint_limits.yaml")
-        .planning_pipelines(pipelines=["ompl"])
-        .to_moveit_configs()
-    )
-
-    manipulation_manager_node = Node(
+def _node(context):
+    arm = LaunchConfiguration("arm").perform(context) or None
+    profile = LaunchConfiguration("profile").perform(context) or None
+    moveit_config = build_moveit_config(arm, hardware="mock", profile=profile)
+    return [Node(
         package="manipulation_manager",
         executable="manipulation_manager_node",
         output="screen",
@@ -40,12 +28,19 @@ def generate_launch_description():
             moveit_config.to_dict(),
             {"use_sim_time": True},
             {"planning_pipelines.pipeline_names": ["ompl"]},
+            {"profile": resolve_profile(arm, profile).name},
             # seed-preferring IK in the backend: 0 = one plain solve (see coverage_pass_demo.launch.py)
-            {"ik_extra_seeds": ParameterValue(LaunchConfiguration("ik_seeds"), value_type=int)},
+            {"ik_extra_seeds": int(LaunchConfiguration("ik_seeds").perform(context))},
         ],
-    )
+    )]
 
+
+def generate_launch_description():
     return LaunchDescription([
+        DeclareLaunchArgument("arm", default_value="",
+                              description="arm name; picks the matching profile when `profile` is empty"),
+        DeclareLaunchArgument("profile", default_value="",
+                              description="robot profile (default ur10e_telescopic)"),
         DeclareLaunchArgument("ik_seeds", default_value="0", description="extra perturbed-seed IK solves (0 = off)"),
-        manipulation_manager_node,
+        OpaqueFunction(function=_node),
     ])
