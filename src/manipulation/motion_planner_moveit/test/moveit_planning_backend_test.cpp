@@ -175,6 +175,14 @@ TEST(MoveItPlanningBackendTest, SeedingConfigFromGroupReadsLimitsAndRevoluteMask
   EXPECT_DOUBLE_EQ(config.upper_limits[1], 3.0);
   EXPECT_TRUE(std::isinf(config.lower_limits[2]));
   EXPECT_TRUE(std::isinf(config.upper_limits[2]));
+  // distance weights follow the joint type: 1 m of the prismatic joint counts as 6 rad by default
+  ASSERT_EQ(config.weights.size(), 3u);
+  EXPECT_DOUBLE_EQ(config.weights[0], 36.0);
+  EXPECT_DOUBLE_EQ(config.weights[1], 1.0);
+  EXPECT_DOUBLE_EQ(config.weights[2], 1.0);
+  SeedPreferringIkConfig custom;
+  ASSERT_TRUE(MoveItPlanningBackend::seedingConfigFromGroup(model.getJointModelGroup("g"), custom, 2.0));
+  EXPECT_DOUBLE_EQ(custom.weights[0], 4.0);
 
   EXPECT_FALSE(MoveItPlanningBackend::seedingConfigFromGroup(nullptr, config));
 }

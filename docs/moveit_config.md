@@ -74,7 +74,6 @@ docker run --rm -v $PWD/src:/ws/src:ro -v mp_build:/ws/build -v mp_install:/ws/i
   the compliant controller's force topics, so it needs that controller under `controller_name`.
   Its names and the base-to-footprint offset are parameters now.
 - Pairs that are never or always in collision for one arm's geometry beyond the sampled check.
-- Seed-preferring IK solver.
 
 ## Compliant controller (JTAC) variant
 
@@ -127,9 +126,12 @@ excess), so the difference only shows on larger moves, where KDL can return a fa
 - Switch it on from the launch line: `ros2 launch motion_planner_moveit coverage_pass_demo.launch.py ik_seeds:=8`
   (`ik_seed_perturbation:=0.3` sets the noise in rad). The parameters are written for a wildcard node name, so
   they reach the backend's own `motion_planner_backend` node.
+- "Closest" is a weighted distance: prismatic joints (the lift) weigh `ik_prismatic_factor`^2 (default 6,
+  so 1 m of lift counts as 6 rad, from the 0.3 rad / 0.05 m jump thresholds in `design_principles.md`
+  section 4) and revolute joints weigh 1. The same knob exists on the cuRobo node (`prismatic_joints`,
+  `ik_prismatic_factor`, `ik_weights`).
 - The 7-DOF `lift_arm` group is redundant, so even TRAC-IK still jumps branch on a couple of poses;
-  a solver-agnostic "several seeds around the current state, return the closest valid solution" wrapper
-  at the `IkPort` level is the next step if that matters.
+  `SeedPreferringIk` (above) is the solver-agnostic wrapper that trims this.
 
 ### Prior art: a modified TRAC-IK from an earlier production stack
 

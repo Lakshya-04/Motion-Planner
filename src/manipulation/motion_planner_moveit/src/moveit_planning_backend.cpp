@@ -1,5 +1,6 @@
 #include "motion_planner_moveit/moveit_planning_backend.hpp"
 
+#include <cmath>
 #include <exception>
 #include <functional>
 #include <limits>
@@ -440,12 +441,13 @@ void MoveItPlanningBackend::setIkSeeding(int extra_seeds, double perturbation)
 }
 
 bool MoveItPlanningBackend::seedingConfigFromGroup(
-  const moveit::core::JointModelGroup * group, SeedPreferringIkConfig & config)
+  const moveit::core::JointModelGroup * group, SeedPreferringIkConfig & config, double prismatic_factor)
 {
   if (!group) {
     return false;
   }
   SeedPreferringIkConfig filled = config;
+  filled.weights.clear();
   filled.wrap_joint.clear();
   filled.lower_limits.clear();
   filled.upper_limits.clear();
@@ -454,6 +456,8 @@ bool MoveItPlanningBackend::seedingConfigFromGroup(
       return false;  // multi-DOF joint: not a plain vector of scalars, skip seed preferring
     }
     filled.wrap_joint.push_back(joint->getType() == moveit::core::JointModel::REVOLUTE);
+    filled.weights.push_back(
+      joint->getType() == moveit::core::JointModel::PRISMATIC ? prismatic_factor * prismatic_factor : 1.0);
     const auto & bounds = joint->getVariableBounds()[0];
     const bool bounded = bounds.position_bounded_;  // a continuous joint has no position bounds
     filled.lower_limits.push_back(
@@ -465,11 +469,11 @@ bool MoveItPlanningBackend::seedingConfigFromGroup(
   return true;
 }
 
-bool MoveItPlanningBackend::seedingConfigForGroup(SeedPreferringIkConfig & config)
+bool MoveItPlanningBackend::seedingConfigForGroup(SeedPreferringIkConfig & config, double prismatic_factor)
 {
   const auto robot_model = move_group_ ? move_group_->getRobotModel() : nullptr;
   return robot_model &&
-         seedingConfigFromGroup(robot_model->getJointModelGroup(move_group_name_), config);
+         seedingConfigFromGroup(robot_model->getJointModelGroup(move_group_name_), config, prismatic_factor);
 }
 
 IkResult MoveItPlanningBackend::ik(const IkRequest & request)
@@ -488,10 +492,18 @@ IkResult MoveItPlanningBackend::ik(const IkRequest & request)
     ik_extra_seeds_ = node_->get_parameter("ik_extra_seeds").as_int();
     ik_seed_perturbation_ = node_->get_parameter("ik_seed_perturbation").as_double();
   }
+  double prismatic_factor = kDefaultPrismaticIkFactor;
+  if (node_) {
+    if (!node_->has_parameter("ik_prismatic_factor")) {
+      node_->declare_parameter<double>("ik_prismatic_factor", kDefaultPrismaticIkFactor);
+    }
+    const double value = node_->get_parameter("ik_prismatic_factor").as_double();
+    if (std::isfinite(value) && value > 0.0) {prismatic_factor = value;}
+  }
   SeedPreferringIkConfig config;
   config.extra_seeds = ik_extra_seeds_;
   config.perturbation = ik_seed_perturbation_;
-  if (config.extra_seeds <= 0 || !seedingConfigForGroup(config)) {
+  if (config.extra_seeds <= 0 || !seedingConfigForGroup(config, prismatic_factor)) {
     return solveIkOnce(request);
   }
   SeedPreferringIk seeded(std::make_shared<SingleSolveIk>(

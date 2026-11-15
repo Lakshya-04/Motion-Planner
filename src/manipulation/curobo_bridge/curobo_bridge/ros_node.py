@@ -3,7 +3,9 @@
 Parameters: `robot` (cuRobo robot config: a bundled name like franka.yml or an absolute path to one
 made by docker/tools/generate_curobo_robot.py), `max_boxes` (obstacle cache size), and optionally
 `esdf_dims` (3 values, m), `esdf_voxel_size`, `esdf_center` to reserve an ESDF grid: set_world points
-then become a distance field instead of cubes. Services (under
+then become a distance field instead of cubes. IK picks the solution nearest the seed: name the
+prismatic joints in `prismatic_joints` (a list of joint names; 1 m then weighs `ik_prismatic_factor`
+rad, default 6) or give `ik_weights` (one per joint, on the squared difference) to override. Services (under
 the node name): ~/plan_joint, ~/plan_pose, ~/set_world. Everything is in the robot base frame.
 
 Run it with the Python that has torch and cuRobo (in the gpu image that is the venv, not the system
@@ -20,7 +22,7 @@ from rclpy.node import Node
 from sensor_msgs_py import point_cloud2
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-from curobo_bridge.planner import Box, CuroboPlanner, EsdfSpec, PlanResult
+from curobo_bridge.planner import PRISMATIC_IK_FACTOR, Box, CuroboPlanner, EsdfSpec, PlanResult
 
 
 def _duration(seconds: float) -> Duration:
@@ -66,11 +68,15 @@ class CuroboPlannerNode(Node):
         esdf_dims = [d for d in esdf_dims if d > 0.0]
         esdf_voxel = float(self.declare_parameter('esdf_voxel_size', 0.04).value)
         esdf_center = self.declare_parameter('esdf_center', [0.0, 0.0, 0.0]).value
+        prismatic = [n for n in self.declare_parameter('prismatic_joints', ['']).value if n]
+        ik_prismatic_factor = float(self.declare_parameter('ik_prismatic_factor', PRISMATIC_IK_FACTOR).value)
+        ik_weights = [w for w in self.declare_parameter('ik_weights', [0.0]).value if w > 0.0]
         self._planner = planner
         if self._planner is None:
             try:
                 self._planner = CuroboPlanner(
-                    robot, max_boxes=max_boxes,
+                    robot, max_boxes=max_boxes, prismatic_joints=prismatic,
+                    ik_prismatic_factor=ik_prismatic_factor, ik_weights=ik_weights,
                     esdf=esdf_from_parameters(esdf_dims, esdf_voxel, esdf_center))
                 self.get_logger().info(
                     f'cuRobo ready: {self._planner.dimension} joints, tool {self._planner.tool_frames}')

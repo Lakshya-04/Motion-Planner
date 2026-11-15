@@ -79,12 +79,19 @@ public:
   /// and inside the joint limits (SeedPreferringIk). Otherwise one plain solve, as before.
   IkResult ik(const IkRequest & request) override;
 
-  /// Fills limits and the revolute mask of `config` from the group's active joints, in group order.
-  /// Prismatic joints are not wrapped; a joint without position bounds (continuous) gets infinite
-  /// limits. False for a group containing a multi-variable joint. Public so it is testable with
-  /// a bare RobotModel, no live node.
+  /// One metre of a prismatic joint counts as this many radians when IK solutions are compared
+  /// (the 0.3 rad / 0.05 m jump thresholds of docs/design_principles.md give 6). Parameter
+  /// `ik_prismatic_factor` overrides it.
+  static constexpr double kDefaultPrismaticIkFactor = 6.0;
+
+  /// Fills limits, the revolute mask and the distance weights of `config` from the group's active
+  /// joints, in group order. Prismatic joints are not wrapped and get weight factor^2 (the weight
+  /// multiplies the squared difference, so 1 m weighs `prismatic_factor` rad); other joints weigh
+  /// 1. A joint without position bounds (continuous) gets infinite limits. False for a group
+  /// containing a multi-variable joint. Public so it is testable with a bare RobotModel, no live node.
   static bool seedingConfigFromGroup(
-    const moveit::core::JointModelGroup * group, SeedPreferringIkConfig & config);
+    const moveit::core::JointModelGroup * group, SeedPreferringIkConfig & config,
+    double prismatic_factor = kDefaultPrismaticIkFactor);
 
   /// Overrides the ik_extra_seeds / ik_seed_perturbation parameters. 0 extra seeds = off.
   void setIkSeeding(int extra_seeds, double perturbation);
@@ -149,7 +156,7 @@ private:
   /// One MoveIt solve from the request's seed; what ik() did before seed preferring.
   IkResult solveIkOnce(const IkRequest & request);
   /// Limits / revolute mask of the active group, for SeedPreferringIk. False if unavailable.
-  bool seedingConfigForGroup(SeedPreferringIkConfig & config);
+  bool seedingConfigForGroup(SeedPreferringIkConfig & config, double prismatic_factor);
 
   std::shared_ptr<rclcpp::Node> node_;
   int ik_extra_seeds_{0};

@@ -162,6 +162,25 @@ TEST(SeedPreferringIk, NoiseSkipsNonTurnJointsAndStaysInLimits)
   }
 }
 
+TEST(SeedPreferringIk, WeightsDecideBetweenMetresAndRadians)
+{
+  // joints: lift (m), shoulder (rad). Branch A moves the lift 0.3 m, branch B the shoulder 0.35 rad.
+  auto run = [](const std::vector<double> & weights) {
+      int n = 0;
+      auto inner = std::make_shared<FakeIk>([&n](const IkRequest &) {
+          return ++n % 2 ? ok({0.3, 0.1}) : ok({0.0, 0.35});
+        });
+      SeedPreferringIkConfig config;
+      config.extra_seeds = 1;
+      config.weights = weights;
+      return SeedPreferringIk(inner, config).ik(withSeed({0.0, 0.0})).joint_solution;
+    };
+  EXPECT_NEAR(run({})[0], 0.3, 1e-12);                 // unweighted: the slow lift is moved
+  const auto weighted = run({36.0, 1.0});              // 1 m counts as 6 rad
+  EXPECT_NEAR(weighted[0], 0.0, 1e-12);
+  EXPECT_NEAR(weighted[1], 0.35, 1e-12);
+}
+
 TEST(SeedPreferringIk, FirstFailureReasonIsKept)
 {
   int n = 0;

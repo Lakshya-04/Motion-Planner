@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from curobo_bridge.planner import closest_solution
+from curobo_bridge.planner import closest_solution, ik_weights_from_joint_types
 
 
 def test_closest_solution_picks_nearest_successful_row():
@@ -31,3 +31,19 @@ def test_closest_solution_does_not_shift_out_of_limits():
     # seed at -3.5 would pull 2.5 to 2.5 - 2*pi = -3.78, outside [-2.9, 2.9]: keep the solver's value
     joints, _, _ = closest_solution(sols, np.array([True]), [-3.5], ([-2.9], [2.9]))
     assert joints == pytest.approx([2.5])
+
+
+def test_weights_keep_lift_metres_from_counting_as_radians():
+    # joints: [lift (m), shoulder (rad)]. A moves the lift 0.3 m, B moves the shoulder 0.35 rad.
+    sols = np.array([[0.3, 0.1], [0.0, 0.35]])
+    ok = np.ones(2, dtype=bool)
+    seed = [0.0, 0.0]
+    assert closest_solution(sols, ok, seed)[2] == 0           # unweighted: the slow lift is moved
+    weights = ik_weights_from_joint_types(['lift', 'shoulder'], ['lift'])
+    assert weights == pytest.approx([36.0, 1.0])
+    joints, dist, row = closest_solution(sols, ok, seed, weights=weights)
+    assert row == 1
+    assert joints == pytest.approx([0.0, 0.35])
+    assert dist == pytest.approx(0.35)
+    with pytest.raises(ValueError):
+        closest_solution(sols, ok, seed, weights=[1.0])

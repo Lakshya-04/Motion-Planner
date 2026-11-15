@@ -114,21 +114,42 @@ def points_to_esdf(points: np.ndarray, spec: EsdfSpec, max_distance: float = 1.0
     return np.clip(outside - inside_d, -max_distance, max_distance).astype(np.float32)
 
 
+# One metre of a prismatic joint counts as this many radians when solutions are compared. 6 comes from
+# the per-joint-type jump thresholds in docs/design_principles.md (0.3 rad revolute vs 0.05 m
+# prismatic): an unweighted norm treats 1 m of lift as 1 rad of shoulder.
+PRISMATIC_IK_FACTOR = 6.0
+
+
+def ik_weights_from_joint_types(joint_names: Sequence[str], prismatic_joints: Sequence[str] = (),
+                                factor: float = PRISMATIC_IK_FACTOR) -> List[float]:
+    """Per-joint weights for the squared distance of `closest_solution`: factor**2 on the named
+    prismatic joints (so 1 m weighs like `factor` rad), 1 on everything else."""
+    prismatic = set(prismatic_joints)
+    return [float(factor) ** 2 if name in prismatic else 1.0 for name in joint_names]
+
+
 def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[float],
-                     limits: Optional[Tuple[Sequence[float], Sequence[float]]] = None):
+                     limits: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
+                     weights: Optional[Sequence[float]] = None):
     """Pick the successful IK solution nearest `seed` out of a batch (cuRobo solves many seeds at once
     and returns all of them; the first row is not the closest). Each joint is shifted by whole turns
     toward the seed, but only when it is more than pi away, so metre-scale prismatic joints (a lift)
     are never touched. With `limits=(lower, upper)` a shift that would leave the limits is not applied (the
     solver's own value is kept for that joint). Returns (joints, distance, row), `row` being the index into `solutions` it came from, or None when
     nothing succeeded. Without limits, a joint that is not a turn but spans more than pi could be shifted
-    wrongly; cuRobo's limits are passed in solve_ik so such shifts stay inside the real range."""
+    wrongly; cuRobo's limits are passed in solve_ik so such shifts stay inside the real range.
+    `weights` (one per joint, applied to the squared difference; see ik_weights_from_joint_types)
+    keep metres and radians apart in the distance; without them the norm is unweighted. The returned
+    distance is the weighted one."""
     solutions = np.asarray(solutions, dtype=float).reshape(-1, len(seed))
     success = np.asarray(success, dtype=bool).reshape(-1)
     if success.shape[0] != solutions.shape[0]:      # unexpected layout: trust the first row only
         success = np.zeros(solutions.shape[0], dtype=bool)
         success[:1] = True
     seed = np.asarray(seed, dtype=float)
+    w = np.ones(len(seed)) if weights is None else np.asarray(weights, dtype=float).reshape(-1)
+    if w.shape != seed.shape:
+        raise ValueError(f'{w.shape[0]} weights for {seed.shape[0]} joints')
     best, best_distance, best_row = None, np.inf, -1
     for index in np.flatnonzero(success):
         row = solutions[index]
@@ -138,7 +159,7 @@ def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[
             lower, upper = np.asarray(limits[0], dtype=float), np.asarray(limits[1], dtype=float)
             outside = (shifted < lower - 1e-9) | (shifted > upper + 1e-9)
             shifted = np.where(outside, row, shifted)
-        distance = float(np.linalg.norm(shifted - seed))
+        distance = float(np.sqrt(np.sum(w * (shifted - seed) ** 2)))
         if distance < best_distance:
             best, best_distance, best_row = shifted, distance, int(index)
     return None if best is None else (best.tolist(), best_distance, best_row)
@@ -148,7 +169,9 @@ class CuroboPlanner:
     """Joint-goal and pose-goal planning with cuRobo v2 on the GPU."""
 
     def __init__(self, robot: str = 'franka.yml', max_goalset: int = 1, max_boxes: int = 256,
-                 esdf: Optional[EsdfSpec] = None, warmup: bool = True):
+                 esdf: Optional[EsdfSpec] = None, warmup: bool = True,
+                 prismatic_joints: Sequence[str] = (), ik_prismatic_factor: float = PRISMATIC_IK_FACTOR,
+                 ik_weights: Optional[Sequence[float]] = None):
         import torch
         from curobo.motion_planner import MotionPlanner, MotionPlannerCfg
         from curobo.types import JointState
@@ -168,6 +191,9 @@ class CuroboPlanner:
             robot=robot, max_goalset=max_goalset, collision_cache=cache))
         if warmup:
             self._planner.warmup(enable_graph=True, num_warmup_iterations=3)
+        # IK picks the solution nearest the seed: metres of a prismatic joint must not count as radians.
+        self._ik_weights = (list(ik_weights) if ik_weights else
+                            ik_weights_from_joint_types(self.joint_names, prismatic_joints, ik_prismatic_factor))
         self._world_set = False
         self._boxes: List[Box] = []      # explicit boxes of the current world (kept by set_esdf)
         self._field: Optional[np.ndarray] = None            # current ESDF field (kept by set_world)
@@ -329,7 +355,8 @@ class CuroboPlanner:
         res = self._planner.ik_solver.solve_pose(goal, current_state=self._state(seed))
         out = IkResult(joint_names=self.joint_names)
         picked = closest_solution(res.solution.detach().cpu().numpy(),
-                                  res.success.detach().cpu().numpy(), seed, self._joint_limits())
+                                  res.success.detach().cpu().numpy(), seed, self._joint_limits(),
+                                  self._ik_weights)
         if picked is None:
             out.failure_reason_code = 'no_solution'
             out.failure_stage = 'planning'
