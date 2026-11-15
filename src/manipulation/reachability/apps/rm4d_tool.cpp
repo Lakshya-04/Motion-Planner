@@ -51,7 +51,8 @@ int usage()
     "usage:\n  rm4d_tool build chain.yaml out.rm4d [--samples N --threads T --resolution m --extent m --zmin m --zmax m --seed S]\n"
     "  rm4d_tool info map.rm4d\n"
     "  rm4d_tool bands map.rm4d --wall-x X --z-min Z0 --z-max Z1 [--z-step dz --lift-max H --lift-step dh --mount-z dz --base-x bx --base-y by]\n"
-    "  rm4d_tool station map.rm4d --wall-x X --z-min Z0 --z-max Z1 [--width W --z-step dz --y-step dy --lift-max H --mount-z dz --min-clearance c --grid-step g --base-profile profile.yaml]\n");
+    "  rm4d_tool station map.rm4d --wall-x X --z-min Z0 --z-max Z1 [--width W --z-step dz --y-step dy --lift-max H --mount-z dz --min-clearance c --grid-step g --base-profile profile.yaml\n"
+    "    [--multi 1 --start-x X --start-y Y]]\n");
   return 2;
 }
 }  // namespace
@@ -148,13 +149,13 @@ int main(int argc, char ** argv)
       if (num(o, "multi", 0) != 0) {
         const Stand start{Eigen::Vector2d(num(o, "start-x", 0.0), num(o, "start-y", -half)), 0.0};
         const StandPlan sp = planStands(map, r, start);
-        std::printf("%zu stand(s) for %zu targets, %zu unreachable, %.1f s driving\n", sp.stands.size(),
-          r.targets_world.size(), sp.unreachable.size(), sp.total_travel_s);
+        std::printf("%zu stand(s) for %zu targets, %zu unreachable, %zu not planned (stand cap), %.1f s driving\n",
+          sp.stands.size(), r.targets_world.size(), sp.unreachable.size(), sp.not_planned.size(), sp.total_travel_s);
         for (const auto & a : sp.stands) {
           std::printf("  arm base (%.2f, %.2f) yaw %.0f deg: %zu targets, %zu band(s), +%.1f s\n", a.station.x,
             a.station.y, a.station.yaw * 180.0 / M_PI, a.targets.size(), a.station.plan.bands.size(), a.travel_s);
         }
-        return sp.unreachable.empty() ? 0 : 1;
+        return sp.unreachable.empty() && sp.not_planned.empty() ? 0 : 1;
       }
       const Station s = chooseStation(map, r);
       if (!s.found) {

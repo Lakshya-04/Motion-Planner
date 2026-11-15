@@ -46,7 +46,8 @@ StandPlan planStands(
       }), left.end());
     plan.stands.push_back(std::move(a));
   }
-  plan.unreachable = left;
+  // left over because the cap stopped the loop: not known to be unreachable
+  (plan.stands.size() >= max_stands ? plan.not_planned : plan.unreachable) = left;
   return plan;
 }
 

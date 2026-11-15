@@ -123,6 +123,15 @@ TEST(Stands, EquallyGoodStationsGoToTheOneTheBaseReachesSoonest)
   EXPECT_NEAR(near_from.y, 0.6, 0.11);              // the +y end of the search window
 }
 
+TEST(Stands, TheStandCapLeavesTargetsNotPlannedNotUnreachable)
+{
+  const auto r = request(wall({-3.0, -1.5, 0.0, 1.5, 3.0}, {0.8, 1.4}));
+  const auto plan = planStands(sharedMap(), r, std::nullopt, 1);
+  ASSERT_EQ(plan.stands.size(), 1U);
+  EXPECT_TRUE(plan.unreachable.empty());        // every one of these targets is reachable from some stand
+  EXPECT_EQ(plan.not_planned.size() + plan.stands[0].targets.size(), r.targets_world.size());
+}
+
 TEST(Stands, AStrafingBaseStillPrefersTheNearerStationWhenTurningDominates)
 {
   auto r = request(wall({0.0}, {0.8}));
