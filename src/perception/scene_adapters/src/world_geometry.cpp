@@ -244,7 +244,7 @@ mp::WorldGeometryUpdate toWorldGeometry(
     }
     std::vector<Vec3> pts;
     if (std::holds_alternative<sm::EsdfGrid>(o.geometry)) {
-      rep.skipped.push_back(o.id + ": esdf grid has no box/point form (use the planner's ESDF channel)");
+      rep.skipped.push_back(o.id + ": esdf grid has no box/point form (send it through the planner's ESDF channel, e.g. CuroboClientPlanner::setEsdf; a later world update keeps it)");
       continue;
     }
     Vec3 prim_size;

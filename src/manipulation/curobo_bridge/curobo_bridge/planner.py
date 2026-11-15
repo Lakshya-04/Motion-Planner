@@ -170,6 +170,8 @@ class CuroboPlanner:
             self._planner.warmup(enable_graph=True, num_warmup_iterations=3)
         self._world_set = False
         self._boxes: List[Box] = []      # explicit boxes of the current world (kept by set_esdf)
+        self._field: Optional[np.ndarray] = None            # current ESDF field (kept by set_world)
+        self._field_center: Optional[Sequence[float]] = None
 
     def close(self) -> None:
         """Releases the GPU resources. Use one planner per process, or close one before building
@@ -205,6 +207,10 @@ class CuroboPlanner:
         cache, conservative). `esdf` passes a ready-made field instead (nx, ny, nz; metres, positive
         outside obstacles, e.g. from the scene model or a mapper) on the configured grid, centred
         at `esdf_center`. Explicit boxes beyond the cache are an error, not silently dropped.
+
+        A call with neither `points` nor `esdf` replaces the boxes and KEEPS the current ESDF field
+        (so setEsdf followed by a box-only world update, or the reverse, gives the same world);
+        `clear_world` is what removes the field.
         """
         from curobo.scene import Cuboid, Scene
 
@@ -223,11 +229,14 @@ class CuroboPlanner:
                 field = points_to_esdf(points, self._grid(esdf_center))
             else:
                 all_boxes += voxelize_points(points, point_voxel, self.max_boxes - len(all_boxes))
+        elif self.esdf is not None and self._field is not None:
+            field, esdf_center = self._field, self._field_center   # box-only update: keep the field
         cuboids = [Cuboid(name=b.id, dims=list(b.size), pose=[*b.center, *b.quat_wxyz]) for b in all_boxes]
         voxels = self._voxel_scene(field, esdf_center) if self.esdf is not None else []
         self._planner.update_world(Scene(cuboid=cuboids, voxel=voxels))
         self._world_set = True
         self._boxes = list(boxes)
+        self._field, self._field_center = field, esdf_center
         return len(cuboids) + (1 if field is not None else 0)
 
     def set_esdf(self, esdf: np.ndarray, center: Optional[Sequence[float]] = None) -> int:
@@ -244,6 +253,7 @@ class CuroboPlanner:
         self._planner.update_world(Scene(voxel=voxels))
         self._world_set = False
         self._boxes = []
+        self._field, self._field_center = None, None
 
     # ---- ESDF helpers -----------------------------------------------------------------------
     def _grid(self, center: Optional[Sequence[float]]) -> EsdfSpec:

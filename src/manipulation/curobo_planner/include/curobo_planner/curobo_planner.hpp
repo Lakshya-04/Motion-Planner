@@ -39,7 +39,8 @@ public:
 
   std::string name() const override {return "curobo";}
 
-  /// Replaces the planner's world (boxes + points, `points_origin` applied). False on failure.
+  /// Replaces the planner's boxes and points (`points_origin` applied). The distance field set by
+  /// setEsdf() is kept unless `world` carries points, which replace it. False on failure.
   bool setWorld(const motion_planner::WorldGeometryUpdate & world, std::string * message = nullptr);
   bool clearWorld(std::string * message = nullptr);
 

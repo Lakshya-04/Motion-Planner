@@ -68,7 +68,7 @@ collision checking:
   become their bounding box; clouds, meshes and voxel grids become occupied cubes (`obstacle_voxel`,
   doubled until at most `max_obstacle_boxes`, so the obstacle only ever grows).
 - Every approximation is listed in the `ConversionReport` (`approximated`, `coarsened`); an
-  `EsdfGrid` has no box / point form and is `skipped` (it goes through the planner's ESDF channel).
+  `EsdfGrid` has no box / point form and is `skipped` (it goes through the planner's ESDF channel, which a later world update keeps).
 
 `VampPlanner` and `CuroboClientPlanner` implement `ScenePort` as well, so the same scene feeds any
 backend. Geometry is taken as already in the robot base frame.
