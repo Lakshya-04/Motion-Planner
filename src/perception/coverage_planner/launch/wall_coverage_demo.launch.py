@@ -1,11 +1,29 @@
 import json
 
+import yaml
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
+# Fields of the selected tool profile that a launch argument can override (empty = keep profile).
+TOOL_OVERRIDES = [
+    "contact",
+    "standoff_m",
+    "tool_normal_policy",
+    "max_edge_tilt_deg",
+    "tool_frame_yaw_deg",
+    "swath_m",
+    "overlap_pct",
+    "sweep_direction",
+    "enable_boundary_pass",
+    "boundary_offset_m",
+    "obstacle_inflation",
+    "double_pass",
+]
 
 
 def launch_setup(context, *args, **kwargs):
@@ -44,39 +62,31 @@ def launch_setup(context, *args, **kwargs):
         ],
     )
 
+    node_params = {
+        "wall_scene_json": LaunchConfiguration("wall_scene_json"),
+        "wall_id": LaunchConfiguration("wall_id"),
+        "resolution": LaunchConfiguration("resolution"),
+        "coverage_service_name": LaunchConfiguration("coverage_service_name"),
+        "allow_flatness_override": LaunchConfiguration("allow_flatness_override"),
+        "output_json": LaunchConfiguration("output_json"),
+        "add_strip_connectors": LaunchConfiguration("add_strip_connectors"),
+        "allow_unknown": LaunchConfiguration("allow_unknown"),
+        "orientation_format": LaunchConfiguration("orientation_format"),
+        "tool_name": LaunchConfiguration("tool_name"),
+        "tool_profiles_file": LaunchConfiguration("tool_profiles_file"),
+    }
+    # Per-field overrides of the selected tool profile: only passed when the user set them.
+    for name in TOOL_OVERRIDES:
+        value = LaunchConfiguration(name).perform(context)
+        if value != "":
+            node_params[name] = yaml.safe_load(value)
+
     wall_coverage_demo_node = Node(
         package="coverage_planner",
         executable="wall_coverage_demo_node",
         name="wall_coverage_demo",
         output="screen",
-        parameters=[
-            {
-                "wall_scene_json": LaunchConfiguration("wall_scene_json"),
-                "wall_id": LaunchConfiguration("wall_id"),
-                "resolution": LaunchConfiguration("resolution"),
-                "coverage_service_name": LaunchConfiguration("coverage_service_name"),
-                "allow_flatness_override": LaunchConfiguration(
-                    "allow_flatness_override"
-                ),
-                "output_json": LaunchConfiguration("output_json"),
-                "add_strip_connectors": LaunchConfiguration("add_strip_connectors"),
-                "allow_unknown": LaunchConfiguration("allow_unknown"),
-                "orientation_format": LaunchConfiguration("orientation_format"),
-                "tool_name": LaunchConfiguration("tool_name"),
-                "contact": LaunchConfiguration("contact"),
-                "standoff_m": LaunchConfiguration("standoff_m"),
-                "tool_normal_policy": LaunchConfiguration("tool_normal_policy"),
-                "max_edge_tilt_deg": LaunchConfiguration("max_edge_tilt_deg"),
-                "tool_frame_yaw_deg": LaunchConfiguration("tool_frame_yaw_deg"),
-                "swath_m": LaunchConfiguration("swath_m"),
-                "overlap_pct": LaunchConfiguration("overlap_pct"),
-                "sweep_direction": LaunchConfiguration("sweep_direction"),
-                "enable_boundary_pass": LaunchConfiguration("enable_boundary_pass"),
-                "boundary_offset_m": LaunchConfiguration("boundary_offset_m"),
-                "obstacle_inflation": LaunchConfiguration("obstacle_inflation"),
-                "double_pass": LaunchConfiguration("double_pass"),
-            }
-        ],
+        parameters=[node_params],
     )
 
     rviz_node = Node(
@@ -183,68 +193,25 @@ def generate_launch_description():
         ),
     )
 
-    # Tool coverage/orientation params -- see buildToolCoverageProfile()'s own doc comment.
-    tool_name_arg = DeclareLaunchArgument("tool_name", default_value="mop")
-    contact_arg = DeclareLaunchArgument(
-        "contact",
-        default_value="true",
-        choices=["true", "false"],
-        description="True for a tool physically touching the wall (path stays on the surface).",
+    # Tool selection and overrides. Overrides default to "" = keep the profile's value.
+    tool_profiles_file_arg = DeclareLaunchArgument(
+        "tool_profiles_file",
+        default_value="",
+        description="tool_profiles.yaml to read (empty = the file this package ships).",
     )
-    standoff_m_arg = DeclareLaunchArgument(
-        "standoff_m",
-        default_value="0.0",
-        description="Stand-off along the wall normal; 0.0 for contact tools.",
+    tool_name_arg = DeclareLaunchArgument(
+        "tool_name",
+        default_value="contact_wiper",
+        description="Profile in tool_profiles_file: contact_wiper or spray_gun when shipped.",
     )
-    tool_normal_policy_arg = DeclareLaunchArgument(
-        "tool_normal_policy",
-        default_value="constant",
-        choices=["constant", "tilt_at_edges"],
-        description='"constant" or "tilt_at_edges" (non-contact tools only).',
-    )
-    max_edge_tilt_deg_arg = DeclareLaunchArgument(
-        "max_edge_tilt_deg", default_value="0.0"
-    )
-    tool_frame_yaw_deg_arg = DeclareLaunchArgument(
-        "tool_frame_yaw_deg", default_value="0.0"
-    )
-    swath_m_arg = DeclareLaunchArgument(
-        "swath_m",
-        default_value="0.2",
-        description="Effective tool footprint width (m).",
-    )
-    overlap_pct_arg = DeclareLaunchArgument(
-        "overlap_pct",
-        default_value="20.0",
-        description="step_m = swath_m * (1 - overlap_pct / 100).",
-    )
-    sweep_direction_arg = DeclareLaunchArgument(
-        "sweep_direction",
-        default_value="vertical",
-        choices=["vertical", "horizontal"],
-        description='"vertical" or "horizontal".',
-    )
-    enable_boundary_pass_arg = DeclareLaunchArgument(
-        "enable_boundary_pass", default_value="false", choices=["true", "false"]
-    )
-    boundary_offset_m_arg = DeclareLaunchArgument(
-        "boundary_offset_m", default_value="0.0"
-    )
-    obstacle_inflation_arg = DeclareLaunchArgument(
-        "obstacle_inflation",
-        default_value="uniform",
-        choices=["uniform", "primary_axis"],
-        description='"uniform" or "primary_axis".',
-    )
-    # obstacle_inflation_radius_m intentionally not exposed here -- wall_coverage_demo_node's own
-    # declare_parameter() default (swath_m / 2.0) only applies when the param is left unset;
-    # passing any fixed literal through this launch file would defeat that per-run fallback.
-    double_pass_arg = DeclareLaunchArgument(
-        "double_pass",
-        default_value="false",
-        choices=["true", "false"],
-        description="Two identical-standoff passes, second one reversed (e.g. a mop).",
-    )
+    override_args = [
+        DeclareLaunchArgument(
+            name,
+            default_value="",
+            description=f"Override '{name}' of the tool profile (empty = profile value).",
+        )
+        for name in TOOL_OVERRIDES
+    ]
 
     show_rviz_arg = DeclareLaunchArgument(
         "show_rviz",
@@ -264,19 +231,9 @@ def generate_launch_description():
             add_strip_connectors_arg,
             allow_unknown_arg,
             orientation_format_arg,
+            tool_profiles_file_arg,
             tool_name_arg,
-            contact_arg,
-            standoff_m_arg,
-            tool_normal_policy_arg,
-            max_edge_tilt_deg_arg,
-            tool_frame_yaw_deg_arg,
-            swath_m_arg,
-            overlap_pct_arg,
-            sweep_direction_arg,
-            enable_boundary_pass_arg,
-            boundary_offset_m_arg,
-            obstacle_inflation_arg,
-            double_pass_arg,
+            *override_args,
             show_rviz_arg,
             OpaqueFunction(function=launch_setup),
         ]
