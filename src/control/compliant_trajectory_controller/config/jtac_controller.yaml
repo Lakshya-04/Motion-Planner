@@ -37,7 +37,8 @@ combined_arm_lift_controller:
       - velocity
 
     # link_tcp, not link6: this test's xacro render includes add_other_geometry (the mop tool),
-    # so link_tcp is the real controlled point -- CLAUDE.md's own convention, and the same choice
+    # so link_tcp is the real controlled point -- the repo's tool-point convention (docs/ft_sensing.md,
+    # docs/design_principles.md), and the same choice
     # jtac_compliance_demo.launch.py's real-robot branch already made for the same reason.
     kinematics:
       plugin_name: kinematics_interface_kdl/KinematicsInterfaceKDL
@@ -71,25 +72,23 @@ combined_arm_lift_controller:
         # force_control_backend_admittance_vs_diffik.md's tool_profiles.yaml landmine list.
         force: 0.0
 
-    # Diagnostic gains -- NOT mop's shipped production values. Only Z selected: a push along the
-    # tool's own local Z is the wall-contact case (CLAUDE.md/wall_penetration_check.hpp's "tool
-    # +Z = outward wall normal" convention).
+    # Diagnostic gains -- NOT production values. Only Z selected: a push along the
+    # tool's own local Z is the wall-contact case (wall_penetration_check.hpp's "tool +Z = outward wall
+    # normal" convention).
     #
-    # Mass is 4x T4a's/T6's own proven-stable diagnostic values (X/Y: 4.0, Z: 2.0), NOT the same
-    # numbers -- found the hard way, live, under this real controller: T4a/T6 only ever validate
-    # AdmittanceRule::update() against a STATIC reference (reference never moves; only the
-    # measured-force-driven deflection does). Driving a REAL, MOVING FollowJointTrajectory goal
-    # through this controller for the first time reproduced the exact discrete-instability
-    # signature T4a's own AdmittanceRuleUnconditionallyDivergesAtMopsShippedGains regression
-    # documents (desired-velocity alternating sign, growing ~1.3-2x/cycle) at T4a's own "stable"
-    # mass values, with ZERO applied force -- purely from following an ordinary joint-space
-    # trajectory. The M > K*(zeta*dt)^2 bound was derived (and only ever empirically checked)
-    # against a motionless reference; a moving reference's own tracking error apparently erodes
-    # that margin by more than the ~28% headroom T4a's own diagnostic values (M=4.0 against a
-    # M_min=3.125 requirement) provided. 4x mass cleared it with margin in this live test; this is
-    # an empirical safety factor, not a re-derived bound -- re-tightening it needs the same kind
-    # of derivation T4a's own comment walks through, generalized to a nonzero reference velocity
-    # term, not just picking a bigger number that happened to work once.
+    # Mass is 4x the diagnostic values that the static-reference admittance tests use (X/Y: 4.0, Z: 2.0),
+    # NOT the same numbers -- found live under this controller: those tests only validate
+    # AdmittanceRule::update() against a STATIC reference (the reference never moves; only the
+    # force-driven deflection does). Driving a real, moving FollowJointTrajectory goal through this
+    # controller reproduced the discrete-instability signature that the
+    # AdmittanceRuleUnconditionallyDivergesAtMopsShippedGains regression documents (desired velocity
+    # alternating in sign, growing about 1.3-2x per cycle) at those "stable" mass values, with zero applied
+    # force, purely from following an ordinary joint-space trajectory. The M > K*(zeta*dt)^2 bound was
+    # derived (and only checked empirically) against a motionless reference; a moving reference's tracking
+    # error apparently erodes that margin by more than the ~28% headroom the diagnostic values (M=4.0
+    # against M_min=3.125) provided. 4x mass cleared it with margin in this live test; this is an empirical
+    # safety factor, not a re-derived bound: re-tightening it needs a derivation generalized to a nonzero
+    # reference velocity, not just a bigger number that happened to work once.
     admittance:
       # Starts with every axis deselected -- the same "no force obligation" default
       # ForceStage::kNone and PickNik's own admittance_parameters_no_admittance.yaml preset use

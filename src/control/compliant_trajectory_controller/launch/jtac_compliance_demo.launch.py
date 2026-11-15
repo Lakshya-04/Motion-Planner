@@ -72,9 +72,9 @@ def _launch_setup(context, *args, **kwargs):
         robot_description = _render_real_robot_description(context)
         reference_pose = REAL_ROBOT_REFERENCE_POSE
         # link_tcp, not link6: the real chain is rendered with add_other_geometry:=true (the
-        # mop tool from the wall_cleaning_default profile), so link6 is the bare wrist flange,
-        # NOT the controlled tool point -- CLAUDE.md's own convention ("Controlled tool point:
-        # link_tcp... link_eef is reserved for the bare flange, not the tool tip"). Using link6
+        # tool from the robot profile), so link6 is the bare wrist flange,
+        # NOT the controlled tool point -- the repo's tool-point convention (controlled tool point:
+        # link_tcp; the bare flange is not the tool tip, see docs/design_principles.md). Using link6
         # here means admittance has no awareness of the tool geometry swinging further out on
         # every correction, which is exactly what let a real self-collision through undetected.
         kinematics_tip = "link_tcp"
