@@ -41,7 +41,7 @@ RunScorecard scoreRun(
   stroke.swath_m = options.swath_m;
   auto flush = [&]() {
       if (!stroke.samples.empty()) {
-        verifier.addStroke(stroke);
+        if (options.spray) {verifier.addSprayStroke(stroke, *options.spray);} else {verifier.addStroke(stroke);}
         ++card.strokes;
         stroke.samples.clear();
       }
@@ -91,6 +91,12 @@ RunScorecard scoreRun(
       m.str(""); m << "in-band fraction " << card.in_band_fraction << " < " << limits.min_in_band_fraction;
       fail(m.str());
     }
+  }
+  if (limits.max_thickness_cov > 0.0 && card.coverage.thickness.valid &&
+    card.coverage.thickness.cov > limits.max_thickness_cov)
+  {
+    m.str(""); m << "thickness CoV " << card.coverage.thickness.cov << " > " << limits.max_thickness_cov;
+    fail(m.str());
   }
   if (limits.max_force_peak_n > 0.0 && card.force_peak_n > limits.max_force_peak_n) {
     m.str(""); m << "force peak " << card.force_peak_n << " N > " << limits.max_force_peak_n;

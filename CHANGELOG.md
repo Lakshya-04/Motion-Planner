@@ -12,6 +12,7 @@ anything verified on hardware.
 
 ### Added
 
+- Non-contact tool end to end: `coverage_planner` `spray_deposition.hpp` (Gaussian footprint over the cone swath), `CoverageVerifier::addSprayStroke` (thickness raster from valve-open samples; mean, CoV, min, max), `score_run --no-contact --spray-standoff`; `manipulation_manager` `contact:=false` (no force engage or press, stroke at the plan's standoff, `std_msgs/Bool` valve on `/tool/valve` for the stroke only); `record_run.py` records the valve as the `active` column; `sim_mujoco/scripts/run_spray_pass.sh`.
 - `manipulation_manager` `world_frame` (default off): coverage poses in a fixed frame, transformed into `base_footprint` per column from TF; `dock_attempts`; `base_check` in the world frame. `sim_mujoco/scripts/run_stand_pass.sh`: plan stands, drive to stand 0, manager pass from there, scored.
 
 **Perception and scene**

@@ -145,6 +145,11 @@ if(BUILD_TESTING)
     target_link_libraries(wall_direction_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
+  ament_add_gtest(tool_mode_test test/tool_mode_test.cpp)
+  if(TARGET tool_mode_test)
+    target_include_directories(tool_mode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
   ament_add_gtest(frame_transform_test test/frame_transform_test.cpp)
   if(TARGET frame_transform_test)
     target_link_libraries(frame_transform_test ${PROJECT_NAME}_core core_types::core_types)

@@ -86,14 +86,46 @@ spacing is 0.140 m and 0.186 m. The coverage planner (`toolSwath`, `toolLineSpac
 non-contact tool whose profile has `spray_half_angle_deg > 0`, so changing `standoff_m` changes the spacing.
 Zero or negative standoff, a half-angle outside (0, 90) deg or a fraction outside (0, 1] throw.
 
+### Deposition and thickness uniformity
+
+`coverage_planner/core/spray_deposition.hpp` adds the deposit across the strip: a Gaussian centred on the path,
+truncated at the cone edge `h = d tan(theta)` and normalised to integrate to 1 (`sigma = 0.25 * w_geo`, the edge at two
+sigma, 13.5 % of the peak). A pass of length L with the valve open deposits `g(x) * L` at perpendicular distance x
+(relative thickness, constant speed). `CoverageVerifier::addSprayStroke` accumulates this per cell for the engaged
+(valve-open) stretches of a stroke and the report carries `thickness`: mean, coefficient of variation (CoV = standard
+deviation / mean over the covered target cells), min, max. Samples with the valve closed (dock, transit, retract) add
+nothing, to coverage or thickness. Pass the footprint to the scorer:
+
+```
+ros2 run coverage_planner score_run --no-contact --samples run.csv --wall run.csv.wall.json --swath 0.175 \
+  --spray-standoff 0.30 --spray-half-angle 20 [--spray-sigma 0.25] [--max-thickness-cov 0.4]
+```
+
+A non-contact scorecard has no force limits (the force statistics are for contact tools); the JSON gains a `thickness`
+section only when `--spray-standoff` is given, so a contact scorecard is unchanged.
+
 Limits:
 
-- It is a width model. There is no deposition thickness, no overspray at strip ends or around obstacles, no
-  dependence on speed, pressure or wall angle, and spacing is not optimised for thickness uniformity.
+- The width model has no dependence on speed, pressure or wall angle; the thickness model is the stationary Gaussian
+  above with no overspray beyond the cone, no flow transient at valve opening and no obstacle shadowing. Spacing is not
+  optimised for thickness uniformity. Cells at a stroke's two ends get less than their share (a stroke deposits along its
+  length only), so the CoV includes that fall-off at the boundary of the wall.
 - `theta` and `f` are guesses until measured on the real nozzle (spray a test wall, measure the width of the
   usable band at two standoffs, fit both).
-- No valve timing: `tool_command`, `tool_off_lead_s` and `tool_on_at_speed_ratio` are in the profile but
-  nothing along the path triggers the valve yet.
+- Valve timing is coarse: the manager opens the valve once the tool has taken up the first stroke pose and closes it when
+  the stroke segment returns. `tool_off_lead_s` and `tool_on_at_speed_ratio` are in the profile but not used, and no
+  hardware valve driver exists (only the `std_msgs/Bool` topic).
+
+## Non-contact column in the manager
+
+`manipulation_manager` parameter `contact` (default `true`, the contact flow unchanged). With `contact: false`
+(`core/tool_mode.hpp`): the coverage plan already carries the standoff (the planner lifts the poses `standoff_m` in front
+of the wall for a non-contact tool), so a column is dock (fsp, `dock_standoff_m` further back) -> move to the first stroke
+pose with the valve closed -> valve ON -> Cartesian stroke along the column -> valve OFF -> retract. No admittance engage,
+no force target, no press and settle, no `allow_target_contact` / penetration allowance, no `contact_y_overshoot_m`;
+`spray_extra_standoff_m` (default 0) moves the stroke further from the wall, never closer. The valve is
+`std_msgs/Bool` on `valve_topic` (default `/tool/valve`, reliable and transient local), closed at start and after the plan;
+`record_run.py` records it as the `active` column. MuJoCo run: `run_spray_pass.sh` (`docs/sim_mujoco.md`).
 - Obstacle inflation is a fixed margin, not derived from the swath unless left unset.
 
 ## How to add a tool

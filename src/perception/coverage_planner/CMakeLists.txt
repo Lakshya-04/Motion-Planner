@@ -167,6 +167,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_coverage_verification test/core/coverage_verification_test.cpp)
   target_link_libraries(test_coverage_verification coverage_planner_core)
 
+  ament_add_gtest(test_spray_deposition test/core/spray_deposition_test.cpp)
+  target_link_libraries(test_spray_deposition coverage_planner_core)
+
   ament_add_gtest(test_run_scorecard test/core/run_scorecard_test.cpp)
   target_link_libraries(test_run_scorecard coverage_planner_core)
 

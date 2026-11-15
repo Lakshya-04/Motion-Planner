@@ -23,6 +23,7 @@
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "geometry_msgs/msg/pose.hpp"
 #include "reachability_msgs/srv/plan_stands.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float64.hpp"
 #include "tf2/time.h"
 #include "tf2_ros/buffer.h"
@@ -38,6 +39,7 @@
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/frame_transform.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
+#include "manipulation_manager/core/tool_mode.hpp"
 #include "manipulation_manager/core/wall_direction.hpp"
 #include "manipulation_manager/ros/coverage/coverage_output_json_source.hpp"
 #include "manipulation_manager/ros/execution/jtac_execution_adapter.hpp"
@@ -146,6 +148,14 @@ public:
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
     press_settle_s_ = this->declare_parameter<double>("press_settle_s", 2.0);
     unload_m_ = this->declare_parameter<double>("unload_m", 0.0);
+    // Tool kind. true (default): the contact flow above. false: a non-contact (spray) tool -- no force
+    // engage, no press, no wall-contact allowance, strokes at the plan's stand-off (+ spray_extra_standoff_m
+    // further from the wall) and the valve (std_msgs/Bool on valve_topic) is open during the stroke only.
+    contact_ = this->declare_parameter<bool>("contact", true);
+    spray_extra_standoff_ = this->declare_parameter<double>("spray_extra_standoff_m", 0.0);
+    valve_pub_ = this->create_publisher<std_msgs::msg::Bool>(
+      this->declare_parameter<std::string>("valve_topic", "/tool/valve"),
+      rclcpp::QoS(10).reliable().transient_local());
 
     // Base stance check against the reachability planner: "off" (default), "warn" (log and go on)
     // or "enforce" (do not run the plan from a stance the planner says cannot reach it).
@@ -186,6 +196,10 @@ public:
     execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
       shared_from_this(), "/" + controller_name_ + "/follow_joint_trajectory");
     manager_.setExecutionPort(execution_adapter_);
+    if (!contact_) {
+      valve_.update(true);   // force the first command out: the valve is explicitly closed at start
+      setValve(false);
+    }
 
     param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(
       shared_from_this(), "/" + controller_name_);
@@ -204,6 +218,18 @@ public:
     if (plugin_spin_thread_.joinable()) {
       plugin_spin_thread_.join();
     }
+  }
+
+  /// Opens or closes the spray valve; only a change is published.
+  void setValve(bool open)
+  {
+    if (!valve_.update(open)) {
+      return;
+    }
+    std_msgs::msg::Bool msg;
+    msg.data = open;
+    valve_pub_->publish(msg);
+    RCLCPP_INFO(this->get_logger(), "valve %s", open ? "ON" : "OFF");
   }
 
   void setAdmittanceEngaged(bool enabled)
@@ -250,6 +276,7 @@ public:
         ++columns_failed;
       }
     }
+    setValve(false);
     RCLCPP_INFO(
       this->get_logger(), "Coverage plan complete: done=%zu partial=%zu failed=%zu",
       columns_done, columns_partial, columns_failed);
@@ -498,6 +525,10 @@ private:
       return ColumnOutcome::kFailed;
     }
 
+    if (!contact_) {
+      return runSprayStroke(intent, wall_dir, standoff_pose);
+    }
+
     setAdmittanceEngaged(true);
     {
       std_msgs::msg::Float64 msg;
@@ -525,7 +556,8 @@ private:
     std::vector<core_types::Pose> contact_waypoints;
     contact_waypoints.reserve(intent.poses.size());
     for (size_t i = 0; i < intent.poses.size(); ++i) {
-      core_types::Pose p = wall_dir.shifted(intent.poses[i], contact_y_overshoot_);
+      core_types::Pose p = wall_dir.shifted(
+        intent.poses[i], columnSteps(true, contact_y_overshoot_, 0.0).stroke_shift_m);
       contact_waypoints.push_back(p);
     }
 
@@ -590,6 +622,63 @@ private:
       ? ColumnOutcome::kDone : ColumnOutcome::kPartial;
   }
 
+  /// The non-contact column after the dock: move to the first stroke pose with the valve closed, open the
+  /// valve, stroke along the column at the plan's stand-off (no force engage, no press, no contact
+  /// allowance), close the valve, retract to the dock pose.
+  ColumnOutcome runSprayStroke(
+    const CoverageSegmentIntent & intent, const WallDirection & wall_dir,
+    const core_types::Pose & standoff_pose)
+  {
+    const auto steps = columnSteps(false, 0.0, spray_extra_standoff_);
+    std::vector<core_types::Pose> waypoints;
+    waypoints.reserve(intent.poses.size());
+    for (const auto & p : intent.poses) {
+      waypoints.push_back(wall_dir.shifted(p, steps.stroke_shift_m));
+    }
+
+    MotionSegmentSpec stroke_seg;
+    stroke_seg.label = intent.label + "_spray";
+    stroke_seg.mode_hint = "cartesian";
+    stroke_seg.target_eef_speed = intent.target_eef_speed;
+    stroke_seg.min_path_fraction = 0.05;
+    stroke_seg.allow_target_contact = steps.allow_wall_contact;   // false: the wall is an obstacle
+
+    // Valve closed: take up the first stroke pose from the dock pose (a straight move).
+    setValve(false);
+    MotionSegmentSpec start_seg = stroke_seg;
+    start_seg.label = intent.label + "_start";
+    start_seg.waypoint_indices = {0};
+    manager_.executeMotionSegments(frame_id_, {start_seg}, {waypoints.front()}, planning_group_);
+
+    for (size_t i = 0; i < waypoints.size(); ++i) {
+      stroke_seg.waypoint_indices.push_back(i);
+    }
+    setValve(steps.valve);
+    const auto stroke_exec = manager_.executeMotionSegments(
+      frame_id_, {stroke_seg}, waypoints, planning_group_);
+    setValve(false);
+    RCLCPP_INFO(
+      this->get_logger(), "%s: spray success=%d completed=%zu", intent.label.c_str(),
+      stroke_exec.success, stroke_exec.waypoints_completed);
+
+    MotionSegmentSpec retract_seg;
+    retract_seg.label = intent.label + "_retract";
+    retract_seg.mode_hint = "fsp";
+    retract_seg.waypoint_indices = {0};
+    retract_seg.min_path_fraction = 0.99;
+    const auto retract_exec = manager_.executeMotionSegments(
+      frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
+    if (!retract_exec.success) {
+      RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
+    }
+
+    if (!stroke_exec.success || stroke_exec.waypoints_completed == 0) {
+      return ColumnOutcome::kFailed;
+    }
+    return stroke_exec.waypoints_completed == intent.poses.size()
+      ? ColumnOutcome::kDone : ColumnOutcome::kPartial;
+  }
+
   // Plugin plumbing. Declared before manager_ so the manager (which owns the planners) is
   // destroyed first; the registry's plugin libraries stay loaded for the whole process.
   std::string planning_config_;
@@ -603,6 +692,10 @@ private:
   std::shared_ptr<JtacExecutionAdapter> execution_adapter_;
   std::shared_ptr<rclcpp::AsyncParametersClient> param_client_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr force_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr valve_pub_;
+  ValveGate valve_;
+  bool contact_{true};
+  double spray_extra_standoff_{0.0};
 
   std::string frame_id_;
   std::string world_frame_;
