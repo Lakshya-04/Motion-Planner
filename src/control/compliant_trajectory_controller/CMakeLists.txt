@@ -273,6 +273,7 @@ target_link_libraries(jtac_wall_approach_test_node
   wall_octomap_probe
   mobile_manipulator_profile::mobile_manipulator_profile
 )
+target_include_directories(jtac_wall_approach_test_node PRIVATE include)
 ament_target_dependencies(jtac_wall_approach_test_node
   control_msgs
   geometry_msgs

@@ -90,6 +90,7 @@
 #include "moveit/robot_state/robot_state.h"
 #include "moveit/robot_trajectory/robot_trajectory.h"
 #include "moveit/trajectory_processing/time_optimal_trajectory_generation.hpp"
+#include "compliant_trajectory_controller/pose_inputs.hpp"
 #include "mobile_manipulator_profile/profile.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
@@ -101,8 +102,8 @@ namespace
 
 using FollowJTrajAction = control_msgs::action::FollowJointTrajectory;
 
-// Joint order of the commanded group. Starts as the legacy chain and is replaced in main() by
-// the planning group's own active joints, so the node follows whatever arm the profile names.
+// Joint order of the commanded group: the legacy chain the hand-derived poses below belong to.
+// main() refuses to run when the planning group's active joints differ.
 // Tool frame the trajectories are visualised for; set from the profile in main().
 std::string kTcpLink{"tcp_link"};
 std::vector<std::string> kJointNames{
@@ -494,7 +495,10 @@ bool planAndExecuteJointTarget(
   // instead of the intended +0.77) while j1 (coincidentally?) landed close to its own intended
   // value -- looked exactly like an admittance/trim runaway at first, and cost real debugging time
   // (including two genuine self-collisions) before being traced to this ordering mismatch instead.
-  move_group.setJointValueTarget(kJointNames, joint_positions);
+  if (!move_group.setJointValueTarget(kJointNames, joint_positions)) {
+    RCLCPP_ERROR(node->get_logger(), "FSP: the joint target does not fit the planning group.");
+    return false;
+  }
   moveit::planning_interface::MoveGroupInterface::Plan plan;
   if (move_group.plan(plan) != moveit::core::MoveItErrorCode::SUCCESS) {
     RCLCPP_ERROR(node->get_logger(), "FSP plan() failed for the requested joint target.");
@@ -587,7 +591,15 @@ int main(int argc, char ** argv)
   auto moveit_node = rclcpp::Node::make_shared("jtac_wall_approach_test_moveit_client");
   MoveGroupExecutorThread moveit_executor_thread(moveit_node);
   moveit::planning_interface::MoveGroupInterface move_group(moveit_node, planning_group);
-  kJointNames = move_group.getActiveJoints();
+  // The hand-derived poses below belong to the legacy [lift, joint1..6] chain. Other arms need
+  // their own poses; refuse instead of driving them with these.
+  if (const auto err = compliant_trajectory_controller::checkPoseChain(
+      move_group.getActiveJoints(), kJointNames, kApproachStandoffPose); !err.empty())
+  {
+    RCLCPP_FATAL(node->get_logger(), "%s", err.c_str());
+    rclcpp::shutdown();
+    return 1;
+  }
   move_group.setPlanningTime(10.0);
 
   TrajectoryVisualizer visualizer(node, move_group.getRobotModel());
