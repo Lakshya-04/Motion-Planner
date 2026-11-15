@@ -29,19 +29,19 @@ scene_model::PointCloud wallScan()
   scene_model::PointCloud cloud;
   std::mt19937 rng(1);
   std::normal_distribution<double> noise(0.0, 0.002);
-  for (double x = 0.0; x <= 4.0; x += 0.02) {
-    for (double z = 0.0; z <= 3.0; z += 0.02) {
+  for (double x = 0.0; x <= 4.0; x += 0.01) {
+    for (double z = 0.0; z <= 3.0; z += 0.01) {
       cloud.points.emplace_back(x, 2.0 + noise(rng), z);
     }
   }
   return cloud;
 }
 
-// Mean distance between adjacent row heights (z) of a horizontal-sweep plan.
+// Mean distance between adjacent vertical strokes (x) of the default vertical pattern.
 double meanRowSpacing(const ScanCoverageResult & r)
 {
   std::vector<double> zs;
-  for (const auto & p : r.final_plan.path.poses) {zs.push_back(p.pose.position.z);}
+  for (const auto & p : r.final_plan.path.poses) {zs.push_back(p.pose.position.x);}
   std::sort(zs.begin(), zs.end());
   std::vector<double> rows;
   double sum = zs.front();
@@ -178,7 +178,7 @@ TEST(SprayCoverage, RowSpacingFollowsTheStandoff)
     o.standoff_m = standoff;
     const auto tool = shipped("spray_gun", o);
     const auto result = planCoverageFromScan(scan, scene_model::SceneModel(), tool, options);
-    ASSERT_TRUE(result.success) << result.message;
+    ASSERT_TRUE(result.success) << "standoff " << standoff << ": " << result.message;
     const double measured = meanRowSpacing(result);
     EXPECT_NEAR(measured, toolLineSpacing(tool), 0.015) << "standoff " << standoff;
     EXPECT_GT(measured, previous_spacing);
