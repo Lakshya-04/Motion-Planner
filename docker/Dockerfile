@@ -130,6 +130,7 @@ USER ${USERNAME}
 
 ############################ sim-gazebo #######################
 # Thin layer: Gazebo Harmonic + the ROS bridges and gz_ros2_control (src/simulation/sim_gazebo).
+# No workspace is built into it: mount src/ and colcon build inside (docs/sim_gazebo.md).
 # Runs headless (gz sim -s), no GPU or display needed.
 FROM deps AS sim-gazebo
 ARG ROS_DISTRO

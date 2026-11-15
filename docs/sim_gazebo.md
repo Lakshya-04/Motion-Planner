@@ -2,14 +2,17 @@
 
 Gazebo Harmonic backend for the mobile manipulator (base + lift + arm + tool), selected with
 `hardware:=gazebo` in the description. Package: [`src/simulation/sim_gazebo`](../src/simulation/sim_gazebo).
-Everything runs headless (`gz sim -s`, no GPU, no display), so it works in a container and in CI.
+Everything runs headless (`gz sim -s`, no GPU, no display), so it works in a container.
 
 ## Run
 
 ```bash
 docker build -f docker/Dockerfile --target sim-gazebo -t motion-planner:sim-gazebo .
-# inside the image, workspace built (mobile_manipulator_description, sim_gazebo, and for the
-# compliant controller compliant_trajectory_controller + ft_bridge_hardware):
+# The image holds only the system packages (Gazebo, ros_gz, gz_ros2_control), no workspace. Mount
+# the sources, build them inside, then source the install space (mobile_manipulator_description,
+# sim_gazebo, and for the compliant controller compliant_trajectory_controller + ft_bridge_hardware):
+docker run --rm -it -v $PWD/src:/ws/src -w /ws motion-planner:sim-gazebo bash
+colcon build --packages-up-to sim_gazebo && source install/setup.bash
 ros2 launch sim_gazebo sim.launch.py                                          # headless, joint_trajectory_controller
 ros2 launch sim_gazebo sim.launch.py wall_scene:=<wall_scene.json> wall_id:=0 standoff:=0.9
 ros2 launch sim_gazebo sim.launch.py controller:=jtac                         # compliant JTAC controller
