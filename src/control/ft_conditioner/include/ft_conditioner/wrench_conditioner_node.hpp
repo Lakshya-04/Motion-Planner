@@ -15,9 +15,13 @@
 // Calibration: with the arm still and no contact, call ~/capture_pose in at least four poses that point
 // gravity in clearly different directions in the sensor frame, then ~/identify. The node fits payload
 // mass, centre of gravity and bias, starts using them, and returns a YAML snippet for the parameters.
+// ~/capture_pose averages the raw wrenches of the last capture_window_s and refuses when the input is stale
+// (newest older than capture_max_age_s), too short (< capture_min_samples) or not still (force spread above
+// capture_max_spread_n, orientation drift above capture_max_rotation_rad).
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -52,6 +56,7 @@ public:
   std::size_t staleTf() const {return stale_tf_;}
   std::size_t samples() const;
   force_core::ConditionerConfig config() const;
+  std::vector<force_core::CalibrationSample> calibrationSamples() const;
 
 private:
   void onRaw(const geometry_msgs::msg::WrenchStamped::SharedPtr msg);
@@ -74,9 +79,16 @@ private:
   mutable std::mutex mutex_;
   force_core::ConditionerConfig config_;
   std::vector<force_core::CalibrationSample> samples_;
-  geometry_msgs::msg::WrenchStamped::SharedPtr last_raw_;
-  force_core::Mat3 last_r_;
-  bool have_last_{false};
+  struct Recent
+  {
+    rclcpp::Time received;
+    force_core::Mat3 r;
+    core_types::Wrench raw;
+  };
+  std::deque<Recent> recent_;           // raw wrenches (with usable TF) of the last capture_window_s
+  double capture_window_s_{0.5}, capture_max_age_s_{0.25}, capture_max_spread_n_{1.0};
+  double capture_max_rotation_rad_{0.02};
+  std::size_t capture_min_samples_{5};
 
   double max_tf_age_s_{0.1};
   std::size_t published_{0}, dropped_{0}, stamp_fallbacks_{0}, stale_tf_{0};

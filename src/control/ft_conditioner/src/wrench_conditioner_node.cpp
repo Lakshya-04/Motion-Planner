@@ -53,6 +53,12 @@ WrenchConditionerNode::WrenchConditionerNode(const rclcpp::NodeOptions & options
   tool_frame_ = declare_parameter<std::string>("tool_frame", "tcp_link");
   sensor_frame_param_ = declare_parameter<std::string>("sensor_frame", "");
   max_tf_age_s_ = declare_parameter<double>("max_tf_age", 0.1);
+  capture_window_s_ = declare_parameter<double>("capture_window_s", 0.5);
+  capture_max_age_s_ = declare_parameter<double>("capture_max_age_s", 0.25);
+  capture_max_spread_n_ = declare_parameter<double>("capture_max_spread_n", 1.0);
+  capture_max_rotation_rad_ = declare_parameter<double>("capture_max_rotation_rad", 0.02);
+  capture_min_samples_ = static_cast<std::size_t>(
+    std::max<int64_t>(1, declare_parameter<int64_t>("capture_min_samples", 5)));
   offset_from_tf_ = declare_parameter<bool>("tool_in_sensor_from_tf", true);
   const auto off_xyz = declare_parameter<std::vector<double>>("tool_in_sensor_xyz", {0.0, 0.0, 0.0});
   const auto off_rpy = declare_parameter<std::vector<double>>("tool_in_sensor_rpy", {0.0, 0.0, 0.0});
@@ -94,6 +100,12 @@ std::size_t WrenchConditionerNode::samples() const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   return samples_.size();
+}
+
+std::vector<force_core::CalibrationSample> WrenchConditionerNode::calibrationSamples() const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return samples_;
 }
 
 force_core::ConditionerConfig WrenchConditionerNode::config() const
@@ -166,9 +178,11 @@ void WrenchConditionerNode::onRaw(const geometry_msgs::msg::WrenchStamped::Share
     std::lock_guard<std::mutex> lock(mutex_);
     config_.tool_in_sensor = off;
     cfg = config_;
-    last_raw_ = msg;
-    last_r_ = r;
-    have_last_ = true;
+    const rclcpp::Time now = get_clock()->now();
+    recent_.push_back({now, r, toCore(msg->wrench)});
+    while (!recent_.empty() && (now - recent_.front().received).seconds() > capture_window_s_) {
+      recent_.pop_front();
+    }
   }
   const core_types::Wrench w = force_core::WrenchConditioner(cfg).condition(toCore(msg->wrench), r);
   geometry_msgs::msg::WrenchStamped out;
@@ -184,14 +198,55 @@ void WrenchConditionerNode::captureSample(
   const std::shared_ptr<std_srvs::srv::Trigger::Request>, std::shared_ptr<std_srvs::srv::Trigger::Response> res)
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!have_last_) {
+  if (recent_.empty()) {
     res->message = "no raw wrench with a usable TF received yet";
     return;
   }
-  samples_.push_back({last_r_, toCore(last_raw_->wrench)});
+  const double age = (get_clock()->now() - recent_.back().received).seconds();
+  if (age > capture_max_age_s_) {
+    char buf[200];
+    std::snprintf(buf, sizeof(buf),
+      "input is stale: newest raw wrench with a usable TF is %.2f s old (limit capture_max_age_s %.2f s)",
+      age, capture_max_age_s_);
+    res->message = buf;
+    return;
+  }
+  if (recent_.size() < capture_min_samples_) {
+    res->message = "only " + std::to_string(recent_.size()) + " raw wrenches in the last " +
+      std::to_string(capture_window_s_) + " s, need capture_min_samples=" + std::to_string(capture_min_samples_);
+    return;
+  }
+  core_types::Wrench mean;
+  for (const auto & s : recent_) {
+    mean.force_x += s.raw.force_x; mean.force_y += s.raw.force_y; mean.force_z += s.raw.force_z;
+    mean.torque_x += s.raw.torque_x; mean.torque_y += s.raw.torque_y; mean.torque_z += s.raw.torque_z;
+  }
+  const double n = static_cast<double>(recent_.size());
+  mean.force_x /= n; mean.force_y /= n; mean.force_z /= n;
+  mean.torque_x /= n; mean.torque_y /= n; mean.torque_z /= n;
+  double spread = 0.0;
+  for (const auto & s : recent_) {
+    spread = std::max(spread, std::hypot(s.raw.force_x - mean.force_x,
+      std::hypot(s.raw.force_y - mean.force_y, s.raw.force_z - mean.force_z)));
+  }
+  const auto & a0 = recent_.front().r;
+  const auto & a1 = recent_.back().r;
+  double tr = 0.0;                 // trace of a0^T a1
+  for (int i = 0; i < 9; ++i) {tr += a0.m[i] * a1.m[i];}
+  const double drift = std::acos(std::clamp((tr - 1.0) / 2.0, -1.0, 1.0));
+  if (spread > capture_max_spread_n_ || drift > capture_max_rotation_rad_) {
+    char buf[200];
+    std::snprintf(buf, sizeof(buf),
+      "arm not still or in contact: force spread %.2f N (limit %.2f), orientation drift %.3f rad (limit %.3f)",
+      spread, capture_max_spread_n_, drift, capture_max_rotation_rad_);
+    res->message = buf;
+    return;
+  }
+  samples_.push_back({a1, mean});
   res->success = true;
-  res->message = "captured pose " + std::to_string(samples_.size()) +
-    " (arm still, no contact; need >= 4 with gravity pointing in clearly different directions)";
+  res->message = "captured pose " + std::to_string(samples_.size()) + " (mean of " +
+    std::to_string(recent_.size()) + " readings; arm still, no contact; need >= 4 with gravity pointing in " +
+    "clearly different directions)";
 }
 
 void WrenchConditionerNode::clearSamples(

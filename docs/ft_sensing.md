@@ -91,7 +91,7 @@ sensor-to-tool offset is looked up once (the sensor is rigid on the tool). A wre
 dropped and counted, with a throttled warning, never guessed. `max_tf_age: 0` turns the limit off.
 
 **Calibrating.** With the arm still and nothing touching the tool, move to a pose and call
-`~/capture_pose`; repeat in at least four poses that point gravity in clearly different directions in the
+`~/capture_pose` (it averages the raw wrenches of the last 0.5 s, and refuses with a message if the input is stale, too short, or the arm is not still: force spread or orientation drift above `capture_max_spread_n` / `capture_max_rotation_rad`); repeat in at least four poses that point gravity in clearly different directions in the
 sensor frame (rotate the wrist about at least two non-parallel axes); then `~/identify`. The node fits mass,
 centre of gravity and bias, starts using them immediately, and returns a YAML snippet to keep in the
 parameters. `~/clear_samples` starts over. A degenerate set of poses is rejected with a reason.

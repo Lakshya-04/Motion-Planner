@@ -247,6 +247,32 @@ TEST(WrenchConditionerNode, DropsAWrenchWhoseNewestTransformIsTooOld)
   EXPECT_GE(rig.node->staleTf(), 1U);
 }
 
+TEST(WrenchConditionerNode, CapturePoseRefusesAStaleInputAndAveragesTheWindow)
+{
+  Rig rig;
+  const Mat3 r = rotX(0.4);
+  std::string msg;
+  EXPECT_FALSE(rig.call("/wrench_conditioner/capture_pose", msg));    // nothing received yet
+  // a noisy reading: alternate +-0.2 N around the true free-space wrench
+  const auto base = rawFor(w(0, 0, 0, 0, 0, 0), r);
+  for (int i = 0; i < 20; ++i) {
+    auto x = base;
+    x.force_x += (i % 2 ? 0.2 : -0.2);
+    rig.publishTf(r, true);
+    rig.publishRaw(x);
+    rig.spinFor(20ms);
+  }
+  ASSERT_TRUE(rig.call("/wrench_conditioner/capture_pose", msg)) << msg;
+  const auto got = rig.node->calibrationSamples();
+  ASSERT_EQ(got.size(), 1U);
+  EXPECT_NEAR(got[0].raw.force_x, base.force_x, 0.05);                // averaged, not one +-0.2 sample
+  // the input stops: a later capture must fail instead of reusing the old reading
+  rig.spinFor(600ms);
+  EXPECT_FALSE(rig.call("/wrench_conditioner/capture_pose", msg));
+  EXPECT_NE(msg.find("stale"), std::string::npos) << msg;
+  EXPECT_EQ(rig.node->calibrationSamples().size(), 1U);
+}
+
 TEST(TfFreshEnough, LimitsTheAgeAndTreatsStaticAsFresh)
 {
   using ft_conditioner::tfFreshEnough;
