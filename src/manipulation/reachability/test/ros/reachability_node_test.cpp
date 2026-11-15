@@ -226,6 +226,27 @@ TEST(ReachabilityNode, UnloadableBaseProfileLeavesTheNodeNotReady)
   reachability::ReachabilityNode node(o);
   EXPECT_FALSE(node.ready());   // would otherwise plan stands without the footprint check
 }
+TEST(ReachabilityNode, PlanStandsRejectsStepsThatWouldRunForever)
+{
+  Fixture f;
+  auto req = wideWall();
+  req->grid_step = 0.01;
+  auto res = f.call<PlanStands>(req);
+  EXPECT_FALSE(res->success);
+  EXPECT_NE(res->message.find("grid_step"), std::string::npos) << res->message;
+
+  req = wideWall();
+  req->lift_step = 0.001;
+  res = f.call<PlanStands>(req);
+  EXPECT_FALSE(res->success);
+  EXPECT_NE(res->message.find("lift_step"), std::string::npos) << res->message;
+
+  req = wideWall();
+  req->max_standoff = 1e6;      // huge search area
+  res = f.call<PlanStands>(req);
+  EXPECT_FALSE(res->success);
+  EXPECT_TRUE(res->stands.empty());
+}
 TEST(ReachabilityNode, MissingMapFileLeavesTheNodeNotReady)
 {
   rclcpp::NodeOptions o;
