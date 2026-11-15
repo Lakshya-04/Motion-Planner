@@ -284,7 +284,10 @@ Runs (UR10e, two strokes). At 0.05 velocity scale every stroke planned and execu
 (806 of 806 cells), but the contact was poor: peak 21.5 N against the 10 N target, force RMS error 2.8 N, 34 percent of the
 working samples within 1.5 N, 192 strokes in the scorer (the contact breaks and re-makes along the stroke, stick-slip on the
 sliding wall). At 0.02 (the default now) the same pass gives peak 18.6 N, RMS error 1.5 N, 81 percent in band, 146 strokes.
-The remaining peak is mostly the first-contact creep (see the JTAC force-limit notes in the roadmap); still to improve: the
+The 18.6 N peak is not first contact: the recording has 36 spikes of exactly two samples (20 ms) at about 18 N spread along the
+strokes (stick-slip micro-events on the sliding wall), while the mean is 10.4 N; a real F/T filter or a lower wall friction
+should remove them, and the scorer's default 15 N peak limit therefore fails this run. The first-contact creep (about 13 N for
+2 s, see the JTAC force-limit notes in the roadmap) is the second source. Still to improve: the
 sliding friction in the sim, the admittance gains, the press depth. The manager and the coverage planner are not in this
 loop yet, the strokes are scripted.
 
