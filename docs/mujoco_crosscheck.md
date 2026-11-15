@@ -40,7 +40,10 @@ native self-collision cost (its `self_collision_ignore` matrix, GPU). Sphere cou
 The ignore list is shared by MuJoCo, FOAM and cuRobo-numpy (`allowed_pairs`): links joined by fixed joints
 form one rigid group, and two groups are ignored when at most `hops` revolute joints apart. `hops = 1`
 is "adjacent only" (strict); `hops = 2` also ignores neighbour-of-neighbour pairs, which spherization
-bulges into (`vamp_notes.md`). cuRobo's native check uses its own generated matrix, so it is a separate
+bulges into (`vamp_notes.md`). With the lift pinned, the base, the lift column and the arm base form
+one rigid group, so `hops = 2` also ignores upper arm vs base / column / lift stages: the "false-free
+0.000" rows do not cover the upper arm swinging into the column or base, which is a real failure
+mode on this robot. Only `hops = 1` checks it. cuRobo's native check uses its own generated matrix, so it is a separate
 list in both tables.
 
 **(c) MJX.** `jax.vmap(mjx.forward)` and one `mjx.step` over all 2000 configurations under
@@ -94,8 +97,8 @@ Reading it:
   ignore list (or a list sampled from the spheres themselves, as Cricket does) before it is usable.
 - cuRobo's native rows equal the numpy rows at `hops = 1` sample for sample, so its generated
   ignore matrix behaves like "adjacent links only" on these robots, and the numpy re-implementation
-  of the sphere check reproduces the GPU verdicts. At `hops = 2` the native row differs only because
-  its list is stricter, not because of a different check.
+  of the sphere check reproduces the GPU verdicts. At `hops = 2` the native row probably differs only because
+  its list is stricter (not measured: the lists were not intersected pair by pair).
 - Most MuJoCo contacts at `hops = 2` are forearm vs lift stages, forearm vs wrist 3/tool (UR10e) and
   shoulder vs wrist links (generic): an arm folded into itself or into the lift column.
 

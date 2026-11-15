@@ -6,8 +6,9 @@ For N seeded random configurations inside the URDF joint limits:
   (a) tool-frame FK from MuJoCo vs a from-the-spec URDF FK, the analytic UR10e DH chain (ur10e only)
       and cuRobo's FK (from the .npz written by curobo_crosscheck_dump.py);
   (b) self-collision: MuJoCo mesh contacts (ground truth) vs the FOAM sphere set, the cuRobo sphere set
-      (same spheres, numpy check) and cuRobo's own native verdict (from the .npz). All use one shared
-      allowed-pair list (see `mujoco_model.allowed_pairs`, run for hops 1 and 2);
+      (same spheres, numpy check) and cuRobo's own native verdict (from the .npz). MuJoCo, FOAM and
+      cuRobo-numpy share one allowed-pair list (see `mujoco_model.allowed_pairs`, run for hops 1 and 2);
+      cuRobo native uses its own generated `self_collision_ignore`;
   (c) the same FK and contact verdicts from a jax-vmapped `mjx.forward` batch, with timing.
 
     mujoco_crosscheck.py --robot ur10e --urdf robot.urdf --foam-urdf spherized.urdf \
@@ -124,13 +125,11 @@ def run(args):
         rows = {name: mm.verdict_rates(truth[h], v) for name, v in verdicts[h].items()}
         collision[f'hops{h}'] = {'truth_collision_rate': float(truth[h].mean()), 'n': len(q), 'models': rows}
         if args.hops and h == args.hops[-1]:
-            collision[f'hops{h}']['pair_counts'] = {}
             counts = {}
             for ps in mj_pairs[h]:
                 for p in ps:
                     counts[' / '.join(p)] = counts.get(' / '.join(p), 0) + 1
             collision[f'hops{h}']['mujoco_pair_counts'] = dict(sorted(counts.items(), key=lambda kv: -kv[1])[:8])
-            del collision[f'hops{h}']['pair_counts']
     result['collision'] = collision
 
     # ---------------- (c) MJX batch
@@ -186,6 +185,7 @@ def run_mjx(urdf, kin, joints, q, tool_frame, hops, vertices, full_truth, collis
         d = mjx.forward(mx, base.replace(qpos=base.qpos.at[adr_j].set(qi)))
         if not collision:
             return d.xpos[body], d.xmat[body].reshape(3, 3), jnp.bool_(False)
+        # private MJX API (`_impl`), unverified and tied to the MuJoCo version in the results table (4.0.1)
         c = d._impl.contact
         g = jnp.clip(c.geom, 0, model.ngeom - 1)
         return d.xpos[body], d.xmat[body].reshape(3, 3), jnp.any((c.dist < 0) & counts[g[:, 0], g[:, 1]])
