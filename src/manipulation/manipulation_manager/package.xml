@@ -23,10 +23,12 @@
   <depend>rclcpp_action</depend>
   <depend>control_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
   <depend>core_types</depend>
   <depend>ros_adapters</depend>
   <depend>motion_planner</depend>
   <depend>motion_planner_moveit</depend>
+  <depend>ament_index_cpp</depend>
   <depend>mobile_manipulator_profile</depend>
   <depend>nlohmann-json-dev</depend>
   <!-- manipulation_manager.launch.py builds the node's MoveIt parameters -->

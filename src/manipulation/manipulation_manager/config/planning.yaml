@@ -1,0 +1,15 @@
+# Planning backend selection for manipulation_manager_node (parameter `planning_config`).
+# These are the defaults: the MoveIt backend, Cartesian first with OMPL as the free-space fallback.
+# Schema and how to switch backends: docs/backend_selection.md.
+planning:
+  ik: moveit_ik
+  free_space: moveit_ompl
+  cartesian: moveit_cartesian
+  collision: moveit_collision
+  # scene: moveit_scene          # optional scene plugin
+  # Per-segment override of the routing (contact -> cartesian, transition -> free_space):
+  # segments: {contact: cartesian, transition: free_space}
+  # Parameters of a plugin, by plugin name:
+  # plugin_params:
+  #   curobo: {node_name: /curobo_planner}
+  #   vamp: {robot: ur5}
