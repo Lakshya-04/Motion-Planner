@@ -12,15 +12,51 @@ dependency listed in the repo. Files live in [`docker/`](../docker/).
 | `dev` | deps + gdb, clang-tidy, rviz2, a non-root user matching your host UID | interactive development |
 | `build` | deps + workspace built and tested with colcon | CI-style check |
 | `gpu` | dev + CUDA PyTorch + cuRobo v2 (pinned) | GPU planning, needs NVIDIA runtime |
-| `vamp` (build stage) | upstream VAMP at a pinned commit, SIMD baseline x86-64-v3 + AVX2 | feeds `full` |
+| `vamp-build` (build stage) | upstream VAMP at a pinned commit, SIMD baseline x86-64-v3 + AVX2 | feeds `full` |
 | `full` | `gpu` + VAMP | everything |
-| `sim` | `gpu` + MuJoCo 4 (`mujoco-core`) + MJX with JAX (`docker/requirements-sim.txt`) | simulation and RL, optional |
+| `sim` | `gpu` + MuJoCo 4 (`mujoco-core`) + MJX with JAX (`docker/requirements-sim.txt`) | MuJoCo Python tools, cross-check, MJX; optional |
+| `sim-gazebo` | `deps` + Gazebo Harmonic through `ros-<distro>-ros-gz-sim`, `ros-gz-bridge`, `gz-ros2-control` | headless Gazebo backend (`sim_gazebo`); optional, no GPU |
 
 `sim` is built on its own (`docker build -f docker/Dockerfile --target sim -t motion-planner:sim .`) and
 is not part of `full`. MuJoCo 4 splits the Python package: `mujoco-core` is the headless library and
 bindings, which is all a container needs; `mujoco` and `mujoco-studio` add the viewer and renderer.
 MJX needs Python 3.11 or newer. 4.0 removed the `composite` element, the `cable` plugin and `flexvert`
 equality constraints, so older models that use them need updating.
+
+## Simulation targets
+
+Neither is part of `full`, and neither has a compose service: build and run them with plain `docker`.
+
+**`sim`** (MuJoCo 4 + MJX + JAX). Built on `gpu`, so it also carries torch and cuRobo and needs the NVIDIA
+runtime to use them. `docker/requirements-sim.txt` pins `mujoco-core==4.0.1`, `mujoco-mjx==4.0.1` and
+`jax[cuda12]==0.12.0.1`; the file records that torch, cuRobo (planner tests) and an MJX step were run
+together on it. It serves the Python side of MuJoCo: the MJCF generator tests, the MuJoCo / MJX cross-check
+([mujoco_crosscheck.md](mujoco_crosscheck.md)) and sphere tools. It does **not** contain the MuJoCo C SDK,
+which the `sim_mujoco` ROS plugin needs: that is mounted from a tarball and pointed at with `MUJOCO_ROOT`
+(see [sim_mujoco.md](sim_mujoco.md), Build). Without it the plugin is skipped and only the Python tools build.
+
+```bash
+docker build -f docker/Dockerfile --target sim -t motion-planner:sim .
+docker run --rm --gpus all -v $PWD:/ws -w /ws motion-planner:sim \
+  /opt/venv/bin/python -c "import mujoco, mujoco.mjx, jax; print(mujoco.__version__, jax.devices())"
+```
+
+**`sim-gazebo`** (Gazebo Harmonic). A thin layer on `deps`: it adds the Gazebo ROS packages and nothing
+else, so it needs no GPU or display (`gz sim -s`). The workspace is not built into the image; build
+`mobile_manipulator_description` and `sim_gazebo` (and `compliant_trajectory_controller` plus
+`ft_bridge_hardware` for the JTAC variants) inside it, then launch. Give each simulation its own
+`ROS_DOMAIN_ID`: containers on one Docker bridge discover each other. Details and the test scripts:
+[sim_gazebo.md](sim_gazebo.md).
+
+```bash
+docker build -f docker/Dockerfile --target sim-gazebo -t motion-planner:sim-gazebo .
+docker run --rm -e ROS_DOMAIN_ID=51 -v $PWD/src:/ws/src:ro -v $PWD/docker:/ws/docker:ro \
+  -v mp_build:/ws/build -v mp_install:/ws/install -v mp_log:/ws/log -w /ws \
+  motion-planner:sim-gazebo bash -lc '
+  source /opt/ros/jazzy/setup.bash &&
+  colcon build --packages-up-to sim_gazebo && source install/setup.bash &&
+  ros2 launch sim_gazebo sim.launch.py'
+```
 
 ## Usage
 
@@ -93,7 +129,8 @@ docker run --rm -v $PWD/src:/ws/src:ro -v $PWD/docker:/ws/docker:ro \
 
 ## Status
 
-Verified on Jazzy in the container: all 12 packages build and install, and the 277 unit tests
-in 10 packages pass, plus the description's pytest contract tests. The `gpu` / `full` targets
-(CUDA PyTorch, cuRobo, VAMP) and the FOAM / Cricket tool images are written and lint-checked but
-have not been built here yet.
+The first Jazzy build (12 packages, 277 tests) is the origin of the findings above. The latest full run
+recorded in [ROADMAP.md](ROADMAP.md) section 15 is 736 colcon tests in 26 packages with no failures.
+Whether the `gpu`, `full` and `sim` targets and the FOAM / Cricket tool images were built after the
+first build is recorded in the notes of the documents that use them ([curobo_v2_notes.md](curobo_v2_notes.md),
+[vamp_notes.md](vamp_notes.md), [sim_mujoco.md](sim_mujoco.md)); this page makes no claim for them.
