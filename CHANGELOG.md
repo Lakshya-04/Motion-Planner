@@ -14,6 +14,8 @@ anything verified on hardware.
 
 - `manipulation_manager` `world_frame` (default off): coverage poses in a fixed frame, transformed into `base_footprint` per column from TF; `dock_attempts`; `base_check` in the world frame. `sim_mujoco/scripts/run_stand_pass.sh`: plan stands, drive to stand 0, manager pass from there, scored.
 
+- `sim_mujoco/scripts/run_sensed_pass.sh`: the manager pass on a wall sensed by the simulated depth camera (wall_detector -> cropped scene -> coverage -> whole-wall octomap -> manager); `manager_pass_common.sh` shared with `run_manager_pass.sh`, `crop_wall_scene.py`.
+
 **Perception and scene**
 - `scene_model`: backend-neutral scene (primitives, meshes, point clouds, voxel grids, ESDF), loaders for
   PCD, PLY, OBJ, STL and native / cuRobo-style YAML scenes, CPU voxelisation and exact ESDF, RANSAC plane
