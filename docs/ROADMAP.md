@@ -59,14 +59,14 @@ without code, when we can implement it.
 - [x] `ToolProfile` with geometry, task, coverage and control facets, and a YAML loader (`core_types`, `ros_adapters`)
 - [x] Coverage uses swath, overlap, inflation, standoff, yaw, tilt, contact flag (`ToolCoverageProfile`)
 - [x] Tool offset from the arm TCP: kinematics via `tcp_xyz/rpy` in the profile; force via the conditioner's lever arm
-- [ ] **Ship tool profiles**: no `tool_profiles.yaml` exists; nodes take parameters and default to "mop"
-- [ ] Connect the YAML loader to the coverage planner (not wired end to end)
+- [x] **Ship tool profiles**: `coverage_planner/config/tool_profiles.yaml` ships `contact_wiper` and `spray_gun` (`docs/tools.md`)
+- [x] The YAML loader is wired into the coverage launch files and the demo node (`tool_profiles_file`, `tool_name`, per-field overrides; the manager pass uses it)
 - [~] Spray model: `sprayerEffectiveSwath` is a placeholder (slope 1, intercept 0); swath is not derived from standoff;
       no overspray/overlap model, no valve/pump timing along the path. *Implement: parametric swath w(d), Gaussian/beta profile,
       thickness-accumulation raster, choose spacing and standoff by minimising thickness variance (about 16-18% overlap is a published optimum for an elliptical pattern)*
 - [ ] Non-contact segments end to end: hold standoff, no force engage, trigger the valve along the path (contact approach/retreat exist)
 - [ ] Contact tools: adaptive line spacing from a contact-area model (a cheap published idea, 2-3 days on top of a planner)
-- [ ] "How to add a tool" guide
+- [x] "How to add a tool" guide (`docs/tools.md`)
 
 ## 5. Motion planning (any backend, contact and non-contact)
 
