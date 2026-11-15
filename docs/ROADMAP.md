@@ -257,6 +257,62 @@ Still unverified: whether cuRobo's Mapper runs standalone and its VRAM on 4 GB; 
 `mujoco_ros2_control` against MuJoCo 4.0.1; headless depth rendering in `mujoco-core`; the ROS 2 wavemap forks' quality; the toppra and Tesseract Jazzy
 packages; the licences of paper code beyond those named; all effort figures (researcher estimates).
 
+## 18. Ideas adopted from an earlier construction-robot stack
+
+Ideas only: that stack is proprietary, so none of its code is reused. Each item was checked against this repo with grep (2026-11-15); items already done
+here were dropped. Placement is the milestone that should carry it.
+
+**Safety and execution (M1, M2; hardware wiring M6)**
+- [ ] Fault abort in ros2_control: a `fault` state interface and typed codes; a lift or arm fault makes `read()/write()` return ERROR so every controller claiming the component deactivates; mark devices safety-critical or not (tool I/O is not); debounce about 3 cycles
+- [ ] Never report a dead axis healthy: hold the last position, raise `fault`, return ERROR past a threshold (no "degraded mode")
+- [ ] NaN and limit guard on every command interface; per-joint trajectory tolerance including the lift
+- [ ] Spray valve forced off on any fault and confirmed by polling; drive-side watchdog and bring-up ordering (hardware only)
+- [ ] **Tool actuation executor**: nothing executes `tool_command` or `tool_off_lead_s` today. Typed commands verified against echoed state, scheduled on trajectory time (a pause freezes the tool), tool off on every exit path, `TOOL_FAULT` / `TOOL_NOT_RESPONSIVE` results, on/off latency as profile data
+- [ ] Segment-level intent in the motion layer: force stage, target force, standoff, normal, speed, tool command, lift height (unknown stage degrades to NONE)
+
+**Manager and task flow (M1)**
+- [ ] Manager action contract: goal kind plus params, one job at a time, per-app cancel; BehaviorTree.CPP with BehaviorTree.ROS2 action nodes, not hand-rolled clients
+- [ ] Always-report tree convention (`Fallback(work, ForceFailure(ReportStatus))`), halt and skip guards, mission FSM (IDLE/ACTIVE/PAUSED/STOPPED/RECOVERY) with one typed command service
+- [ ] Durable ledger keyed (mission, stand, segment) and resume; acceptance test: kill mid-wall, restart, only unfinished segments rerun
+- [ ] Per-station failure policy: typed SKIPPED reasons, hardware-origin codes, no blind retry on a contact overload; station queue skips a blocked stand with a reason and slides it in small steps
+- [ ] Controller switching only at segment boundaries
+
+**Planning (M1, M2)**
+- [ ] Time parameterisation by segment role: constant-speed jerk-limited for contact seams, time-optimal for transitions, split at 180-degree reversals, limit violations on a seam are failures
+- [ ] Lift-aware planning: time metric max|dq|/vmax for ordering, strips by ascending lift height, in-band passes with the lift held, lift-travel KPI
+- [ ] Rate-feasible-by-construction IK; failure-aware resequencing (forbidden arcs, bounded rounds, committed prefix frozen)
+- [ ] Contact strips must plan to at least 98 percent or split (manager default `min_path_fraction` is 0.5 today)
+- [ ] **Weighted IK on the 7-DOF group**: `kinematics_trac_ik.yaml` uses `solve_type: Distance` on `lift_arm`, which uses the whole timeout on every call and counts 1 m of lift like 1 rad
+
+**Scorecard and verification (M2)**
+- [ ] Numeric pass/fail thresholds per mode (for example any contact above 5 N fails a non-contact run; force, standoff, coverage, no controller switch under load)
+- [ ] One verify-result contract (passed, coverage percent, failed segment ids, report path): v1 from execution telemetry, v2 from perception
+- [ ] Post-work verification from perception: severity raster on the wall plane, 0-100 score, initial vs final pair, targeted re-work from the score map (ship end to end or not at all)
+- [ ] Observability bundle: per-goal trajectory CSV, force trace, BT log, per-mission rosbag; test-only wrench-inject topic
+- [ ] Golden exact-waypoint tests for the coverage planner before any algorithm change; table of mode-derived coverage parameters (the content of the shipped tool profiles); tool-profile loader invariants as hard errors
+
+**Stationing (M3)**
+- [ ] Re-perceive at the station and use the achieved pose (never the commanded one) as the work frame; log arrival error; reject degenerate planes (mean residual above 0.35 m); reach-derived station pitch and a tolerance-budget doc
+
+**Simulation and tooling (M0, M2, M6)**
+- [ ] Sim environment registry run by `colcon test`; launch readiness chaining instead of sleeps; ground-truth odometry toggle
+- [ ] Local quality tooling without CI: `docker/build.sh check`, pre-commit config, `pyproject.toml`, pinned clang-format
+- [ ] Container lessons: base / cacher / dev stages copying only `package.xml`, BuildKit secrets, large shm for DDS, no `-march=native` in distributed images
+- [ ] Contributor guidance for users and coding agents (`AGENTS.md`, `docs/contributing/`)
+
+**Pitfalls to cover with tests**
+- [ ] Frozen lift feedback with a loose tolerance must still abort; a tool-I/O fault must not
+- [ ] Mixed-unit jump detection (0.06 m of lift vs 0.2 rad of arm), including against the start state
+- [ ] Mimic and stage joints reach `/joint_states`; every runtime velocity limit equals the profile value
+- [ ] Dead config: a file never loaded, padding at the wrong namespace, `allowed_start_tolerance` handling (not set anywhere in `src` today)
+- [ ] Redundant-group pose goals are random-goal samplers; a failed IK call can leave a partial result
+- [ ] Retimer hazards: reversals, near-duplicate waypoints, mixed joint types, zero acceleration limit give a valid trajectory or a typed error
+- [ ] Force-offset leakage: the tracking-error threshold must budget the admittance offset; offset zero when force is off; settle threshold above the sensor deadband
+- [ ] NaN or out-of-range commands clamped on the real write path; navigation arrival error of 5-9 cm and 3 degrees must not corrupt the work frame
+
+Not adopted: the supervisor launch system, a site database with authoring GUI, a QP DiffIK controller (JTAC covers it), learned dirt detection, wrist hand-eye
+calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
+
 ---
 
 ## Proposed order (each milestone has an exit test)
