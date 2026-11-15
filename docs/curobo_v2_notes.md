@@ -248,3 +248,17 @@ older planner then fails with `illegal memory access` (two plain planners are fi
 planner is fine). The node builds exactly one planner, so deployment is unaffected; in tests call
 `CuroboPlanner.close()` before building one with a different layout (the ESDF tests live in their own
 module for this reason).
+
+## Our C++ ESDF into cuRobo (verified end to end)
+
+`CuroboClientPlanner::setEsdf(const scene_model::EsdfGrid&)` -> `~/set_esdf` ->
+`CuroboPlanner.set_esdf`, which replaces only the distance field and keeps the explicit boxes.
+
+- Layout: scene_model is x-fastest (`i + nx * (j + ny * k)`), cuRobo x-major
+  (`ix * ny * nz + iy * nz + iz`); the client reorders.
+- Origin: scene_model's `origin` is the centre of voxel (0,0,0); cuRobo wants the centre of the whole
+  grid box, `origin + voxel * (n - 1) / 2` per axis.
+- The node must run with an ESDF grid of the same shape and voxel size (`esdf_dims`,
+  `esdf_voxel_size`, `esdf_center`); a mismatch is answered with a message, not applied.
+- Checked on the GPU: a voxel blob at the robot's tool turned into an EsdfGrid (`computeEsdf`) blocks
+  the plan; an all-free field of the same grid unblocks it.

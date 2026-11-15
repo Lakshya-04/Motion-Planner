@@ -19,6 +19,7 @@ find_package(ros_adapters REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common io)
 find_package(motion_planner REQUIRED)
 find_package(motion_planner_moveit REQUIRED)
+find_package(mobile_manipulator_profile REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
 # core/ (zero ROS deps -- verified: only stdlib + core_types/motion_planner headers)
@@ -74,6 +75,7 @@ target_link_libraries(manipulation_manager_node
   ${PROJECT_NAME}_core
   ros_adapters::ros_adapters
   motion_planner_moveit::motion_planner_moveit_lib
+  mobile_manipulator_profile::mobile_manipulator_profile
 )
 
 install(TARGETS
@@ -122,6 +124,8 @@ if(BUILD_TESTING)
     set(ament_cmake_uncrustify_FOUND TRUE)
     set(ament_cmake_flake8_FOUND TRUE)
     set(ament_cmake_pep257_FOUND TRUE)
+    set(ament_cmake_xmllint_FOUND TRUE)
+    set(ament_cmake_lint_cmake_FOUND TRUE)
     ament_lint_auto_find_test_dependencies()
   endif()
 endif()

@@ -48,6 +48,10 @@
 namespace manipulation_manager
 {
 
+/// Whole-body planning group of mobile_manipulator_description's SRDF (the profile's
+/// `groups.whole_body`); the default when a caller names no group.
+inline constexpr char kDefaultPlanningGroup[] = "lift_arm";
+
 /**
  * @class ManipulationManager
  * @brief Sequences segments, drives execution/retry, and reports outcomes --
@@ -184,7 +188,7 @@ public:
   FeasibilityReport analyzeFeasibleSegments(
     const std::vector<CoverageSegmentIntent> & intents,
     const std::string & frame_id,
-    const std::string & planning_group = "arm_7dof");
+    const std::string & planning_group = kDefaultPlanningGroup);
 
   std::string selectedMode() const;
   std::string selectedPlanner() const;
@@ -208,7 +212,7 @@ public:
     const std::string & frame_id,
     const std::vector<MotionSegmentSpec> & segments,
     const std::vector<core_types::Pose> & waypoint_poses = {},
-    const std::string & planning_group = "arm_7dof");
+    const std::string & planning_group = kDefaultPlanningGroup);
 
   /**
    * @brief Convenience overload for callers without per-segment planning
@@ -225,7 +229,7 @@ public:
     const std::vector<std::string> & segment_modes = {},
     const std::vector<std::string> & segment_planners = {},
     const std::vector<core_types::Pose> & waypoint_poses = {},
-    const std::string & planning_group = "arm_7dof");
+    const std::string & planning_group = kDefaultPlanningGroup);
 
   MotionRunSummary lastRunSummary() const;
   const std::vector<MotionSegmentExecMetrics> & lastSegmentMetrics() const;

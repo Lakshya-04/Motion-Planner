@@ -13,7 +13,7 @@
  *          (this package) -- see that file's own doc comment for why it exists and what it
  *          replaces.
  *
- *          FULL FLOW: HOME (SRDF-named "home" group_state, arm_7dof) -> [FSP: collision-
+ *          FULL FLOW: HOME (SRDF-named "home" group_state, whole-body group) -> [FSP: collision-
  *          checked MoveIt joint-space plan+execute] -> kApproachStandoffPose (the coverage-plan's
  *          own start point, offset from the real wall) -> engage() -> APPROACH (one ordinary
  *          trajectory, admittance's own bounded offset closes the remaining gap to genuine
@@ -90,6 +90,8 @@
 #include "moveit/robot_state/robot_state.h"
 #include "moveit/robot_trajectory/robot_trajectory.h"
 #include "moveit/trajectory_processing/time_optimal_trajectory_generation.hpp"
+#include "compliant_trajectory_controller/pose_inputs.hpp"
+#include "mobile_manipulator_profile/profile.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
@@ -100,7 +102,11 @@ namespace
 
 using FollowJTrajAction = control_msgs::action::FollowJointTrajectory;
 
-const std::vector<std::string> kJointNames{
+// Joint order of the commanded group: the legacy chain the hand-derived poses below belong to.
+// main() refuses to run when the planning group's active joints differ.
+// Tool frame the trajectories are visualised for; set from the profile in main().
+std::string kTcpLink{"tcp_link"};
+std::vector<std::string> kJointNames{
   "lift_prismatic_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"};
 
 // The coverage-plan's own start point, offset from the wall -- re-derived against wall_mount_
@@ -489,17 +495,20 @@ bool planAndExecuteJointTarget(
   // instead of the intended +0.77) while j1 (coincidentally?) landed close to its own intended
   // value -- looked exactly like an admittance/trim runaway at first, and cost real debugging time
   // (including two genuine self-collisions) before being traced to this ordering mismatch instead.
-  move_group.setJointValueTarget(kJointNames, joint_positions);
+  if (!move_group.setJointValueTarget(kJointNames, joint_positions)) {
+    RCLCPP_ERROR(node->get_logger(), "FSP: the joint target does not fit the planning group.");
+    return false;
+  }
   moveit::planning_interface::MoveGroupInterface::Plan plan;
   if (move_group.plan(plan) != moveit::core::MoveItErrorCode::SUCCESS) {
     RCLCPP_ERROR(node->get_logger(), "FSP plan() failed for the requested joint target.");
     return false;
   }
-  visualizer.publish(node->get_logger(), plan.trajectory, "fsp", "link_tcp");
+  visualizer.publish(node->get_logger(), plan.trajectory, "fsp", kTcpLink);
   return move_group.execute(plan) == moveit::core::MoveItErrorCode::SUCCESS;
 }
 
-/// Same as above, but for the SRDF-named "home" group_state (arm_7dof) -- the canonical,
+/// Same as above, but for the SRDF-named "home" group_state (whole-body group) -- the canonical,
 /// idiomatic way to say "home" in this codebase, rather than a hand-maintained joint vector.
 bool planAndExecuteNamedTarget(
   const rclcpp::Node::SharedPtr & node, moveit::planning_interface::MoveGroupInterface & move_group,
@@ -512,7 +521,7 @@ bool planAndExecuteNamedTarget(
       node->get_logger(), "FSP plan() failed for named target '%s'.", named_target.c_str());
     return false;
   }
-  visualizer.publish(node->get_logger(), plan.trajectory, "fsp", "link_tcp");
+  visualizer.publish(node->get_logger(), plan.trajectory, "fsp", kTcpLink);
   return move_group.execute(plan) == moveit::core::MoveItErrorCode::SUCCESS;
 }
 
@@ -550,6 +559,18 @@ int main(int argc, char ** argv)
 
   const auto tool_profile = buildTestToolProfile();
 
+  node->declare_parameter("profile", std::string(mobile_manipulator_profile::kDefaultProfile));
+  std::string profile_warning;
+  const auto robot_profile = mobile_manipulator_profile::loadProfileOrDefaults(
+    node->get_parameter("profile").as_string(), profile_warning);
+  if (!profile_warning.empty()) {
+    RCLCPP_WARN(node->get_logger(), "%s", profile_warning.c_str());
+  }
+  node->declare_parameter("planning_group", robot_profile.whole_body_group);
+  const std::string planning_group = node->get_parameter("planning_group").as_string();
+  kTcpLink = robot_profile.frameOr("tcp", "tcp_link");
+  const std::string & tcp_link = kTcpLink;
+
   compliant_trajectory_controller::JtacControllerCompliancePort::Options port_options;
   port_options.controller_node_name = "combined_arm_lift_controller";
   compliant_trajectory_controller::JtacControllerCompliancePort port(port_options);
@@ -562,14 +583,23 @@ int main(int argc, char ** argv)
 
   compliant_trajectory_controller::WallOctomapProbe verification_probe(node);
   CHECK(
-    verification_probe.initialize("base_link", "link_tcp"),
+    verification_probe.initialize(robot_profile.frameOr("base", "base_link"), tcp_link),
     "loaded the live pushed wall octomap for post-hoc geometric verification");
 
   // Dedicated node/executor for MoveGroupInterface -- see MoveGroupExecutorThread's own doc
   // comment for why this must be SEPARATE from `node`.
   auto moveit_node = rclcpp::Node::make_shared("jtac_wall_approach_test_moveit_client");
   MoveGroupExecutorThread moveit_executor_thread(moveit_node);
-  moveit::planning_interface::MoveGroupInterface move_group(moveit_node, "arm_7dof");
+  moveit::planning_interface::MoveGroupInterface move_group(moveit_node, planning_group);
+  // The hand-derived poses below belong to the legacy [lift, joint1..6] chain. Other arms need
+  // their own poses; refuse instead of driving them with these.
+  if (const auto err = compliant_trajectory_controller::checkPoseChain(
+      move_group.getActiveJoints(), kJointNames, kApproachStandoffPose); !err.empty())
+  {
+    RCLCPP_FATAL(node->get_logger(), "%s", err.c_str());
+    rclcpp::shutdown();
+    return 1;
+  }
   move_group.setPlanningTime(10.0);
 
   TrajectoryVisualizer visualizer(node, move_group.getRobotModel());
@@ -712,7 +742,7 @@ int main(int argc, char ** argv)
       moveit_msgs::msg::RobotTrajectory strip_trajectory;
       robot_trajectory.getRobotTrajectoryMsg(strip_trajectory);
 
-      visualizer.publish(node->get_logger(), strip_trajectory, "cartesian", "link_tcp");
+      visualizer.publish(node->get_logger(), strip_trajectory, "cartesian", tcp_link);
       moveit::planning_interface::MoveGroupInterface::Plan strip_plan;
       strip_plan.trajectory = strip_trajectory;
       strip_executed = move_group.execute(strip_plan) == moveit::core::MoveItErrorCode::SUCCESS;

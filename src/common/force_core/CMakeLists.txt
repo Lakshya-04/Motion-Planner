@@ -12,6 +12,7 @@ find_package(Threads REQUIRED)
 add_library(${PROJECT_NAME}
   src/force_stage_fsm.cpp
   src/force_stage_sequencer.cpp
+  src/wrench_conditioning.cpp
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -50,6 +51,9 @@ if(BUILD_TESTING)
   ament_add_gtest(force_stage_sequencer_test test/force_stage_sequencer_test.cpp)
   target_link_libraries(force_stage_sequencer_test ${PROJECT_NAME})
 
+  ament_add_gtest(wrench_conditioning_test test/wrench_conditioning_test.cpp)
+  target_link_libraries(wrench_conditioning_test ${PROJECT_NAME})
+
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)
     # No per-file copyright headers in this repo yet -- matches core_types'/motion_planner's
@@ -59,6 +63,8 @@ if(BUILD_TESTING)
     set(ament_cmake_uncrustify_FOUND TRUE)
     set(ament_cmake_flake8_FOUND TRUE)
     set(ament_cmake_pep257_FOUND TRUE)
+    set(ament_cmake_xmllint_FOUND TRUE)
+    set(ament_cmake_lint_cmake_FOUND TRUE)
     ament_lint_auto_find_test_dependencies()
   endif()
 endif()

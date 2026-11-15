@@ -8,6 +8,7 @@
 #   dev   : deps + developer tools + non-root user matching the host UID
 #   build : deps + the workspace built and tested with colcon (CI-style, no GPU needed)
 #   gpu   : dev + CUDA-enabled PyTorch + cuRobo v2 pinned (needs the NVIDIA container runtime)
+#   sim-gazebo : deps + Gazebo Harmonic (ros_gz, gz_ros2_control) for the headless simulation backend
 #   vamp  : upstream VAMP (SIMD CPU planner) built from a pinned commit, installed to /opt/vamp
 #   full  : gpu + vamp  (the "everything" image)
 #
@@ -48,7 +49,8 @@ COPY docker/apt-extra.txt /tmp/apt-extra.txt
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
-    && (rosdep init 2>/dev/null || true) && rosdep update --rosdistro ${ROS_DISTRO} \
+    && (rosdep init 2>/dev/null || true) \
+    && (for i in 1 2 3 4 5; do rosdep update --rosdistro ${ROS_DISTRO} && exit 0; echo "rosdep update failed (try $i), retrying"; sleep 10; done; exit 1) \
     && rosdep install --from-paths /tmp/src-manifest --ignore-src -y --rosdistro ${ROS_DISTRO} \
          --skip-keys "ament_cmake_clang_format" \
     && rm -rf /var/lib/apt/lists/* /tmp/src-manifest
@@ -113,6 +115,31 @@ ENV PATH=/opt/venv/bin:$PATH \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility
 USER ${USERNAME}
+
+############################ sim ##############################
+# MuJoCo 4 + MJX (JAX) on top of the gpu image. Optional: not needed for planning.
+#   docker build -f docker/Dockerfile --target sim -t motion-planner:sim .
+FROM gpu AS sim
+ARG USERNAME=dev
+USER root
+COPY docker/requirements-sim.txt /tmp/requirements-sim.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    /opt/venv/bin/pip install -r /tmp/requirements-sim.txt \
+    && chown -R ${USERNAME}: /opt/venv
+USER ${USERNAME}
+
+############################ sim-gazebo #######################
+# Thin layer: Gazebo Harmonic + the ROS bridges and gz_ros2_control (src/simulation/sim_gazebo).
+# No workspace is built into it: mount src/ and colcon build inside (docs/sim_gazebo.md).
+# Runs headless (gz sim -s), no GPU or display needed.
+FROM deps AS sim-gazebo
+ARG ROS_DISTRO
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-ros-gz-sim ros-${ROS_DISTRO}-ros-gz-bridge \
+      ros-${ROS_DISTRO}-gz-ros2-control \
+    && rm -rf /var/lib/apt/lists/*
 
 ############################ vamp #############################
 # Upstream VAMP, unmodified, at a pinned commit. Built for a portable SIMD baseline

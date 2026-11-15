@@ -27,6 +27,7 @@
   <depend>ros_adapters</depend>
   <depend>motion_planner</depend>
   <depend>motion_planner_moveit</depend>
+  <depend>mobile_manipulator_profile</depend>
   <depend>nlohmann-json-dev</depend>
 
   <test_depend>ament_lint_auto</test_depend>

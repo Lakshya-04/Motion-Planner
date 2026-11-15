@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ft_conditioner</name>
+  <version>0.0.1</version>
+  <description>
+    ROS node around force_core's wrench conditioning: raw force/torque sensor wrench in, contact wrench at
+    the tool point in the tool axes out (sign, bias, payload gravity, lever-arm move), with services to
+    identify payload and bias from static poses.
+  </description>
+  <maintainer email="100lakshyaagarwal@gmail.com">Lakshya Agarwal</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2_ros</depend>
+  <depend>core_types</depend>
+  <depend>force_core</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>tf2_ros</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

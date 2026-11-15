@@ -60,6 +60,71 @@ Measured on this machine (8 threads): 3 million samples in 0.5 s. UR10e, a 3 m w
 front of the base: **2 bands** (lift 0.95 m covers 25 of 30 targets, 1.45 m the other 5). The same
 wall 3 m away: all targets unreachable. Generic arm: 3 bands.
 
+## Base-aware stationing
+
+The map is indexed by the **arm base** position, but what must stay clear of a wall is the whole
+**footprint**. `BaseModel` (`core/base_model.hpp`) carries the footprint polygon, where the arm sits on
+it (`arm_mount_xy`, default the footprint origin), the drive type and the velocity limits, and loads from
+the `base:` section of a robot profile (`loadBaseProfile`; every profile in
+`mobile_manipulator_description/config/profiles` parses, a test checks it).
+
+- **Clearance.** With `StationRequest::base` set, `min_clearance` applies to the nearest footprint
+  point, not the arm base. `chooseStation` picks the base yaw that leaves the most clearance (ties go to
+  facing the wall), skips stands where the footprint would not fit, and reports `yaw` and
+  `footprint_clearance`. `standoff` and `max_standoff` still refer to the arm base. Without a base model
+  nothing changes.
+- **Travel.** `travelTime(base, from, to)` models the drive type: an omni base
+  translates and turns together, a four-wheel-steer base crabs and spins one after the other; diff and skid-steer bases turn toward the goal, drive
+  and turn to the final yaw, and reverse when that is quicker. `orderStands` visits stands greedily by that
+  time, so a wall covered from several stands is ordered by what the base can actually do. Only the velocity limits are used; the profile's
+  acceleration limits are not modelled, so short hops are underestimated (fine for ordering).
+- **Try it.**
+
+```bash
+rm4d_tool station ur10e.rm4d --wall-x 3.0 --z-min 0.3 --z-max 2.2 --width 2.0 \
+  --base-profile config/profiles/ur10e_husky_telescopic.yaml
+```
+
+With `--base-profile` the arm base height at lift zero comes from the profile's
+`lift_mount_height_m` plus the lift column and arm mount (`armBaseHeightAtLiftZero`: 1.08 m on the
+Ranger Mini, 1.12 m MPO-500, 1.17 m MiR100, 1.21 m Husky); `--mount-z` overrides it, and without a
+base profile the default stays `--mount-z 0.2`.
+
+Same 2 m x 1.9 m wall 3 m ahead, UR10e map, `min_clearance` 0.3 m: with no base model the arm base
+stands 0.50 m from the wall; with a base model 0.60 m (Ranger Mini, MiR100, MPO-500) or 0.70 m (Husky),
+every base turned side-on (yaw 90 degrees, short side to the wall), footprint clearance 0.31 to 0.36 m.
+Footprints are nominal rectangles from the profiles. The mount height changes the bands: the lift
+only goes up from 1.1 to 1.2 m, so the lowest targets of the wall (z = 0.3 m) are out of reach, and
+the tool reports 4 (Ranger Mini, MPO-500), 6 (MiR100) or 9 (Husky) of the 110 targets unreachable
+in 2 bands; the old `--mount-z 0.2` default reached all of them in 3 bands for every base.
+
+### Several stands for a wide wall
+
+`planStands(map, request, start)` (`core/stands.hpp`) covers a wall wider than the arm's reach: greedy
+cover, each round taking the station that reaches the most remaining targets (`chooseStation`) and, among
+equally good ones, the one the base reaches soonest from where it is (`StationRequest::from`, drive type
+and footprint through `travelTime`). It returns the stands in visiting order, the targets and lift bands
+of each, the driving time between them and the targets nothing reaches.
+
+```bash
+rm4d_tool station ur10e.rm4d --wall-x 3.0 --z-min 0.3 --z-max 2.2 --width 7.0 --multi 1 --start-y -3.5 \
+  --base-profile config/profiles/ur10e_husky_telescopic.yaml
+```
+
+A 7 m wide, 1.9 m high wall (360 targets), UR10e map, start at one end, 0.3 m clearance:
+
+| Base | Stands | Driving | Notes |
+|---|---|---|---|
+| Ranger Mini (strafes) | 3 | 5.1 s | 130 / 130 / 100 targets, 3, 3 and 2 lift bands |
+| MiR100 (diff) | 3 | 6.6 s | same stands, turn-drive-turn between them |
+| Husky (skid-steer) | 4 | 11.1 s | its 0.99 m footprint puts the arm 0.7 m from the wall: less reach, 7 bands per stand, and a fourth stand for 4 leftover targets |
+
+Limits: greedy cover can leave a few stragglers that cost an extra stand and a backtrack (the Husky
+row). Folding such a stand into a neighbour does not help there: its targets lie outside what the
+neighbours reach. A cover chosen for total time instead of count, or a finer stand grid near the gaps,
+might. Each stand is chosen on its own, so the order is "nearest next", not the best
+tour. Not done: a yaw preference for contact work.
+
 ## Limits and next steps
 
 - **Sampling density.** Uniform joint sampling leaves cells empty at fine resolution: 3 M samples
@@ -108,8 +173,11 @@ built with `rm4d_tool` and serves it:
 | `~/is_reachable` | tool pose in the arm base frame | reachable, sample count |
 | `~/get_base_candidates` | tool pose in the world, arm base height | base (x, y) candidates |
 | `~/plan_lift_bands` | wall targets, base station, lift range and step | bands + unreachable targets |
+| `~/plan_stands` | wall targets and plane, lift range, optional start stand | stands in visiting order (arm base x, y, base yaw, targets, lift bands, travel time) + unreachable targets |
 
-Parameters: `map_file` (required), `robot_fingerprint` (rejects a map built for another robot).
+Parameters: `map_file` (required), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored; a set `base_profile` that cannot be loaded leaves the node not ready, like a missing `map_file`).
+
+`~/plan_stands` rejects `grid_step` below 0.02 m, `lift_step` below 0.01 m, `lift_max` (when set) below `lift_min`, and searches whose work (stations x lift heights x targets) exceeds 5e7 per stand, so one request cannot keep the node's callbacks busy for minutes. All positions (targets, wall point, returned stands) are in the same world frame the caller chose; the service does not transform.
 The map does not know which side of a wall is free, so base candidates come back on both sides of
 the target plane; the caller (stationing logic) picks the free side.
 

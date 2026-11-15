@@ -72,6 +72,7 @@
 #include "moveit_msgs/msg/planning_scene_components.hpp"
 #include "moveit_msgs/msg/robot_trajectory.hpp"
 #include "moveit_msgs/srv/get_planning_scene.hpp"
+#include "mobile_manipulator_profile/profile.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2_eigen/tf2_eigen.hpp"
@@ -167,8 +168,17 @@ int main(int argc, char ** argv)
   rclcpp::init(argc, argv);
   auto node = rclcpp::Node::make_shared("moveit_pose_finder");
 
-  node->declare_parameter("planning_group", std::string("arm_7dof"));
-  node->declare_parameter("tcp_link", std::string("link_tcp"));
+  // Names come from the robot profile (`profile` parameter, config/profiles/<name>.yaml); the
+  // explicit parameters below still win when set.
+  node->declare_parameter("profile", std::string(mobile_manipulator_profile::kDefaultProfile));
+  std::string profile_warning;
+  const auto profile = mobile_manipulator_profile::loadProfileOrDefaults(
+    node->get_parameter("profile").as_string(), profile_warning);
+  if (!profile_warning.empty()) {
+    RCLCPP_WARN(node->get_logger(), "%s", profile_warning.c_str());
+  }
+  node->declare_parameter("planning_group", profile.whole_body_group);
+  node->declare_parameter("tcp_link", profile.frameOr("tcp", "tcp_link"));
   node->declare_parameter("reference_frame", std::string(""));  // empty == move_group's default.
   node->declare_parameter("position_xyz", std::vector<double>{0.0, 0.0, 0.0});
   node->declare_parameter("orientation_rpy", std::vector<double>{0.0, 0.0, 0.0});
@@ -263,7 +273,7 @@ int main(int argc, char ** argv)
   // kinematics parameters. Found live: without these, setFromIK() fails outright with "No
   // kinematics solver instantiated for group ..." even for a target already proven IK-solvable
   // by the collision-aware path. Values match robot_description/config/kinematics.yaml's own
-  // arm_7dof entry -- MoveIt's own robot_description_kinematics.<group>.<key> convention, NOT
+  // whole-body group's entry -- MoveIt's own robot_description_kinematics.<group>.<key> convention, NOT
   // kinematics_interface's flat kinematics.* one this package's other tools use.
   node->declare_parameter(
     "robot_description_kinematics." + planning_group + ".kinematics_solver",
@@ -306,18 +316,16 @@ int main(int argc, char ** argv)
   }
   {
     std::string dbg = "[";
-    for (const auto & jn : {
-        "lift_prismatic_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"})
-    {
+    for (const auto & jn : move_group.getActiveJoints()) {
       const double * p = current_state_check->getJointPositions(jn);
-      dbg += std::string(jn) + "=" + (p ? std::to_string(*p) : std::string("?")) + " ";
+      dbg += jn + "=" + (p ? std::to_string(*p) : std::string("?")) + " ";
     }
     dbg += "]";
     RCLCPP_INFO(node->get_logger(), "getCurrentState() reports: %s", dbg.c_str());
   }
 
-  const std::vector<std::string> kJointNames{
-    "lift_prismatic_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"};
+  // The group's own active joints, in group order (lift first, then the arm): any DOF.
+  const std::vector<std::string> kJointNames = move_group.getActiveJoints();
 
   moveit::core::RobotState seed_state(move_group.getRobotModel());
   seed_state.setToDefaultValues();
