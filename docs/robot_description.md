@@ -91,13 +91,14 @@ casters, for costmaps and base stationing), `wheel_radius_m`, `track_m`, `wheelb
 `max_angular_acceleration_radps2`, `lift_mount_height_m` (`lift_mount_link` above the ground),
 `ground_clearance_m`, `mass_kg`. Base stationing (`docs/reachability.md`) can use `can_strafe` and
 the footprint as inputs: a strafing base can take any station pose, a diff/skid base needs a
-heading along its motion. These fields are data only for now; nothing in the planner reads them
-yet, and the URDF does not read them either. `test/test_bases.py` keeps the profile, the
-footprint, the mass and the macro in agreement. Profiles per base:
-`ur10e_<base>_telescopic.yaml` (for example `ur10e_ranger_mini_telescopic.yaml`); the TurtleBot3
-profiles use the generic arm because a UR10e would tip it. The `ur10e_scout_mini_telescopic.yaml`
-profile is a geometry example: the Scout Mini's rated payload is far below a UR10e on a 1.5 m
-lift, so check the platform rating before using it.
+heading along its motion. The URDF does not read the section; `BaseModel` in the reachability
+package does (`rm4d_tool station --base-profile`), including `arm_mount_xy`, the arm base position
+on the footprint. `test/test_bases.py` keeps the profile, the footprint, the mass and the macro in
+agreement. Profiles per base: `ur10e_<base>_telescopic.yaml` (for example
+`ur10e_ranger_mini_telescopic.yaml`); the TurtleBot3 profiles use the generic arm because a UR10e
+would tip it. The `ur10e_scout_mini_telescopic.yaml` profile is a geometry example: the Scout
+Mini's rated payload is far below a UR10e on a 1.5 m lift, so check the platform rating before
+using it.
 
 Swap steps: `xacro urdf/mobile_manipulator.urdf.xacro arm:=ur10e base:=ranger_mini`, or pick the
 matching profile. The lift mounts at `lift_mount_link`; shift it with the `lift_mount_xyz` xacro
