@@ -320,3 +320,17 @@ def test_generate_acm_takes_a_base(tmp_path):
                     '--base', 'scout_mini', '--out', str(out)], check=True, capture_output=True)
     text = out.read_text()
     assert 'base_link' in text and '_wheel_link' in text
+
+
+@pytest.mark.parametrize('path', _profile_files(), ids=lambda p: p.stem)
+def test_profile_arm_mount_matches_the_arm_base_position(path):
+    """Stationing places the footprint by `arm_mount_xy`; it must be where the URDF puts the arm."""
+    profile = _load(path)
+    robot = _render_base(profile['base']['name'])
+    x = y = 0.0
+    for name in robot.get_chain('base_footprint', 'arm_base_link', links=False):
+        origin = robot.joint_map[name].origin
+        if origin is not None:
+            assert all(abs(a) < TOL for a in origin.rpy), f'{name} rotates'
+            x, y = x + origin.xyz[0], y + origin.xyz[1]
+    assert profile['base']['arm_mount_xy'] == pytest.approx([x, y], abs=1e-6)

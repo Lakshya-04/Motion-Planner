@@ -69,6 +69,7 @@ base:
   max_angular_velocity_radps: 1.0
   max_linear_acceleration_mps2: 0.5
   max_angular_acceleration_radps2: 1.0
+  arm_mount_xy: [0.0, 0.0]      # arm base in base_footprint (x, y); stationing places the footprint by it
   lift_mount_height_m: 0.3     # lift_mount_link above base_footprint
   ground_clearance_m: 0.05
   mass_kg: 100.0
