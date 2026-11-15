@@ -133,6 +133,7 @@ public:
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
     press_settle_s_ = this->declare_parameter<double>("press_settle_s", 2.0);
+    unload_m_ = this->declare_parameter<double>("unload_m", 0.0);
 
     // Base stance check against the reachability planner: "off" (default), "warn" (log and go on)
     // or "enforce" (do not run the plan from a stance the planner says cannot reach it).
@@ -474,6 +475,24 @@ private:
       this->get_logger(), "%s: contact success=%d completed=%zu", intent.label.c_str(),
       contact_exec.success, contact_exec.waypoints_completed);
 
+    // Back the reference off the wall while the admittance is still engaged: switching it off with the
+    // reference 1.5 mm inside the wall snaps the arm onto that reference (27-31 N spikes at every
+    // stroke end). The admittance releases its offset against a reference that no longer presses.
+    if (unload_m_ > 0.0 && !contact_waypoints.empty()) {
+      MotionSegmentSpec unload_seg = contact_seg;
+      unload_seg.label = intent.label + "_unload";
+      unload_seg.waypoint_indices = {0};
+      unload_seg.allow_target_contact = false;
+      unload_seg.min_path_fraction = 0.5;
+      const auto unload_pose = wall_dir_.shifted(contact_waypoints.back(), -(contact_y_overshoot_ + unload_m_));
+      manager_.executeMotionSegments(frame_id_, {unload_seg}, {unload_pose}, planning_group_);
+    }
+    // Ramp the force target to zero and let the admittance unload the wall before it is switched off.
+    {
+      std_msgs::msg::Float64 zero;
+      zero.data = 0.0;
+      force_pub_->publish(zero);
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     setAdmittanceEngaged(false);
 
@@ -531,6 +550,7 @@ private:
   double max_wall_penetration_{0.0};
   double target_force_n_{0.0};
   double press_settle_s_{2.0};
+  double unload_m_{0.0};
 };
 
 }  // namespace manipulation_manager
