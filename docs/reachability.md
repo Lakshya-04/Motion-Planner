@@ -120,9 +120,10 @@ A 7 m wide, 1.9 m high wall (360 targets), UR10e map, start at one end, 0.3 m cl
 | Husky (skid-steer) | 4 | 11.1 s | its 0.99 m footprint puts the arm 0.7 m from the wall: less reach, 7 bands per stand, and a fourth stand for 4 leftover targets |
 
 Limits: greedy cover can leave a few stragglers that cost an extra stand and a backtrack (the Husky
-row); a final pass that merges small stands into a neighbour, or a cover chosen for total time instead
-of count, would fix it. Each stand is chosen on its own, so the order is "nearest next", not the best
-tour. Not done: a yaw preference for contact work, passing the base footprint to the ROS shell services.
+row). Folding such a stand into a neighbour does not help there: its targets lie outside what the
+neighbours reach. A cover chosen for total time instead of count, or a finer stand grid near the gaps,
+might. Each stand is chosen on its own, so the order is "nearest next", not the best
+tour. Not done: a yaw preference for contact work.
 
 ## Limits and next steps
 
@@ -172,8 +173,11 @@ built with `rm4d_tool` and serves it:
 | `~/is_reachable` | tool pose in the arm base frame | reachable, sample count |
 | `~/get_base_candidates` | tool pose in the world, arm base height | base (x, y) candidates |
 | `~/plan_lift_bands` | wall targets, base station, lift range and step | bands + unreachable targets |
+| `~/plan_stands` | wall targets and plane, lift range, optional start stand | stands in visiting order (arm base x, y, base yaw, targets, lift bands, travel time) + unreachable targets |
 
-Parameters: `map_file` (required), `robot_fingerprint` (rejects a map built for another robot).
+Parameters: `map_file` (required), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored; a set `base_profile` that cannot be loaded leaves the node not ready, like a missing `map_file`).
+
+`~/plan_stands` rejects `grid_step` below 0.02 m, `lift_step` below 0.01 m, `lift_max` (when set) below `lift_min`, and searches whose work (stations x lift heights x targets) exceeds 5e7 per stand, so one request cannot keep the node's callbacks busy for minutes. All positions (targets, wall point, returned stands) are in the same world frame the caller chose; the service does not transform.
 The map does not know which side of a wall is free, so base candidates come back on both sides of
 the target plane; the caller (stationing logic) picks the free side.
 
