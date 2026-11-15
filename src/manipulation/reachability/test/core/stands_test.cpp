@@ -113,12 +113,14 @@ TEST(Stands, EquallyGoodStationsGoToTheOneTheBaseReachesSoonest)
   auto r = request(wall({0.0}, {0.8}));            // one target: many stations tie on coverage
   r.base = box(true);
   r.grid_step = 0.1;
+  r.lateral_margin = 0.6;                          // room on both sides of the target
   const auto middle = chooseStation(sharedMap(), r);
   ASSERT_TRUE(middle.found);
   r.from = Stand{Eigen::Vector2d(1.0, 1.0), 0.0};  // the base is off to the +y side
   const auto near_from = chooseStation(sharedMap(), r);
   ASSERT_TRUE(near_from.found);
-  EXPECT_LE(std::abs(near_from.y - 1.0), std::abs(middle.y - 1.0) + 1e-9);
+  EXPECT_GT(near_from.y, middle.y + 0.05);          // strictly moved towards `from`
+  EXPECT_NEAR(near_from.y, 0.6, 0.11);              // the +y end of the search window
 }
 
 TEST(Stands, LiftBandIndicesAreGlobalAndMatchTheStandsTargets)
