@@ -94,7 +94,7 @@ def main():
     ap.add_argument('--z-bottom', type=float, default=1.02)
     ap.add_argument('--target', type=float, default=10.0, help='contact force, N')
     ap.add_argument('--press-depth', type=float, default=0.0015, help='reference past the wall surface, m')
-    ap.add_argument('--stroke-speed', type=float, default=0.05, help='velocity scale of the stroke (and of free moves)')
+    ap.add_argument('--stroke-speed', type=float, default=0.02, help='velocity scale of the stroke (and of free moves)')
     ap.add_argument('--target-path', choices=['bridge', 'jtac'], default='jtac')
     ap.add_argument('--record', default='/tmp/wall_pass.csv')
     ap.add_argument('--timeout', type=float, default=120.0)
