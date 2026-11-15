@@ -25,9 +25,8 @@
  *          the trajectory released (kCartesianFollow) changes that depth continuously, and nothing
  *          watches or corrects for it: beforeSegment(kCartesian) only settles once, BEFORE
  *          releasing the trajectory, and afterSegment() only checks again AFTER the caller's own
- *          execute() call returns -- see force_control_backend_admittance_vs_diffik.md's own
- *          "Control law: direct force (PI) vs. admittance" section for why literature treats this
- *          as the admittance law's one structural blind spot, and why the fix is a small outer
+ *          execute() call returns. The literature treats this as the
+ *          admittance law's one structural blind spot, and the fix is a small outer
  *          integral trim (this codebase's own trim_ki/trim_integral_max_n fields), not a
  *          replacement of admittance itself.
  *
@@ -184,7 +183,7 @@ private:
   /// PUSH regardless of current load, letting admittance settle toward its own zero-force
   /// equilibrium rather than continuing to chase a stale nonzero target). Then, ONLY if the
   /// CURRENT measured force is already below kAbortSafeDisengageForceN (matching this codebase's
-  /// own established bumpless-transfer threshold, see MotionSegmentExecMetrics/T8-T9's own
+  /// own established bumpless-transfer threshold, see MotionSegmentExecMetrics and the engage and wall-approach tests' own
   /// "< 3.0" convention), fully disengage() for a clean rigid switch. If force is still high,
   /// disengaging immediately would itself be the unsafe "snap back at full stiffness" hazard
   /// RETRACT's own kRetractFollow path is already designed to avoid -- in that case, this

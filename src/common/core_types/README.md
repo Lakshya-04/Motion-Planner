@@ -78,12 +78,12 @@ source. Real consumers, all via `find_package(core_types REQUIRED)` +
   `CoverageSource`, `ExecutionPort`, `MotionExecReporter`, the MoveIt execution adapter, and marker
   utils all build on `Pose`/`Trajectory`; `ManipulationManager` also defaults its injected logger to
   `NullLogger` (`setLogger()` doc: "defaults to a no-op NullLogger").
-- **`serum_demo_bt`** (in `applications/`) -- `wall_cleaning_action_server.cpp` includes
+- **The wall-cleaning application** (outside this repo) -- its action server includes
   `core_types/pose.hpp` and builds a `std::vector<core_types::Pose>` of core waypoints.
 
 ## The one-way dependency rule
 
-Per `implementation_plan_manipulation_architecture.md` §2.3: **types ← cores ← adapters**. Cores
+Dependency rule (see docs/design_principles.md and docs/architecture.md): **types ← cores ← adapters**. Cores
 (`*_core` algorithm packages) never depend on adapters; nothing pure depends on `interfaces`
 (the ROS msg/srv/action wire contract). `core_types` sits at the bottom of that arrow chain --
 everything above it may depend on it, it depends on nothing in this repo. Keep it a domain/types
