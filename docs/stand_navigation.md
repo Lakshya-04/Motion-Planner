@@ -1,7 +1,7 @@
 # Stand navigation
 
 Gets the base from where it is to a stand returned by reachability `~/plan_stands`. Milestone M3 of
-`ROADMAP.md`, first half (the base reaches the stand; running the pass from there is still open).
+`ROADMAP.md`. The base reaches the stand, and the manager pass runs from there (see "The pass from the stand").
 
 ## What is there
 
@@ -40,14 +40,34 @@ agrees, wall gap 0.803 m, arm deviation 0.0016, F/T change 0.49 N, no drift at t
 - Obstacle avoidance. The controller drives a straight line; there is no costmap and no planning. The wall is
   avoided only because the stand keeps the footprint clear and the approach is parallel to it.
 - Diff drive in the sim (the controller is unit-tested for it; the sim run used the omni profile).
-- The manager pass from the stand. The manager works in `base_footprint` and docks at a fixed standoff, assuming the base
-  where the wall scene was authored; it would need the coverage poses re-expressed for the new base pose (the
-  manager's `base_check` already compares the stand against the origin). Next step: send the poses in the odom frame
-  or shift the plan by the base pose, then run `run_manager_pass.sh` after the drive.
+- Several stands in a loop (drive, run only the columns that stand covers, drive on). The pass from the stand
+  runs the whole plan from one stand (stand 0); a wall that needs two stands is not run yet.
 - `NavigateThroughPoses`, a wall-plane servo for the last centimetres, localisation (odom only; the odom frame is the
   world frame, the base starts at the origin).
 - Found on the way and fixed: `manipulation_manager`'s default `base_check_service` was `/reachability_node/plan_stands`, but the
   node is named `reachability` (service `/reachability/plan_stands`); the default now matches. The script still renames the node.
+
+## The pass from the stand
+
+`manipulation_manager` takes `world_frame` (default empty = off: the poses are used as they are in `frame_id`, the base at
+the origin, byte-identical to before). With `world_frame: odom` the coverage plan stays in the odom frame, where the
+coverage planner and `plan_stands` authored it, and **each column is transformed into `base_footprint` with the TF of the
+moment it starts** (`FrameTransform`, ROS-free, `test/frame_transform_test.cpp`). `wall_direction` is a direction in the
+world frame and is rotated with the column, so a base that stopped at another yaw (the planner picks side-on stands) still
+docks, presses and strokes along the wall's real normal.
+
+Why this and not re-authoring the poses from the arrival pose: the poses are produced once, by the coverage planner, in
+one frame; the base stops within tolerance of the stand (about 1 cm), and a pose set re-authored from the goal would carry
+that error into the contact. With a TF lookup per column the poses are right for where the base actually is, and
+drift between columns (a pushed base) is absorbed. `base_check` also works in the world frame: it starts the planner at the
+arm base's pose from TF and compares the stand with it.
+
+`sim_mujoco/scripts/run_stand_pass.sh` closes the loop in MuJoCo (`base_motion:=true`, JTAC, F/T conditioner, MoveIt):
+the wall is moved to x = 0.58 m and y +0.3 (`shift_wall_scene.py`, `STAND_PASS_WALL_DX/DY`) so the first stand is not
+where the base starts; the coverage planner plans it in odom; `stand_drive.py` calls `plan_stands` (start = the base pose)
+and drives to stand 0 through `navigate_to_stand`; the wall goes into MoveIt's scene as an octomap in the odom frame; the
+manager runs with `world_frame: odom`; the recorder logs the tool point in odom (`record_run.py --frame odom`) and
+`score_run` scores it against the moved wall.
 
 ## Nav2 swap path
 

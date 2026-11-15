@@ -104,7 +104,7 @@ without code, when we can implement it.
 - [x] RM4D reachability map, builder, CLI; forward and inverse queries; lift bands (`reachability`, 56 tests)
 - [x] `chooseStation` (free side of the wall, footprint clearance, yaw), `planStands`, `orderStands`, drive-type travel time
 - [x] ROS service `~/plan_stands` with a base profile (`reachability_node`)
-- [~] **Reachability -> manager**: verify-only stance check (`base_check:=warn|enforce`, `docs/reachability.md`); the manager still never moves the base or asks for a different stand
+- [~] **Reachability -> manager**: stance check (`base_check:=warn|enforce`, `docs/reachability.md`, also in the world frame); `scripts/run_stand_pass.sh` (MuJoCo) plans stands, drives to stand 0 and runs the manager pass from there with `world_frame: odom` (columns transformed into `base_footprint` from TF; `docs/stand_navigation.md`): scorer passes, coverage 0.931, peak 18.8 N, RMS 3.31 N, stand 0.51 m and 90 degrees from the start, one run. Not done: a wall that needs several stands (drive, run that stand's columns, drive on), the manager asking for a different stand on its own
 - [~] Stand -> navigation goal with the arm-base vs `base_footprint` frame conversion: `stand_navigator` (`NavigateToStand` action, `NavigateToPose`-shaped; ROS-free core, unit-tested; `docs/stand_navigation.md`).
       Done in MuJoCo: `plan_stands` -> first stand -> arrival within 1 cm. Not done: `NavigateThroughPoses`, obstacle avoidance, a Nav2 bridge. *Reuse: Nav2 (not installed in any image; the node is the stand-in)*
 - [ ] Docking approach to the wall. *Reuse: Nav2 `opennav_docking` (Jazzy branch, v1.3.14) with a custom `NonChargingDock` plugin: `configure` / `cleanup` / `activate` / `deactivate`, `getStagingPose(pose, frame)`, `getRefinedPose(pose, id)` (where the plane detector overwrites the dock pose) and `isDocked()`*
@@ -167,7 +167,7 @@ without code, when we can implement it.
 ## 11. The end-to-end gap (the main remaining work)
 
 - [~] **One launch per simulator**: MuJoCo has `run_wall_pass.sh` (scripted strokes planned by MoveIt, recorded and scored) and `run_manager_pass.sh` (coverage planner + manager + MoveIt + JTAC: both columns dock, press, stroke and retract; scorer passes with coverage 0.93, peak 20.5 N, RMS 3.6 N, in-band 0.48; `docs/sim_mujoco.md`). Gazebo has none yet; force along the stroke is still looser than the scripted pass (RMS 1.5 N, 81 percent in band)
-- [~] **A scorecard** for that run: `scoreRun` / `score_run` compute coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); `run_contact.sh --record` feeds it a MuJoCo contact run (`docs/sim_mujoco.md`); `run_manager_pass.sh` records and scores a full manager pass; collisions are not counted
+- [~] **A scorecard** for that run: `scoreRun` / `score_run` compute coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); `run_contact.sh --record` feeds it a MuJoCo contact run (`docs/sim_mujoco.md`); `run_manager_pass.sh` records and scores a full manager pass; collisions are not counted; `run_stand_pass.sh` adds the base move (plan stands, drive, pass from the stand, scored in odom)
 - [ ] Manager interface: an action or service to start, stop and monitor a coverage task (it runs once from `main` today). *Reuse: BehaviorTree.CPP (MIT) for the
       task flow, the way Nav2 does; keep the force FSM*
 - [ ] Scenario set: empty wall, wall with obstacles, panels needing several stands, each robot profile
@@ -325,7 +325,7 @@ calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
   verification raster**, plus the force-CBF limiter and a compliant tip for Gazebo. MuJoCo first. *Exit:* an automated wall pass in MuJoCo with the scorecard
   recorded on two robot profiles; Gazebo holds 10 N (done with the compliant tip).
 - **M3 Base motion and docking, by reuse**: planar-velocity bases, then ros2_control drive controllers; Nav2 with stands as goals; `opennav_docking` with a
-  wall-dock plugin; global stand selection by set cover + TSP; then local refinement. *Exit:* the base drives to a stand in sim (done, `run_stand_navigation.sh`) and the pass succeeds from where it stopped (not done: the manager still docks at a fixed offset assuming the base at the origin, see `docs/stand_navigation.md`).
+  wall-dock plugin; global stand selection by set cover + TSP; then local refinement. *Exit:* the base drives to a stand in sim (done, `run_stand_navigation.sh`) and the pass succeeds from where it stopped (done for one stand in MuJoCo, `run_stand_pass.sh`: the manager's `world_frame` transforms each column from TF; not done: several stands in a loop, see `docs/stand_navigation.md`).
 - **M4 Live perception, by reuse**: MoveIt octomap + `octomap_server`, PCL wall detection, our self filter on the live cloud, simulated depth/lidar, then a
   mapper (cuRobo Mapper or wavemap) and AMCL / KISS-ICP localisation. *Exit:* M2's scenario runs from a sensed wall, not a file.
 - **M5 Tools and surfaces**: spray model and the non-contact path; floors and ceilings as planar patches; Noether for meshes. *Exit:* a spray pass over a wall

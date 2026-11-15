@@ -22,12 +22,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--record', required=True)
     ap.add_argument('--timeout', type=float, default=900.0)
+    ap.add_argument('--frame', default='base_footprint', help='frame the tool point and the wall are in (odom after a base move)')
     ap.add_argument('--wall-x', type=float, default=0.98)
     ap.add_argument('--wall-y', type=float, nargs=2, default=[0.0, 0.3])
     ap.add_argument('--wall-z', type=float, nargs=2, default=[1.0, 1.3])
     args = ap.parse_args()
     rclpy.init()
     node = ContactTest()
+    node.record_frame = args.frame
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())

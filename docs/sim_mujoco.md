@@ -346,3 +346,20 @@ the lift on every contact path), docking at the first pose of the stroke, the al
 the lift, `generate_acm.py`), a press-then-stroke sequence with a 2 s settle (`press_settle_s`), and planning for the sim
 tool's swath (0.14 m, `MANAGER_PASS_SWATH`) instead of the profile's 0.20 m. Next: the contact force (slower stroke,
 F/T filtering, JTAC gains).
+
+### Stand pass (plan stands, drive, then the manager pass)
+
+`scripts/run_stand_pass.sh` closes the loop with `base_motion:=true`: the wall is moved (`STAND_PASS_WALL_DX/DY`, default
+0 and +0.9 m, `shift_wall_scene.py`) so the first planned stand is not where the base starts; the coverage planner plans it
+in odom; `stand_drive.py` asks reachability `plan_stands` (start = the base pose) and drives to stand 0 through
+`navigate_to_stand`; the wall goes into MoveIt's scene (odom frame); the manager runs with `world_frame: odom`, which
+transforms each column into `base_footprint` from TF (`docs/stand_navigation.md`); `record_run.py --frame odom` records the
+tool point in odom. Outputs go to `STAND_PASS_OUT` (default `/tmp/stand_pass`); `STAND_MAP` reuses a reachability map.
+
+Result (one run each, UR10e generic omni base): stand 0 at arm base (-0.02, 0.51), yaw 1.571 (side-on to the wall: the
+planner prefers footprint clearance), 0.51 m from the start; arrival error 15 mm, 0.013 rad; the manager's stance check
+agrees; three columns dock, press, stroke and retract; scorer passes with coverage 0.931, peak 18.8 N, RMS error 3.31 N,
+in-band 0.45. The unchanged manager pass (base at the origin, `run_manager_pass.sh`) on the same build: coverage 0.931, peak
+18.8 N, RMS 3.60 N. Flaky points: a dock from the turned base needs more OMPL tries (`dock_attempts`, 6 in the script; one
+earlier run with 3 lost the first column, coverage 0.68), and the F/T peak was 34 N in another run (the scorer limit passed).
+Not done: a wall needing several stands.
