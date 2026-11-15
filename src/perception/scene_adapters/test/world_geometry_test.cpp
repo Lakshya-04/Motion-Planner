@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <set>
+#include <string>
 
 #include "scene_adapters/world_geometry.hpp"
 
@@ -115,7 +117,7 @@ TEST(WorldGeometry, ObstacleCloudBecomesCubesNotContactPoints)
   EXPECT_TRUE(w.points.empty());                 // never the excludable blob
   ASSERT_EQ(w.boxes.size(), 2U);
   EXPECT_DOUBLE_EQ(w.boxes[0].size_x, 0.1);
-  EXPECT_EQ(w.boxes[0].id, "clutter_0");
+  EXPECT_EQ(w.boxes[0].id, "clutter#c0");
   EXPECT_TRUE(rep.coarsened.empty());
 }
 
@@ -241,4 +243,24 @@ TEST(WorldGeometry, EmptySceneGivesAnEmptyUpdate)
   const auto w = toWorldGeometry(sm::SceneModel("base"));
   EXPECT_EQ(w.frame_id, "base");
   EXPECT_TRUE(w.boxes.empty() && w.points.empty());
+}
+
+TEST(WorldGeometry, BoxIdsStayUniqueAfterASceneMergeRenamesObjects)
+{
+  // SceneModel::merge renames a clashing id to "<id>_<n>", which is also the pattern cube boxes
+  // used: a cloud "crate" merged with a box "crate" gave crate_0, crate_1, crate_1.
+  sm::SceneModel a("base");
+  sm::PointCloud pc;
+  pc.points = {{0.0, 0.0, 0.0}, {0.5, 0.0, 0.0}};
+  a.add(object("crate", pc));
+  sm::SceneModel b("base");
+  b.add(object("crate", sm::Box{sm::Vec3(0.1, 0.1, 0.1)}));
+  a.merge(b);
+  WorldGeometryOptions opt;
+  opt.obstacle_voxel = 0.1;
+  const auto w = toWorldGeometry(a, opt);
+  std::set<std::string> ids;
+  for (const auto & box : w.boxes) {ids.insert(box.id);}
+  EXPECT_EQ(ids.size(), w.boxes.size());
+  EXPECT_EQ(w.boxes.size(), 3U);
 }

@@ -203,7 +203,7 @@ std::vector<mp::WorldGeometryBox> cubesFor(
   for (const auto & c : cells) {
     sm::Transform t = sm::Transform::Identity();
     t.translation() = Vec3((c[0] + 0.5) * size, (c[1] + 0.5) * size, (c[2] + 0.5) * size);
-    boxes.push_back(makeBox(id + "_" + std::to_string(n++), t, Vec3::Constant(size)));
+    boxes.push_back(makeBox(id + "#c" + std::to_string(n++), t, Vec3::Constant(size)));
   }
   return boxes;
 }
@@ -302,6 +302,18 @@ mp::WorldGeometryUpdate toWorldGeometry(
       rep.approximated.push_back(o.id + ": " + sm::geometryName(o.geometry) + " -> occupied cubes");
       out.boxes.insert(out.boxes.end(), cubes.begin(), cubes.end());
     }
+  }
+
+  // Ids must be unique per update (a MoveIt ADD of an existing id replaces it). Cube boxes are named
+  // "<id>#c<n>", a pattern SceneModel::merge never produces ("<id>_<n>"), and any remaining clash
+  // (an object literally named like a cube) is renamed here and reported.
+  std::set<std::string> used;
+  for (auto & b : out.boxes) {
+    if (used.insert(b.id).second) {continue;}
+    const std::string base = b.id;
+    int n = 1;
+    do {b.id = base + "#" + std::to_string(n++);} while (!used.insert(b.id).second);
+    rep.approximated.push_back(base + ": duplicate box id renamed to " + b.id);
   }
   return out;
 }
