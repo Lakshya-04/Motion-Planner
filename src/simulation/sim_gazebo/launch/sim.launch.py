@@ -49,7 +49,7 @@ def _jtc_params(joints):
         'constraints': {'stopped_velocity_tolerance': 0.05, 'goal_time': 2.0}}}}
 
 
-def _jtac_params(profile, joints, robot_description, conditioned=False, ft_filter=1.0):
+def _jtac_params(profile, joints, robot_description, conditioned=False, ft_filter=1.0, position_only=False):
     """The existing JTAC config with names/frames taken from the profile instead of the demo's."""
     cfg_path = os.path.join(get_package_share_directory('compliant_trajectory_controller'),
                             'config', 'jtac_controller.yaml')
@@ -57,6 +57,12 @@ def _jtac_params(profile, joints, robot_description, conditioned=False, ft_filte
         params = yaml.safe_load(f)['combined_arm_lift_controller']['ros__parameters']
     fr = prof.frames(profile)
     params['joints'] = joints
+    if position_only:
+        # Position only. With the velocity command interface claimed too, gz_ros2_control drives the joints open loop
+        # from the velocity (the trajectory feed-forward) and ignores the position command, so a moving reference is
+        # tracked far behind (a 0.01 m/s stroke fell 0.08 m short, coverage 0.88). The position command then goes
+        # through gz_ros2_control's own P loop (gain 0.1/s by default: slow, soft; see docs/sim_gazebo.md).
+        params['command_interfaces'] = ['position']
     params['robot_description'] = robot_description
     params['kinematics'].update({'base': fr['base'], 'tip': fr['tcp']})
     if conditioned:
@@ -137,7 +143,7 @@ def _launch(context):
         name = CONTROLLER_NAMES[lc('controller')]
         params = (_jtc_params(joints) if lc('controller') == 'jtc'
                   else _jtac_params(profile, joints, robot_description, conditioned,
-                                    float(lc('ft_filter'))))
+                                    float(lc('ft_filter')), lc('jtac_position_only') == 'true'))
         jsb = _spawner('joint_state_broadcaster')
         ftb = _spawner('force_torque_sensor_broadcaster', _write_yaml(
             {'force_torque_sensor_broadcaster': {'ros__parameters': {
@@ -148,6 +154,13 @@ def _launch(context):
             RegisterEventHandler(OnProcessExit(target_action=jsb, on_exit=[ftb])),
             RegisterEventHandler(OnProcessExit(target_action=ftb, on_exit=[ctl])),
         ]
+    if lc('move_group') == 'true':
+        # MoveIt for planning only (the same description the sim runs, hardware jtac_mock); execution stays
+        # with the controller started above
+        from mobile_manipulator_moveit_config import build_moveit_config
+        moveit_config = build_moveit_config(profile=lc('profile'), hardware='jtac_mock')
+        actions.append(Node(package='moveit_ros_move_group', executable='move_group', output='screen',
+                            parameters=[moveit_config.to_dict(), {'use_sim_time': True}]))
     return actions
 
 
@@ -169,5 +182,11 @@ def generate_launch_description():
                               description='JTAC ft_sensor.filter_coefficient (1.0: no low-pass; smaller: smoother)'),
         DeclareLaunchArgument('payload_mass_kg', default_value='0.0',
                               description='initial payload mass for ft_conditioner (0: calibrate with ~/identify)'),
+        DeclareLaunchArgument('jtac_position_only', default_value='false',
+                              description='true: JTAC claims only the position command interface (closed gz position '
+                                          'loop, slow and soft) instead of position + velocity (open loop on the '
+                                          'velocity); the manager pass uses true'),
+        DeclareLaunchArgument('move_group', default_value='false',
+                              description='also start move_group (planning only) for the manipulation manager'),
         OpaqueFunction(function=_launch),
     ])

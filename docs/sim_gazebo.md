@@ -21,13 +21,15 @@ ros2 run sim_gazebo smoke_test.py [--controller jtc|jtac]                     # 
 ros2 launch sim_gazebo sim.launch.py controller:=jtac ft_conditioner:=true    # force path (see below)
 ros2 run sim_gazebo contact_control_test.py                                   # contact test, about 3 minutes
 ros2 run sim_gazebo wall_world_gen.py scene.json -o wall.sdf --standoff 0.9   # world only
+bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_manager_pass.sh         # coverage planner + manager + MoveIt + JTAC, scored (about 5 minutes)
 ```
 
 Launch arguments: `profile` (name in `config/profiles` or a path; its `robot.xacro_args`, joint
 names, frames and home pose drive everything), `world`, `wall_scene`/`wall_id`/`standoff`, `gui`,
 `controller` (`jtc` | `jtac` | `none`), `ft_conditioner` (`true` starts the conditioner and points JTAC at
 the sensor `ft_sensor_tcp`), `payload_mass_kg` (initial payload for the conditioner, 0: calibrate),
-`ft_filter` (JTAC `ft_sensor.filter_coefficient`). Several containers on one Docker bridge share DDS
+`ft_filter` (JTAC `ft_sensor.filter_coefficient`), `move_group` (also start MoveIt for planning, hardware `jtac_mock`),
+`jtac_position_only` (JTAC claims only the position command interface, see the manager pass). Several containers on one Docker bridge share DDS
 multicast: give each simulation its own `ROS_DOMAIN_ID` (or `ROS_LOCALHOST_ONLY=1`), otherwise
 another stack's `/robot_description` can reach the gz controller manager.
 
@@ -160,6 +162,47 @@ Steps and results (profile `generic_6dof_telescopic`, wall 0.9 m in front of the
    (107 N difference, the hard-stop contact; not investigated), so 5 N/mm is the default.
 4. **Release:** target to zero, disengage, retreat to the standoff: ground-truth force 0.000 N after the retreat.
 
+
+## Manager pass (the real pipeline)
+
+`scripts/run_manager_pass.sh` is the Gazebo twin of `sim_mujoco/scripts/run_manager_pass.sh` (same steps, same ready
+pose, same contact region): the sim (`profile:=ur10e_telescopic controller:=jtac jtac_position_only:=true
+ft_conditioner:=true move_group:=true`, wall world from `test/data/smoke_wall_scene.json`) comes up headless, the coverage
+planner plans the contact region (`test/data/wall_pass_coverage_scene.json` with `walls.pcd` beside it, tool
+`contact_wiper`, `tool_frame_yaw_deg` -90, swath 0.14 m), `world_model_loader_node` puts the whole 2 m x 2 m wall into
+MoveIt's scene as an octomap, the arm goes to the ready pose (`ready_pose.py`, the MuJoCo smoke test's FREE pose), and
+`manipulation_manager` (`controller_name combined_arm_lift_controller`, wall `[1, 0, 0]`, `dock_at_stroke_start`, 10 N,
+0.01 m/s, `hardware:=jtac_mock`, `profile:=ur10e_telescopic`, `use_sim_time` true: Gazebo has a `/clock`) docks, presses,
+strokes and retracts per column. `record_run.py` records the tool point and the ground-truth force; `score_run` scores it.
+Outputs and logs go to `MANAGER_PASS_OUT` (default `/tmp/manager_pass`); `MANAGER_PASS_SPEED/PRESS/TARGET/SWATH/TOOL_YAW`
+and `MANAGER_PASS_LAUNCH_ARGS` override the defaults.
+
+Geometry: the tool tip ends 6.5 cm short of the tcp, so the world wall is at x = 0.915 while the plane the coverage
+planner, the octomap and the scorer use is where the tcp touches it, x = 0.98 (the same numbers as the MuJoCo pass).
+
+Status: the pass runs end to end and the scorer passes (exit 0): all three columns dock, press, stroke and retract
+(`done=3 failed=0`), coverage 0.93 (865 of 930 cells), peak force 16.8 N, RMS error 2.14 N against the 10 N target, in-band
+(+-1.5 N) 0.85, about 190 s of sim time. Runs vary a little (three other runs of the final configuration: RMS 1.6 to 1.9 N,
+in-band 0.86 to 0.91, peak 15.9 to 18.1 N, coverage 0.93 each time). Ground-truth force is the compliant tool tip's
+(`/ft_sensor/ground_truth_wrench`), the tool point comes from TF.
+
+What it took, beyond the MuJoCo lessons (wall octomap, tool roll, `dock_at_stroke_start`, `press_settle_s`, swath, stale
+coverage file, zero force target before disengage):
+
+- **The wall in MoveIt must be the whole wall.** With only the contact patch as an octomap, free-space moves (OMPL
+  `prime_continuity`) swung over the patch edge (z up to 2.7 m) and hit the real wall top at 684 N.
+- **`jtac_position_only`** (a launch argument, off by default). With both JTAC command interfaces (position and velocity),
+  gz_ros2_control drives the joints from the velocity feed-forward and ignores the position command (open loop), so a
+  moving reference was tracked far behind: the 0.01 m/s stroke ended 8 cm short, the dock 20 cm short, coverage 0.88.
+  With the position interface only the same pass reaches coverage 0.93. The cost: gz_ros2_control's position loop has a
+  gain of 0.1 /s (10 s time constant), so the arm settles slowly (the ready pose needs about 20 s; the calibration poses of
+  `contact_control_test.py` do not settle in its 5 s moves and fail, so it keeps the default). A gain of 10
+  (`position_proportional_gain`) makes the joints stiff and the contact bounces (8 kN peaks); the soft loop is part of
+  why the contact holds. Not fixed: a properly tuned joint model.
+- JTAC's Cartesian offset clamp (3 mm instead of the default 0.1 m) made no difference to this pass and is not used.
+- The tool roll is -90 degrees because the UR10e ready pose has the same roll as in MuJoCo; the generic 6-DOF profile
+  (smoke test pose, wrist roll -46.4 degrees) also ran end to end but its ACM only has adjacent pairs, and
+  OMPL-chosen configurations then collided in the manager's Cartesian planner in some runs, so the pass uses the UR10e.
 
 ## Limits
 
