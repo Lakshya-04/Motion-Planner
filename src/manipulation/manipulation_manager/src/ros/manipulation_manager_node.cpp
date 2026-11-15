@@ -139,7 +139,7 @@ public:
     // or "enforce" (do not run the plan from a stance the planner says cannot reach it).
     base_check_mode_ = this->declare_parameter<std::string>("base_check", "off");
     base_check_service_ = this->declare_parameter<std::string>(
-      "base_check_service", "/reachability_node/plan_stands");
+      "base_check_service", "/reachability/plan_stands");
     base_check_lift_min_ = this->declare_parameter<double>("base_check_lift_min_m", 0.0);
     base_check_lift_max_ = this->declare_parameter<double>("base_check_lift_max_m", 0.0);
     base_check_arm_mount_z_ = this->declare_parameter<double>("base_check_arm_mount_z_m", 0.0);

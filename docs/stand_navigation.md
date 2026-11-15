@@ -46,8 +46,8 @@ agrees, wall gap 0.803 m, arm deviation 0.0016, F/T change 0.49 N, no drift at t
   or shift the plan by the base pose, then run `run_manager_pass.sh` after the drive.
 - `NavigateThroughPoses`, a wall-plane servo for the last centimetres, localisation (odom only; the odom frame is the
   world frame, the base starts at the origin).
-- A reminder found on the way: `manipulation_manager`'s default `base_check_service` is `/reachability_node/plan_stands`,
-  but the node is named `reachability` (service `/reachability/plan_stands`); the script renames the node.
+- Found on the way and fixed: `manipulation_manager`'s default `base_check_service` was `/reachability_node/plan_stands`, but the
+  node is named `reachability` (service `/reachability/plan_stands`); the default now matches. The script still renames the node.
 
 ## Nav2 swap path
 
