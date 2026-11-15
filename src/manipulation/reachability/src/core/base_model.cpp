@@ -49,7 +49,12 @@ BaseModel loadBaseProfile(const std::string & path)
   m.name = b["name"] ? b["name"].as<std::string>() : "unnamed";
   if (!b["drive_type"]) {throw std::runtime_error(path + ": base.drive_type missing");}
   m.drive = driveFrom(b["drive_type"].as<std::string>());
-  m.can_strafe = b["can_strafe"] ? b["can_strafe"].as<bool>() : m.drive == DriveType::kOmni;
+  // Omni and four-wheel-steer bases strafe by default; diff and skid-steer bases cannot.
+  const bool strafing_drive = m.drive == DriveType::kOmni || m.drive == DriveType::kFourWheelSteer;
+  m.can_strafe = b["can_strafe"] ? b["can_strafe"].as<bool>() : strafing_drive;
+  if (m.can_strafe && !strafing_drive) {
+    throw std::runtime_error(path + ": a diff or skid base cannot strafe (can_strafe: true)");
+  }
   const YAML::Node fp = b["footprint"];
   if (!fp || !fp.IsSequence() || fp.size() < 3) {
     throw std::runtime_error(path + ": base.footprint needs at least 3 [x, y] points");
@@ -128,6 +133,11 @@ double travelTime(const BaseModel & base, const Stand & from, const Stand & to)
   const double dist = d.norm();
   const double turn_final = std::abs(wrap(to.yaw - from.yaw));
   if (base.can_strafe) {
+    // Omni wheels translate and spin together. Four-wheel steering crabs or spins but does not do
+    // both at once, so the two add up.
+    if (base.drive == DriveType::kFourWheelSteer) {
+      return dist / base.max_linear + turn_final / base.max_angular;
+    }
     return std::max(dist / base.max_linear, turn_final / base.max_angular);
   }
   if (dist < 1e-3) {return turn_final / base.max_angular;}

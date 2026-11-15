@@ -3,6 +3,9 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <string>
+
+#include <unistd.h>
 
 #include "reachability/core/base_model.hpp"
 
@@ -63,6 +66,17 @@ TEST(BaseModel, StrafingBeatsTurnDriveTurnAlongTheWall)
   EXPECT_GT(travelTime(diff, a, b), travelTime(omni, a, b));
 }
 
+TEST(BaseModel, FourWheelSteerCannotTranslateAndSpinAtOnce)
+{
+  BaseModel ws = box(0.8, 0.5, true);
+  ws.drive = DriveType::kFourWheelSteer;
+  const Stand a{{0.0, 0.0}, 0.0}, b{{0.0, 1.0}, kPi / 2};     // 1 m sideways and a quarter turn
+  EXPECT_NEAR(travelTime(ws, a, b), 1.0 + kPi / 2, 1e-9);
+  BaseModel omni = ws;
+  omni.drive = DriveType::kOmni;
+  EXPECT_NEAR(travelTime(omni, a, b), kPi / 2, 1e-9);        // the spin hides the 1 m slide
+}
+
 TEST(BaseModel, ADifferentialBaseReversesInsteadOfTurningAround)
 {
   const BaseModel diff = box(0.8, 0.5, false);
@@ -83,7 +97,7 @@ TEST(BaseModel, OrderStandsVisitsNeighboursFirst)
 
 TEST(BaseModel, ArmBaseHeightFollowsTheProfilesLiftMount)
 {
-  const auto dir = std::filesystem::temp_directory_path() / "base_model_test";
+  const auto dir = std::filesystem::temp_directory_path() / ("base_model_test_" + std::to_string(::getpid()));
   std::filesystem::create_directories(dir);
   const auto path = (dir / "mount.yaml").string();
   std::ofstream(path) << "base:\n  drive_type: skid\n  lift_mount_height_m: 0.39\n"
@@ -93,9 +107,27 @@ TEST(BaseModel, ArmBaseHeightFollowsTheProfilesLiftMount)
   EXPECT_NEAR(*armBaseHeightAtLiftZero(m), 0.39 + 0.8 + 0.02, 1e-12);
 }
 
+TEST(BaseModel, CanStrafeDefaultsToTheDriveTypeAndRejectsContradictions)
+{
+  const auto dir = std::filesystem::temp_directory_path() / ("base_model_test_" + std::to_string(::getpid()));
+  std::filesystem::create_directories(dir);
+  const std::string fp = "  footprint: [[-0.4, -0.2], [0.4, -0.2], [0.4, 0.2], [-0.4, 0.2]]\n";
+  auto load = [&](const std::string & drive, const std::string & strafe) {
+      const auto path = (dir / "strafe.yaml").string();
+      std::ofstream(path) << "base:\n  drive_type: " << drive << "\n" << strafe << fp;
+      return loadBaseProfile(path);
+    };
+  EXPECT_TRUE(load("4ws", "").can_strafe);
+  EXPECT_TRUE(load("omni", "").can_strafe);
+  EXPECT_FALSE(load("diff", "").can_strafe);
+  EXPECT_FALSE(load("skid", "").can_strafe);
+  EXPECT_THROW(load("diff", "  can_strafe: true\n"), std::runtime_error);
+  EXPECT_THROW(load("skid", "  can_strafe: true\n"), std::runtime_error);
+}
+
 TEST(BaseModel, LoadsAProfileAndRejectsBadOnes)
 {
-  const auto dir = std::filesystem::temp_directory_path() / "base_model_test";
+  const auto dir = std::filesystem::temp_directory_path() / ("base_model_test_" + std::to_string(::getpid()));
   std::filesystem::create_directories(dir);
   const auto good = (dir / "good.yaml").string();
   std::ofstream(good) << "base:\n  name: t\n  drive_type: diff\n  can_strafe: false\n"
@@ -134,5 +166,10 @@ TEST(BaseModel, EveryShippedBaseProfileLoads)
     ++n;
   }
   EXPECT_GE(n, 8U);
+}
+#else
+TEST(BaseModel, EveryShippedBaseProfileLoads)
+{
+  GTEST_SKIP() << "mobile_manipulator_description/config/profiles not found next to this package";
 }
 #endif

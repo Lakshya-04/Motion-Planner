@@ -62,8 +62,8 @@ double bestYaw(
   const BaseModel & base, const Eigen::Vector2d & arm_xy, const Eigen::Vector2d & wall_point,
   const Eigen::Vector2d & wall_normal, double * clearance = nullptr, int steps = 24);
 
-/// Time (s) to drive the base from one stand to the next. Strafing bases translate and turn
-/// together; the others turn toward the goal (or away from it, to reverse), drive, then turn to the
+/// Time (s) to drive the base from one stand to the next. Omni bases translate and turn
+/// together; four-wheel-steer bases crab or spin one after the other; the others turn toward the goal (or away from it, to reverse), drive, then turn to the
 /// final yaw.
 double travelTime(const BaseModel & base, const Stand & from, const Stand & to);
 
