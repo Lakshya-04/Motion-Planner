@@ -84,8 +84,11 @@ evaluation. The same conditioner then runs on simulated and real data, and the g
 | `payload_mass_kg`, `payload_cog_xyz`, `bias` | 0 | what calibration finds |
 
 The sensor's orientation (for the payload's weight) comes from TF at the message's stamp, falling back to the
-newest transform if that stamp is not there yet; the sensor-to-tool offset is looked up once (the sensor is
-rigid on the tool). A wrench with no TF is dropped and counted, never guessed.
+newest transform if that stamp is not there yet, but only if that transform is at most `max_tf_age` seconds
+(default 0.1) older than the wrench; a static transform never ages. Beyond that the wrench is dropped, so a
+stalled TF publisher stops the output instead of leaving it compensating with a frozen orientation. The
+sensor-to-tool offset is looked up once (the sensor is rigid on the tool). A wrench with no usable TF is
+dropped and counted, with a throttled warning, never guessed. `max_tf_age: 0` turns the limit off.
 
 **Calibrating.** With the arm still and nothing touching the tool, move to a pose and call
 `~/capture_pose`; repeat in at least four poses that point gravity in clearly different directions in the

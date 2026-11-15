@@ -231,6 +231,32 @@ TEST(WrenchConditionerNode, DropsAWrenchWithoutTfInsteadOfGuessing)
   EXPECT_GE(rig.node->dropped(), 1U);
 }
 
+TEST(WrenchConditionerNode, DropsAWrenchWhoseNewestTransformIsTooOld)
+{
+  Rig rig;     // max_tf_age default 0.1 s
+  const Mat3 r = rotX(0.5);
+  ASSERT_TRUE(rig.settle(r, true, rawFor(w(0, 0, -5, 0, 0, 0), r), w(0, 0, -5, 0, 0, 0)));
+  // the TF publisher stalls, the sensor keeps publishing
+  rig.spinFor(400ms);
+  const std::size_t before = rig.received;
+  for (int i = 0; i < 10; ++i) {
+    rig.publishRaw(rawFor(w(0, 0, -5, 0, 0, 0), r));
+    rig.spinFor(30ms);
+  }
+  EXPECT_EQ(rig.received, before);
+  EXPECT_GE(rig.node->staleTf(), 1U);
+}
+
+TEST(TfFreshEnough, LimitsTheAgeAndTreatsStaticAsFresh)
+{
+  using ft_conditioner::tfFreshEnough;
+  EXPECT_TRUE(tfFreshEnough(1'000'000'000, 950'000'000, 0.1));
+  EXPECT_FALSE(tfFreshEnough(1'000'000'000, 800'000'000, 0.1));
+  EXPECT_TRUE(tfFreshEnough(1'000'000'000, 1'200'000'000, 0.1));   // transform newer than the wrench
+  EXPECT_TRUE(tfFreshEnough(1'000'000'000, 0, 0.1));               // static transform
+  EXPECT_TRUE(tfFreshEnough(1'000'000'000, 1, 0.0));               // limit off
+}
+
 TEST(WrenchConditionerNode, IdentifiesPayloadAndBiasFromCapturedPoses)
 {
   // start with no payload known, a bias present on the sensor

@@ -52,6 +52,7 @@ WrenchConditionerNode::WrenchConditionerNode(const rclcpp::NodeOptions & options
   world_frame_ = declare_parameter<std::string>("world_frame", "base_footprint");
   tool_frame_ = declare_parameter<std::string>("tool_frame", "tcp_link");
   sensor_frame_param_ = declare_parameter<std::string>("sensor_frame", "");
+  max_tf_age_s_ = declare_parameter<double>("max_tf_age", 0.1);
   offset_from_tf_ = declare_parameter<bool>("tool_in_sensor_from_tf", true);
   const auto off_xyz = declare_parameter<std::vector<double>>("tool_in_sensor_xyz", {0.0, 0.0, 0.0});
   const auto off_rpy = declare_parameter<std::vector<double>>("tool_in_sensor_rpy", {0.0, 0.0, 0.0});
@@ -108,10 +109,15 @@ bool WrenchConditionerNode::sensorOrientation(
     r_world_sensor = toMat(tf_buffer_->lookupTransform(world_frame_, sensor_frame, stamp).transform.rotation);
     return true;
   } catch (const tf2::TransformException &) {
-    // The transform for this exact stamp is not there (yet): use the newest one rather than drop.
+    // The transform for this exact stamp is not there (yet): use the newest one, but only while it is
+    // recent. A stalled TF publisher must not leave us compensating gravity with a frozen orientation.
     try {
-      r_world_sensor = toMat(
-        tf_buffer_->lookupTransform(world_frame_, sensor_frame, tf2::TimePointZero).transform.rotation);
+      const auto t = tf_buffer_->lookupTransform(world_frame_, sensor_frame, tf2::TimePointZero);
+      if (!tfFreshEnough(stamp.nanoseconds(), rclcpp::Time(t.header.stamp).nanoseconds(), max_tf_age_s_)) {
+        ++stale_tf_;
+        return false;
+      }
+      r_world_sensor = toMat(t.transform.rotation);
       ++stamp_fallbacks_;
       return true;
     } catch (const tf2::TransformException &) {
@@ -150,8 +156,9 @@ void WrenchConditionerNode::onRaw(const geometry_msgs::msg::WrenchStamped::Share
   if (!sensorOrientation(sensor, rclcpp::Time(msg->header.stamp), r) || !toolOffset(sensor, off)) {
     ++dropped_;
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-      "no TF for '%s' (world '%s', tool '%s'): wrench dropped (%zu so far)", sensor.c_str(),
-      world_frame_.c_str(), tool_frame_.c_str(), dropped_);
+      "no usable TF for '%s' (world '%s', tool '%s'; a newest transform older than max_tf_age %.3f s "
+      "counts as none): wrench dropped (%zu so far, %zu for a stale transform)", sensor.c_str(),
+      world_frame_.c_str(), tool_frame_.c_str(), max_tf_age_s_, dropped_, stale_tf_);
     return;
   }
   force_core::ConditionerConfig cfg;

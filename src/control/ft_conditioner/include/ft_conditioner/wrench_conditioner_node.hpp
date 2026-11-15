@@ -8,13 +8,16 @@
 //
 // Frames come from TF: world <- sensor gives the sensor's orientation for the payload's weight, and
 // sensor <- tool is the lever arm and the tool axes. Where a simulator has no TF frame for the sensor,
-// give the tool offset as parameters instead (tool_in_sensor_from_tf:=false).
+// give the tool offset as parameters instead (tool_in_sensor_from_tf:=false). If the transform at a
+// wrench's stamp is not there yet, the newest one is used only while it is at most max_tf_age seconds
+// older than the wrench; beyond that (TF publisher stalled) the wrench is dropped.
 //
 // Calibration: with the arm still and no contact, call ~/capture_pose in at least four poses that point
 // gravity in clearly different directions in the sensor frame, then ~/identify. The node fits payload
 // mass, centre of gravity and bias, starts using them, and returns a YAML snippet for the parameters.
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -31,6 +34,14 @@
 namespace ft_conditioner
 {
 
+/// True when a transform stamped `tf_stamp_ns` may stand in for a wrench stamped `msg_stamp_ns`.
+/// `max_age_s <= 0` disables the limit; a zero stamp is a static transform, which never ages.
+inline bool tfFreshEnough(std::int64_t msg_stamp_ns, std::int64_t tf_stamp_ns, double max_age_s)
+{
+  if (max_age_s <= 0.0 || tf_stamp_ns == 0) {return true;}
+  return static_cast<double>(msg_stamp_ns - tf_stamp_ns) * 1e-9 <= max_age_s;
+}
+
 class WrenchConditionerNode : public rclcpp::Node
 {
 public:
@@ -38,6 +49,7 @@ public:
 
   std::size_t published() const {return published_;}
   std::size_t dropped() const {return dropped_;}
+  std::size_t staleTf() const {return stale_tf_;}
   std::size_t samples() const;
   force_core::ConditionerConfig config() const;
 
@@ -66,7 +78,8 @@ private:
   force_core::Mat3 last_r_;
   bool have_last_{false};
 
-  std::size_t published_{0}, dropped_{0}, stamp_fallbacks_{0};
+  double max_tf_age_s_{0.1};
+  std::size_t published_{0}, dropped_{0}, stamp_fallbacks_{0}, stale_tf_{0};
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr sub_;
