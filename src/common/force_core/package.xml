@@ -12,8 +12,8 @@
     implementation_plan_manipulation_architecture.md's roadmap (P2.1/P2.2): a genuine
     cross-tree consumer at the platform tier (compliant_trajectory_controller,
     a fused JTC+admittance controller prototype) needed this logic, and platform
-    packages may not depend on capabilities orchestration packages -- see CLAUDE.md's
-    core/adapter split and dependency-direction rule. force_segment_expander stayed behind
+    packages may not depend on capabilities orchestration packages -- see
+    docs/package_layout.md's core/adapter split and dependency direction. force_segment_expander stayed behind
     in manipulation_manager: unlike the FSM/sequencer, it depends on manager-specific
     types (MotionSegmentSpec, CoverageSource) and was never designed to be portable.
   </description>

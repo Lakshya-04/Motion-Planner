@@ -64,7 +64,7 @@ public:
     std::string kinematics_base{"base_link"};      ///< Must not include the compliant joints' root
                                                     ///< above the chain -- see kinematics.base note
                                                     ///< in force_control_backend_admittance_vs_diffik.md.
-    std::string kinematics_tip{"link_tcp"};        ///< Controlled tool point (CLAUDE.md convention).
+    std::string kinematics_tip{"link_tcp"};        ///< Controlled tool point (docs/ft_sensing.md).
     double dt_s{0.01};                             ///< AdmittanceRule tick period (100 Hz default).
   };
 

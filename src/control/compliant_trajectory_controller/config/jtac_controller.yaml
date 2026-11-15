@@ -37,7 +37,8 @@ combined_arm_lift_controller:
       - velocity
 
     # link_tcp, not link6: this test's xacro render includes add_other_geometry (the mop tool),
-    # so link_tcp is the real controlled point -- CLAUDE.md's own convention, and the same choice
+    # so link_tcp is the real controlled point -- the repo's tool-point convention (docs/ft_sensing.md,
+    # docs/design_principles.md), and the same choice
     # jtac_compliance_demo.launch.py's real-robot branch already made for the same reason.
     kinematics:
       plugin_name: kinematics_interface_kdl/KinematicsInterfaceKDL
@@ -72,8 +73,8 @@ combined_arm_lift_controller:
         force: 0.0
 
     # Diagnostic gains -- NOT mop's shipped production values. Only Z selected: a push along the
-    # tool's own local Z is the wall-contact case (CLAUDE.md/wall_penetration_check.hpp's "tool
-    # +Z = outward wall normal" convention).
+    # tool's own local Z is the wall-contact case (wall_penetration_check.hpp's "tool +Z = outward wall
+    # normal" convention).
     #
     # Mass is 4x T4a's/T6's own proven-stable diagnostic values (X/Y: 4.0, Z: 2.0), NOT the same
     # numbers -- found the hard way, live, under this real controller: T4a/T6 only ever validate
