@@ -113,7 +113,10 @@ The generic 6-DOF arm gives the same picture (KDL excess 0.65 / 0.29 with 4 / 2 
 0.00 with 1 / 0). For targets within 0.4 rad of the seed all three behave (KDL and TRAC-IK 20/20, no
 excess), so the difference only shows on larger moves, where KDL can return a far or wrapped branch.
 
-- **Default: `trac_ik` with `Distance`** (it prefers the seed's branch). `kdl` ships with MoveIt and
+- **Default: `trac_ik`**, `Distance` on `arm` (it prefers the seed's branch) and `Speed` on `lift_arm`:
+  `Distance` uses the whole timeout on every call, which is 0.1 s per waypoint of a Cartesian pass on the
+  7-DOF group. The table above was measured with `Distance` on both; `Speed` on `lift_arm` was not
+  measured, and its branch preference comes from `ik_seeds:=N` (`SeedPreferringIk`, off by default). `kdl` ships with MoveIt and
   stays available as `ik:=kdl`. The plugin is an `exec_depend`, so the Docker deps layer installs it.
 - `pick_ik` is kept as an opt-in config but performed poorly here (tolerances / scales untuned for
   these poses); do not use it without tuning.
