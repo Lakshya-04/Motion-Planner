@@ -465,6 +465,9 @@ bool MoveItPlanningBackend::seedingConfigFromGroup(
     filled.upper_limits.push_back(
       bounded ? bounds.max_position_ : std::numeric_limits<double>::infinity());
   }
+  if (filled.wrap_joint.size() != group->getVariableCount()) {
+    return false;  // mimic variables make seeds longer than the active joint list: skip seed preferring
+  }
   config = std::move(filled);
   return true;
 }
