@@ -15,7 +15,8 @@ EXPECTED = {
     'mock': ['mock_components/GenericSystem'],
     # jtac_mock adds the F/T bridge (a scripted wrench stands in for a sensor)
     'jtac_mock': ['ft_bridge_hardware/FtBridgeHardwareInterface', 'mock_components/GenericSystem'],
-    'mujoco': ['sim_mujoco/MujocoSystemInterface'],
+    # mujoco adds a second F/T bridge for the conditioned wrench (sensor ft_sensor_tcp)
+    'mujoco': ['ft_bridge_hardware/FtBridgeHardwareInterface', 'sim_mujoco/MujocoSystemInterface'],
     'gazebo': ['gz_ros2_control/GazeboSimSystem'],
 }
 
@@ -55,3 +56,11 @@ def test_simulated_backends_export_the_raw_force_torque_sensor(hardware):
     assert xml.count('<sensor name="ft_sensor">') == 1
     for interface in ('force.x', 'force.y', 'force.z', 'torque.x', 'torque.y', 'torque.z'):
         assert f'<state_interface name="{interface}"' in xml
+
+
+def test_mujoco_exports_the_conditioned_sensor_next_to_the_raw_one():
+    xml = _render('mujoco')
+    assert xml.count('<sensor name="ft_sensor_tcp">') == 1
+    assert '<param name="source_topic">/ft_conditioner/wrench_conditioned</param>' in xml
+    # the raw name stays unique: the conditioned sensor must not reuse it
+    assert xml.count('<sensor name="ft_sensor">') == 1

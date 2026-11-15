@@ -9,7 +9,11 @@
        hardware:=mujoco     sim_mujoco/MujocoSystemInterface: the same joints as jtac_mock (position and
                             velocity command) stepped by MuJoCo, plus the tool force/torque as the sensor
                             `ft_sensor` in the same system block. The MJCF path comes from the
-                            environment variable SIM_MUJOCO_MJCF (see docs/sim_mujoco.md).
+                            environment variable SIM_MUJOCO_MJCF (see docs/sim_mujoco.md). A second
+                            block, `ft_conditioned_bridge`, exports the sensor `ft_sensor_tcp`: the
+                            conditioned contact wrench (ft_conditioner node, tool frame), read by
+                            ft_bridge_hardware from /ft_conditioner/wrench_conditioned; all zero until
+                            the conditioner runs. JTAC reads it when the launch starts the conditioner.
        hardware:=gazebo     gz_ros2_control/GazeboSimSystem with the jtac_mock joint interfaces plus
                             effort state, the F/T sensor `ft_sensor` as a gz force_torque sensor on
                             tool_mount_joint, and the base pinned to the world (package sim_gazebo,
@@ -81,6 +85,22 @@
       </xacro:if>
     </ros2_control>
     <xacro:if value="${hardware == 'gazebo'}"><xacro:sim_gazebo_tags/></xacro:if>
+    <xacro:if value="${hardware == 'mujoco'}">
+      <ros2_control name="ft_conditioned_bridge" type="sensor">
+        <hardware>
+          <plugin>ft_bridge_hardware/FtBridgeHardwareInterface</plugin>
+          <param name="source_topic">/ft_conditioner/wrench_conditioned</param>
+        </hardware>
+        <sensor name="ft_sensor_tcp">
+          <state_interface name="force.x"/>
+          <state_interface name="force.y"/>
+          <state_interface name="force.z"/>
+          <state_interface name="torque.x"/>
+          <state_interface name="torque.y"/>
+          <state_interface name="torque.z"/>
+        </sensor>
+      </ros2_control>
+    </xacro:if>
     <xacro:if value="${hardware == 'jtac_mock'}">
       <ros2_control name="ft_sensor_bridge" type="sensor">
         <hardware>

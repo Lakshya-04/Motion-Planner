@@ -12,6 +12,7 @@ xacro, next to `mock` and `jtac_mock`. Package: [`src/simulation/sim_mujoco`](..
 | `sim_mujoco.wall_world` | `wall_scene.json` / `scene_model` scene / cuRobo world to MuJoCo geoms. |
 | `launch/sim_mujoco.launch.py` | profile -> xacro -> MJCF -> controller_manager + plugin + controllers. Headless. |
 | `scripts/smoke_test.py`, `run_smoke.sh` | trajectory-following and wall-contact smoke test. |
+| `scripts/contact_test.py`, `run_contact.sh` | contact-controlled test of the full force path (conditioner, bridge, JTAC). |
 
 ## Build
 
@@ -37,6 +38,7 @@ tests also run in the `sim` image (it has the `mujoco-core` 4.0.1 Python package
 ros2 launch sim_mujoco sim_mujoco.launch.py profile:=ur10e_telescopic \
     scene:=$(ros2 pkg prefix sim_mujoco)/share/sim_mujoco/data/smoke_wall_scene.json
 ros2 launch sim_mujoco sim_mujoco.launch.py controller:=jtac     # compliant controller
+ros2 launch sim_mujoco sim_mujoco.launch.py controller:=jtac conditioner:=true   # + ft_conditioner, JTAC on the conditioned wrench
 ros2 launch sim_mujoco sim_mujoco.launch.py viewer:=true         # optional, needs a display
 ros2 run sim_mujoco generate_mjcf --profile ur10e_telescopic --out /tmp/mj --scene wall_scene.json \
     --scene-offset 0.6 0 0 0                                    # model only, no ROS graph
@@ -135,9 +137,84 @@ past the wall gives a negative tool-z force of a few hundred N at most, mostly a
 the raw wrench equals ground truth plus payload plus lever arm (`tau_s = tau_tcp + r x F + tau_payload`,
 `r = (0, 0, tcp_z)`) within 8 %; the force goes away on retreat. Last run with `jtc`: all checks pass
 (Fz = -208 N, raw/truth difference 0.05 N, 0.00 N m). With `jtac` (no admittance axes selected, so
-it passes the reference through) the same run passes except the retreat check (13.8 N residual after
-1.5 s). The poses were solved with a damped-least-squares IK on the generated model; they are
+it passes the reference through) the same run passes too; the retreat check waits for the force to vanish
+(quiet for 0.5 s, 8 s allowed) and prints how long that took: 0 s with `jtc`, about 3 s with `jtac` (see
+"Retreat" below). The poses were solved with a damped-least-squares IK on the generated model; they are
 UR10e-specific.
+
+### Retreat: why JTAC leaves a residual for about 3 s
+
+Earlier versions of the smoke test looked 1.5 s after the retreat trajectory ended and, with `jtac`, found
+13.8 N still on the tool. It is not the simulator. Measured over the retreat (press 5 cm past the wall, then
+back to a pose 3 cm short of it; wall plane x = 0.98 m, tool axis +x; the JTAC `~/debug_offset` topic gives
+the reference and the commanded tool position):
+
+| t after retreat start | reference x | commanded x (reference + compliance offset) | ground-truth Fz |
+|---|---|---|---|
+| 0 s | 1.030 | 1.127 | -47 N |
+| 4 s (trajectory ends) | 0.950 | 1.022 | -22 N |
+| 5 s | 0.950 | 1.008 | -14 N |
+| 6 s | 0.950 | 0.996 | -12 N |
+| 7 s | 0.950 | 0.983 | 0 |
+| 8 s | 0.950 | 0.971 | 0 |
+
+- The force is not simulator hysteresis: with `jtc` the same retreat gives 0 N at once, and the force goes
+  to exactly zero (not a tail) the moment the commanded x crosses the wall plane (0.98 m, at about 7 s).
+  There is no tare (`ft_tare` off), and the tool is not stuck: the joints follow the command.
+- It is the JTAC compliance offset. The ros2_controllers admittance rule integrates a mass-spring-damper on
+  the tracking error and only masks the *force* by `selected_axes`; the spring acts on every axis. While the
+  wall blocked the tool the rule accumulated a 0.10 m offset (commanded 10 cm past the reference), which
+  is also why the push is 50 N and not the 208 N of `jtc`. When the reference leaves, the offset relaxes
+  with the over-damped time constant D/K (about 2 s for the Z gains of `jtac_controller.yaml`), so the
+  commanded pose is still inside the wall about 3 s after the trajectory ended.
+- Consequence for tests and for coverage sequencing: after a contact segment, wait for the offset to relax
+  (about 3 time constants) or reset it before relying on "no contact", and do not treat a JTAC retreat as
+  instantaneous. With a force target and the axis engaged (contact test below) the offset is small, and the
+  force is released as the trajectory ends (4.1 s after its start).
+- Not changed in the simulator: nothing in `sim_mujoco` was wrong. A fix would be in JTAC (reset the
+  admittance state on disengage); left alone here.
+
+## Contact-controlled test (full force path)
+
+`scripts/run_contact.sh` launches `controller:=jtac conditioner:=true` with the smoke wall and runs
+`scripts/contact_test.py`. The chain:
+
+```
+/sim_mujoco/ft_raw (sensor frame tool_mount_link, raw, payload weight included)
+  -> ft_conditioner (sign +1, tool = tcp_link and sensor orientation from TF, payload from its own calibration)
+  -> /ft_conditioner/wrench_conditioned (tcp_link, tool axes)
+  -> ft_bridge_hardware, sensor `ft_sensor_tcp` (second ros2_control block `ft_conditioned_bridge` of the
+     mujoco hardware; the name `ft_sensor` is the raw sim sensor), biased by ~/target_wrench
+  -> JTAC (ft_sensor.name ft_sensor_tcp, frame tcp_link, control frame tcp_link)
+```
+
+What the test does: (1) calibrates the conditioner with its own services, six free-space wrist poses
+(`capture_pose` each, `identify`) and compares the fit with the tool inertial of the URDF; (2) approaches the
+wall (pose 3 cm short), publishes `fz = -10 N` on the bridge's `~/target_wrench`, engages the tool-Z axis
+(`admittance.selected_axes` through the controller's parameters), and presses with the reference on the wall
+surface; (3) holds 10 s and compares the steady force with `/sim_mujoco/ft_ground_truth` and the conditioned
+wrench with the ground truth sample by sample (same stamp); (4) disengages (axes off, target 0) and retreats.
+Last run (MuJoCo 4.0.1, 100 Hz controller, JTAC gains of `jtac_controller.yaml`):
+
+| | result |
+|---|---|
+| identified payload | 0.5012 kg (known 0.5), centre of gravity (0, 0, 0.7 mm) (known 0), bias < 2e-4; fit residual 0 |
+| conditioned wrench in free space, after calibration | 0.000 N, 0.000 N m (uncalibrated it reads the 4.91 N payload) |
+| steady contact force, target 10 N | ground truth 10.13 N, std 0.03 N over 10 s (tolerance +-1.5 N); lateral 0.18 N, 0.05 N |
+| conditioned minus ground truth, 1002 samples | force: mean 0.000, rms <= 0.001 N, max 0.004 N; torque: rms <= 0.0005 N m, max 0.001 N m (the script checks rms against a loose tolerance and the maxima against 0.05 N and 0.02 N m, `--err-force-max` / `--err-torque-max`) |
+| release after disengage | measured from a trace sampled during the retreat: the last sample at or above 0.5 N is at the end of the 4 s trajectory (4.1 s after its start), then 0.000 N; the check needs 0.5 s of quiet after it, not a single low sample |
+
+The steady force depends on where the reference is, because the admittance spring pulls toward it:
+`F = target + K * d` with K = 300 N/m (Z) and `d` the reference depth past the surface. Measured for a 10 N target
+(reference depths from a joint-space interpolation between the two poses, so approximate): 0.6 cm short of
+the surface gave 8.3 N, on the surface 10.1 N, 1.2 cm past 13.2 N, 3.4 cm past 20.5 N, 5 cm past 25.5 N, a
+slope of about 306 N/m. A reference
+inside the wall therefore over-presses by K*d; coverage references sit on the surface.
+
+The conditioner errors are near zero because the simulated sensor is noise-free and rigid and the
+calibration is exact; the test pins the sign, the frame handling, the lever arm (TF `tool_mount_link` ->
+`tcp_link`, 0.165 m) and the payload compensation. The contact here is almost purely along the tool axis,
+so the lever-arm torque is small (0.165 m x 0.2 N); a lateral-load test would stress it more.
 
 Tests: `colcon test --packages-select sim_mujoco` (gtests need the SDK; Python tests skip what they
 lack), or `python -m pytest src/simulation/sim_mujoco/test` in the `sim` image.
