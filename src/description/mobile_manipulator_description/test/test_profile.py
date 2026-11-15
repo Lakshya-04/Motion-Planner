@@ -73,3 +73,31 @@ def test_home_must_cover_every_joint():
     del data['home']['arm_joint7']
     with pytest.raises(ProfileError, match='home'):
         parse_profile(data)
+
+
+def _panda():
+    return yaml.safe_load((PKG / 'config' / 'profiles' / 'panda_telescopic.yaml').read_text())
+
+
+def test_more_arm_joints_than_the_xacro_unrolls_are_rejected():
+    data = _panda()
+    names = [f'arm_joint{i}' for i in range(1, 14)]
+    data['joints']['arm'] = names
+    data['arm']['dof'] = 13
+    data['home'] = {n: 0.0 for n in names + [data['joints']['lift']]}
+    with pytest.raises(ProfileError, match='at most 12'):
+        parse_profile(data)
+
+
+def test_mimic_joint_must_not_repeat_or_overlap():
+    data = _panda()
+    data['joints']['mimic'] = ['arm_joint1']
+    with pytest.raises(ProfileError, match='mimic'):
+        parse_profile(data)
+
+
+def test_non_numeric_home_value_names_the_profile():
+    data = _panda()
+    data['home']['arm_joint1'] = 'up'
+    with pytest.raises(ProfileError, match='home value'):
+        parse_profile(data, 'broken')

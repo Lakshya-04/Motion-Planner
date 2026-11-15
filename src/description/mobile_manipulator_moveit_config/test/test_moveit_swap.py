@@ -74,7 +74,8 @@ def test_fk_ik_through_moveit(name):
             assert got['tip'] == p.tcp_link
             # IK from a nearby seed must recover the pose for most samples.
             assert int(got['ik_ok']) >= 12, out.stdout
-            assert float(got['max_pose_error']) < 0.01, out.stdout
+            assert float(got['max_pos_error_m']) < 0.01, out.stdout
+            assert float(got['max_rot_error_rad']) < 0.01, out.stdout
 
 
 def test_profile_given_as_a_path_is_used_for_the_urdf_and_srdf(tmp_path):

@@ -16,6 +16,7 @@ import yaml
 
 DEFAULT_PROFILE = 'ur10e_telescopic'
 _DEFAULT_GROUPS = {'arm': 'arm', 'whole_body': 'lift_arm', 'tool': 'tool'}
+MAX_ARM_JOINTS = 12   # the ros2_control and SRDF xacro files unroll one entry per joint up to this
 _REQUIRED_FRAMES = ('world_base', 'base', 'arm_base', 'flange', 'tool_mount', 'tcp')
 
 
@@ -128,11 +129,20 @@ def parse_profile(data, name='profile'):
     if len(set(arm_joints + ([lift_joint] if lift_joint else []))) != len(
             arm_joints) + (1 if lift_joint else 0):
         raise ProfileError(f'{name}: duplicate joint names')
+    if len(arm_joints) > MAX_ARM_JOINTS:
+        raise ProfileError(f'{name}: {len(arm_joints)} arm joints, at most {MAX_ARM_JOINTS} are supported')
+    mimic = list(joints.get('mimic') or [])
+    if any(j in arm_joints or j == lift_joint for j in mimic) or len(set(mimic)) != len(mimic):
+        raise ProfileError(f'{name}: joints.mimic must be unique and not an arm or lift joint '
+                           f'(got {mimic})')
     arm_section = data.get('arm') or {}
-    if 'dof' in arm_section and int(arm_section['dof']) != len(arm_joints):
-        raise ProfileError(
-            f"{name}: arm.dof={arm_section['dof']} but joints.arm lists {len(arm_joints)}")
-    home = {k: float(v) for k, v in (data.get('home') or {}).items()}
+    try:
+        dof = int(arm_section['dof']) if 'dof' in arm_section else len(arm_joints)
+        home = {k: float(v) for k, v in (data.get('home') or {}).items()}
+    except (TypeError, ValueError) as err:
+        raise ProfileError(f'{name}: arm.dof or a home value is not a number ({err})') from err
+    if dof != len(arm_joints):
+        raise ProfileError(f'{name}: arm.dof={dof} but joints.arm lists {len(arm_joints)}')
     missing_home = [j for j in ([lift_joint] if lift_joint else []) + arm_joints if j not in home]
     if missing_home:
         raise ProfileError(f'{name}: home pose misses joints {missing_home}')
@@ -142,7 +152,7 @@ def parse_profile(data, name='profile'):
         name=name, robot_name=data['robot'].get('name', 'mobile_manipulator'),
         xacro_args={k: str(v) for k, v in xacro_args.items()}, frames=dict(frames),
         lift_joint=lift_joint, arm_joints=arm_joints,
-        mimic_joints=list(joints.get('mimic') or []), home=home, groups=groups,
+        mimic_joints=mimic, home=home, groups=groups,
         controller_family=str(arm_section.get(
             'controller_family', 'ur' if str(xacro_args['arm']).startswith('ur') else xacro_args['arm'])),
         raw=data)

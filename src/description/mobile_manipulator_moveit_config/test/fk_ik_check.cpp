@@ -4,7 +4,7 @@
 //   fk_ik_check <urdf-file> <srdf-file> <group> [samples]
 //
 // Output, one key=value line each (parsed by test_moveit_swap.py):
-//   dof=<n>   joints=<a,b,...>   tip=<link>   ik_ok=<n>   samples=<n>   max_pose_error=<m>
+//   dof=<n>   joints=<a,b,...>   tip=<link>   ik_ok=<n>   samples=<n>   max_pos_error_m=<m>   max_rot_error_rad=<rad>
 // Each sample draws a random state inside the joint limits (collision not considered), takes the
 // tip pose by FK, then solves IK for that pose from a seed perturbed by 0.1 rad and compares the
 // FK of the solution to the target pose.
@@ -18,6 +18,7 @@
 
 #include "moveit/robot_model_loader/robot_model_loader.hpp"
 #include "moveit/robot_state/robot_state.hpp"
+#include "random_numbers/random_numbers.h"
 #include "rclcpp/rclcpp.hpp"
 
 namespace
@@ -78,9 +79,10 @@ int main(int argc, char ** argv)
 
   moveit::core::RobotState state(model);
   int ok = 0;
-  double max_err = 0.0;
+  double max_pos = 0.0, max_rot = 0.0;
+  random_numbers::RandomNumberGenerator rng(42);   // fixed seed: the same samples every run
   for (int i = 0; i < samples; ++i) {
-    state.setToRandomPositions(jmg);
+    state.setToRandomPositions(jmg, rng);
     state.update();
     const Eigen::Isometry3d target = state.getGlobalLinkTransform(tip);
     std::vector<double> q;
@@ -94,10 +96,12 @@ int main(int argc, char ** argv)
     const Eigen::Isometry3d got = seeded.getGlobalLinkTransform(tip);
     const double pos = (got.translation() - target.translation()).norm();
     const double rot = Eigen::AngleAxisd(got.rotation().transpose() * target.rotation()).angle();
-    max_err = std::max(max_err, std::max(pos, rot));
+    max_pos = std::max(max_pos, pos);
+    max_rot = std::max(max_rot, rot);
     ++ok;
   }
-  std::cout << "samples=" << samples << "\nik_ok=" << ok << "\nmax_pose_error=" << max_err << "\n";
+  std::cout << "samples=" << samples << "\nik_ok=" << ok << "\nmax_pos_error_m=" << max_pos
+            << "\nmax_rot_error_rad=" << max_rot << "\n";
   rclcpp::shutdown();
   return 0;
 }
