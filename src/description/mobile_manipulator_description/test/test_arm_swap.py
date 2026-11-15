@@ -153,3 +153,74 @@ def test_arm_with_other_lifts_and_bases(name, lift, base):
     assert state.get('group') == p.whole_body_group
     control = ET.fromstring(_urdf(p, lift=lift, base=base, hardware='mock')).find('ros2_control')
     assert [j.get('name') for j in control.findall('joint')] == expected
+
+
+def _rpy(r, p, y):
+    import numpy as np
+    cr, sr, cp, sp, cy, sy = np.cos(r), np.sin(r), np.cos(p), np.sin(p), np.cos(y), np.sin(y)
+    return np.array([[cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+                     [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+                     [-sp, cp * sr, cp * cr]])
+
+
+def _link_poses_at_zero(root):
+    """World (R, p) of every link with all joints at 0."""
+    import numpy as np
+    joints = {j.find('child').get('link'): j for j in root.findall('joint')}
+    poses = {}
+
+    def pose(link):
+        if link not in poses:
+            if link not in joints:
+                poses[link] = (np.eye(3), np.zeros(3))
+            else:
+                j = joints[link]
+                pr, pp = pose(j.find('parent').get('link'))
+                o = j.find('origin')
+                xyz = [float(v) for v in (o.get('xyz', '0 0 0') if o is not None else '0 0 0').split()]
+                rpy = [float(v) for v in (o.get('rpy', '0 0 0') if o is not None else '0 0 0').split()]
+                poses[link] = (pr @ _rpy(*rpy), pp + pr @ np.array(xyz))
+        return poses[link]
+
+    for link in list(joints):
+        pose(link)
+    return poses
+
+
+def test_panda_collision_cylinders_lie_on_the_kinematic_chain():
+    """Every joint-to-joint segment of the Panda chain is covered by a collision cylinder, and no
+    cylinder sticks out of the chain (the arm is built from primitives, so a wrong axis or offset
+    leaves a segment without geometry and adds a phantom bar elsewhere)."""
+    import numpy as np
+    root = ET.fromstring(_urdf(load_profile('panda_telescopic')))
+    poses = _link_poses_at_zero(root)
+    links = [f'arm_link{i}' for i in range(1, 8)]
+    cylinders = []   # (end a, end b, radius) in world
+    for name in links:
+        rot, pos = poses[name]
+        for c in root.find(f"link[@name='{name}']").findall('collision'):
+            cyl = c.find('geometry/cylinder')
+            o = c.find('origin')
+            xyz = np.array([float(v) for v in o.get('xyz', '0 0 0').split()])
+            r_c = _rpy(*[float(v) for v in o.get('rpy', '0 0 0').split()])
+            half = float(cyl.get('length')) / 2 * (rot @ r_c @ np.array([0, 0, 1.0]))
+            centre = pos + rot @ xyz
+            cylinders.append((centre - half, centre + half, float(cyl.get('radius'))))
+
+    def dist_to_segment(p, a, b):
+        t = np.clip(np.dot(p - a, b - a) / max(np.dot(b - a, b - a), 1e-12), 0.0, 1.0)
+        return np.linalg.norm(p - (a + t * (b - a)))
+
+    chain = ['arm_base_link', *links, 'arm_flange_link']
+    segments = [(poses[a][1], poses[b][1]) for a, b in zip(chain, chain[1:])]
+    for a, b in segments:
+        if np.linalg.norm(b - a) < 1e-6:
+            continue
+        for s in np.linspace(0.0, 1.0, 11):
+            p = a + s * (b - a)
+            assert any(dist_to_segment(p, ea, eb) <= r + 1e-6 for ea, eb, r in cylinders), \
+                f'segment {a} -> {b} is not covered at {p}'
+    for ea, eb, _ in cylinders:
+        for end in (ea, eb):
+            assert min(dist_to_segment(end, a, b) for a, b in segments) < 0.1, \
+                f'cylinder end {end} is off the kinematic chain'
