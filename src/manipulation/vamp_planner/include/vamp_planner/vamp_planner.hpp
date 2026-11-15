@@ -25,6 +25,10 @@ struct Options
   double nominal_joint_speed{1.0};   ///< rad/s used to stamp the result; real timing is a later stage.
   bool simplify{true};               ///< Shortcut + B-spline the raw path.
   bool require_world{false};         ///< Refuse to plan until setWorld() was called.
+  /// Frame the robot is planned in. When set, updateWorldGeometry() rejects an update whose
+  /// frame_id is set to anything else (no transform is available here, so it cannot be converted).
+  /// Empty: the update's frame is trusted to be the planning base frame.
+  std::string base_frame;
 };
 
 /// Free-space planner and collision checker over one compiled-in VAMP robot.

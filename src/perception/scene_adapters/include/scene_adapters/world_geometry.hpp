@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,10 @@ struct WorldGeometryOptions
   double obstacle_voxel{0.05};          ///< Cube size for cloud / mesh / voxel obstacles (m).
   size_t max_obstacle_boxes{2000};      ///< Cap on boxes made from one object; the cube grows to fit.
   bool unknown_voxels_occupied{false};  ///< Treat kVoxelUnknown cells as occupied.
+  /// Pose of another frame in the scene frame (scene_T_frame), keyed by frame id. An object whose
+  /// own frame_id is set and differs from the scene frame is transformed with its entry; without
+  /// one it is skipped and reported, never placed as if it were in the scene frame.
+  std::map<std::string, scene_model::Transform> frame_to_scene;
 };
 
 struct ConversionReport
@@ -36,8 +41,9 @@ struct ConversionReport
   std::vector<std::string> coarsened;     ///< Objects whose obstacle cubes grew to respect the cap.
 };
 
-/// All objects are taken as already expressed in the scene's frame (objects whose frame differs
-/// are not transformed, same assumption as SceneModel::bounds()).
+/// An object with an empty frame_id (or the scene's own) is in the scene frame. One in another
+/// frame is moved into the scene frame with `options.frame_to_scene`, or skipped with an entry in
+/// `report->skipped` when no transform is given.
 motion_planner::WorldGeometryUpdate toWorldGeometry(
   const scene_model::SceneModel & scene, const WorldGeometryOptions & options = {},
   ConversionReport * report = nullptr);

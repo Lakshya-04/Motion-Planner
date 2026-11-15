@@ -156,6 +156,13 @@ mp::PlanningResult CuroboClientPlanner::plan(const mp::PlanningRequest & request
 
 bool CuroboClientPlanner::setWorld(const mp::WorldGeometryUpdate & world, std::string * message)
 {
+  if (!impl_->options.base_frame.empty() && !world.frame_id.empty() && world.frame_id != impl_->options.base_frame) {
+    if (message) {
+      *message = "world frame '" + world.frame_id + "' differs from the robot base frame '" +
+        impl_->options.base_frame + "' and cuRobo cannot transform it";
+    }
+    return false;
+  }
   auto req = std::make_shared<SetWorld::Request>();
   for (const auto & b : world.boxes) {
     curobo_bridge_msgs::msg::Box box;

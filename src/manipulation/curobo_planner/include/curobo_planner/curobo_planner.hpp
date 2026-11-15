@@ -23,6 +23,10 @@ struct Options
   std::string node_name{"/curobo_planner"};  ///< Name of the cuRobo planner node (its services' prefix).
   double wait_for_service_sec{5.0};
   double timeout_sec{30.0};                  ///< Per-call deadline; the first plan can be slow.
+  /// The robot's base frame. When set, setWorld() / updateWorldGeometry() reject an update whose
+  /// frame_id is set to anything else (the node cannot transform it). Empty: the update's frame is
+  /// trusted to be the base frame.
+  std::string base_frame;
 };
 
 class CuroboClientPlanner : public motion_planner::Planner, public motion_planner::ScenePort

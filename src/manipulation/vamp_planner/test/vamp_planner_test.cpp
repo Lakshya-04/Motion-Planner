@@ -108,6 +108,23 @@ TEST(VampPlanner, PointCloudWorldBlocksTheArm)
   EXPECT_TRUE(p.collision(probe).collision_free);
 }
 
+TEST(VampPlanner, RejectsAWorldInAnotherFrame)
+{
+  Options o;
+  o.base_frame = "base_link";
+  VampPlanner planner{o};
+  mp::WorldGeometryUpdate w;
+  w.frame_id = "map";
+  w.boxes.push_back(box(-0.11, 0.64, 0.9, 0.2, 0.2, 0.8));
+  std::string error;
+  EXPECT_FALSE(planner.updateWorldGeometry(w, error));
+  EXPECT_NE(error.find("map"), std::string::npos);
+  EXPECT_FALSE(planner.hasWorld());           // nothing was placed
+  w.frame_id = "base_link";
+  EXPECT_TRUE(planner.updateWorldGeometry(w, error));
+  EXPECT_TRUE(planner.hasWorld());
+}
+
 TEST(VampPlanner, IsAScenePortToo)
 {
   VampPlanner planner{Options{}};

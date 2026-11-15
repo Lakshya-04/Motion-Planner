@@ -229,7 +229,19 @@ mp::WorldGeometryUpdate toWorldGeometry(
     rep.approximated.push_back("obstacle_voxel must be > 0, using " + std::to_string(defaults.obstacle_voxel));
   }
 
-  for (const auto & o : scene.objects()) {
+  for (const auto & original : scene.objects()) {
+    sm::SceneObject o = original;
+    if (!o.frame_id.empty() && o.frame_id != scene.frameId()) {
+      const auto t = options.frame_to_scene.find(o.frame_id);
+      if (t == options.frame_to_scene.end()) {
+        rep.skipped.push_back(
+          o.id + ": in frame '" + o.frame_id + "', scene frame is '" + scene.frameId() +
+          "' and no transform was given (options.frame_to_scene)");
+        continue;
+      }
+      o.pose = t->second * o.pose;
+      rep.approximated.push_back(o.id + ": moved from frame '" + o.frame_id + "' to '" + scene.frameId() + "'");
+    }
     std::vector<Vec3> pts;
     if (std::holds_alternative<sm::EsdfGrid>(o.geometry)) {
       rep.skipped.push_back(o.id + ": esdf grid has no box/point form (use the planner's ESDF channel)");

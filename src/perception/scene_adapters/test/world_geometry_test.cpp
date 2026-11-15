@@ -294,3 +294,36 @@ TEST(WorldGeometry, ObstacleMeshIsSampledNoCoarserThanItsVoxel)
   }
   EXPECT_LT(worst, 0.5 * opt.obstacle_voxel);
 }
+
+TEST(WorldGeometry, ObjectInAnotherFrameIsRejectedUnlessATransformIsGiven)
+{
+  sm::SceneModel scene("base");
+  auto here = object("here", sm::Box{sm::Vec3(0.1, 0.1, 0.1)});
+  auto there = object("there", sm::Box{sm::Vec3(0.1, 0.1, 0.1)});
+  there.frame_id = "map";
+  there.pose = at(1.0, 0.0, 0.0);
+  auto wall = object("wall", sm::Box{sm::Vec3(0.2, 0.2, 0.2)}, sm::Role::kContactSurface);
+  wall.frame_id = "map";
+  scene.add(here);
+  scene.add(there);
+  scene.add(wall);
+
+  ConversionReport rep;
+  auto w = toWorldGeometry(scene, {}, &rep);
+  ASSERT_EQ(w.boxes.size(), 1U);              // never placed in the wrong frame
+  EXPECT_EQ(w.boxes[0].id, "here");
+  EXPECT_TRUE(w.points.empty());
+  ASSERT_EQ(rep.skipped.size(), 2U);
+  EXPECT_NE(rep.skipped[0].find("map"), std::string::npos);
+
+  WorldGeometryOptions opt;
+  opt.frame_to_scene["map"] = at(0.0, 5.0, 0.0);   // map origin is 5 m along y in the scene frame
+  rep = ConversionReport{};
+  w = toWorldGeometry(scene, opt, &rep);
+  ASSERT_EQ(w.boxes.size(), 2U);
+  EXPECT_DOUBLE_EQ(w.boxes[1].center_x, 1.0);
+  EXPECT_DOUBLE_EQ(w.boxes[1].center_y, 5.0);
+  EXPECT_FALSE(w.points.empty());
+  for (const auto & p : w.points) {EXPECT_NEAR(p.y, 5.0, 0.11);}
+  EXPECT_TRUE(rep.skipped.empty());
+}

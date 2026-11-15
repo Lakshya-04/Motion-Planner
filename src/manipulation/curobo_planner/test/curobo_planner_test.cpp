@@ -297,6 +297,28 @@ TEST(CuroboClient, WorldCarriesBoxesAndTransformedPoints)
   EXPECT_EQ(message, "too many boxes");
 }
 
+TEST(CuroboClient, RejectsAWorldInAnotherFrame)
+{
+  Fixture f;
+  curobo_planner::Options o;
+  o.base_frame = "base";
+  o.timeout_sec = 5.0;
+  curobo_planner::CuroboClientPlanner planner(f.client_node, o);
+  mp::WorldGeometryUpdate w;
+  w.frame_id = "map";
+  mp::WorldGeometryBox b;
+  b.id = "crate";
+  b.orientation_w = 1.0;
+  w.boxes.push_back(b);
+  std::string error;
+  EXPECT_FALSE(planner.updateWorldGeometry(w, error));
+  EXPECT_NE(error.find("map"), std::string::npos);
+  EXPECT_TRUE(f.server->last_world.boxes.empty());   // nothing reached the node
+  w.frame_id = "base";
+  EXPECT_TRUE(planner.updateWorldGeometry(w, error)) << error;
+  EXPECT_EQ(f.server->last_world.boxes.size(), 1U);
+}
+
 TEST(CuroboClient, IsAScenePortToo)
 {
   Fixture f;
