@@ -101,6 +101,26 @@
         </sensor>
       </ros2_control>
     </xacro:if>
+    <xacro:if value="${hardware == 'gazebo'}">
+      <!-- The conditioned contact wrench (ft_conditioner output, at the tcp) as the sensor
+           `ft_sensor_tcp`, for JTAC. Not `ft_sensor`: that is the raw gz sensor above. -->
+      <!-- gz_ros2_control only loads its own system base class (a plain sensor plugin is refused),
+           so this is the bridge under that class: ft_bridge_hardware/FtBridgeSimSystem. -->
+      <ros2_control name="ft_conditioned_bridge" type="system">
+        <hardware>
+          <plugin>ft_bridge_hardware/FtBridgeSimSystem</plugin>
+          <param name="source_topic">/ft_conditioner/wrench_conditioned</param>
+        </hardware>
+        <sensor name="ft_sensor_tcp">
+          <state_interface name="force.x"/>
+          <state_interface name="force.y"/>
+          <state_interface name="force.z"/>
+          <state_interface name="torque.x"/>
+          <state_interface name="torque.y"/>
+          <state_interface name="torque.z"/>
+        </sensor>
+      </ros2_control>
+    </xacro:if>
     <xacro:if value="${hardware == 'jtac_mock'}">
       <ros2_control name="ft_sensor_bridge" type="sensor">
         <hardware>

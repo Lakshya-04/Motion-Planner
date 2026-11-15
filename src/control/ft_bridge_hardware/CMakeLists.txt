@@ -31,6 +31,21 @@ ament_target_dependencies(ft_bridge_hardware
 
 pluginlib_export_plugin_description_file(hardware_interface ft_bridge_hardware.xml)
 
+# The same bridge under gz_ros2_control's plugin base class (Gazebo only accepts that one), built
+# only where gz_ros2_control is installed (the sim-gazebo image), so the other images are unaffected.
+find_package(gz-sim8 QUIET)  # gz_ros2_control's exported targets need it found first
+if(gz-sim8_FOUND)
+  find_package(gz_ros2_control QUIET)
+endif()
+if(gz-sim8_FOUND AND gz_ros2_control_FOUND)
+  add_library(ft_bridge_hardware_gz SHARED src/ft_bridge_sim_system.cpp)
+  target_link_libraries(ft_bridge_hardware_gz ft_bridge_hardware)
+  ament_target_dependencies(ft_bridge_hardware_gz gz_ros2_control)
+  pluginlib_export_plugin_description_file(gz_ros2_control ft_bridge_sim_system.xml)
+  install(TARGETS ft_bridge_hardware_gz ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
+  install(FILES ft_bridge_sim_system.xml DESTINATION share/${PROJECT_NAME})
+endif()
+
 install(TARGETS
   ft_bridge_hardware
   ARCHIVE DESTINATION lib
