@@ -28,6 +28,7 @@
 #pragma once
 
 #include <array>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -92,6 +93,26 @@ public:
   };
   BasePose basePose() const;
 
+  /// Simulated depth sensor (present when the MJCF has the site `depth_sensor` and the numeric
+  /// `sim_mujoco_depth`, see the generator's `depth_sensor` option). Ray-cast depth: a width x
+  /// height pinhole grid of mj_multiRay from the site, against the world geoms (group 1: the
+  /// scene, not the robot itself) only. Points are in the SITE frame (x forward, y left, z up).
+  struct DepthConfig
+  {
+    int width{0};
+    int height{0};
+    double hfov{0.0};       ///< rad
+    double vfov{0.0};       ///< rad
+    double min_range{0.0};  ///< m
+    double max_range{0.0};  ///< m
+    double rate_hz{0.0};
+    double noise_std{0.0};  ///< Gaussian noise on the range, m (fixed seed)
+  };
+  bool hasDepth() const {return depth_.present;}
+  const DepthConfig & depthConfig() const {return depth_.cfg;}
+  /// One scan: the hit points (misses and ranges outside [min_range, max_range] are dropped).
+  std::vector<std::array<float, 3>> depthScan();
+
   double time() const {return data_->time;}
   int contactCount() const {return data_->ncon;}
   const mjModel * model() const {return model_;}
@@ -120,6 +141,7 @@ private:
     double cmd[3]{};       ///< body-frame command
   };
   void initBase();
+  void initDepth();
   Wrench rawWrench() const;
   void applyMimic();
 
@@ -133,6 +155,18 @@ private:
   int torque_adr_{-1};
   Wrench tare_{};
   Base base_;
+  struct Depth
+  {
+    bool present{false};
+    int site{-1};
+    DepthConfig cfg;
+    std::vector<mjtNum> dirs;       ///< unit ray directions in the site frame, 3 per ray
+    std::vector<mjtNum> world_dirs;
+    std::vector<mjtNum> dist;
+    std::vector<int> geomid;
+    std::mt19937 rng{12345};
+  };
+  Depth depth_;
   double carry_{0.0};
 };
 

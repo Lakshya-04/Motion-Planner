@@ -22,6 +22,12 @@ controller:=jtac compliant_trajectory_controller/JtacController from the repo's 
                  TCP) instead, with the sensor frame at the TCP and no gravity compensation, because
                  the conditioner already removed the tool weight.
 
+depth_sensor:=true adds a simulated depth sensor (ray-cast, MuJoCo mj_multiRay against the scene, not the
+                 robot) on the root link at depth_sensor_pose "x y z roll pitch yaw" (x forward): the plugin
+                 publishes sensor_msgs/PointCloud2 on /depth_sensor/points in frame depth_sensor_link
+                 and this launch file adds the static TF <root frame> -> depth_sensor_link. Off by
+                 default: the MJCF is then unchanged.
+
 base_motion:=true adds a planar base (three joints under base_footprint, stiff position hold): send
                  geometry_msgs/Twist on /cmd_vel (body frame; vy ignored for diff / skid profiles,
                  limited to the profile's max velocities, zero after 0.5 s without a command); the plugin
@@ -95,9 +101,16 @@ def _setup(context, *args, **kwargs):
     scene = arg('scene') or None
     offset = [float(v) for v in arg('scene_offset').split()]
 
+    depth = None
+    if arg('depth_sensor') == 'true':
+        pose = [float(v) for v in arg('depth_sensor_pose').split()]
+        if len(pose) != 6:
+            raise ValueError('depth_sensor_pose needs "x y z roll pitch yaw"')
+        depth = dict(pos=pose[:3], rpy=pose[3:], noise_std=float(arg('depth_sensor_noise_m')),
+                     rate_hz=float(arg('depth_sensor_rate_hz')))
     mjcf, skipped = generate(profile, render_urdf(profile), out_dir, scene=scene,
                              scene_offset=tuple(offset),
-                             base_motion=arg('base_motion') == 'true')
+                             base_motion=arg('base_motion') == 'true', depth_sensor=depth)
     for s in skipped:
         print(f'[sim_mujoco] skipped scene object {s}')
     print(f'[sim_mujoco] MJCF: {mjcf}')
@@ -144,6 +157,13 @@ def _setup(context, *args, **kwargs):
         nodes.append(Node(package='sim_mujoco', executable='base_odom.py', name='base_odom', output='screen',
                           parameters=[{'base_frame': (profile.get('frames', {}).get('world_base')
                                                       or 'base_footprint')}]))
+    if depth is not None:
+        root_frame = profile.get('frames', {}).get('world_base') or 'base_footprint'
+        p, r = depth['pos'], depth['rpy']
+        nodes.append(Node(package='tf2_ros', executable='static_transform_publisher', name='depth_sensor_tf',
+                          arguments=['--x', str(p[0]), '--y', str(p[1]), '--z', str(p[2]),
+                                     '--roll', str(r[0]), '--pitch', str(r[1]), '--yaw', str(r[2]),
+                                     '--frame-id', root_frame, '--child-frame-id', 'depth_sensor_link']))
     if conditioner:
         # raw wrench is in tool_mount_link (the sensor frame) and includes the payload weight; sign
         # +1 (the plugin reports the load the tool puts on the sensor); the sensor-to-tcp offset and
@@ -192,6 +212,15 @@ def generate_launch_description():
                               description='planar base (x, y, yaw) driven by geometry_msgs/Twist on /cmd_vel '
                                           '(omni or diff per the profile drive_type), odom on /odom and TF '
                                           'odom -> base_footprint; false keeps the base static'),
+        DeclareLaunchArgument('depth_sensor', default_value='false',
+                              description='simulated ray-cast depth sensor: PointCloud2 on /depth_sensor/points, '
+                                          'TF root -> depth_sensor_link; false leaves the MJCF unchanged'),
+        DeclareLaunchArgument('depth_sensor_pose', default_value='0.1 0 1.15 0 0 0',
+                              description='depth sensor mounting in the root link frame: "x y z roll pitch yaw" '
+                                          '(x forward, z up)'),
+        DeclareLaunchArgument('depth_sensor_noise_m', default_value='0.0',
+                              description='Gaussian range noise of the depth sensor, m'),
+        DeclareLaunchArgument('depth_sensor_rate_hz', default_value='5.0', description='depth sensor rate, Hz'),
         DeclareLaunchArgument('update_rate', default_value='100', description='control rate, Hz'),
         DeclareLaunchArgument('out_dir', default_value='', description='where to write the MJCF'),
         DeclareLaunchArgument('viewer', default_value='false',

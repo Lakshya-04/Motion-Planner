@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <iterator>
 
 #include "sim_mujoco/mujoco_sim.hpp"
 
@@ -132,4 +135,79 @@ TEST(MujocoSim, ReleasingTheCommandReleasesTheForce)
   sim.setCommand(0, 0.0, 0.0);
   sim.advance(3.0);
   EXPECT_NEAR(sim.wrench()[2], 0.0, 1.0);
+}
+
+// ------------------------------------------------------------------ depth sensor
+
+namespace
+{
+const std::string kDepthModel = std::string(SIM_MUJOCO_TEST_DATA) + "/depth_wall.xml";
+}
+
+TEST(MujocoSimDepth, AbsentWithoutTheSiteAndNumeric)
+{
+  MujocoSim sim(kModel, {"slide"});
+  EXPECT_FALSE(sim.hasDepth());
+  EXPECT_TRUE(sim.depthScan().empty());
+}
+
+TEST(MujocoSimDepth, ScansTheWallPlaneAndNotTheRobot)
+{
+  MujocoSim sim(kDepthModel, {"slide"});
+  ASSERT_TRUE(sim.hasDepth());
+  EXPECT_EQ(sim.depthConfig().width, 21);
+  sim.setJointPositions({0.0});
+  const auto points = sim.depthScan();
+  ASSERT_EQ(points.size(), 21u * 15u);  // every ray hits the wall; the pad (group 0) is not scanned
+  // wall front face z = 0.25 is the sensor's x axis; y spans +-tan(hfov/2) x range, z +-tan(vfov/2)
+  double ymax = 0.0, zmax = 0.0;
+  for (const auto & p : points) {
+    EXPECT_NEAR(p[0], 0.25, 1e-5);
+    ymax = std::max(ymax, static_cast<double>(std::abs(p[1])));
+    zmax = std::max(zmax, static_cast<double>(std::abs(p[2])));
+  }
+  EXPECT_NEAR(ymax, 0.25 * std::tan(0.5235988 / 2) * (1.0 - 1.0 / 21), 2e-3);
+  EXPECT_NEAR(zmax, 0.25 * std::tan(0.3490659 / 2) * (1.0 - 1.0 / 15), 2e-3);
+}
+
+TEST(MujocoSimDepth, FollowsTheBodyAndDropsOutOfRange)
+{
+  MujocoSim sim(kDepthModel, {"slide"});
+  sim.setJointPositions({0.1});  // carriage (and sensor) 0.1 m closer to the wall
+  const auto near_points = sim.depthScan();
+  ASSERT_FALSE(near_points.empty());
+  EXPECT_NEAR(near_points[0][0], 0.15, 1e-5);
+  sim.setJointPositions({0.22});  // wall 0.03 away, below the 0.05 minimum range: nothing returned
+  EXPECT_TRUE(sim.depthScan().empty());
+}
+
+TEST(MujocoSimDepth, RangeNoiseIsAppliedAlongTheRay)
+{
+  std::string text;
+  {
+    std::ifstream in(kDepthModel);
+    text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  }
+  const std::string from = "5.0 0.0\"/>";
+  const auto pos = text.find(from);
+  ASSERT_NE(pos, std::string::npos);
+  text.replace(pos, from.size(), "5.0 0.005\"/>");
+  const std::string path = ::testing::TempDir() + "/depth_wall_noise.xml";
+  {
+    std::ofstream out(path);
+    out << text;
+  }
+  MujocoSim sim(path, {"slide"});
+  sim.setJointPositions({0.0});
+  const auto points = sim.depthScan();
+  double sum = 0.0, sum2 = 0.0;
+  for (const auto & p : points) {
+    const double r = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+    const double d = r - 0.25 / (p[0] / r);  // measured minus true range along this ray
+    sum += d;
+    sum2 += d * d;
+  }
+  const double n = static_cast<double>(points.size());
+  EXPECT_NEAR(sum / n, 0.0, 0.002);
+  EXPECT_NEAR(std::sqrt(sum2 / n), 0.005, 0.0015);
 }
