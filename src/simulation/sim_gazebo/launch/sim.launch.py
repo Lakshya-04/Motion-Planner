@@ -5,10 +5,15 @@
   ros2 launch sim_gazebo sim.launch.py controller:=jtac                  # compliant JTAC controller
   ros2 launch sim_gazebo sim.launch.py wall_scene:=/path/wall_scene.json wall_id:=0 standoff:=0.9
   ros2 launch sim_gazebo sim.launch.py profile:=ur10e_telescopic
+  ros2 launch sim_gazebo sim.launch.py base_motion:=true                 # planar base on /cmd_vel, /odom, TF odom -> base_footprint
+  ros2 launch sim_gazebo sim.launch.py depth_sensor:=true                # gz depth camera -> /depth_sensor/points
 
 What starts: gz sim (server only unless gui:=true), robot_state_publisher, the robot spawned from
 the description rendered with hardware:=gazebo from the profile's xacro args, ros_gz_bridge for
 /clock, the raw wrench (/ft_sensor/wrench_gz) and the ground-truth contacts,
+plus (base_motion:=true) /cmd_vel, /odom and TF odom -> base_footprint through gz-sim's VelocityControl and
+OdometryPublisher systems, plus (depth_sensor:=true) /depth_sensor/points from a gz depth_camera (the world gets the
+Sensors system, ogre2 renders headless in software),
 plus the broadcaster topic /force_torque_sensor_broadcaster/wrench (frame ft_sensor_link), and the controller spawners. The controller_manager
 lives inside the gz server (gz_ros2_control), not in a separate node.
 """
@@ -30,6 +35,8 @@ from sim_gazebo import profile as prof
 from sim_gazebo import wall_world
 
 FT_FRAME = 'ft_sensor_link'   # raw wrench frame: the sensor body between flange and tool
+SENSORS_PLUGIN = ('  <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">'
+                  '<render_engine>ogre2</render_engine></plugin>\n')
 CONTROLLER_NAMES = {'jtc': 'joint_trajectory_controller', 'jtac': 'combined_arm_lift_controller'}
 
 
@@ -95,15 +102,35 @@ def _launch(context):
     fr = prof.frames(profile)
 
     desc_pkg = get_package_share_directory('mobile_manipulator_description')
+    base_motion = lc('base_motion') == 'true'
+    depth = lc('depth_sensor') == 'true'
+    mappings = prof.xacro_mappings(profile, 'gazebo')
+    if base_motion:
+        mappings['gz_base_motion'] = 'true'
+    if depth:
+        pose = [float(v) for v in lc('depth_sensor_pose').split()]
+        if len(pose) != 6:
+            raise ValueError('depth_sensor_pose needs "x y z roll pitch yaw"')
+        mappings.update(gz_depth_sensor='true', gz_depth_xyz=' '.join(map(str, pose[:3])),
+                        gz_depth_rpy=' '.join(map(str, pose[3:])), gz_depth_noise=lc('depth_sensor_noise_m'),
+                        gz_depth_rate=lc('depth_sensor_rate_hz'))
     robot_description = xacro.process_file(
-        os.path.join(desc_pkg, 'urdf', 'mobile_manipulator.urdf.xacro'),
-        mappings=prof.xacro_mappings(profile, 'gazebo')).toxml()
+        os.path.join(desc_pkg, 'urdf', 'mobile_manipulator.urdf.xacro'), mappings=mappings).toxml()
 
     world = lc('world') or os.path.join(pkg, 'worlds', 'empty.sdf')
     if lc('wall_scene'):
         world = os.path.join(tempfile.mkdtemp(prefix='sim_gazebo_world_'), 'wall.sdf')
         wall_world.generate_world(lc('wall_scene'), world, wall_id=int(lc('wall_id')),
                                   standoff=float(lc('standoff')))
+    if depth:
+        # the render sensors need the Sensors system in the world (ogre2; no display: gz falls back to headless)
+        with open(world) as f:
+            sdf = f.read()
+        if 'gz-sim-sensors-system' not in sdf:
+            sdf = sdf.replace('</world>', SENSORS_PLUGIN + '</world>', 1)
+            world = os.path.join(tempfile.mkdtemp(prefix='sim_gazebo_world_'), 'world_sensors.sdf')
+            with open(world, 'w') as f:
+                f.write(sdf)
 
     gz_args = f'-r -v2 {world}' + ('' if lc('gui') == 'true' else ' -s')
     gz = IncludeLaunchDescription(
@@ -117,11 +144,20 @@ def _launch(context):
     spawn = Node(package='ros_gz_sim', executable='create', output='screen',
                  arguments=['-topic', 'robot_description', '-name', profile.robot_name,
                             '-z', '0.0'])
+    bridged = ['/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+               '/ft_sensor/wrench@geometry_msgs/msg/WrenchStamped[gz.msgs.Wrench',
+               '/tool_contact/contacts@ros_gz_interfaces/msg/Contacts[gz.msgs.Contacts']
+    remaps = [('/ft_sensor/wrench', '/ft_sensor/wrench_gz')]
+    if base_motion:
+        # gz-side topics /base/* (VelocityControl, OdometryPublisher) -> the ROS names the MuJoCo sim uses
+        bridged += ['/base/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
+                    '/base/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+                    '/base/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V']
+        remaps += [('/base/cmd_vel', '/cmd_vel'), ('/base/odom', '/odom'), ('/base/tf', '/tf')]
+    if depth:
+        bridged.append('/depth_sensor/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked')
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge', output='screen',
-                  arguments=['/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
-                             '/ft_sensor/wrench@geometry_msgs/msg/WrenchStamped[gz.msgs.Wrench',
-                             '/tool_contact/contacts@ros_gz_interfaces/msg/Contacts[gz.msgs.Contacts'],
-                  remappings=[('/ft_sensor/wrench', '/ft_sensor/wrench_gz')],
+                  arguments=bridged, remappings=remaps,
                   parameters=[{'use_sim_time': True}])
     truth = Node(package='sim_gazebo', executable='contact_ground_truth.py', output='screen',
                  parameters=[{'use_sim_time': True, 'tcp_frame': fr['tcp']}])
@@ -188,5 +224,17 @@ def generate_launch_description():
                                           'velocity); the manager pass uses true'),
         DeclareLaunchArgument('move_group', default_value='false',
                               description='also start move_group (planning only) for the manipulation manager'),
+        DeclareLaunchArgument('base_motion', default_value='false',
+                              description='true: free planar base driven by geometry_msgs/Twist on /cmd_vel (gz-sim '
+                                          'VelocityControl, omni; the profile drive_type is not applied), nav_msgs/'
+                                          'Odometry on /odom and TF odom -> base_footprint (OdometryPublisher); false '
+                                          'pins the base to the world'),
+        DeclareLaunchArgument('depth_sensor', default_value='false',
+                              description='true: gz depth_camera on base_footprint, PointCloud2 on /depth_sensor/points '
+                                          'in frame depth_sensor_link (needs gz rendering, ogre2); false adds nothing'),
+        DeclareLaunchArgument('depth_sensor_pose', default_value='0.1 0 1.15 0 0 0',
+                              description='"x y z roll pitch yaw" of depth_sensor_link in base_footprint (x forward)'),
+        DeclareLaunchArgument('depth_sensor_noise_m', default_value='0.0', description='Gaussian range noise std, m'),
+        DeclareLaunchArgument('depth_sensor_rate_hz', default_value='5.0', description='depth sensor rate, Hz'),
         OpaqueFunction(function=_launch),
     ])

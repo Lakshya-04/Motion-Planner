@@ -82,3 +82,38 @@ def test_other_backends_unchanged(hardware):
     for j in robot.find("ros2_control[@type='system']").findall('joint'):
         assert {s.get('name') for s in j.findall('state_interface')} == {'position', 'velocity'}
         assert {c.get('name') for c in j.findall('command_interface')} == want_cmd
+
+
+def _render_with(extra):
+    profile = prof.load_profile('ur10e_telescopic')
+    doc = xacro.process_file(os.path.join(DESC, 'urdf', 'mobile_manipulator.urdf.xacro'),
+                             mappings={**prof.xacro_mappings(profile, 'gazebo'), **extra})
+    return ET.fromstring(doc.toxml())
+
+
+def test_base_motion_and_depth_off_by_default():
+    robot = _render_with({})
+    assert robot.find("joint[@name='sim_world_joint']") is not None
+    assert robot.find("link[@name='base_skid_link']") is None and robot.find("link[@name='depth_sensor_link']") is None
+    assert not [p for p in robot.iter('plugin') if 'VelocityControl' in p.get('name', '')]
+    assert all(s.get('type') != 'depth_camera' for s in robot.iter('sensor'))
+
+
+def test_base_motion_frees_the_base():
+    robot = _render_with({'gz_base_motion': 'true'})
+    assert robot.find("joint[@name='sim_world_joint']") is None
+    assert not [j for j in robot.findall('joint') if j.find('parent').get('link') == 'world']
+    names = {p.get('name') for p in robot.iter('plugin')}
+    assert {'gz::sim::systems::VelocityControl', 'gz::sim::systems::OdometryPublisher'} <= names
+    odom = next(p for p in robot.iter('plugin') if (p.get('name') or '').endswith('OdometryPublisher'))
+    assert odom.find('odom_frame').text == 'odom' and odom.find('robot_base_frame').text == 'base_footprint'
+    assert robot.find("link[@name='base_skid_link']/collision") is not None
+
+
+def test_depth_sensor_is_a_gz_depth_camera_on_depth_sensor_link():
+    robot = _render_with({'gz_depth_sensor': 'true', 'gz_depth_xyz': '0.2 0 1.0', 'gz_depth_noise': '0.003'})
+    j = robot.find("joint[@name='depth_sensor_joint']")
+    assert j.find('parent').get('link') == 'base_footprint' and j.find('origin').get('xyz') == '0.2 0 1.0'
+    s = robot.find("gazebo[@reference='depth_sensor_link']/sensor[@type='depth_camera']")
+    assert s.find('topic').text == '/depth_sensor' and s.find('gz_frame_id').text == 'depth_sensor_link'
+    assert float(s.find('camera/noise/stddev').text) == 0.003
