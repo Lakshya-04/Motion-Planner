@@ -34,6 +34,7 @@
 
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
+#include "manipulation_manager/core/wall_direction.hpp"
 #include "manipulation_manager/ros/coverage/coverage_output_json_source.hpp"
 #include "manipulation_manager/ros/execution/jtac_execution_adapter.hpp"
 
@@ -79,11 +80,9 @@ std::vector<double> readCurrentJointState(const rclcpp::Node::SharedPtr & node)
 
 namespace
 {
-// wall_reference_pose's local Z must be the wall's OUTWARD normal, opposite the tool's
-// approach axis -- same constant coverage_pass_demo_node.cpp uses, empirically tied to this
-// tool/wall geometry, not derivable from the coverage plan's own approach-orientation poses.
-constexpr double kWallNormalQx = 0.7071067811865476;
-constexpr double kWallNormalQw = 0.7071067811865475;
+// wall_reference_pose's local Z must be the wall's OUTWARD normal, opposite the tool's approach
+// axis. WallDirection::outwardNormalQuaternion() gives it for any wall direction; for the default
+// +y wall it equals the constant coverage_pass_demo_node.cpp uses.
 }  // namespace
 
 class ManipulationManagerNode : public rclcpp::Node
@@ -112,6 +111,16 @@ public:
     // base_link -> base_footprint fixed offset (see coverage_pass_demo_node.cpp's own frame_id
     // comment) -- coverage_output.json is authored in base_link.
     z_offset_ = this->declare_parameter<double>("z_offset_m", 0.31);
+    {
+      // Which way the wall lies from the robot in frame_id (a vector, normalised here). The default
+      // is the original +y wall; the MuJoCo/Gazebo scenes have the wall at +x: [1, 0, 0].
+      const auto v = this->declare_parameter<std::vector<double>>(
+        "wall_direction", std::vector<double>{0.0, 1.0, 0.0});
+      if (v.size() != 3) {
+        throw std::invalid_argument("wall_direction needs three numbers");
+      }
+      wall_dir_ = WallDirection::from(v[0], v[1], v[2]);
+    }
     dock_standoff_ = this->declare_parameter<double>("dock_standoff_m", 0.12);
     contact_y_overshoot_ = this->declare_parameter<double>("contact_y_overshoot_m", 0.045);
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
@@ -257,10 +266,14 @@ private:
       m.orientation.w = p.qw;
       req->targets_world.push_back(m);
     }
-    // The wall is on the +y side of the base (the same assumption the dock pose makes); the normal
-    // points into the free side, back towards the robot.
+    // The wall lies along wall_direction from the base (the same direction the dock pose uses); the
+    // normal points into the free side, back towards the robot.
+    req->wall_point.x = wall.wall_x;
     req->wall_point.y = wall.wall_y;
-    req->wall_normal.y = -1.0;
+    req->wall_point.z = wall.wall_z;
+    req->wall_normal.x = -wall_dir_.d[0];
+    req->wall_normal.y = -wall_dir_.d[1];
+    req->wall_normal.z = -wall_dir_.d[2];
     req->lift_min = base_check_lift_min_;
     req->lift_max = base_check_lift_max_;
     req->arm_mount_offset_z = base_check_arm_mount_z_;
@@ -357,10 +370,9 @@ private:
     const auto & rep = intent.poses.front();
     const double dock_z = intent.poses[intent.poses.size() / 2].z;
 
-    core_types::Pose standoff_pose;
-    standoff_pose.x = rep.x;
-    standoff_pose.y = rep.y - dock_standoff_;
+    core_types::Pose standoff_pose = rep;
     standoff_pose.z = dock_z;
+    standoff_pose = wall_dir_.shifted(standoff_pose, -dock_standoff_);
     standoff_pose.qx = rep.qx;
     standoff_pose.qy = rep.qy;
     standoff_pose.qz = rep.qz;
@@ -414,16 +426,16 @@ private:
     contact_seg.wall_reference_pose.x = rep.x;
     contact_seg.wall_reference_pose.y = rep.y;
     contact_seg.wall_reference_pose.z = rep.z;
-    contact_seg.wall_reference_pose.qx = kWallNormalQx;
-    contact_seg.wall_reference_pose.qy = 0.0;
-    contact_seg.wall_reference_pose.qz = 0.0;
-    contact_seg.wall_reference_pose.qw = kWallNormalQw;
+    const auto wall_q = wall_dir_.outwardNormalQuaternion();
+    contact_seg.wall_reference_pose.qx = wall_q[0];
+    contact_seg.wall_reference_pose.qy = wall_q[1];
+    contact_seg.wall_reference_pose.qz = wall_q[2];
+    contact_seg.wall_reference_pose.qw = wall_q[3];
 
     std::vector<core_types::Pose> contact_waypoints;
     contact_waypoints.reserve(intent.poses.size());
     for (size_t i = 0; i < intent.poses.size(); ++i) {
-      core_types::Pose p = intent.poses[i];
-      p.y += contact_y_overshoot_;
+      core_types::Pose p = wall_dir_.shifted(intent.poses[i], contact_y_overshoot_);
       contact_waypoints.push_back(p);
       contact_seg.waypoint_indices.push_back(i);
     }
@@ -472,6 +484,7 @@ private:
   std::string planning_group_;
   std::string coverage_json_path_;
   double z_offset_{0.0};
+  WallDirection wall_dir_;
   double dock_standoff_{0.0};
   std::string base_check_mode_{"off"};
   std::string base_check_service_;

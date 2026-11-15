@@ -131,6 +131,11 @@ if(BUILD_TESTING)
     target_link_libraries(base_stance_check_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
+  ament_add_gtest(wall_direction_test test/wall_direction_test.cpp)
+  if(TARGET wall_direction_test)
+    target_link_libraries(wall_direction_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
   ament_add_gtest(planning_config_test test/planning_config_test.cpp)
   if(TARGET planning_config_test)
     target_link_libraries(planning_config_test motion_planner::motion_planner_ros)
