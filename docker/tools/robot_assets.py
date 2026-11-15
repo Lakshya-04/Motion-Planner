@@ -171,7 +171,9 @@ def inner_check(profile, out):
     spherized, srdf = out / 'vamp' / 'spherized.urdf', out / 'vamp' / 'robot.srdf'
     if not spherized.exists():
         raise SystemExit('check needs the spheres stage (vamp/spherized.urdf)')
-    model = model_mod.Model(str(spherized), str(srdf) if srdf.exists() else None)
+    if not srdf.exists():
+        raise SystemExit('check needs the vamp stage (vamp/robot.srdf, the ignore list for these spheres)')
+    model = model_mod.Model(str(spherized), str(srdf))
     arm = profile['joints']['arm']
     if sorted(model.dof) != sorted(arm):
         raise SystemExit(f'revolute joints {model.dof} do not match the profile arm {arm}')
@@ -186,10 +188,14 @@ def inner_check(profile, out):
               'ok': (not home_pairs) and bool(folded_pairs)}
     (out / 'check.json').write_text(json.dumps(result, indent=2))
     print(json.dumps({k: v for k, v in result.items() if k not in ('home_pairs', 'folded_pairs')}))
+    if not result['ok']:
+        raise SystemExit('self-collision check failed: home must be free and the folded pose must collide (see check.json)')
 
 
 # ----------------------------------------------------------------------------- host stages
 def host_spheres(profile, out, env):
+    # new spheres invalidate the ignore list of an earlier run; the vamp stage writes it again
+    (out / 'vamp' / 'robot.srdf').unlink(missing_ok=True)
     run(['bash', TOOLS / 'generate_vamp_robot.sh', robot_name(profile['_path']),
          out / 'arm_only' / 'resolved' / 'robot.urdf', '-', profile['frames']['tcp'], out / 'vamp'],
         env={**env, 'FOAM_ONLY': '1'})

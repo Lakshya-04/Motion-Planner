@@ -50,12 +50,15 @@ column (same output height). The full `robot.urdf` keeps the real lift for the m
 The profile is the only input: lift values come from its `lift:` section through
 `scripts/profile_xacro_args.py`, which wins over lift entries in `robot.xacro_args`.
 
+Tests: `python -m pytest docker/tools/tests/test_robot_assets.py` (no docker, no GPU).
+
 ## Self-collision sanity
 
 `check` loads `vamp/spherized.urdf` with `vamp/rigid.srdf` through `sphere_self_collision.py`'s model and
 reports: the profile's `home` pose must be free, a folded pose (elbow back on itself,
 `[0, 0, 3.1, 0, 0, 0]`) must collide, and the share of 500 random poses that are free. `ok` is true only
-if both hold. A home pose that collides means the SRDF misses pairs (raise `--hops`); a folded pose that
+if both hold, and a stage with `ok` false fails (exit 1). It needs the `vamp` stage's SRDF; the `spheres`
+stage deletes an older one, so a skipped `vamp` stage fails the check instead of using a stale list. A home pose that collides means the SRDF misses pairs (raise `--hops`); a folded pose that
 does not means the spheres are too small or the pose does not fold that arm.
 
 ## Manifest

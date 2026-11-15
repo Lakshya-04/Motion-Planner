@@ -2,6 +2,7 @@
 
     python -m pytest docker/tools/tests/test_robot_assets.py
 """
+import json
 import pathlib
 import sys
 import types
@@ -27,6 +28,46 @@ def test_moving_lift_is_pinned_at_its_home_height():
     profile = {'robot': {}, 'lift': {'type': 'telescopic'}, 'home': {'lift_joint': 0.3}}
     args = ra.arm_only_args(profile)
     assert args['lift'] == 'fixed' and float(args['lift_fixed_height']) == pytest.approx(0.3)
+
+
+class FakeModel:
+    dof = ['j1', 'j2']
+
+    def __init__(self, urdf, srdf=None):
+        FakeModel.srdf = srdf
+
+    def colliding_pairs(self, q):
+        return [('a', 'b')] if list(q) == [0.0, 0.0] else []  # home collides, anything else is free
+
+
+def _check_setup(tmp_path, monkeypatch, with_srdf):
+    (tmp_path / 'vamp').mkdir()
+    (tmp_path / 'vamp' / 'spherized.urdf').write_text('<robot/>')
+    if with_srdf:
+        (tmp_path / 'vamp' / 'robot.srdf').write_text('<robot/>')
+    monkeypatch.setattr(ra, 'load_module', lambda path, name: types.SimpleNamespace(Model=FakeModel))
+    return {'joints': {'arm': ['j1', 'j2']}, 'home': {'j1': 0.0, 'j2': 0.0}}
+
+
+def test_a_failed_self_collision_check_fails_the_stage(tmp_path, monkeypatch):
+    profile = _check_setup(tmp_path, monkeypatch, with_srdf=True)
+    with pytest.raises(SystemExit):
+        ra.inner_check(profile, tmp_path)
+    assert json.loads((tmp_path / 'check.json').read_text())['ok'] is False
+
+
+def test_check_needs_the_vamp_ignore_list(tmp_path, monkeypatch):
+    profile = _check_setup(tmp_path, monkeypatch, with_srdf=False)
+    with pytest.raises(SystemExit, match='srdf'):
+        ra.inner_check(profile, tmp_path)
+
+
+def test_spheres_stage_drops_a_stale_ignore_list(tmp_path, monkeypatch):
+    (tmp_path / 'vamp').mkdir()
+    (tmp_path / 'vamp' / 'robot.srdf').write_text('<robot/>')
+    monkeypatch.setattr(ra, 'run', lambda cmd, **kw: None)
+    ra.host_spheres({'_path': 'p.yaml', 'frames': {'tcp': 'tcp'}}, tmp_path, {})
+    assert not (tmp_path / 'vamp' / 'robot.srdf').exists()
 
 
 def test_srdf_stage_passes_lift_stages(tmp_path, monkeypatch):
