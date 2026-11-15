@@ -69,7 +69,12 @@ def load_terms():
     return [t.lower() for t in lines if t]
 
 
+# The checker's own tests contain deliberately dangling references and placeholder paths.
+SELF_EXCLUDES = ("docker/tools/tests/test_check_public_readiness.py",)
+
+
 def scan(root, excludes=()):
+    excludes = tuple(excludes) + SELF_EXCLUDES
     files = tracked_files(root)
     tracked = set(files)
     terms = load_terms()

@@ -192,7 +192,7 @@ without code, when we can implement it.
 - [ ] **Public-readiness cleanup**
   - [ ] 63 references in 41 files to 9 documents that are not in the repo (`force_control_backend_admittance_vs_diffik.md`,
         `implementation_plan_manipulation_architecture.md`, ...): strip them or distil into `docs/`
-  - [ ] "serum" (the earlier project's base type and `serum_demo_bt`) in 21 places (12 files); "mop" as the default tool name
+  - [~] Earlier-project base and application names are removed from code, READMEs and comments; "mop" as the default tool name remains until tool profiles ship (section 4)
   - [ ] Four launch files that look up packages that do not exist (`description`, `moveit_config`):
         `jtac_compliance_demo`, `jtac_controller_test`, `jtac_gazebo_controllers`, `manipulation_manager.launch.py`
   - [ ] `.claude/` is not in `.gitignore`
@@ -318,7 +318,7 @@ calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
 ## Proposed order (each milestone has an exit test)
 
 - **M0 Housekeeping** (days): push the cleanup, `.gitignore`, fix or delete the four broken launch files, reconcile section 14, strip the dangling
-  references and "serum". *Exit:* the section 13 scan finds nothing; docs match the code.
+  references and earlier-project names. *Exit:* the section 13 scan finds nothing; docs match the code.
 - **M1 Pipeline core, by reuse**: pluginlib backend selection, BehaviorTree.CPP task flow behind a manager action, ship tool profiles and wire them to
   coverage, reachability `plan_stands` called by the manager, ROS coverage source. *Exit:* swap MoveIt / cuRobo / VAMP and the tool by config, in a test.
 - **M2 First full run in sim, base static** (what you can start testing with): one launch per simulator, a scenario set, the scorecard **with the coverage
