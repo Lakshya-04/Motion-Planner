@@ -5,6 +5,7 @@ no actuated joint in the base, and agree with the `base:` section of its profile
 contains the body, mount height, wheel radius and track). The whole robot must render with each
 base on the UR10e + telescopic lift. Runs from the source tree with a temporary ament prefix.
 """
+import importlib.util
 import os
 import pathlib
 import tempfile
@@ -59,6 +60,14 @@ def _render(**mappings):
 
 def _profile_files():
     return sorted(p for p in PROFILES.glob('*.yaml') if 'base' in yaml.safe_load(p.read_text()))
+
+
+def _profile_args(profile):
+    # robot.xacro_args plus the lift variant from the profile's `lift:` section (scripts/profile_xacro_args.py)
+    spec = importlib.util.spec_from_file_location('profile_xacro_args', PKG / 'scripts' / 'profile_xacro_args.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.xacro_args(profile)
 
 
 def _load(path):
@@ -257,13 +266,13 @@ def test_whole_robot_renders_with_ur10e_and_telescopic_lift(base):
 @pytest.mark.parametrize('path', _profile_files(), ids=lambda p: p.stem)
 def test_every_profile_renders_with_its_base(path):
     profile = _load(path)
-    args = {k: v for k, v in profile['robot']['xacro_args'].items()}
-    robot = URDF.from_xml_string(_render(**args))
+    robot = URDF.from_xml_string(_render(**_profile_args(profile)))
     links = {l.name for l in robot.links}
     assert set(profile['frames'].values()) <= links
     actuated = [j.name for j in robot.joints
                 if j.type in ('revolute', 'prismatic', 'continuous') and j.mimic is None]
-    assert sorted(actuated) == sorted([profile['joints']['lift']] + profile['joints']['arm'])
+    lift = profile['joints']['lift']          # null for lift:=none / fixed, which has no actuated lift joint
+    assert sorted(actuated) == sorted(([lift] if lift else []) + profile['joints']['arm'])
 
 
 def test_default_base_is_generic_base():

@@ -30,7 +30,9 @@
           <plugin>mock_components/GenericSystem</plugin>
         </xacro:if>
       </hardware>
-      <xacro:position_joint name="lift_joint" initial="${home_lift}" velocity_command="${vel_cmd}"/>
+      <xacro:if value="${lift_actuated}">
+        <xacro:position_joint name="lift_joint" initial="${home_lift}" velocity_command="${vel_cmd}"/>
+      </xacro:if>
       <xacro:position_joint name="${arm_joint_names[0]}" initial="${home_arm[0]}" velocity_command="${vel_cmd}"/>
       <xacro:position_joint name="${arm_joint_names[1]}" initial="${home_arm[1]}" velocity_command="${vel_cmd}"/>
       <xacro:position_joint name="${arm_joint_names[2]}" initial="${home_arm[2]}" velocity_command="${vel_cmd}"/>

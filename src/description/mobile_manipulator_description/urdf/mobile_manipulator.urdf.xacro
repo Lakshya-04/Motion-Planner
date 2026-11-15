@@ -3,7 +3,7 @@
 
      Every part is swappable behind a small contract (see each file's header):
        base  urdf/base/base.xacro  (generic_base | ranger_mini | scout_mini | scout | husky | mpo_500 | mir100 | turtlebot3_*)
-       lift  urdf/lift/telescopic_lift.xacro
+       lift  urdf/lift/lift.xacro  (telescopic | scissor | fixed | none)
        arm   urdf/arms/arm.xacro  (generic_6dof | ur3 | ur5 | ur10 | ur10e | ur16e | ur20 | ...)
        tool  urdf/tools/generic_tool.xacro
 
@@ -16,10 +16,16 @@
 
   <xacro:arg name="base" default="generic_base"/>
   <xacro:arg name="arm" default="ur10e"/>
+  <!-- telescopic | scissor | fixed | none, all behind the same lift contract (urdf/lift/lift.xacro). -->
+  <xacro:arg name="lift" default="telescopic"/>
   <xacro:arg name="lift_stroke" default="1.5"/>
   <xacro:arg name="lift_stages" default="2"/>
   <xacro:arg name="lift_max_velocity" default="0.2"/>
-  <!-- Empty = prismatic lift. A number (m) pins the lift at that extension: an arm-only robot. -->
+  <xacro:arg name="lift_max_acceleration" default="0.5"/>
+  <!-- Height of lift_output_link above lift_base_link when retracted; empty = the variant default. -->
+  <xacro:arg name="lift_mount_height" default=""/>
+  <!-- Empty = moving lift. A number (m) pins the lift at that extension: an arm-only robot
+       (lift:=fixed does the same and defaults to 0.4 m). -->
   <xacro:arg name="lift_fixed_height" default=""/>
   <xacro:arg name="lift_mount_xyz" default="0 0 0"/>
   <xacro:arg name="arm_mount_xyz" default="0 0 0.02"/>
@@ -40,6 +46,8 @@
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/turtlebot3_waffle.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/base.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/lift/telescopic_lift.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/lift/scissor_lift.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/lift/lift.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/tools/generic_tool.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/generic_6dof_arm.xacro"/>
   <xacro:if value="${'$(arg arm)'.startswith('ur')}">
@@ -49,12 +57,13 @@
 
   <xacro:base base_type="$(arg base)"/>
 
-  <xacro:telescopic_lift parent="lift_mount_link"
+  <xacro:lift lift_type="$(arg lift)" parent="lift_mount_link"
     stroke="$(arg lift_stroke)" stages="$(arg lift_stages)" max_velocity="$(arg lift_max_velocity)"
+    max_acceleration="$(arg lift_max_acceleration)" mount_height="$(arg lift_mount_height)"
     fixed_height="$(arg lift_fixed_height)"
     arm_mount_xyz="$(arg arm_mount_xyz)" arm_mount_rpy="$(arg arm_mount_rpy)">
     <origin xyz="$(arg lift_mount_xyz)" rpy="0 0 0"/>
-  </xacro:telescopic_lift>
+  </xacro:lift>
 
   <xacro:arm arm_type="$(arg arm)" parent="lift_output_link">
     <origin xyz="0 0 0" rpy="0 0 0"/>

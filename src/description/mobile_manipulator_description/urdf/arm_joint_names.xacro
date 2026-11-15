@@ -7,4 +7,8 @@
   <!-- Folded, collision-free home pose (arm joints in the order above) and lift height. -->
   <xacro:property name="home_arm" value="${[0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]}"/>
   <xacro:property name="home_lift" value="0.4"/>
+  <!-- True when the lift joint moves (telescopic / scissor and not pinned). With lift:=none, lift:=fixed
+       or a lift_fixed_height the lift contract links still exist but lift_joint is a fixed joint, so it
+       is not commanded and has no home value. Requires the `lift` and `lift_fixed_height` xacro args. -->
+  <xacro:property name="lift_actuated" value="${'$(arg lift)' in ('telescopic', 'scissor') and '$(arg lift_fixed_height)' == ''}"/>
 </robot>
