@@ -133,8 +133,12 @@ ReachabilityNode::ReachabilityNode(const rclcpp::NodeOptions & options)
       r.grid_step = pos(req->grid_step, d.grid_step);
       r.lateral_margin = pos(req->lateral_margin, d.lateral_margin);
       r.lift_min = req->lift_min;
-      r.lift_max = req->lift_max > req->lift_min ? req->lift_max : d.lift_max;
+      r.lift_max = req->lift_max != 0.0 ? req->lift_max : d.lift_max;
       r.lift_step = pos(req->lift_step, d.lift_step);
+      if (r.lift_max < r.lift_min) {
+        res->message = "lift_max (default " + std::to_string(d.lift_max) + ") must be >= lift_min";
+        return;
+      }
       if (r.grid_step < kMinGridStep || r.lift_step < kMinLiftStep) {
         res->message = "grid_step must be >= " + std::to_string(kMinGridStep) + " m and lift_step >= " +
           std::to_string(kMinLiftStep) + " m";

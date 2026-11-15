@@ -247,6 +247,16 @@ TEST(ReachabilityNode, PlanStandsRejectsStepsThatWouldRunForever)
   EXPECT_FALSE(res->success);
   EXPECT_TRUE(res->stands.empty());
 }
+TEST(ReachabilityNode, PlanStandsRejectsAnEmptyLiftRange)
+{
+  Fixture f;
+  auto req = wideWall();
+  req->lift_min = 1.8;
+  req->lift_max = 0.0;          // default 1.5 is below lift_min
+  const auto res = f.call<PlanStands>(req);
+  EXPECT_FALSE(res->success);
+  EXPECT_NE(res->message.find("lift_max"), std::string::npos) << res->message;
+}
 TEST(ReachabilityNode, MissingMapFileLeavesTheNodeNotReady)
 {
   rclcpp::NodeOptions o;
