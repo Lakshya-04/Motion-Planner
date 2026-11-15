@@ -259,6 +259,13 @@ ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}}"
 - **Stand navigation.** `scripts/run_stand_navigation.sh` adds the reachability node and `stand_navigator`: plan stands for
   the smoke wall, drive the arm base to the first one, check arrival, arm, F/T (`docs/stand_navigation.md`).
 
+## Depth sensor (`depth_sensor:=true`)
+
+A ray-cast depth sensor (`mj_multiRay` against the scene geoms) on the root link publishes
+`sensor_msgs/PointCloud2` on `/depth_sensor/points` (frame `depth_sensor_link`, TF from the launch file); arguments
+`depth_sensor_pose`, `depth_sensor_noise_m`, `depth_sensor_rate_hz`. Off by default and then the MJCF is unchanged.
+Details, the wall detector that consumes it and `scripts/run_depth_wall.sh` are in [perception_live.md](perception_live.md).
+
 ## MuJoCo 4 notes
 
 - 4.0 split the Python package into `mujoco-core` and `mujoco-studio` (the viewer lives with the

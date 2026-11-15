@@ -208,7 +208,13 @@ DEFAULTS = dict(
     base_kp=(2.0e4, 2.0e4, 1.0e4),   # N/m, N/m, N m/rad: stiff hold, so wall contact barely moves it
     base_kv_over_kp=0.1,             # seconds
     base_force_limit=(3000.0, 3000.0, 1500.0),
+    # None, or dict(pos=(x, y, z), rpy=(r, p, y) in the root link frame; optional width, height, hfov_deg,
+    # vfov_deg, min_range, max_range, rate_hz, noise_std): a ray-cast depth sensor the plugin publishes
+    depth_sensor=None,
 )
+
+DEPTH_DEFAULTS = dict(width=96, height=64, hfov_deg=60.0, vfov_deg=45.0, min_range=0.1, max_range=5.0,
+                      rate_hz=5.0, noise_std=0.0)
 
 BASE_JOINTS = ('base_x_joint', 'base_y_joint', 'base_yaw_joint')
 
@@ -294,6 +300,11 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
             i = link.inertial
             ET.SubElement(body, 'inertial', pos=_fmt(i['pos']), mass=str(i['mass']),
                           fullinertia=_fmt(_rotated_inertia(i['inertia'], i['rpy'])))
+        if joint is None and opt['depth_sensor'] is not None:
+            ds = opt['depth_sensor']
+            ET.SubElement(body, 'site', name='depth_sensor', size='0.01', group='4',
+                          pos=_fmt(ds.get('pos', (0, 0, 0))),
+                          quat=_fmt(quat_from_rpy(*ds.get('rpy', (0, 0, 0)))))
         if joint is None and opt['base_motion'] is not None:
             for name, kind, axis in zip(BASE_JOINTS, ('slide', 'slide', 'hinge'),
                                         ('1 0 0', '0 1 0', '0 0 1')):
@@ -335,6 +346,8 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
 
     add_body(world, robot.root, None)
     for g in world_geoms:
+        if opt['depth_sensor'] is not None:
+            g.set('group', '1')  # the depth sensor scans group 1 only: the scene, not the robot
         world.append(g)
 
     # contacts between nearby links are meaningless for meshes that overlap at joints
@@ -375,6 +388,15 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
                       data='1' if drive == 'diff' else '0')
         ET.SubElement(custom, 'numeric', name='sim_mujoco_base_max_vel',
                       data=_fmt([bm.get('max_linear', 0.5), bm.get('max_angular', 1.0)]))
+
+    if opt['depth_sensor'] is not None:
+        d = dict(DEPTH_DEFAULTS, **opt['depth_sensor'])
+        custom = mj.find('custom')
+        if custom is None:
+            custom = ET.SubElement(mj, 'custom')
+        ET.SubElement(custom, 'numeric', name='sim_mujoco_depth', data=_fmt([
+            d['width'], d['height'], math.radians(d['hfov_deg']), math.radians(d['vfov_deg']),
+            d['min_range'], d['max_range'], d['rate_hz'], d['noise_std']]))
 
     sensors = ET.SubElement(mj, 'sensor')
     ET.SubElement(sensors, 'force', name='ft_force', site='ft_sensor')

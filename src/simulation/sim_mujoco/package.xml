@@ -20,6 +20,7 @@
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
   <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
 
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>mobile_manipulator_description</exec_depend>
@@ -33,9 +34,12 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>control_msgs</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>tf2_ros_py</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>wall_detector</exec_depend>
+  <exec_depend>coverage_planner</exec_depend>
+  <exec_depend>coverage_planner_msgs</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
   <exec_depend>mobile_manipulator_moveit_config</exec_depend>
   <exec_depend>moveit_ros_move_group</exec_depend>
   <exec_depend>moveit_msgs</exec_depend>

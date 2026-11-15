@@ -18,6 +18,7 @@
  *            tcp_site      MJCF site of the TCP for the ground truth (default "tcp_site")
  *            ft_frame_id   frame_id of the raw topic (default "tool_mount_link")
  *            tcp_frame_id  frame_id of the ground-truth topic (default "tcp_link")
+ *            depth_frame_id frame_id of the point cloud (default "depth_sensor_link")
  *            ft_tare       "true": subtract the reading at activation (default "false")
  *
  *          Planar base: when the MJCF has the base joints (launch base_motion:=true), a
@@ -28,6 +29,10 @@
  *          (TwistStamped) on `sim_mujoco/base_twist`; the `base_odom.py` node turns them into
  *          nav_msgs/Odometry on `/odom` and TF odom -> base_footprint (so the plugin needs only
  *          geometry_msgs). Without the joints none of this exists.
+ *
+ *          Depth sensor: when the MJCF has one (launch depth_sensor:=true) the plugin publishes the
+ *          ray-cast scan as sensor_msgs/PointCloud2 (xyz float32, dense, sensor frame x forward) on
+ *          `depth_sensor/points`; the TF to the sensor frame is the launch file's static transform.
  *
  *          Threading: read() and write() run on the controller manager thread; the model is stepped
  *          in write() by the controller period, so simulated time follows the update rate.
@@ -43,6 +48,7 @@
 #include <geometry_msgs/msg/wrench_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <hardware_interface/handle.hpp>
 #include <hardware_interface/hardware_info.hpp>
 #include <hardware_interface/system_interface.hpp>
@@ -92,6 +98,13 @@ private:
   rclcpp::Time last_cmd_time_;
   std::array<double, 3> cmd_vel_{};
   void publishBase(const rclcpp::Time & stamp);
+
+  // Depth sensor (launch depth_sensor:=true): sensor_msgs/PointCloud2 `depth_sensor/points` in
+  // `depth_frame_id` (hardware parameter, default "depth_sensor_link"), at the MJCF's rate.
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr depth_pub_;
+  std::string depth_frame_id_;
+  double next_depth_time_{0.0};
+  void publishDepth(const rclcpp::Time & stamp);
 
   std::vector<double> initial_position_;
   std::vector<double> state_position_;
