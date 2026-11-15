@@ -41,7 +41,7 @@ without code, when we can implement it.
 - [x] Obstacles projected onto the wall and inflated per tool (`wall_rasterizer.cpp`)
 - [~] ROS nodes: `coverage_planner_node` (OccupancyGrid -> path), `wall_coverage_service_node` (from `wall_scene.json` + PCD), demo node;
       no action interface, the `CoveragePlan` topic has no subscriber in the repo, nodes have only a conversions test
-- [~] Spiral is listed in the service but is a stub; the `coverage_planner` README still says only boustrophedon exists
+- [~] Spiral is listed in the service but is a stub (the README now says so)
 - [ ] Cellular decomposition (BCD) for large cluttered walls (`docs/coverage_patterns.md`)
 - [ ] Coverage feed over ROS (the manager reads `coverage_output.json`; a ROS `CoverageSource` is planned)
 - [ ] **Coverage verification**: estimate what was actually covered from executed tool poses (a per-cell deposition/contact raster);
@@ -183,11 +183,11 @@ without code, when we can implement it.
 ## 13. Open source and plug-and-play
 
 - [x] Apache-2.0 licence; docs index; architecture, robot, reachability, simulation, F/T docs; Docker with nine targets
-- [~] Root README (66 lines): no overview, no quickstart, and it says a robot description is not included (it is)
+- [~] Root README: overview, workflow, package map, Docker build and test, simulators; no one-command quickstart (none exists)
 - [ ] **Getting started**: one command to a running simulated wall pass
-- [ ] `THIRD_PARTY` / `NOTICE` for VAMP, FOAM, Cricket, cuRobo (Apache-2.0, bundled example assets under their own licences), MuJoCo, Gazebo, MoveIt, and whatever we adopt
-- [ ] CHANGELOG and real package versions (all `0.0.0`); a fuller CONTRIBUTING (9 lines today)
-- [ ] `docs/docker.md` covers the `sim-gazebo` target (only in `docs/sim_gazebo.md` today)
+- [x] `THIRD_PARTY.md` (licences, use, nothing vendored); revisit as adopted software lands (a few licences are marked unverified there; the cddlib GPL-2.0 header copy in the VAMP stage needs a review)
+- [~] CHANGELOG and CONTRIBUTING written; real package versions still all `0.0.0`
+- [x] `docs/docker.md` covers the `sim` and `sim-gazebo` targets
 - [ ] CI: none by decision; instead one documented "run all checks" command (`docker/build.sh test` + sim smoke tests)
 - [ ] **Public-readiness cleanup**
   - [ ] 63 references in 41 files to 9 documents that are not in the repo (`force_control_backend_admittance_vs_diffik.md`,
@@ -201,11 +201,11 @@ without code, when we can implement it.
 
 ## 14. Docs that no longer match the code
 
-- [ ] `architecture.md` status table: reachability, self filter, TRAC-IK, VAMP / cuRobo collision, sim execution still say "planned"
-- [ ] `reachability.md` "Not done": the ROS shell and multi-stand selection now exist
-- [ ] `curobo_v2_notes.md` "Not done" (robot config, ESDF, client are done); `moveit_config.md` "Not done" (JTAC variant, seed IK exist)
-- [ ] `scene_model.md` (ROS converters exist) and `robot_self_filter.md` ("ROS shell not built yet" is wrong)
-- [ ] `coverage_planner` README (says only boustrophedon); test counts in `scene_model.md` (41 vs 53) and `robot_self_filter.md` (24 vs 29)
+- [x] `architecture.md` status table (reachability, self filter, TRAC-IK, VAMP / cuRobo collision, sim execution; the pluginlib wording is left to the backend-selection work)
+- [x] `reachability.md` "Not done"
+- [x] `curobo_v2_notes.md` and `moveit_config.md` "Not done"
+- [x] `scene_model.md` and `robot_self_filter.md` (the node is described; test counts 53 and 29)
+- [x] `coverage_planner` README rewritten
 - [ ] `package_layout.md` prescribes pluginlib selection; implement it (section 5)
 
 ## 15. Tests and quality
