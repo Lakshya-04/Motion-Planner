@@ -121,14 +121,14 @@ so SRDF chains, reachability and planners do not change.
 | `lift:` | `lift_joint` | Extra links | Notes |
 |---|---|---|---|
 | `telescopic` | prismatic, 0..`stroke` | `lift_stage_N_link` (`stages` 0-3, mimic) | default; `stages:=0` is the recipe for a chain / column lift below |
-| `scissor` | prismatic, 0..`stroke` | `lift_scissor_K_{center,a,b}` per X-level (`stages` levels, mimic) | box primitives; angles are linearly interpolated, so the linkage is a visual / conservative envelope, the platform height is exact |
+| `scissor` | prismatic, 0..`stroke` | `lift_scissor_K_{center,a,b}` per X-level (`stages` levels, mimic) | box primitives; angles are linearly interpolated, so the linkage is a visual envelope (conservative vertically, up to about 2 cm narrower sideways), the platform height is exact |
 | `fixed` | fixed, pinned at `lift_fixed_height` (default 0.4) above retracted | the telescopic column | the older `lift_fixed_height:=<m>` on any variant does the same; this is the unified name |
 | `none` | fixed | a pedestal | arm mounted directly on the base at `lift_mount_height` (default 0.3) |
 
 Profile `lift:` keys: `type`, `stroke_m`, `stages`, `mount_height_m` (`lift_mount_height`: height of
 `lift_output_link` above `lift_base_link` when retracted; for a scissor this is the minimum height),
-`max_velocity_mps`, `max_acceleration_mps2` (URDF cannot carry an acceleration: it is written to
-`lift_limits.yaml` by the asset command for the MoveIt joint limits), and `payload_kg` (a note about
+`max_velocity_mps`, `max_acceleration_mps2` (URDF cannot carry an acceleration: it is not wired into MoveIt yet,
+so copy it into `mobile_manipulator_moveit_config/config/joint_limits.yaml` by hand), and `payload_kg` (a note about
 the real lift's rating, not used by the model). With `none` / `fixed` the lift joint is not actuated:
 the SRDF omits it from the home state, the ros2_control block does not command it, `lift_arm` has the
 same six joints as `arm`, and the profile sets `joints.lift: null`.

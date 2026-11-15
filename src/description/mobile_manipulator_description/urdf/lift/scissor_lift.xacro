@@ -14,7 +14,7 @@
      A real scissor's arm angle is theta = asin(h / (stages * L)), which is not linear in the
      height; a <mimic> joint can only be linear, so theta is interpolated between the collapsed and
      the fully extended angle. The pivots therefore drift from the platform by a few centimetres
-     mid-stroke: the linkage is a visualisation and a conservative collision envelope, the platform
+     mid-stroke: the linkage is a visualisation and a collision envelope that is conservative vertically but up to about 2 cm narrower sideways, the platform
      height itself is exact. Arm length L is chosen so the arms reach 70 degrees at full stroke.
 
      `mount_height` is the height of the top platform's underside above the bottom plate origin when

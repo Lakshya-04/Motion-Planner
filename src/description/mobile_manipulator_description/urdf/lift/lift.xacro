@@ -16,8 +16,8 @@
 
      An empty `fixed_height` means the lift moves (telescopic, scissor); a number pins whichever
      variant it is given to, so `telescopic` + fixed_height behaves as `fixed`.
-     `max_acceleration` is not representable in URDF; it is carried by the profile and written to
-     joint_limits by the asset tooling. -->
+     `max_acceleration` is not representable in URDF; it is carried by the profile only (the MoveIt
+     joint_limits.yaml is edited by hand for now). -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="lift" params="lift_type parent *origin stroke:=1.5 stages:=2 max_velocity:=0.2 max_acceleration:=0.5 mount_height:='' fixed_height:='' arm_mount_xyz:='0 0 0.02' arm_mount_rpy:='0 0 0'">
     <xacro:property name="arm_z" value="${float(arm_mount_xyz.split()[2])}"/>
