@@ -1,55 +1,32 @@
-"""Read a description profile (config/profiles/*.yaml) into xacro arguments and joint names.
+"""Profile access for the Gazebo backend, on top of the shared reader.
 
-The profile YAML is the single source of joint names and xacro arguments; launch files and
-tests read it through here instead of repeating lists.
+The profile YAML is read and validated by `mobile_manipulator_description.profile` (the same
+reader every other node uses), so a profile means the same thing here: `lift: null` is a chain
+without a lift joint and a missing home entry is an error, not 0. These helpers only add what is
+specific to this package.
 """
-import os
-
-import yaml
-
-
-def profile_dir():
-    from ament_index_python.packages import get_package_share_directory
-    return os.path.join(get_package_share_directory('mobile_manipulator_description'),
-                        'config', 'profiles')
-
-
-def resolve_profile(name_or_path):
-    """`generic_6dof_telescopic`, `generic_6dof_telescopic.yaml` or a path."""
-    if os.path.isfile(name_or_path):
-        return name_or_path
-    base = name_or_path if name_or_path.endswith('.yaml') else name_or_path + '.yaml'
-    path = os.path.join(profile_dir(), base)
-    if not os.path.isfile(path):
-        raise FileNotFoundError(f'profile {name_or_path!r} not found (looked in {profile_dir()})')
-    return path
-
-
-def load_profile(name_or_path):
-    with open(resolve_profile(name_or_path)) as f:
-        return yaml.safe_load(f)
+from mobile_manipulator_description.profile import (  # noqa: F401  (re-exported)
+    Profile, ProfileError, load_profile, parse_profile)
 
 
 def xacro_mappings(profile, hardware='gazebo'):
-    """robot.xacro_args of the profile as xacro mappings (all values as strings)."""
-    args = {str(k): str(v) for k, v in (profile.get('robot', {}).get('xacro_args') or {}).items()}
+    """The profile's xacro arguments as xacro mappings, with the hardware backend set."""
+    args = profile.xacro_mappings()
     args['hardware'] = hardware
     return args
 
 
 def controlled_joints(profile):
-    """Lift joint first, then the six arm joints: the order every controller here uses."""
-    j = profile['joints']
-    return [j['lift']] + list(j['arm'])
+    """Actuated joints in the order every controller here uses (lift first when there is one)."""
+    return list(profile.joints)
 
 
 def frames(profile):
-    f = profile['frames']
+    f = profile.frames
     return {'base': f['base'], 'tcp': f['tcp'], 'tool_mount': f['tool_mount'],
-            'world_base': f.get('world_base', 'base_footprint')}
+            'world_base': f['world_base']}
 
 
 def home_positions(profile):
-    """Home pose in controlled_joints order (missing entries default to 0)."""
-    home = profile.get('home', {})
-    return [float(home.get(name, 0.0)) for name in controlled_joints(profile)]
+    """Home pose in controlled_joints order."""
+    return list(profile.home_positions)

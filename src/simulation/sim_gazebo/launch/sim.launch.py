@@ -103,7 +103,7 @@ def _launch(context):
                parameters=[{'robot_description': robot_description, 'use_sim_time': True}],
                output='screen')
     spawn = Node(package='ros_gz_sim', executable='create', output='screen',
-                 arguments=['-topic', 'robot_description', '-name', profile['robot']['name'],
+                 arguments=['-topic', 'robot_description', '-name', profile.robot_name,
                             '-z', '0.0'])
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge', output='screen',
                   arguments=['/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',

@@ -57,7 +57,14 @@ def test_gazebo_branch(profile_name):
     assert robot.find("gazebo[@reference='tool_mount_link']/sensor[@type='contact']") is not None
 
     pinned = [j for j in robot.findall('joint') if j.find('parent').get('link') == 'world']
-    assert [j.find('child').get('link') for j in pinned] == [profile['frames']['world_base']]
+    assert [j.find('child').get('link') for j in pinned] == [profile.frames['world_base']]
+
+
+def test_no_lift_profile_controls_only_the_arm():
+    profile = prof.load_profile('ur10e_nolift')
+    names = prof.controlled_joints(profile)
+    assert None not in names and names == profile.arm_joints
+    assert len(prof.home_positions(profile)) == len(names)
 
 
 @pytest.mark.parametrize('hardware', ['mock', 'jtac_mock'])
