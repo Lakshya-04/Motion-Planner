@@ -12,6 +12,8 @@ find_package(sensor_msgs REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(reachability_msgs REQUIRED)
 find_package(core_types REQUIRED)
 find_package(ros_adapters REQUIRED)
@@ -74,6 +76,8 @@ ament_target_dependencies(manipulation_manager_node
   std_msgs
   sensor_msgs
   ament_index_cpp
+  tf2
+  tf2_ros
 )
 # The node is the composition root, but it no longer links a backend: the planners are built
 # from the planning_config YAML through pluginlib (motion_planner_ros), so switching backends
@@ -139,6 +143,11 @@ if(BUILD_TESTING)
   ament_add_gtest(wall_direction_test test/wall_direction_test.cpp)
   if(TARGET wall_direction_test)
     target_link_libraries(wall_direction_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(frame_transform_test test/frame_transform_test.cpp)
+  if(TARGET frame_transform_test)
+    target_link_libraries(frame_transform_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
   ament_add_gtest(planning_config_test test/planning_config_test.cpp)

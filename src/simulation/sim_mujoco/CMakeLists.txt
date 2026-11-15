@@ -23,6 +23,7 @@ install(PROGRAMS scripts/generate_mjcf scripts/smoke_test.py scripts/contact_tes
   scripts/run_contact.sh scripts/wall_pass_test.py scripts/run_wall_pass.sh
   scripts/record_run.py scripts/ready_pose.py scripts/run_manager_pass.sh scripts/base_motion_test.py scripts/run_base_motion.sh
   scripts/base_odom.py scripts/stand_navigation_test.py scripts/run_stand_navigation.sh
+  scripts/run_stand_pass.sh scripts/stand_drive.py scripts/shift_wall_scene.py
   DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/depth_wall_test.py scripts/run_depth_wall.sh DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch test/data DESTINATION share/${PROJECT_NAME})

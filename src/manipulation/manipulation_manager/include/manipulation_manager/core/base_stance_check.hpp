@@ -53,9 +53,10 @@ struct StanceVerdict
 StanceWall stanceWall(const std::vector<CoverageSegmentIntent> & intents);
 
 /// Accept the stance only when no target is unreachable or unplanned, exactly one stand covers
-/// the plan, and that stand is within `tol` of the origin (where the base is).
+/// the plan, and that stand is within `tol` of `base` (where the base is; the origin of the planning
+/// frame unless the plan is in a world frame, then the base pose in that frame).
 StanceVerdict evaluateStance(
   const std::vector<StanceStand> & stands, size_t unreachable, size_t not_planned,
-  const StanceTolerance & tol = {});
+  const StanceTolerance & tol = {}, const StanceStand & base = {});
 
 }  // namespace manipulation_manager

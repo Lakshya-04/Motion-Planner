@@ -12,6 +12,8 @@ anything verified on hardware.
 
 ### Added
 
+- `manipulation_manager` `world_frame` (default off): coverage poses in a fixed frame, transformed into `base_footprint` per column from TF; `dock_attempts`; `base_check` in the world frame. `sim_mujoco/scripts/run_stand_pass.sh`: plan stands, drive to stand 0, manager pass from there, scored.
+
 **Perception and scene**
 - `scene_model`: backend-neutral scene (primitives, meshes, point clouds, voxel grids, ESDF), loaders for
   PCD, PLY, OBJ, STL and native / cuRobo-style YAML scenes, CPU voxelisation and exact ESDF, RANSAC plane

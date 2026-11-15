@@ -24,6 +24,9 @@
 #include "geometry_msgs/msg/pose.hpp"
 #include "reachability_msgs/srv/plan_stands.hpp"
 #include "std_msgs/msg/float64.hpp"
+#include "tf2/time.h"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 
 #include "core_types/pose.hpp"
 #include "motion_planner/core/motion_planner.hpp"
@@ -33,6 +36,7 @@
 #include "ros_adapters/rclcpp_logger.hpp"
 
 #include "manipulation_manager/core/base_stance_check.hpp"
+#include "manipulation_manager/core/frame_transform.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
 #include "manipulation_manager/core/wall_direction.hpp"
 #include "manipulation_manager/ros/coverage/coverage_output_json_source.hpp"
@@ -106,6 +110,12 @@ public:
     if (planning_group_.empty()) {
       planning_group_ = profile.whole_body_group;
     }
+    // Off by default: the coverage poses are taken as they are, in frame_id (the base at the origin).
+    // Set (e.g. "odom"): the poses are in this fixed frame and every column is transformed into
+    // frame_id with the TF at the time it starts, so the pass is right wherever the base stopped
+    // (after stand_navigator drove it to a stand). wall_direction is then a direction in this frame.
+    world_frame_ = this->declare_parameter<std::string>("world_frame", "");
+    arm_base_frame_ = this->declare_parameter<std::string>("arm_base_frame", "arm_base_link");
     coverage_json_path_ = this->declare_parameter<std::string>(
       "coverage_json_path", "/tmp/wall_export/coverage_output.json");
     // base_link -> base_footprint fixed offset (see coverage_pass_demo_node.cpp's own frame_id
@@ -129,6 +139,8 @@ public:
     coverage_eef_speed_ = this->declare_parameter<double>("coverage_eef_speed_mps", 0.02);
     dock_at_stroke_start_ = this->declare_parameter<bool>("dock_at_stroke_start", false);
     dock_standoff_ = this->declare_parameter<double>("dock_standoff_m", 0.12);
+    // OMPL is randomised; from a base that turned side-on to the wall a dock sometimes needs more tries.
+    dock_attempts_ = this->declare_parameter<int>("dock_attempts", 3);
     contact_y_overshoot_ = this->declare_parameter<double>("contact_y_overshoot_m", 0.045);
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
@@ -165,6 +177,11 @@ public:
   {
     if (!buildPlanners()) {
       return false;
+    }
+    if (!world_frame_.empty()) {
+      // its own spin thread: the node itself is only spun in bursts while a request waits
+      tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+      tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_, shared_from_this(), true);
     }
     execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
       shared_from_this(), "/" + controller_name_ + "/follow_joint_trajectory");
@@ -203,8 +220,9 @@ public:
    */
   void runCoveragePlan()
   {
+    // In a world frame the poses are loaded as they are and moved into frame_id column by column.
     CoverageOutputJsonSource source(
-      coverage_json_path_, frame_id_, z_offset_, coverage_z_step_, coverage_z_min_, coverage_z_max_,
+      coverage_json_path_, world_frame_.empty() ? frame_id_ : world_frame_, z_offset_, coverage_z_step_, coverage_z_min_, coverage_z_max_,
       coverage_eef_speed_, wall_dir_);
     const auto intents = source.getCoveragePlan();
     RCLCPP_INFO(this->get_logger(), "Loaded %zu wall column(s) from %s",
@@ -292,6 +310,23 @@ private:
     req->lift_min = base_check_lift_min_;
     req->lift_max = base_check_lift_max_;
     req->arm_mount_offset_z = base_check_arm_mount_z_;
+    // In a world frame the stands are world poses: start the planner where the arm base is, and
+    // compare the stand with that pose (without a start the planner centres the stand on the wall
+    // section, which is not necessarily the stand nearest to the base).
+    StanceStand here;
+    if (!world_frame_.empty()) {
+      FrameTransform arm_in_world, base_in_world;
+      if (!lookup(world_frame_, arm_base_frame_, arm_in_world) ||
+        !lookup(world_frame_, frame_id_, base_in_world))
+      {
+        return fail("no TF " + world_frame_ + " -> " + arm_base_frame_ + " / " + frame_id_);
+      }
+      here = {arm_in_world.t[0], arm_in_world.t[1], base_in_world.yaw()};
+      req->has_start = true;
+      req->start_x = here.x;
+      req->start_y = here.y;
+      req->start_yaw = here.yaw;
+    }
     auto future = client->async_send_request(req);
     if (rclcpp::spin_until_future_complete(
         shared_from_this(), future, std::chrono::seconds(30)) != rclcpp::FutureReturnCode::SUCCESS)
@@ -306,12 +341,30 @@ private:
     StanceTolerance tol;
     tol.xy_m = base_check_tol_xy_;
     tol.yaw_rad = base_check_tol_yaw_;
-    const auto verdict = evaluateStance(stands, res->unreachable.size(), res->not_planned.size(), tol);
+    const auto verdict = evaluateStance(
+      stands, res->unreachable.size(), res->not_planned.size(), tol, here);
     if (verdict.ok) {
       RCLCPP_INFO(this->get_logger(), "base stance check: %s", verdict.message.c_str());
       return true;
     }
     return fail(verdict.message);
+  }
+
+  /// Pose of `child` in `parent` from TF (latest), false when it does not resolve within 2 s.
+  bool lookup(const std::string & parent, const std::string & child, FrameTransform & out)
+  {
+    try {
+      const auto tf = tf_buffer_->lookupTransform(
+        parent, child, tf2::TimePointZero, tf2::durationFromSec(2.0));
+      const auto & t = tf.transform.translation;
+      const auto & q = tf.transform.rotation;
+      out.t = {t.x, t.y, t.z};
+      out.q = {q.x, q.y, q.z, q.w};
+      return true;
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(this->get_logger(), "TF %s <- %s: %s", parent.c_str(), child.c_str(), e.what());
+      return false;
+    }
   }
 
   /// Builds the planners the YAML selection names, through pluginlib. Plugins that need a ROS
@@ -380,8 +433,27 @@ private:
     }
   }
 
-  ColumnOutcome runColumn(const CoverageSegmentIntent & intent)
+  ColumnOutcome runColumn(const CoverageSegmentIntent & world_intent)
   {
+    // The column as planned in world_frame, expressed in frame_id for where the base is now. The
+    // wall direction is rotated with it (the base may have stopped at another yaw).
+    CoverageSegmentIntent intent = world_intent;
+    WallDirection wall_dir = wall_dir_;
+    if (!world_frame_.empty()) {
+      FrameTransform base_in_world;
+      if (!lookup(world_frame_, frame_id_, base_in_world)) {
+        RCLCPP_ERROR(this->get_logger(), "%s: no base pose, skipping column", intent.label.c_str());
+        return ColumnOutcome::kFailed;
+      }
+      const auto world_in_base = base_in_world.inverse();
+      intent = transformIntent(world_in_base, world_intent);
+      wall_dir = world_in_base.apply(wall_dir_);
+      RCLCPP_INFO(
+        this->get_logger(), "%s: base at (%.3f, %.3f) yaw %.3f in %s; column starts at (%.3f, %.3f, %.3f) in %s",
+        intent.label.c_str(), base_in_world.t[0], base_in_world.t[1], base_in_world.yaw(),
+        world_frame_.c_str(), intent.poses.front().x, intent.poses.front().y, intent.poses.front().z,
+        frame_id_.c_str());
+    }
     const auto & rep = intent.poses.front();
     // Docking in the middle of the column is the original behaviour; at the stroke's first pose the
     // contact path starts from the arm configuration it docked in (no IK branch jump at the start).
@@ -390,7 +462,7 @@ private:
 
     core_types::Pose standoff_pose = rep;
     standoff_pose.z = dock_z;
-    standoff_pose = wall_dir_.shifted(standoff_pose, -dock_standoff_);
+    standoff_pose = wall_dir.shifted(standoff_pose, -dock_standoff_);
     standoff_pose.qx = rep.qx;
     standoff_pose.qy = rep.qy;
     standoff_pose.qz = rep.qz;
@@ -411,7 +483,7 @@ private:
     // retries for exactly this reason (a genuine failure to find any path is worth one more
     // attempt before giving up); dock deserves the same tolerance.
     MotionExec dock_exec;
-    for (int attempt = 0; attempt < 3; ++attempt) {
+    for (int attempt = 0; attempt < dock_attempts_; ++attempt) {
       dock_exec = manager_.executeMotionSegments(
         frame_id_, {dock_seg}, {standoff_pose}, planning_group_);
       if (dock_exec.success) {
@@ -444,7 +516,7 @@ private:
     contact_seg.wall_reference_pose.x = rep.x;
     contact_seg.wall_reference_pose.y = rep.y;
     contact_seg.wall_reference_pose.z = rep.z;
-    const auto wall_q = wall_dir_.outwardNormalQuaternion();
+    const auto wall_q = wall_dir.outwardNormalQuaternion();
     contact_seg.wall_reference_pose.qx = wall_q[0];
     contact_seg.wall_reference_pose.qy = wall_q[1];
     contact_seg.wall_reference_pose.qz = wall_q[2];
@@ -453,7 +525,7 @@ private:
     std::vector<core_types::Pose> contact_waypoints;
     contact_waypoints.reserve(intent.poses.size());
     for (size_t i = 0; i < intent.poses.size(); ++i) {
-      core_types::Pose p = wall_dir_.shifted(intent.poses[i], contact_y_overshoot_);
+      core_types::Pose p = wall_dir.shifted(intent.poses[i], contact_y_overshoot_);
       contact_waypoints.push_back(p);
     }
 
@@ -488,7 +560,7 @@ private:
       unload_seg.waypoint_indices = {0};
       unload_seg.allow_target_contact = false;
       unload_seg.min_path_fraction = 0.5;
-      const auto unload_pose = wall_dir_.shifted(contact_waypoints.back(), -(contact_y_overshoot_ + unload_m_));
+      const auto unload_pose = wall_dir.shifted(contact_waypoints.back(), -(contact_y_overshoot_ + unload_m_));
       manager_.executeMotionSegments(frame_id_, {unload_seg}, {unload_pose}, planning_group_);
     }
     // Ramp the force target to zero and let the admittance unload the wall before it is switched off.
@@ -533,6 +605,10 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr force_pub_;
 
   std::string frame_id_;
+  std::string world_frame_;
+  std::string arm_base_frame_;
+  std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
   std::string planning_group_;
   std::string coverage_json_path_;
   double z_offset_{0.0};
@@ -543,6 +619,7 @@ private:
   double coverage_z_max_{1.60};
   double coverage_eef_speed_{0.02};
   double dock_standoff_{0.0};
+  int dock_attempts_{3};
   std::string base_check_mode_{"off"};
   std::string base_check_service_;
   double base_check_lift_min_{0.0};

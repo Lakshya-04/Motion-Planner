@@ -25,6 +25,8 @@
   <depend>std_msgs</depend>
   <depend>reachability_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
   <depend>core_types</depend>
   <depend>ros_adapters</depend>
   <depend>motion_planner</depend>

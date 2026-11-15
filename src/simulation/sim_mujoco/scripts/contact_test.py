@@ -58,6 +58,7 @@ class ContactTest(Smoke):
         self.cond_last = None
         self.record = False
         self.run_rows = []   # (t_s, x, y, z, |Fz|) of the whole run, tool point in base_footprint
+        self.record_frame = 'base_footprint'   # frame of the recorded tool point (record_run.py --frame)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.create_subscription(WrenchStamped, '/ft_conditioner/wrench_conditioned', self._cond,
@@ -85,7 +86,7 @@ class ContactTest(Smoke):
     def _truth_stamped(self, m):
         pos = None
         try:
-            tf = self.tf_buffer.lookup_transform('base_footprint', 'tcp_link', rclpy.time.Time())
+            tf = self.tf_buffer.lookup_transform(self.record_frame, 'tcp_link', rclpy.time.Time())
             pos = (tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z)
         except Exception:  # noqa: BLE001  (no transform yet: skip the row)
             pass

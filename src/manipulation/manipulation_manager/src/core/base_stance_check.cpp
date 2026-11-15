@@ -29,7 +29,7 @@ StanceWall stanceWall(const std::vector<CoverageSegmentIntent> & intents)
 
 StanceVerdict evaluateStance(
   const std::vector<StanceStand> & stands, size_t unreachable, size_t not_planned,
-  const StanceTolerance & tol)
+  const StanceTolerance & tol, const StanceStand & base)
 {
   StanceVerdict v;
   std::ostringstream msg;
@@ -41,8 +41,8 @@ StanceVerdict evaluateStance(
     msg << stands.size() << " stands are needed to cover this plan; the manager runs it from one stance";
   } else {
     const auto & s = stands.front();
-    const double dxy = std::hypot(s.x, s.y);
-    const double dyaw = std::fabs(std::remainder(s.yaw, 2.0 * M_PI));
+    const double dxy = std::hypot(s.x - base.x, s.y - base.y);
+    const double dyaw = std::fabs(std::remainder(s.yaw - base.yaw, 2.0 * M_PI));
     if (dxy <= tol.xy_m && dyaw <= tol.yaw_rad) {
       v.ok = true;
       msg << "base stance reaches the plan (stand " << dxy << " m, " << dyaw << " rad away)";
