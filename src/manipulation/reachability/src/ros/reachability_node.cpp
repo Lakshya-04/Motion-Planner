@@ -43,8 +43,10 @@ ReachabilityNode::ReachabilityNode(const rclcpp::NodeOptions & options)
       base_ = loadBaseProfile(base_file);
       RCLCPP_INFO(get_logger(), "base profile %s: %s", base_file.c_str(), base_->name.c_str());
     } catch (const std::exception & e) {
-      RCLCPP_ERROR(get_logger(), "cannot load base profile '%s': %s; planning stands without a base model",
-        base_file.c_str(), e.what());
+      // planning without the footprint would silently place the base into the wall: stay not ready
+      RCLCPP_ERROR(get_logger(), "cannot load base profile '%s': %s; node not ready", base_file.c_str(), e.what());
+      map_.reset();
+      return;
     }
   }
 

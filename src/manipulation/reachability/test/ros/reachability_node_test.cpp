@@ -219,6 +219,13 @@ TEST(ReachabilityNode, PlanStandsRejectsABadRequest)
   EXPECT_FALSE(f.call<PlanStands>(std::make_shared<PlanStands::Request>())->success);
 }
 
+TEST(ReachabilityNode, UnloadableBaseProfileLeavesTheNodeNotReady)
+{
+  rclcpp::NodeOptions o;
+  o.parameter_overrides({{"map_file", mapFile()}, {"base_profile", std::string("/nonexistent/base.yaml")}});
+  reachability::ReachabilityNode node(o);
+  EXPECT_FALSE(node.ready());   // would otherwise plan stands without the footprint check
+}
 TEST(ReachabilityNode, MissingMapFileLeavesTheNodeNotReady)
 {
   rclcpp::NodeOptions o;
