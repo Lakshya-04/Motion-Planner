@@ -294,3 +294,33 @@ def test_unknown_base_fails_loudly():
     with pytest.raises(Exception) as err:
         _render(arm='generic_6dof', base='not_a_base')
     assert 'unknown base_type' in str(err.value)
+
+
+def _load_module(name, rel):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, PKG / rel)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_display_launch_forwards_base():
+    launch = pytest.importorskip('launch')
+    display = _load_module('display_launch', 'launch/display.launch.py')
+    context = launch.LaunchContext()
+    context.launch_configurations.update({'arm': 'generic_6dof', 'base': 'husky', 'lift_stroke': '1.5'})
+    assert display._mappings(context)['base'] == 'husky'
+    declared = [a.name for a in display.generate_launch_description().entities
+                if isinstance(a, launch.actions.DeclareLaunchArgument)]
+    assert 'base' in declared
+
+
+def test_generate_acm_takes_a_base(tmp_path):
+    """With a wheeled base the matrix lists the wheel/body pairs."""
+    import subprocess
+    import sys
+    out = tmp_path / 'acm.xacro'
+    subprocess.run([sys.executable, str(PKG / 'scripts' / 'generate_acm.py'), '--arm', 'generic_6dof',
+                    '--base', 'scout_mini', '--out', str(out)], check=True, capture_output=True)
+    text = out.read_text()
+    assert 'base_link' in text and '_wheel_link' in text
