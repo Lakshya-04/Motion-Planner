@@ -117,8 +117,9 @@ struct CalibrationResult
 };
 
 /// Least squares for payload mass, centre of gravity and the bias from static poses without
-/// contact. Needs poses that point gravity in clearly different directions in the sensor frame
-/// (at least four, spread over more than a plane); a degenerate set is rejected, not guessed.
+/// contact. Needs at least four poses whose gravity directions in the sensor frame differ by at least
+/// about 10 degrees (largest pairwise angle); a degenerate set is rejected, not guessed. A negative fitted
+/// mass (wrong sensor sign) is rejected with a message saying so.
 CalibrationResult identifyPayload(
   const std::vector<CalibrationSample> & samples, const Vec3 & gravity_world, double sign = 1.0);
 

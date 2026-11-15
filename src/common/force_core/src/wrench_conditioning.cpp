@@ -138,6 +138,12 @@ bool leastSquares(
 }
 }  // namespace
 
+namespace
+{
+constexpr double kMinPoseSpreadRad = 0.17;   // about 10 degrees between the most different poses
+constexpr double kMinPayloadMassKg = 1e-3;   // below this a negative fit is noise around zero payload
+}  // namespace
+
 CalibrationResult identifyPayload(
   const std::vector<CalibrationSample> & samples, const Vec3 & gravity_world, double sign)
 {
@@ -145,6 +151,26 @@ CalibrationResult identifyPayload(
   out.samples = samples.size();
   if (samples.size() < 4) {
     out.message = "need at least 4 static poses, got " + std::to_string(samples.size());
+    return out;
+  }
+  // Gravity must point in clearly different directions in the sensor frame: the largest angle
+  // between any two samples has to exceed a physical minimum, else mass, centre of gravity and bias
+  // are only separated by noise (the normal equations alone pass such sets).
+  std::vector<Vec3> dirs;
+  for (const auto & s : samples) {dirs.push_back(rotateInverse(s.r_world_sensor, gravity_world));}
+  const auto dot = [](const Vec3 & a, const Vec3 & b) {return a.x * b.x + a.y * b.y + a.z * b.z;};
+  double max_angle = 0.0;
+  for (std::size_t i = 0; i < dirs.size(); ++i) {
+    for (std::size_t j = i + 1; j < dirs.size(); ++j) {
+      const double ni = std::sqrt(dot(dirs[i], dirs[i])), nj = std::sqrt(dot(dirs[j], dirs[j]));
+      if (ni < 1e-12 || nj < 1e-12) {continue;}
+      max_angle = std::max(max_angle, std::acos(std::clamp(dot(dirs[i], dirs[j]) / (ni * nj), -1.0, 1.0)));
+    }
+  }
+  if (max_angle < kMinPoseSpreadRad) {
+    out.message = "the poses do not excite the fit: gravity directions in the sensor frame span only " +
+      std::to_string(max_angle * 180.0 / M_PI) + " deg, need at least " +
+      std::to_string(kMinPoseSpreadRad * 180.0 / M_PI) + " deg";
     return out;
   }
   // y = sign * raw. Force:  F = m g_s + b_F        unknowns [m, bFx, bFy, bFz]
@@ -178,6 +204,11 @@ CalibrationResult identifyPayload(
   }
   out.rms_force_n = std::sqrt(sf / static_cast<double>(frows.size()));
   out.rms_torque_nm = std::sqrt(st / static_cast<double>(trows.size()));
+  if (th_f[0] < -kMinPayloadMassKg) {
+    out.message = "negative mass (" + std::to_string(th_f[0]) +
+      " kg): the sensor sign is probably wrong, repeat with sign = -1";
+    return out;
+  }
   out.payload.mass_kg = th_f[0];
   out.bias = make({th_f[1], th_f[2], th_f[3]}, {th_t[3], th_t[4], th_t[5]});
   if (std::abs(th_f[0]) > 1e-6) {

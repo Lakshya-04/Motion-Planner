@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <utility>
 #include <vector>
 
 #include "force_core/wrench_conditioning.hpp"
@@ -181,4 +182,47 @@ TEST(PayloadIdentification, NeedsEnoughPoses)
 {
   const auto r = force_core::identifyPayload(std::vector<CalibrationSample>(2), Vec3{0, 0, -9.80665});
   EXPECT_FALSE(r.ok);
+}
+
+namespace
+{
+std::vector<CalibrationSample> posesFor(
+  const Payload & truth, const Wrench & bias, const Vec3 & gravity, const std::vector<std::pair<double, double>> & angles,
+  double noise)
+{
+  std::vector<CalibrationSample> s;
+  unsigned k = 0;
+  for (const auto & [ax, ay] : angles) {
+    CalibrationSample p;
+    p.r_world_sensor = mul(rotX(0.3 + ax), rotY(-0.5 + ay));
+    const Wrench g = force_core::gravityWrench(truth, p.r_world_sensor, gravity);
+    const auto n = [&]() {return noise * std::sin(12.9898 * static_cast<double>(++k));};
+    p.raw = w(g.force_x + bias.force_x + n(), g.force_y + bias.force_y + n(),
+      g.force_z + bias.force_z + n(), g.torque_x + bias.torque_x + n() * 0.1,
+      g.torque_y + bias.torque_y + n() * 0.1, g.torque_z + bias.torque_z + n() * 0.1);
+    s.push_back(p);
+  }
+  return s;
+}
+}  // namespace
+
+TEST(PayloadIdentification, RejectsNearlyIdenticalPosesWithNoise)
+{
+  // Six poses within 0.1 degree of each other: the fit would be noise, not a payload.
+  const auto s = posesFor(Payload{1.7, {0.012, -0.008, 0.061}}, w(0.4, -0.3, 0.2, 0.02, -0.01, 0.03),
+    Vec3{0, 0, -9.80665}, {{0.0, 0.0}, {0.02, 0.01}, {-0.015, 0.02}, {0.01, -0.02}, {-0.02, 0.015}, {0.005, -0.01}}, 0.05);
+  const auto r = force_core::identifyPayload(s, Vec3{0, 0, -9.80665});
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(r.message.find("do not excite"), std::string::npos);
+}
+
+TEST(PayloadIdentification, RejectsNegativeMassAsWrongSensorSign)
+{
+  const Vec3 gravity{0, 0, -9.80665};
+  const auto s = posesFor(Payload{1.7, {0.012, -0.008, 0.061}}, w(0.4, -0.3, 0.2, 0.02, -0.01, 0.03),
+    gravity, {{0.0, 0.0}, {0.9, 0.5}, {1.8, -0.4}, {2.7, 0.3}, {-1.0, 0.8}, {-2.0, -0.7}}, 0.0);
+  const auto wrong = force_core::identifyPayload(s, gravity, -1.0);   // sensor read with the wrong sign
+  EXPECT_FALSE(wrong.ok);
+  EXPECT_NE(wrong.message.find("negative mass"), std::string::npos);
+  EXPECT_TRUE(force_core::identifyPayload(s, gravity, 1.0).ok);
 }

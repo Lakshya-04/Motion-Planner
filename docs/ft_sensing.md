@@ -1,7 +1,7 @@
 # Force/torque sensing: from a raw sensor reading to the contact wrench
 
 JTAC (the compliant trajectory controller) and the force layer work on one quantity: the wrench the
-environment exerts on the tool, at the tool control point (`link_tcp`), in the tool axes
+environment exerts on the tool, at the tool control point (`link_tcp` on the real robot description, `tcp_link` in the simulated mobile-manipulator description), in the tool axes
 (`core_types::Wrench`; pressing along the tool's +Z gives `force_z` of about minus the target). A real
 wrist sensor does not report that. It reports a wrench at its own origin, in its own axes, with the weight
 of everything beyond it and an offset. The conversion is four steps, in this order.
@@ -54,9 +54,10 @@ in front of it.
 
 `identifyPayload(samples, gravity, sign)` fits mass, centre of gravity (in the sensor frame) and the six
 bias values from static, contact-free readings, each with the sensor's orientation at that moment (from
-forward kinematics). It needs gravity to point in clearly different directions in the sensor frame, at least
-four poses spread over more than a plane; a set that does not excite the fit is rejected with a message,
-not guessed. It returns the fit residual. Static only: inertial terms are ignored, so use it, and the
+forward kinematics). It needs at least four poses in which gravity, seen in the sensor frame, points in clearly
+different directions: the largest angle between any two poses must be at least 10 degrees (a planar sweep
+about one axis is enough; the fit recovers it exactly). A set below that is rejected with a message, not
+guessed. A negative fitted mass is rejected too: it means the sensor sign is wrong, so repeat with `sign = -1`. It returns the fit residual. Static only: inertial terms are ignored, so use it, and the
 compensation, at low accelerations.
 
 ## In simulation
