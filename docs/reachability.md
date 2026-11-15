@@ -73,10 +73,11 @@ the `base:` section of a robot profile (`loadBaseProfile`; every profile in
   facing the wall), skips stands where the footprint would not fit, and reports `yaw` and
   `footprint_clearance`. `standoff` and `max_standoff` still refer to the arm base. Without a base model
   nothing changes.
-- **Travel.** `travelTime(base, from, to)` models the drive type: a base that can strafe (omni,
-  four-wheel steering) translates and turns together; diff and skid-steer bases turn toward the goal, drive
+- **Travel.** `travelTime(base, from, to)` models the drive type: an omni base
+  translates and turns together, a four-wheel-steer base crabs and spins one after the other; diff and skid-steer bases turn toward the goal, drive
   and turn to the final yaw, and reverse when that is quicker. `orderStands` visits stands greedily by that
-  time, so a wall covered from several stands is ordered by what the base can actually do.
+  time, so a wall covered from several stands is ordered by what the base can actually do. Only the velocity limits are used; the profile's
+  acceleration limits are not modelled, so short hops are underestimated (fine for ordering).
 - **Try it.**
 
 ```bash
