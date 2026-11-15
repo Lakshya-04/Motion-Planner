@@ -5,6 +5,12 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# MoveIt's apt binaries are built against the system octomap (liboctomap1.9), while ros-jazzy-octomap
+# ships a newer one that find_package(octomap) would pick first. Two octomap copies in one process
+# free the same statics twice at exit (malloc_consolidate abort). Resolve the one MoveIt links.
+if(NOT octomap_DIR AND EXISTS /usr/share/octomap/octomap-config.cmake)
+  set(octomap_DIR /usr/share/octomap CACHE PATH "octomap package directory (same copy as MoveIt)")
+endif()
 find_package(ament_cmake REQUIRED)
 find_package(admittance_controller REQUIRED)
 find_package(ament_index_cpp REQUIRED)
