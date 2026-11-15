@@ -22,7 +22,9 @@ def test_launch_shuts_down_with_a_clear_message():
     shutdowns = [e for e in entities if isinstance(e, EmitEvent) and isinstance(e.event, Shutdown)]
     assert len(shutdowns) == 1
     assert 'not implemented' in module.NOT_IMPLEMENTED
-    assert 'hardware:=gazebo' in module.NOT_IMPLEMENTED
+    # it must not send users to backends that may not exist on their checkout
+    assert 'hardware:=gazebo' not in module.NOT_IMPLEMENTED
+    assert 'docs/simulation.md' in module.NOT_IMPLEMENTED
 
 
 def test_readme_says_it_is_a_stub():

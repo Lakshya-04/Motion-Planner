@@ -8,7 +8,7 @@ from launch.events import Shutdown
 
 NOT_IMPLEMENTED = (
     'sim_isaac is a stub: the Isaac Sim backend is not implemented yet. '
-    'Use hardware:=gazebo or hardware:=mujoco (docs/simulation.md).')
+    'See docs/simulation.md for the backends and their status.')
 
 
 def generate_launch_description():
