@@ -35,6 +35,9 @@
   <exec_depend>control_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>mobile_manipulator_moveit_config</exec_depend>
+  <exec_depend>moveit_ros_move_group</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
   <exec_depend>trajectory_msgs</exec_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
