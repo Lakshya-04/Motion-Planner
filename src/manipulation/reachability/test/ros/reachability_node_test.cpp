@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <set>
@@ -168,7 +169,8 @@ std::shared_ptr<PlanStands::Request> wideWall()
 
 std::string baseProfile(bool strafe)
 {
-  const std::string path = "/tmp/reachability_stands_base_" + std::to_string(::getpid()) +
+  const char * dir = std::getenv("TEST_TMPDIR");
+  const std::string path = std::string(dir ? dir : "/tmp") + "/reachability_stands_base_" + std::to_string(::getpid()) +
     (strafe ? "_omni.yaml" : "_diff.yaml");
   std::ofstream(path) << "base:\n  name: t\n  drive_type: " << (strafe ? "omni" : "diff")
                       << "\n  can_strafe: " << (strafe ? "true" : "false")
@@ -198,7 +200,9 @@ TEST(ReachabilityNode, PlanStandsCoversAWideWallAndAssignsEveryTargetOnce)
 
 TEST(ReachabilityNode, PlanStandsUsesTheBaseProfile)
 {
-  Fixture f(baseProfile(false));
+  const std::string profile = baseProfile(false);
+  Fixture f(profile);
+  std::remove(profile.c_str());      // the node has read it
   ASSERT_TRUE(f.node->hasBase());
   auto req = wideWall();
   req->has_start = true;
