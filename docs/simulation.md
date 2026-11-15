@@ -9,8 +9,8 @@ uses ([scene_model.md](scene_model.md)).
 | Backend | `hardware:=` | Package | Engine | Status |
 |---|---|---|---|---|
 | Mock | `mock`, `jtac_mock` | `mobile_manipulator_description` | none (ros2_control mock components, scripted F/T) | working; unit and demo level |
-| Gazebo | `gazebo` | `sim_gazebo` | Gazebo Harmonic (gz-sim 8) with `gz_ros2_control` | in development |
-| MuJoCo | `mujoco` | `sim_mujoco` | MuJoCo 4.x through our own ros2_control `SystemInterface` | in development |
+| Gazebo | `gazebo` | `sim_gazebo` | Gazebo Harmonic (gz-sim 8) with `gz_ros2_control` | not on this branch: arrives with the Gazebo PRs |
+| MuJoCo | `mujoco` | `sim_mujoco` | MuJoCo 4.x through our own ros2_control `SystemInterface` | not on this branch: arrives with the MuJoCo PRs |
 | Isaac Sim | `isaac` | `sim_isaac` | NVIDIA Isaac Sim | **stub**: contract and plan only, nothing runs |
 
 ## What every backend provides (the contract)
@@ -33,23 +33,28 @@ A backend is done when all of this works headless, from one profile and one wall
 ## Selecting one
 
 ```bash
-xacro urdf/mobile_manipulator.urdf.xacro arm:=ur10e base:=ranger_mini lift:=telescopic hardware:=gazebo
+xacro urdf/mobile_manipulator.urdf.xacro arm:=ur10e base:=ranger_mini lift:=telescopic hardware:=jtac_mock
 ```
 
-Each backend's launch file does this from a profile (`scripts/profile_xacro_args.py`) and starts the
-controllers with the same configs the mock demos use, so a controller change is tested on every backend.
+On this branch only `mock` and `jtac_mock` exist; any other `hardware:=` value (`gazebo`, `mujoco`,
+`isaac`) fails at render time with "unknown hardware". Each backend PR adds its value and its launch file,
+which does the above from a profile (`scripts/profile_xacro_args.py`) and starts the controllers with the
+same configs the mock demos use, so a controller change is tested on every backend.
 
 ## Layout
 
 ```
 src/simulation/
-  sim_gazebo/   launch, worlds, bridge config, wall-world generator, smoke test   (docs/sim_gazebo.md)
-  sim_mujoco/   ros2_control SystemInterface on MuJoCo 4, MJCF + wall generators   (docs/sim_mujoco.md)
-  sim_isaac/    stub: launch that says it is not implemented, README with the plan
+  sim_gazebo/   launch, worlds, bridge config, wall-world generator, smoke test   (planned: Gazebo PRs)
+  sim_mujoco/   ros2_control SystemInterface on MuJoCo 4, MJCF + wall generators   (planned: MuJoCo PRs)
+  sim_isaac/    stub: launch that says it is not implemented, README with the plan   (this branch)
 ```
 
+Only `sim_isaac` exists on this branch. The `sim_gazebo` and `sim_mujoco` packages and their pages
+(`docs/sim_gazebo.md`, `docs/sim_mujoco.md`) arrive with their own PRs.
+
 Docker: the `sim` target holds MuJoCo 4 (`mujoco-core`, MJX, JAX) for Python work
-([docker.md](docker.md)); Gazebo has its own thin target. Isaac Sim is large and ships as its own NVIDIA
+([docker.md](docker.md)); a thin Gazebo target arrives with the Gazebo PRs. Isaac Sim is large and ships as its own NVIDIA
 image: it will run as a separate compose service, not inside ours.
 
 ## Isaac Sim (stub, to be developed later)
