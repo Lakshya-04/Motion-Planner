@@ -183,19 +183,17 @@ without code, when we can implement it.
 ## 13. Open source and plug-and-play
 
 - [x] Apache-2.0 licence; docs index; architecture, robot, reachability, simulation, F/T docs; Docker with nine targets
-- [~] Root README: overview, workflow, package map, Docker build and test, simulators; no one-command quickstart (none exists)
-- [ ] **Getting started**: one command to a running simulated wall pass
+- [x] Root README: overview, workflow, package map, Docker build and test, simulators, quickstart pointing at the one-command sim scripts
+- [x] **Getting started**: one command to a simulated wall pass (`sim_mujoco/scripts/run_wall_pass.sh`, `run_manager_pass.sh`; `sim_gazebo/scripts/run_manager_pass.sh`)
 - [x] `THIRD_PARTY.md` (licences, use, nothing vendored); revisit as adopted software lands (a few licences are marked unverified there; cddlib GPL-2.0 in the VAMP stage: reviewed 2026-11-15, source and recipes only, no binaries shipped, see THIRD_PARTY.md)
 - [~] CHANGELOG and CONTRIBUTING written; real package versions still all `0.0.0`
 - [x] `docs/docker.md` covers the `sim` and `sim-gazebo` targets
 - [ ] CI: none by decision; instead one documented "run all checks" command (`docker/build.sh test` + sim smoke tests)
 - [ ] **Public-readiness cleanup**
-  - [ ] 63 references in 41 files to 9 documents that are not in the repo (`force_control_backend_admittance_vs_diffik.md`,
-        `implementation_plan_manipulation_architecture.md`, ...): strip them or distil into `docs/`
-  - [~] Earlier-project base and application names are removed from code, READMEs and comments; "mop" as the default tool name remains until tool profiles ship (section 4)
-  - [ ] Four launch files that look up packages that do not exist (`description`, `moveit_config`):
-        `jtac_compliance_demo`, `jtac_controller_test`, `jtac_gazebo_controllers`, `manipulation_manager.launch.py`
-  - [ ] `.claude/` is not in `.gitignore`
+  - [x] References to documents that are not in the repo: none left in code or docs (checked 2026-11-16 with a script over every `*.md` mention in tracked files; `docker/tools/check_public_readiness.py` keeps checking)
+  - [x] Earlier-project base and application names are removed (no `serum` anywhere; "mop" is a real tool in `coverage_planner/config/tool_profiles.yaml`, not a leftover)
+  - [x] Launch files that looked up packages that do not exist are fixed or removed (every remaining `*.launch.py` uses `mobile_manipulator_description` / `mobile_manipulator_moveit_config`)
+  - [x] `.claude/` is in `.gitignore`
   - [ ] Decide about the maintainer's email, which is in 97 files (70 `@author` tags plus `package.xml` maintainer entries; their own address: keep or drop)
   - [ ] Final scan before making the repo public (names, paths, secrets); the visibility change itself is your command
 

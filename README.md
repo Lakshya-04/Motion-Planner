@@ -5,8 +5,9 @@ plan, base stands, arm motion planning and execution on a compliant (admittance)
 feedback. The target is a stack that works for any arm, lift and base (chosen by a robot profile) and any
 tool (contact like a mop, non-contact like a spray gun), in simulation first and on hardware by parameters.
 
-**Status in one line:** the building blocks exist and are tested; **nothing runs them together yet**.
-There is no launch that goes from a scan to an executed wall pass, and nothing here has run on hardware.
+**Status in one line:** the building blocks exist and are tested, and both simulators now run the pipeline
+end to end in headless one-command passes (coverage planner, manager, MoveIt, compliant controller, recorded
+and scored). Nothing here has run on hardware, and the base does not yet move between stands in those passes.
 The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ```
@@ -55,14 +56,31 @@ hardware ([docs/simulation.md](docs/simulation.md)).
 | Can do today | Position and JTAC control of lift + arm, wall worlds from `wall_scene.json`, raw wrist F/T plus ground-truth contact wrench, conditioned force path, a 10 N contact test that holds (10.13 N for a 10 N target) | Same joint control and wall worlds, raw F/T plus ground truth, conditioned path validated against ground truth |
 | Cannot do today | Move the base, simulate sensors | Hold 10 N in Gazebo (about 108 N was measured, cause not established; MuJoCo holds it), move the base, simulate sensors |
 
-Isaac Sim is a stub. Neither simulator yet runs coverage, MoveIt and the manager as one launch.
+Isaac Sim is a stub.
+
+## Quickstart: a simulated wall pass
+
+Needs a built workspace (see above) with a sourced ROS environment; the MuJoCo scripts also need the MuJoCo SDK
+(`MUJOCO_ROOT`, [docs/sim_mujoco.md](docs/sim_mujoco.md)), the Gazebo one needs the `sim-gazebo` image
+([docs/docker.md](docs/docker.md)). Each script launches the sim headless, runs the pass, records it and scores it.
+
+```bash
+# MuJoCo: scripted wall strokes planned by MoveIt
+bash $(ros2 pkg prefix sim_mujoco)/lib/sim_mujoco/run_wall_pass.sh
+# MuJoCo: coverage planner -> manipulation_manager -> MoveIt -> JTAC
+bash $(ros2 pkg prefix sim_mujoco)/lib/sim_mujoco/run_manager_pass.sh
+# Gazebo Harmonic: the same manager pass (about 5 minutes)
+bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_manager_pass.sh
+```
+
+Sources: `src/simulation/sim_mujoco/scripts/`, `src/simulation/sim_gazebo/scripts/`.
 
 ## What you can run today
 
 - MoveIt demo on the description with mock hardware: `ros2 launch mobile_manipulator_moveit_config demo.launch.py arm:=ur10e`
 - Wall coverage planning from a scene file: `ros2 launch coverage_planner wall_coverage_demo.launch.py`
 - Reachability map building and stand planning (`rm4d_tool`, `reachability_node`): [docs/reachability.md](docs/reachability.md)
-- A simulated wall contact through the full force path: the smoke and contact tests of each simulator
+- The simulated wall passes above, and the smoke and contact tests of each simulator
 
 ## Documentation
 

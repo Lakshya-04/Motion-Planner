@@ -138,8 +138,9 @@ tour. Not done: a yaw preference for contact work.
   `~/get_base_candidates`, `~/plan_lift_bands`, `~/plan_stands`) and selection over several stands
   (`planStands`, `orderStands`).
 - **Not done:** RViz slices of the map, a validation harness against brute-force 6D sampling,
-  orientation-constrained wall queries, a yaw preference for contact work, and any caller:
-  the manipulation manager docks at a fixed offset and never asks this module for a base pose.
+  orientation-constrained wall queries, a yaw preference for contact work, and a caller that
+  acts on the result: the manipulation manager only runs a verify-only stance check
+  (`base_check`, see above) and never asks this module for a different base pose.
 
 ## File format
 
