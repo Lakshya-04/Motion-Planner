@@ -173,7 +173,11 @@ class CuroboPlannerNode(Node):
             raw = point_cloud2.read_points(request.points, field_names=('x', 'y', 'z'), skip_nans=True)
             points = np.column_stack([raw['x'], raw['y'], raw['z']]) if len(raw) else None
         try:
-            response.box_count = self._planner.set_world(boxes, points, request.point_voxel or 0.05)
+            if not boxes and points is None:      # an empty world is a clear (ClearWorld sends exactly this)
+                self._planner.clear_world()
+                response.box_count = 0
+            else:
+                response.box_count = self._planner.set_world(boxes, points, request.point_voxel or 0.05)
             response.success = True
         except ValueError as e:
             response.message = str(e)
