@@ -44,7 +44,7 @@ without code, when we can implement it.
 - [~] Spiral is listed in the service but is a stub (the README now says so)
 - [ ] Cellular decomposition (BCD) for large cluttered walls (`docs/coverage_patterns.md`)
 - [ ] Coverage feed over ROS (the manager reads `coverage_output.json`; a ROS `CoverageSource` is planned)
-- [~] **Coverage verification**: `CoverageVerifier` raster (covered fraction, overlap, overspray, missed cells; `docs/coverage_patterns.md`). Not wired to executed poses yet; it is also the evaluator for the spray model (section 4)
+- [~] **Coverage verification**: `CoverageVerifier` raster (covered fraction, overlap, overspray, missed cells; `docs/coverage_patterns.md`). Scores recorded runs through `score_run` (contact and, with the valve column, spray: section 4)
 
 ## 3. Non-planar surfaces (floors, ceilings, columns, curved walls, meshes)
 
@@ -61,10 +61,16 @@ without code, when we can implement it.
 - [x] Tool offset from the arm TCP: kinematics via `tcp_xyz/rpy` in the profile; force via the conditioner's lever arm
 - [x] **Ship tool profiles**: `coverage_planner/config/tool_profiles.yaml` ships `contact_wiper` and `spray_gun` (`docs/tools.md`)
 - [x] The YAML loader is wired into the coverage launch files and the demo node (`tool_profiles_file`, `tool_name`, per-field overrides; the manager pass uses it)
-- [~] Spray model: `sprayerEffectiveSwath` is a placeholder (slope 1, intercept 0); swath is not derived from standoff;
-      no overspray/overlap model, no valve/pump timing along the path. *Implement: parametric swath w(d), Gaussian/beta profile,
-      thickness-accumulation raster, choose spacing and standoff by minimising thickness variance (about 16-18% overlap is a published optimum for an elliptical pattern)*
-- [ ] Non-contact segments end to end: hold standoff, no force engage, trigger the valve along the path (contact approach/retreat exist)
+- [~] Spray model: parametric swath `w(d) = f * 2 d tan(theta)` derived from the standoff (`sprayerEffectiveSwath`, used by `toolSwath`),
+      Gaussian deposition footprint (`spray_deposition.hpp`) and a thickness raster in `CoverageVerifier::addSprayStroke` that counts
+      only valve-open samples and reports thickness mean / CoV / min / max next to the covered fraction (`score_run --no-contact
+      --spray-standoff`). Not done: spacing and standoff chosen by minimising thickness variance (about 16-18% overlap is a published
+      optimum for an elliptical pattern), overspray at strip ends and around obstacles, speed/pressure/wall-angle terms; the width and
+      the Gaussian shape are guesses until fitted to a real nozzle
+- [~] Non-contact segments end to end: `manipulation_manager contact:=false` docks, moves to the first pose at the plan's standoff,
+      opens the valve (`std_msgs/Bool` on `/tool/valve`) for the stroke only, closes it, retracts; no force engage, no press, no wall-contact
+      allowance. Proven in the MuJoCo sim (`run_spray_pass.sh`: 3 columns, valve recorded and scored). Not done: a valve driver on real
+      hardware, `tool_off_lead_s` / `tool_on_at_speed_ratio` timing, valve forced off on a fault, the standoff held by feedback (it is open loop)
 - [ ] Contact tools: adaptive line spacing from a contact-area model (a cheap published idea, 2-3 days on top of a planner)
 - [x] "How to add a tool" guide (`docs/tools.md`)
 

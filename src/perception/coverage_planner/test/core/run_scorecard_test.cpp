@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include "coverage_planner/core/run_scorecard.hpp"
+#include "coverage_planner/core/run_scorecard_io.hpp"
 
 using namespace coverage_planner;  // NOLINT
 
@@ -103,6 +104,42 @@ TEST(RunScorecard, NonContactCountsWhileTheValveIsOpen)
   EXPECT_GT(card.coverage.covered_fraction, 0.95);
   EXPECT_DOUBLE_EQ(card.force_rms_error_n, 0.0);   // force statistics are for contact tools
   EXPECT_DOUBLE_EQ(card.in_band_fraction, 0.0);
+}
+
+TEST(RunScorecard, SprayRunCountsOnlyValveOpenSamplesAndReportsThickness)
+{
+  auto samples = run(0.12, 0.0);
+  for (auto & s : samples) {s.tool_active = (s.y < 1.0);}
+  ScorecardOptions o = contactOptions();
+  o.contact = false;
+  o.swath_m = 0.14;
+  o.spray = SprayFootprint::fromCone(0.30, 20.0);
+  ScorecardLimits limits;
+  limits.min_covered_fraction = 0.9;
+  const auto card = scoreRun(wall(), {}, samples, o, limits);
+  EXPECT_TRUE(card.passed);
+  ASSERT_TRUE(card.coverage.thickness.valid);
+  EXPECT_GT(card.coverage.thickness.mean, 0.0);
+  EXPECT_GE(card.coverage.thickness.cov, 0.0);
+  EXPECT_TRUE(scorecardToJson(card).contains("thickness"));
+
+  // the valve closed for the whole run: nothing counted, no coverage, fails
+  auto closed = samples;
+  for (auto & s : closed) {s.tool_active = false;}
+  const auto none = scoreRun(wall(), {}, closed, o, limits);
+  EXPECT_FALSE(none.passed);
+  EXPECT_DOUBLE_EQ(none.coverage.covered_fraction, 0.0);
+
+  // a thickness CoV limit is enforced
+  limits.max_thickness_cov = 1e-6;
+  EXPECT_FALSE(scoreRun(wall(), {}, samples, o, limits).passed);
+}
+
+TEST(RunScorecard, ContactRunHasNoThicknessSection)
+{
+  const auto card = scoreRun(wall(), {}, run(0.16, 10.0), contactOptions());
+  EXPECT_FALSE(card.coverage.thickness.valid);
+  EXPECT_FALSE(scorecardToJson(card).contains("thickness"));
 }
 
 TEST(RunScorecard, DurationAndEngagedTime)

@@ -86,7 +86,7 @@ WallPlane wallFromJson(const nlohmann::json & j)
 
 nlohmann::json scorecardToJson(const RunScorecard & c)
 {
-  return {
+  nlohmann::json j = {
     {"passed", c.passed},
     {"failures", c.failures},
     {"coverage", {
@@ -102,6 +102,12 @@ nlohmann::json scorecardToJson(const RunScorecard & c)
       {"in_band_fraction", c.in_band_fraction}}},
     {"time", {{"duration_s", c.duration_s}, {"engaged_s", c.engaged_s}}},
     {"strokes", c.strokes}};
+  if (c.coverage.thickness.valid) {
+    j["thickness"] = {
+      {"mean", c.coverage.thickness.mean}, {"cov", c.coverage.thickness.cov},
+      {"min", c.coverage.thickness.min}, {"max", c.coverage.thickness.max}};
+  }
+  return j;
 }
 
 }  // namespace coverage_planner

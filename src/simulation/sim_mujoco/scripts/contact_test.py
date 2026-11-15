@@ -29,6 +29,7 @@ import rclpy
 from geometry_msgs.msg import Wrench, WrenchStamped
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import SetParameters
+from std_msgs.msg import Bool
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
@@ -57,8 +58,12 @@ class ContactTest(Smoke):
         self.truth_by_stamp = {}
         self.cond_last = None
         self.record = False
-        self.run_rows = []   # (t_s, x, y, z, |Fz|) of the whole run, tool point in base_footprint
+        self.run_rows = []   # (t_s, x, y, z, |Fz|, valve) of the whole run, tool point in base_footprint
+        self.valve = 0       # last /tool/valve state (std_msgs/Bool); the `active` column of the recording
         self.record_frame = 'base_footprint'   # frame of the recorded tool point (record_run.py --frame)
+        self.create_subscription(Bool, '/tool/valve', self._valve_cb,
+                                 QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                                            reliability=ReliabilityPolicy.RELIABLE))
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.create_subscription(WrenchStamped, '/ft_conditioner/wrench_conditioned', self._cond,
@@ -77,6 +82,10 @@ class ContactTest(Smoke):
     def _stamp(m):
         return m.header.stamp.sec * 1_000_000_000 + m.header.stamp.nanosec
 
+    def _valve_cb(self, m):
+        with self.lock:
+            self.valve = 1 if m.data else 0
+
     def _cond(self, m):
         with self.lock:
             self.cond_last = self._w(m)
@@ -94,7 +103,7 @@ class ContactTest(Smoke):
             if self.record:
                 self.truth_by_stamp[self._stamp(m)] = self._w(m)
             if pos is not None:
-                self.run_rows.append((self._stamp(m) * 1e-9, *pos, abs(self._w(m)[2])))
+                self.run_rows.append((self._stamp(m) * 1e-9, *pos, abs(self._w(m)[2]), self.valve))
 
     def write_recording(self, path, wall_x, wall_range_y, wall_range_z):
         """The whole run as the score_run CSV (t,x,y,z,force,active) plus a wall JSON beside it. The wall is
@@ -104,8 +113,8 @@ class ContactTest(Smoke):
         t0 = rows[0][0] if rows else 0.0
         with open(path, 'w') as f:
             f.write('t,x,y,z,force,active\n')
-            for t, x, y, z, fz in rows:
-                f.write(f'{t - t0:.4f},{x:.5f},{y:.5f},{z:.5f},{fz:.4f},0\n')
+            for t, x, y, z, fz, valve in rows:
+                f.write(f'{t - t0:.4f},{x:.5f},{y:.5f},{z:.5f},{fz:.4f},{valve}\n')
         wall = {'origin': [wall_x, 0.0, 0.0], 'u': [0, 1, 0], 'v': [0, 0, 1],
                 'u_range': list(wall_range_y), 'v_range': list(wall_range_z)}
         with open(path + '.wall.json', 'w') as f:

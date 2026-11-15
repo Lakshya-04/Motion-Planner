@@ -1,6 +1,7 @@
 // score_run: score a recorded wall run from a sample CSV and a wall JSON (see run_scorecard_io.hpp).
 //   score_run --samples run.csv --wall wall.json [--swath 0.2] [--resolution 0.01] [--no-contact]
 //             [--target-force 10] [--band 1] [--engaged-force 1]
+//             [--spray-standoff 0.3 --spray-half-angle 20 [--spray-sigma 0.25] [--max-thickness-cov 0]]
 //             [--min-coverage 0.95] [--max-rms 0] [--max-peak 0] [--min-in-band 0]
 // Prints the scorecard as JSON. Exit code 0 = passed, 1 = failed a limit, 2 = bad input.
 #include <fstream>
@@ -38,7 +39,12 @@ int main(int argc, char ** argv)
     o.engaged_force_n = num("--engaged-force", o.engaged_force_n);
     o.target_force_n = num("--target-force", o.target_force_n);
     o.force_band_n = num("--band", o.force_band_n);
+    if (!contact && a.count("--spray-standoff")) {
+      o.spray = coverage_planner::SprayFootprint::fromCone(
+        std::stod(a["--spray-standoff"]), num("--spray-half-angle", 20.0), num("--spray-sigma", 0.25));
+    }
     coverage_planner::ScorecardLimits l;
+    l.max_thickness_cov = num("--max-thickness-cov", l.max_thickness_cov);
     l.min_covered_fraction = num("--min-coverage", l.min_covered_fraction);
     l.max_force_rms_error_n = num("--max-rms", l.max_force_rms_error_n);
     l.max_force_peak_n = num("--max-peak", l.max_force_peak_n);

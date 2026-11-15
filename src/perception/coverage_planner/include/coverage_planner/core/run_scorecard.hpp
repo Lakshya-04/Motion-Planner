@@ -10,12 +10,17 @@
  *          non-contact tool while `tool_active` is set (valve open). Force statistics are taken over
  *          engaged samples of a contact tool only.
  *
- *          Limits: geometric coverage only (see coverage_verification.hpp), no collision count (the
+ *          A non-contact run has no force limits. When `ScorecardOptions::spray` is set the engaged
+ *          (valve open) strokes also feed the thickness raster and the card reports its uniformity;
+ *          samples with the valve closed never count, for coverage or thickness.
+ *
+ *          Limits: geometric coverage (see coverage_verification.hpp), no collision count (the
  *          recorder must report those itself), and the pass criteria are the caller's numbers.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,6 +47,8 @@ struct ScorecardOptions
   double engaged_force_n{1.0};   ///< Contact tool: pressing at least this hard counts as working.
   double target_force_n{0.0};    ///< Contact tool: the force the controller aims for.
   double force_band_n{0.0};      ///< Contact tool: |force - target| within this is "in band".
+  /// Non-contact tool: the spray footprint; when set the card carries the thickness statistics.
+  std::optional<SprayFootprint> spray;
 };
 
 struct ScorecardLimits
@@ -50,6 +57,7 @@ struct ScorecardLimits
   double max_force_rms_error_n{0.0};   ///< 0 = not checked.
   double max_force_peak_n{0.0};        ///< 0 = not checked; the abort threshold of the tool.
   double min_in_band_fraction{0.0};    ///< 0 = not checked.
+  double max_thickness_cov{0.0};       ///< Spray: 0 = not checked.
 };
 
 struct RunScorecard
