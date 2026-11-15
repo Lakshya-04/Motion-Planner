@@ -18,15 +18,15 @@
 #include <thread>
 #include <vector>
 
+#include "ament_index_cpp/get_package_share_directory.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "std_msgs/msg/float64.hpp"
 
 #include "core_types/pose.hpp"
 #include "motion_planner/core/motion_planner.hpp"
-#include "motion_planner_moveit/moveit_planning_backend.hpp"
-#include "motion_planner_moveit/cartesian_planner.hpp"
-#include "motion_planner_moveit/ompl_planner.hpp"
+#include "motion_planner/core/planning_pipeline.hpp"
+#include "motion_planner/ros/planning_config.hpp"
 #include "mobile_manipulator_profile/profile.hpp"
 #include "ros_adapters/rclcpp_logger.hpp"
 
@@ -114,11 +114,9 @@ public:
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
 
-    auto backend = std::make_shared<motion_planner::MoveItPlanningBackend>();
-    manager_.setMotionPlanner(
-      std::make_unique<motion_planner::MotionPlanner>(
-        std::make_unique<motion_planner::CartesianPlanner>(backend),
-        std::make_unique<motion_planner::OmplPlanner>(backend)));
+    // Which planning backends to use: a YAML selection (see docs/backend_selection.md), the
+    // packaged default when empty. The planners are built in init().
+    planning_config_ = this->declare_parameter<std::string>("planning_config", "");
     manager_.setLogger(std::make_shared<ros_adapters::RclcppLogger>(this->get_logger()));
 
     force_pub_ = this->create_publisher<std_msgs::msg::Float64>(
@@ -130,6 +128,9 @@ public:
   /// object to already be owned by a shared_ptr) -- call once right after make_shared().
   bool init()
   {
+    if (!buildPlanners()) {
+      return false;
+    }
     execution_adapter_ = std::make_shared<JtacExecutionAdapter>(shared_from_this());
     manager_.setExecutionPort(execution_adapter_);
 
@@ -140,6 +141,16 @@ public:
       return false;
     }
     return true;
+  }
+
+  ~ManipulationManagerNode() override
+  {
+    if (plugin_executor_) {
+      plugin_executor_->cancel();
+    }
+    if (plugin_spin_thread_.joinable()) {
+      plugin_spin_thread_.join();
+    }
   }
 
   void setAdmittanceEngaged(bool enabled)
@@ -185,6 +196,49 @@ public:
   }
 
 private:
+  /// Builds the planners the YAML selection names, through pluginlib. Plugins that need a ROS
+  /// node (cuRobo) get a dedicated one, created and spun only if one of them asks for it.
+  bool buildPlanners()
+  {
+    std::string config_path = planning_config_;
+    if (config_path.empty()) {
+      config_path = ament_index_cpp::get_package_share_directory("manipulation_manager") +
+        "/config/planning.yaml";
+    }
+    motion_planner::PlanningSelection selection;
+    std::string error;
+    if (!motion_planner::loadPlanningSelection(config_path, selection, error)) {
+      RCLCPP_ERROR(this->get_logger(), "planning_config: %s", error.c_str());
+      return false;
+    }
+
+    plugin_registry_ = motion_planner::makePluginlibRegistry();
+    plugin_context_.logger = std::make_shared<ros_adapters::RclcppLogger>(this->get_logger());
+    plugin_context_.setFactory<rclcpp::Node>(
+      "node", [this]() {
+        auto node = std::make_shared<rclcpp::Node>("planning_plugins");
+        plugin_executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+        plugin_executor_->add_node(node);
+        plugin_spin_thread_ = std::thread([this]() {plugin_executor_->spin();});
+        return node;
+      });
+
+    motion_planner::PipelineError pipeline_error;
+    if (!pipeline_.build(selection, *plugin_registry_, plugin_context_, pipeline_error)) {
+      RCLCPP_ERROR(
+        this->get_logger(), "planning backend '%s' (%s) failed: [%s] %s (config %s)",
+        pipeline_error.plugin.c_str(), pipeline_error.role.c_str(), pipeline_error.code.c_str(),
+        pipeline_error.message.c_str(), config_path.c_str());
+      return false;
+    }
+    manager_.setMotionPlanner(pipeline_.makeMotionPlanner());
+    RCLCPP_INFO(
+      this->get_logger(), "planning backends from %s: cartesian=%s free_space=%s ik=%s collision=%s",
+      config_path.c_str(), selection.cartesian.c_str(), selection.free_space.c_str(),
+      selection.ik.c_str(), selection.collision.c_str());
+    return true;
+  }
+
   enum class ColumnOutcome { kDone, kPartial, kFailed };
 
   /// A trivial joint-space "move to where the arm already is" segment -- its only purpose is
@@ -309,6 +363,15 @@ private:
     return contact_exec.waypoints_completed == intent.poses.size()
       ? ColumnOutcome::kDone : ColumnOutcome::kPartial;
   }
+
+  // Plugin plumbing. Declared before manager_ so the manager (which owns the planners) is
+  // destroyed first; the registry's plugin libraries stay loaded for the whole process.
+  std::string planning_config_;
+  std::unique_ptr<motion_planner::PluginRegistry> plugin_registry_;
+  motion_planner::PluginContext plugin_context_;
+  motion_planner::PlanningPipeline pipeline_;
+  std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> plugin_executor_;
+  std::thread plugin_spin_thread_;
 
   ManipulationManager manager_;
   std::shared_ptr<JtacExecutionAdapter> execution_adapter_;

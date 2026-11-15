@@ -15,7 +15,8 @@ Every module package has two halves:
 │   └── ros/         # launch / integration tests
 ├── config/          # default YAML parameters
 ├── launch/
-├── plugins.xml      # pluginlib export, when the module provides plugins
+├── plugins.xml      # pluginlib description, when the module provides plugins (exported
+│                    # under the `motion_planner` package for the planning ports)
 ├── CMakeLists.txt   # two targets: <module>_core (no rclcpp) and <module>_ros
 └── package.xml
 ```
@@ -55,7 +56,9 @@ ROS message and a converter in `ros/`. Then the same module can run either:
 1. Interfaces (ports) and their data types are declared in `core/`.
 2. `core/` compiles and its tests pass with no ROS environment sourced.
 3. Every implementation of a port is a plugin selectable by name; the default lives in
-   `config/`.
+   `config/`. Done for the planning ports (`Planner`, `IkPort`, `CollisionPort`, `ScenePort`);
+   the other module families follow the same pattern when they get a second implementation. See
+   [backend_selection.md](backend_selection.md).
 4. Every port result is structured: success, failure code, failure stage, message.
 5. Every cross-process data type has a `*_msgs` definition and a `ros/` converter, with a
    round-trip unit test.
@@ -65,10 +68,12 @@ ROS message and a converter in `ros/`. Then the same module can run either:
 
 | Package | Status |
 |---|---|
-| `manipulation_manager` | already split into `core/` + `ros/` |
+| `manipulation_manager` | already split into `core/` + `ros/`; the node builds its planners from `config/planning.yaml` (parameter `planning_config`) instead of linking a backend |
 | `core_types`, `force_core` | ROS-free already (pure core packages) |
 | `ros_adapters` | ROS-only conversions (correct as is) |
-| `motion_planner` | **done**: ROS-free core only (ports, types, `MotionPlanner`, geometry helpers); 32 core tests run without ROS |
-| `motion_planner_moveit` | **done**: the MoveIt / OMPL adapter (the only package that depends on MoveIt) |
+| `motion_planner` | **done**: ROS-free core (ports, plugin base classes, `PlanningPipeline`, `MotionPlanner`, geometry helpers; its tests run without ROS) plus a small `motion_planner_ros` library (YAML selection loader, pluginlib registry; needs pluginlib and yaml-cpp, no node) |
+| `motion_planner_moveit` | **done**: the MoveIt / OMPL adapter (the only package that depends on MoveIt); `plugins.xml` exports `moveit_cartesian`, `moveit_ompl`, `moveit_ik`, `moveit_collision`, `moveit_scene` |
+| `curobo_planner` | the cuRobo client; `plugins.xml` exports `curobo`, `curobo_ik`, `curobo_collision`, `curobo_scene` |
+| `vamp_planner` | the VAMP wrapper (built only where VAMP is installed); `plugins.xml` exports `vamp`, `vamp_collision`, `vamp_scene` |
 | `coverage_planner` | **done**: `core/` + `ros/` split, 44 tests |
 | `compliant_trajectory_controller`, `ft_bridge_hardware` | ros2_control plugins; extract controller math into `core/` |

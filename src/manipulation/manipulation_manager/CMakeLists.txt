@@ -7,6 +7,8 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(ament_index_cpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -18,7 +20,7 @@ find_package(ros_adapters REQUIRED)
 # doesn't re-run it itself.
 find_package(PCL REQUIRED COMPONENTS common io)
 find_package(motion_planner REQUIRED)
-find_package(motion_planner_moveit REQUIRED)
+find_package(motion_planner_moveit REQUIRED)  # only the tests still link the MoveIt adapter directly
 find_package(mobile_manipulator_profile REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
@@ -67,14 +69,17 @@ target_include_directories(manipulation_manager_node PUBLIC
 ament_target_dependencies(manipulation_manager_node
   rclcpp
   std_msgs
+  sensor_msgs
+  ament_index_cpp
 )
-# The node is the composition root: it wires the MoveIt/OMPL backend (motion_planner_moveit)
-# into the ROS-free core. Swapping the backend (cuRobo, VAMP) means changing only this link
-# and the factory in the node.
+# The node is the composition root, but it no longer links a backend: the planners are built
+# from the planning_config YAML through pluginlib (motion_planner_ros), so switching backends
+# is a config change. The plugin packages (motion_planner_moveit, curobo_planner, vamp_planner)
+# only need to be installed.
 target_link_libraries(manipulation_manager_node
   ${PROJECT_NAME}_core
   ros_adapters::ros_adapters
-  motion_planner_moveit::motion_planner_moveit_lib
+  motion_planner::motion_planner_ros
   mobile_manipulator_profile::mobile_manipulator_profile
 )
 
@@ -96,6 +101,7 @@ install(DIRECTORY include/
 
 install(DIRECTORY
   launch
+  config
   DESTINATION share/${PROJECT_NAME}/
 )
 
@@ -115,6 +121,13 @@ if(BUILD_TESTING)
   )
   if(TARGET coverage_feasibility_analyzer_test)
     target_link_libraries(coverage_feasibility_analyzer_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(planning_config_test test/planning_config_test.cpp)
+  if(TARGET planning_config_test)
+    target_link_libraries(planning_config_test motion_planner::motion_planner_ros)
+    target_compile_definitions(planning_config_test PRIVATE
+      PLANNING_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/planning.yaml")
   endif()
 
   find_package(ament_lint_auto QUIET)
