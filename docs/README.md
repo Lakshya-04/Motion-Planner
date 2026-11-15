@@ -28,3 +28,4 @@
 | [adr/](adr/) | Decision records (modular pipeline, upstream backends, core/ros split, C++ standard) |
 
 Repository root files: [README.md](../README.md) (overview), [THIRD_PARTY.md](../THIRD_PARTY.md) (third-party software and licences), [CONTRIBUTING.md](../CONTRIBUTING.md) (layout, checks, commit rules), [CHANGELOG.md](../CHANGELOG.md). Package READMEs: [coverage_planner](../src/perception/coverage_planner/README.md).
+- [learnings/](learnings/README.md) — how this repo was built with AI coding agents, and engineering lessons from it
