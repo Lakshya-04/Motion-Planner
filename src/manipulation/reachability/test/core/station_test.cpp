@@ -67,6 +67,17 @@ TEST(Station, NothingReachableMeansNotFound)
   EXPECT_FALSE(chooseStation(sharedMap(), r).found);
 }
 
+TEST(Station, CompleteMeansEveryTargetIsReached)
+{
+  const auto all = chooseStation(sharedMap(), baseRequest(wallTargets({0.0}, {0.8, 1.2})));
+  EXPECT_TRUE(all.complete());
+  // one reachable and one far above any reach: found, but not complete
+  const auto partial = chooseStation(sharedMap(), baseRequest(wallTargets({0.0}, {1.0, 5.0})));
+  ASSERT_TRUE(partial.found);
+  EXPECT_FALSE(partial.complete());
+  EXPECT_FALSE(Station{}.complete());
+}
+
 TEST(Station, WideWallPrefersAStationInTheMiddle)
 {
   const auto s = chooseStation(sharedMap(), baseRequest(wallTargets({-0.3, 0.0, 0.3}, {1.0})));

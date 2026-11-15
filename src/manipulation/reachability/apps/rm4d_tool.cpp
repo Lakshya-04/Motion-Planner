@@ -153,7 +153,7 @@ int main(int argc, char ** argv)
       if (r.base) {
         std::printf("  base yaw %.0f deg, footprint clearance %.2f m\n", s.yaw * 180.0 / M_PI, s.footprint_clearance);
       }
-      return 0;
+      return s.complete() ? 0 : 1;   // like `bands`: a partial station is a failure for scripts
     }
   } catch (const std::exception & e) {
     std::fprintf(stderr, "error: %s\n", e.what());

@@ -45,6 +45,9 @@ struct Station
   double footprint_clearance{0.0};  ///< Footprint to wall distance (only with a base model).
   LiftBandPlan plan;             ///< Lift bands for this station.
   size_t evaluated{0};           ///< Stations tried.
+
+  /// A station was found and it reaches every target.
+  bool complete() const {return found && plan.unreachable.empty();}
 };
 
 /// Best station on the free side of the wall. `found` is false only if nothing reaches any target.
