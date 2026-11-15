@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "manipulation_manager/core/coverage_source.hpp"
+#include "manipulation_manager/core/wall_direction.hpp"
 
 namespace manipulation_manager
 {
@@ -48,6 +49,9 @@ public:
    *            comment for why this isn't a margin off each column's own raw extent.
    * @param[in] z_max_m Absolute upper z clamp (output frame).
    * @param[in] target_eef_speed A controlled, non-crash approach/contact speed (m/s).
+   * @param[in] wall_direction Which way the wall lies from the robot. A column is the set of
+   *            points sharing the same position along the wall's horizontal tangent (direction x up),
+   *            ordered by ascending tangent coordinate; for the default +y wall that is x, as before.
    */
   CoverageOutputJsonSource(
     std::string json_path,
@@ -56,7 +60,8 @@ public:
     double z_step_m = 0.1,
     double z_min_m = 1.20,
     double z_max_m = 1.60,
-    double target_eef_speed = 0.02);
+    double target_eef_speed = 0.02,
+    WallDirection wall_direction = WallDirection{});
 
   std::vector<CoverageSegmentIntent> getCoveragePlan() override;
   std::string getFrameId() override;
@@ -69,6 +74,7 @@ private:
   double z_min_m_;
   double z_max_m_;
   double target_eef_speed_;
+  WallDirection wall_dir_;
 };
 
 }  // namespace manipulation_manager

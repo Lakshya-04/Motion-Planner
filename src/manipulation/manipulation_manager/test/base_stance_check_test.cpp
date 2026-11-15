@@ -26,6 +26,8 @@ TEST(StanceWallTest, FlattensEveryPoseAndTakesTheMeanWallDepth)
   const auto wall = stanceWall({column(-0.2, 0.8, 0.5, 1.5), column(0.2, 1.0, 0.5, 1.5)});
   EXPECT_EQ(wall.targets.size(), 4U);
   EXPECT_NEAR(wall.wall_y, 0.9, 1e-12);
+  EXPECT_NEAR(wall.wall_x, 0.0, 1e-12);
+  EXPECT_NEAR(wall.wall_z, 1.0, 1e-12);
 }
 
 TEST(StanceWallTest, EmptyPlanHasNoTargets)

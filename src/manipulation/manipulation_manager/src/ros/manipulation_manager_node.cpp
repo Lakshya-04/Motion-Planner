@@ -34,6 +34,7 @@
 
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
+#include "manipulation_manager/core/wall_direction.hpp"
 #include "manipulation_manager/ros/coverage/coverage_output_json_source.hpp"
 #include "manipulation_manager/ros/execution/jtac_execution_adapter.hpp"
 
@@ -79,11 +80,9 @@ std::vector<double> readCurrentJointState(const rclcpp::Node::SharedPtr & node)
 
 namespace
 {
-// wall_reference_pose's local Z must be the wall's OUTWARD normal, opposite the tool's
-// approach axis -- same constant coverage_pass_demo_node.cpp uses, empirically tied to this
-// tool/wall geometry, not derivable from the coverage plan's own approach-orientation poses.
-constexpr double kWallNormalQx = 0.7071067811865476;
-constexpr double kWallNormalQw = 0.7071067811865475;
+// wall_reference_pose's local Z must be the wall's OUTWARD normal, opposite the tool's approach
+// axis. WallDirection::outwardNormalQuaternion() gives it for any wall direction; for the default
+// +y wall it equals the constant coverage_pass_demo_node.cpp uses.
 }  // namespace
 
 class ManipulationManagerNode : public rclcpp::Node
@@ -112,16 +111,35 @@ public:
     // base_link -> base_footprint fixed offset (see coverage_pass_demo_node.cpp's own frame_id
     // comment) -- coverage_output.json is authored in base_link.
     z_offset_ = this->declare_parameter<double>("z_offset_m", 0.31);
+    {
+      // Which way the wall lies from the robot in frame_id (a vector, normalised here). The default
+      // is the original +y wall; the MuJoCo/Gazebo scenes have the wall at +x: [1, 0, 0].
+      const auto v = this->declare_parameter<std::vector<double>>(
+        "wall_direction", std::vector<double>{0.0, 1.0, 0.0});
+      if (v.size() != 3) {
+        throw std::invalid_argument("wall_direction needs three numbers");
+      }
+      wall_dir_ = WallDirection::from(v[0], v[1], v[2]);
+    }
+    // Resampling of each wall column and its z limits in frame_id (the defaults are the original
+    // wall-cleaning values), and the contact speed.
+    coverage_z_step_ = this->declare_parameter<double>("coverage_z_step_m", 0.1);
+    coverage_z_min_ = this->declare_parameter<double>("coverage_z_min_m", 1.20);
+    coverage_z_max_ = this->declare_parameter<double>("coverage_z_max_m", 1.60);
+    coverage_eef_speed_ = this->declare_parameter<double>("coverage_eef_speed_mps", 0.02);
+    dock_at_stroke_start_ = this->declare_parameter<bool>("dock_at_stroke_start", false);
     dock_standoff_ = this->declare_parameter<double>("dock_standoff_m", 0.12);
     contact_y_overshoot_ = this->declare_parameter<double>("contact_y_overshoot_m", 0.045);
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
+    press_settle_s_ = this->declare_parameter<double>("press_settle_s", 2.0);
+    unload_m_ = this->declare_parameter<double>("unload_m", 0.0);
 
     // Base stance check against the reachability planner: "off" (default), "warn" (log and go on)
     // or "enforce" (do not run the plan from a stance the planner says cannot reach it).
     base_check_mode_ = this->declare_parameter<std::string>("base_check", "off");
     base_check_service_ = this->declare_parameter<std::string>(
-      "base_check_service", "/reachability_node/plan_stands");
+      "base_check_service", "/reachability/plan_stands");
     base_check_lift_min_ = this->declare_parameter<double>("base_check_lift_min_m", 0.0);
     base_check_lift_max_ = this->declare_parameter<double>("base_check_lift_max_m", 0.0);
     base_check_arm_mount_z_ = this->declare_parameter<double>("base_check_arm_mount_z_m", 0.0);
@@ -133,8 +151,11 @@ public:
     planning_config_ = this->declare_parameter<std::string>("planning_config", "");
     manager_.setLogger(std::make_shared<ros_adapters::RclcppLogger>(this->get_logger()));
 
+    // The JTAC controller's node name: its action, parameters and force topic hang off it.
+    controller_name_ = this->declare_parameter<std::string>(
+      "controller_name", "combined_arm_lift_controller");
     force_pub_ = this->create_publisher<std_msgs::msg::Float64>(
-      "/combined_arm_lift_controller/target_force_n", 10);
+      "/" + controller_name_ + "/target_force_n", 10);
   }
 
   /// Two-phase init: JtacExecutionAdapter needs a live node shared_ptr for its action client,
@@ -145,13 +166,14 @@ public:
     if (!buildPlanners()) {
       return false;
     }
-    execution_adapter_ = std::make_shared<JtacExecutionAdapter>(shared_from_this());
+    execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
+      shared_from_this(), "/" + controller_name_ + "/follow_joint_trajectory");
     manager_.setExecutionPort(execution_adapter_);
 
     param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(
-      shared_from_this(), "/combined_arm_lift_controller");
+      shared_from_this(), "/" + controller_name_);
     if (!param_client_->wait_for_service(std::chrono::seconds(10))) {
-      RCLCPP_ERROR(this->get_logger(), "combined_arm_lift_controller param service unavailable");
+      RCLCPP_ERROR(this->get_logger(), "%s param service unavailable", controller_name_.c_str());
       return false;
     }
     return true;
@@ -181,7 +203,9 @@ public:
    */
   void runCoveragePlan()
   {
-    CoverageOutputJsonSource source(coverage_json_path_, frame_id_, z_offset_);
+    CoverageOutputJsonSource source(
+      coverage_json_path_, frame_id_, z_offset_, coverage_z_step_, coverage_z_min_, coverage_z_max_,
+      coverage_eef_speed_, wall_dir_);
     const auto intents = source.getCoveragePlan();
     RCLCPP_INFO(this->get_logger(), "Loaded %zu wall column(s) from %s",
       intents.size(), coverage_json_path_.c_str());
@@ -257,10 +281,14 @@ private:
       m.orientation.w = p.qw;
       req->targets_world.push_back(m);
     }
-    // The wall is on the +y side of the base (the same assumption the dock pose makes); the normal
-    // points into the free side, back towards the robot.
+    // The wall lies along wall_direction from the base (the same direction the dock pose uses); the
+    // normal points into the free side, back towards the robot.
+    req->wall_point.x = wall.wall_x;
     req->wall_point.y = wall.wall_y;
-    req->wall_normal.y = -1.0;
+    req->wall_point.z = wall.wall_z;
+    req->wall_normal.x = -wall_dir_.d[0];
+    req->wall_normal.y = -wall_dir_.d[1];
+    req->wall_normal.z = -wall_dir_.d[2];
     req->lift_min = base_check_lift_min_;
     req->lift_max = base_check_lift_max_;
     req->arm_mount_offset_z = base_check_arm_mount_z_;
@@ -355,12 +383,14 @@ private:
   ColumnOutcome runColumn(const CoverageSegmentIntent & intent)
   {
     const auto & rep = intent.poses.front();
-    const double dock_z = intent.poses[intent.poses.size() / 2].z;
+    // Docking in the middle of the column is the original behaviour; at the stroke's first pose the
+    // contact path starts from the arm configuration it docked in (no IK branch jump at the start).
+    const double dock_z = dock_at_stroke_start_ ? intent.poses.front().z
+                                                : intent.poses[intent.poses.size() / 2].z;
 
-    core_types::Pose standoff_pose;
-    standoff_pose.x = rep.x;
-    standoff_pose.y = rep.y - dock_standoff_;
+    core_types::Pose standoff_pose = rep;
     standoff_pose.z = dock_z;
+    standoff_pose = wall_dir_.shifted(standoff_pose, -dock_standoff_);
     standoff_pose.qx = rep.qx;
     standoff_pose.qy = rep.qy;
     standoff_pose.qz = rep.qz;
@@ -414,17 +444,33 @@ private:
     contact_seg.wall_reference_pose.x = rep.x;
     contact_seg.wall_reference_pose.y = rep.y;
     contact_seg.wall_reference_pose.z = rep.z;
-    contact_seg.wall_reference_pose.qx = kWallNormalQx;
-    contact_seg.wall_reference_pose.qy = 0.0;
-    contact_seg.wall_reference_pose.qz = 0.0;
-    contact_seg.wall_reference_pose.qw = kWallNormalQw;
+    const auto wall_q = wall_dir_.outwardNormalQuaternion();
+    contact_seg.wall_reference_pose.qx = wall_q[0];
+    contact_seg.wall_reference_pose.qy = wall_q[1];
+    contact_seg.wall_reference_pose.qz = wall_q[2];
+    contact_seg.wall_reference_pose.qw = wall_q[3];
 
     std::vector<core_types::Pose> contact_waypoints;
     contact_waypoints.reserve(intent.poses.size());
     for (size_t i = 0; i < intent.poses.size(); ++i) {
-      core_types::Pose p = intent.poses[i];
-      p.y += contact_y_overshoot_;
+      core_types::Pose p = wall_dir_.shifted(intent.poses[i], contact_y_overshoot_);
       contact_waypoints.push_back(p);
+    }
+
+    // Press first, then stroke: the admittance needs a couple of seconds at rest to settle on the
+    // target force; stroking straight out of the approach drags the first-contact creep (about
+    // 13 N) along the wall.
+    if (press_settle_s_ > 0.0 && !contact_waypoints.empty()) {
+      MotionSegmentSpec press_seg = contact_seg;
+      press_seg.label = intent.label + "_press";
+      press_seg.waypoint_indices = {0};
+      const auto press_exec = manager_.executeMotionSegments(
+        frame_id_, {press_seg}, {contact_waypoints.front()}, planning_group_);
+      if (press_exec.success) {
+        std::this_thread::sleep_for(std::chrono::duration<double>(press_settle_s_));
+      }
+    }
+    for (size_t i = 0; i < contact_waypoints.size(); ++i) {
       contact_seg.waypoint_indices.push_back(i);
     }
     const auto contact_exec = manager_.executeMotionSegments(
@@ -433,6 +479,24 @@ private:
       this->get_logger(), "%s: contact success=%d completed=%zu", intent.label.c_str(),
       contact_exec.success, contact_exec.waypoints_completed);
 
+    // Back the reference off the wall while the admittance is still engaged: switching it off with the
+    // reference 1.5 mm inside the wall snaps the arm onto that reference (27-31 N spikes at every
+    // stroke end). The admittance releases its offset against a reference that no longer presses.
+    if (unload_m_ > 0.0 && !contact_waypoints.empty()) {
+      MotionSegmentSpec unload_seg = contact_seg;
+      unload_seg.label = intent.label + "_unload";
+      unload_seg.waypoint_indices = {0};
+      unload_seg.allow_target_contact = false;
+      unload_seg.min_path_fraction = 0.5;
+      const auto unload_pose = wall_dir_.shifted(contact_waypoints.back(), -(contact_y_overshoot_ + unload_m_));
+      manager_.executeMotionSegments(frame_id_, {unload_seg}, {unload_pose}, planning_group_);
+    }
+    // Ramp the force target to zero and let the admittance unload the wall before it is switched off.
+    {
+      std_msgs::msg::Float64 zero;
+      zero.data = 0.0;
+      force_pub_->publish(zero);
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     setAdmittanceEngaged(false);
 
@@ -472,6 +536,12 @@ private:
   std::string planning_group_;
   std::string coverage_json_path_;
   double z_offset_{0.0};
+  WallDirection wall_dir_;
+  bool dock_at_stroke_start_{false};
+  double coverage_z_step_{0.1};
+  double coverage_z_min_{1.20};
+  double coverage_z_max_{1.60};
+  double coverage_eef_speed_{0.02};
   double dock_standoff_{0.0};
   std::string base_check_mode_{"off"};
   std::string base_check_service_;
@@ -483,6 +553,9 @@ private:
   double contact_y_overshoot_{0.0};
   double max_wall_penetration_{0.0};
   double target_force_n_{0.0};
+  std::string controller_name_{"combined_arm_lift_controller"};
+  double press_settle_s_{2.0};
+  double unload_m_{0.0};
 };
 
 }  // namespace manipulation_manager

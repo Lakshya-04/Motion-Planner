@@ -19,19 +19,21 @@ from mobile_manipulator_moveit_config import build_moveit_config, resolve_profil
 def _node(context):
     arm = LaunchConfiguration("arm").perform(context) or None
     profile = LaunchConfiguration("profile").perform(context) or None
-    moveit_config = build_moveit_config(arm, hardware="mock", profile=profile)
+    hardware = LaunchConfiguration("hardware").perform(context)
+    moveit_config = build_moveit_config(arm, hardware=hardware, profile=profile)
+    params_file = LaunchConfiguration("params_file").perform(context)
     return [Node(
         package="manipulation_manager",
         executable="manipulation_manager_node",
         output="screen",
         parameters=[
             moveit_config.to_dict(),
-            {"use_sim_time": True},
+            {"use_sim_time": LaunchConfiguration("use_sim_time").perform(context).lower() == "true"},
             {"planning_pipelines.pipeline_names": ["ompl"]},
             {"profile": resolve_profile(arm, profile).name},
             # seed-preferring IK in the backend: 0 = one plain solve (see coverage_pass_demo.launch.py)
             {"ik_extra_seeds": int(LaunchConfiguration("ik_seeds").perform(context))},
-        ],
+        ] + ([params_file] if params_file else []),  # last, so it can override anything above
     )]
 
 
@@ -42,5 +44,11 @@ def generate_launch_description():
         DeclareLaunchArgument("profile", default_value="",
                               description="robot profile (default ur10e_telescopic)"),
         DeclareLaunchArgument("ik_seeds", default_value="0", description="extra perturbed-seed IK solves (0 = off)"),
+        DeclareLaunchArgument("hardware", default_value="mock",
+                              description="MoveIt hardware mode (mock; jtac_mock for the sims' JTAC controller)"),
+        DeclareLaunchArgument("use_sim_time", default_value="true",
+                              description="false for the MuJoCo sim, which does not publish /clock"),
+        DeclareLaunchArgument("params_file", default_value="",
+                              description="YAML of manager parameters (wall_direction, base_check, ...), applied last"),
         OpaqueFunction(function=_node),
     ])

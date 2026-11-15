@@ -14,7 +14,7 @@
      contact it adds the force the environment exerts on the tool (statics: f_reading = f_env + m g).
      Nothing is compensated or moved to the tcp here. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <xacro:macro name="sim_gazebo_tags" params="sensor_mass:=0.3 sensor_com_z:=0.02 sensor_radius:=0.04 sensor_length:=0.04 tool_mu:=0.8">
+  <xacro:macro name="sim_gazebo_tags" params="sensor_mass:=0.3 sensor_com_z:=0.02 sensor_radius:=0.04 sensor_length:=0.04 tool_mu:=0.8 tip_stiffness:=5000.0 tip_damping:=100.0 tip_travel:=0.02 tip_length:=0.1 tip_radius:=0.04">
     <link name="world"/>
     <joint name="sim_world_joint" type="fixed">
       <parent link="world"/>
@@ -71,14 +71,51 @@
     <gazebo reference="tool_mount_link">
       <mu1>${tool_mu}</mu1>
       <mu2>${tool_mu}</mu2>
-      <kp>1000000.0</kp>
-      <kd>100.0</kd>
+    </gazebo>
+
+    <!-- Compliant tool tip: the tool's collision lives on tool_tip_link, a side branch of tool_mount_link
+         (not in the arm-to-tcp chain, so kinematics and the controller see the same rigid tcp) on a
+         prismatic joint along the tool axis with a spring and a damper. The wall can only push it back
+         (tool -z), up to tip_travel. Without it the contact is a rigid body on a servo joint: about
+         108 N for any penetration of 0.05 mm or more, so no force loop can hold 10 N. -->
+    <link name="tool_tip_link">
+      <visual>
+        <origin xyz="0 0 ${tip_length / 2.0}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${tip_radius}" length="${tip_length}"/></geometry>
+        <material name="tool_tip_orange"><color rgba="0.95 0.5 0.1 1"/></material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${tip_length / 2.0}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${tip_radius}" length="${tip_length}"/></geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 ${tip_length / 2.0}" rpy="0 0 0"/>
+        <mass value="0.05"/>
+        <inertia ixx="0.00005" ixy="0" ixz="0" iyy="0.00005" iyz="0" izz="0.00003"/>
+      </inertial>
+    </link>
+    <joint name="tool_tip_joint" type="prismatic">
+      <parent link="tool_mount_link"/>
+      <child link="tool_tip_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="${-tip_travel}" upper="0.0" effort="1000" velocity="1.0"/>
+      <dynamics damping="${tip_damping}" friction="0.0"/>
+    </joint>
+    <gazebo reference="tool_tip_joint">
+      <implicitSpringDamper>true</implicitSpringDamper>
+      <springStiffness>${tip_stiffness}</springStiffness>
+      <springReference>0.0</springReference>
+    </gazebo>
+    <gazebo reference="tool_tip_link">
+      <mu1>${tool_mu}</mu1>
+      <mu2>${tool_mu}</mu2>
       <sensor name="tool_contact" type="contact">
         <always_on>true</always_on>
         <update_rate>200</update_rate>
         <contact>
           <topic>/tool_contact/contacts</topic>
-          <collision>tool_mount_link_collision</collision>
+          <collision>tool_tip_link_collision</collision>
         </contact>
       </sensor>
     </gazebo>

@@ -59,14 +59,14 @@ without code, when we can implement it.
 - [x] `ToolProfile` with geometry, task, coverage and control facets, and a YAML loader (`core_types`, `ros_adapters`)
 - [x] Coverage uses swath, overlap, inflation, standoff, yaw, tilt, contact flag (`ToolCoverageProfile`)
 - [x] Tool offset from the arm TCP: kinematics via `tcp_xyz/rpy` in the profile; force via the conditioner's lever arm
-- [ ] **Ship tool profiles**: no `tool_profiles.yaml` exists; nodes take parameters and default to "mop"
-- [ ] Connect the YAML loader to the coverage planner (not wired end to end)
+- [x] **Ship tool profiles**: `coverage_planner/config/tool_profiles.yaml` ships `contact_wiper` and `spray_gun` (`docs/tools.md`)
+- [x] The YAML loader is wired into the coverage launch files and the demo node (`tool_profiles_file`, `tool_name`, per-field overrides; the manager pass uses it)
 - [~] Spray model: `sprayerEffectiveSwath` is a placeholder (slope 1, intercept 0); swath is not derived from standoff;
       no overspray/overlap model, no valve/pump timing along the path. *Implement: parametric swath w(d), Gaussian/beta profile,
       thickness-accumulation raster, choose spacing and standoff by minimising thickness variance (about 16-18% overlap is a published optimum for an elliptical pattern)*
 - [ ] Non-contact segments end to end: hold standoff, no force engage, trigger the valve along the path (contact approach/retreat exist)
 - [ ] Contact tools: adaptive line spacing from a contact-area model (a cheap published idea, 2-3 days on top of a planner)
-- [ ] "How to add a tool" guide
+- [x] "How to add a tool" guide (`docs/tools.md`)
 
 ## 5. Motion planning (any backend, contact and non-contact)
 
@@ -94,7 +94,7 @@ without code, when we can implement it.
 - [x] Lifts: telescopic, scissor, fixed, none; recipe for a column lift
 - [x] Bases: ranger_mini, scout, scout_mini, husky, mpo_500, mir100, two turtlebot3, generic (omni / diff / skid / 4ws)
 - [x] One command from a profile to every per-robot asset (spheres, cuRobo config, VAMP header, ACM, reach map, manifest)
-- [~] Still hard-coded: controller name `lift_arm_controller`, `/combined_arm_lift_controller/target_force_n`, `z_offset_m` 0.31, default group
+- [~] Still hard-coded (the manager takes `controller_name` now): controller name `lift_arm_controller`, `/combined_arm_lift_controller/target_force_n`, `z_offset_m` 0.31, default group
       `lift_arm`, three legacy diagnostic nodes with a `joint1..6` chain
 - [ ] VAMP / cuRobo robot models built from the profile at run time (today: the asset command, compile-time for VAMP)
 - [ ] MoveIt swap verified for the Panda arm in docs (tests exist; no recorded evidence)
@@ -105,7 +105,8 @@ without code, when we can implement it.
 - [x] `chooseStation` (free side of the wall, footprint clearance, yaw), `planStands`, `orderStands`, drive-type travel time
 - [x] ROS service `~/plan_stands` with a base profile (`reachability_node`)
 - [~] **Reachability -> manager**: verify-only stance check (`base_check:=warn|enforce`, `docs/reachability.md`); the manager still never moves the base or asks for a different stand
-- [ ] Stand -> navigation goal (`NavigateToPose`, `NavigateThroughPoses`) with the arm-base vs `base_footprint` frame conversion. *Reuse: Nav2*
+- [~] Stand -> navigation goal with the arm-base vs `base_footprint` frame conversion: `stand_navigator` (`NavigateToStand` action, `NavigateToPose`-shaped; ROS-free core, unit-tested; `docs/stand_navigation.md`).
+      Done in MuJoCo: `plan_stands` -> first stand -> arrival within 1 cm. Not done: `NavigateThroughPoses`, obstacle avoidance, a Nav2 bridge. *Reuse: Nav2 (not installed in any image; the node is the stand-in)*
 - [ ] Docking approach to the wall. *Reuse: Nav2 `opennav_docking` (Jazzy branch, v1.3.14) with a custom `NonChargingDock` plugin: `configure` / `cleanup` / `activate` / `deactivate`, `getStagingPose(pose, frame)`, `getRefinedPose(pose, id)` (where the plane detector overwrites the dock pose) and `isDocked()`*
 - [ ] Wall-plane standoff and yaw servoing for the last metres from the fitted plane (about 1-2 weeks; no off-the-shelf package, published
       wall-painting robots do exactly this)
@@ -122,7 +123,7 @@ without code, when we can implement it.
 - [x] Verified in MuJoCo: 10.13 N for a 10 N target (std 0.03); conditioner error vs ground truth under 0.005 N in both simulators
 - [~] JTAC compliance offset accumulates on every axis while blocked and releases over about 3 s after the reference retreats (`docs/sim_mujoco.md`)
 - [~] **Force-CBF limiter on JTAC** (arXiv 2405.04859 idea, no code used): `force_core::ForceLimiter` bounds the velocity into the wall by `alpha (F_max - F) / k` with an online stiffness estimate and a free-space speed cap; closed-loop tests keep the force under the limit on 1-40 kN/m walls (`docs/ft_sensing.md`). Not wired into JTAC's command path yet (needs a simulator run), and there is no energy tank around the slow release; the existing `max_offset_m` clamp stays
-- [ ] **Hardware parameter template**: gains, sensor name, source topic, payload and bias live in yaml comments marked "diagnostic"
+- [~] **Hardware parameter template**: `compliant_trajectory_controller/config/hardware_template.yaml` lists every value to set (conditioner, bridge, JTAC, tool profile) with safe defaults marked; documented only, no launch file loads it yet and nothing is tested on hardware
 - [ ] Payload identification with safe excitation trajectories and bounds (arXiv 2504.21486, about 1.5 weeks; its code, `roahmlab/OnlineSafeSysID`, has no licence file, so implement from the paper) and bias/temperature drift tracking (3-5 days);
       optionally replace the gravity step with the `control_toolbox` gravity-compensation filter (Apache-2.0; gravity and centre-of-gravity torque only, so sign, bias and the lever arm stay ours)
 - [ ] Gain auto-tuning by Bayesian optimisation on the MuJoCo twin (cost: force RMS + overshoot + windup; method reference arXiv 2512.03772: SAASBO tuning of a torque-level MPC on a UR10e with a digital twin, not admittance gains, no code; 1-2 weeks)
@@ -134,12 +135,15 @@ without code, when we can implement it.
 
 ## 9. Mobile base execution
 
-- [ ] Base motion in the simulators (wheels are fixed links; both sims hold the base static or welded). *First version: planar-velocity base
-      (`mujoco_ros2_control` `base_velocity` plugin in MuJoCo, which needs the base body to have a freejoint, so our MJCF generator must emit one;
-      a planar/velocity plugin in Gazebo), wheels later*
+- [~] Base motion in the simulators (wheels are fixed links; both sims hold the base static or welded). *MuJoCo done as the first version:
+      `base_motion:=true` adds a planar-velocity base (x, y, yaw joints with stiff position hold) driven by `/cmd_vel`, `omni` or `diff`
+      per profile `drive_type`, with `/odom` and TF `odom -> base_footprint`; arm, lift and F/T unaffected, tested with
+      `scripts/run_base_motion.sh` (`docs/sim_mujoco.md`). Implemented in our own plugin, not `mujoco_ros2_control` (freejoint, MuJoCo 3.12
+      pin). Not done: Gazebo (planar/velocity plugin), wheel physics and floor contact, 4-wheel-steering kinematics, odom noise*
 - [ ] `ros2_control` drive controllers per base profile. *Reuse: `diff_drive_controller`, `mecanum_drive_controller` (Apache-2.0; the mecanum one takes a `TwistStamped` on `<name>/reference` and one velocity command per wheel); the 4-wheel-steering
       Ranger needs a small custom controller or the vendor `ranger_ros2` driver (BSD-3)*
-- [ ] Nav2 integration: costmap from the base footprint, goals from the stands, `odom`. *Reuse: Nav2 (Smac lattice/Hybrid-A*, MPPI omni/diff/Ackermann)*
+- [~] Nav2 integration: costmap from the base footprint, goals from the stands, `odom`. Goals from the stands and `odom` are done without Nav2 (`stand_navigator`, a straight-line proportional controller with
+      velocity and acceleration limits per drive type, no costmap, no planning around obstacles); Nav2 (`nav2_msgs`, `nav2_bringup`) is not in the docker images and was not added. Swap path in `docs/stand_navigation.md`. *Reuse: Nav2 (Smac lattice/Hybrid-A*, MPPI omni/diff/Ackermann)*
 - [ ] Localisation against the building and the wall. *Reuse: `robot_localization` (Apache-2.0); Nav2 AMCL and slam_toolbox are LGPL-2.1 (separate ROS nodes, licence review);
       KISS-ICP, KISS-SLAM, GLIM, PIN-SLAM (MIT) if a 3D lidar is added; avoid FAST-LIO2, FAST-LIVO2 and iG-LIO (GPL-2.0)*
 
@@ -148,8 +152,7 @@ without code, when we can implement it.
 - [x] Backend contract and `hardware:=mujoco|gazebo` selection; both run headless with smoke tests (`docs/simulation.md`)
 - [x] MuJoCo 4: own `SystemInterface`, MJCF and wall generators, raw + ground-truth F/T, 10 N contact control
 - [x] Gazebo Harmonic: package, wall world, raw + ground-truth F/T, `FtBridgeSimSystem`, conditioned path validated
-- [~] Gazebo does not hold a 10 N contact: JTAC gave about 108 N at two depths and the cause is not established (rigid contact is one hypothesis; `docs/sim_gazebo.md`). *Fix: a compliant tool tip (a spring-damper joint)
-      or effort control; physical stiffness of 5-50 N/mm, physics 5-10x faster than the controller*
+- [x] Gazebo holds a 10 N contact with a compliant tool tip (prismatic spring-damper joint, 5 N/mm, `docs/sim_gazebo.md`): mean 9.69 N, std 0.00 N over the last 4 s, was 163.9 N, std 120.6 N (rigid tool). Not yet: the 35 mm overpress still hits the hard stop (about 105 N), the residual of 0.3 to 1.6 N depends on the reference depth, MuJoCo still holds 10.13 N.
 - [ ] Evaluate `mujoco_ros2_control` (Apache-2.0, v0.1.4; Humble, Jazzy, Kilted, Lyrical; plugins `base_velocity`, `camera`, `mujoco_3d_lidar`,
       `external_wrench`, `fts_grav_comp`, `free_joint_state_publisher`) against our own plugin. Its `mujoco_vendor` pins MuJoCo 3.12.0 and no MuJoCo 4 work was
       found, while ours builds against 4.0.1: try building it against 4.0.1, otherwise borrow its plugin designs
@@ -163,8 +166,8 @@ without code, when we can implement it.
 
 ## 11. The end-to-end gap (the main remaining work)
 
-- [ ] **One launch per simulator**: sim + move_group + controllers + conditioner + coverage + manager, executing a wall pass
-- [~] **A scorecard** for that run: `scoreRun` / `score_run` compute coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); `run_contact.sh --record` feeds it a MuJoCo contact run (`docs/sim_mujoco.md`); a full wall pass is not recorded yet and collisions are not counted
+- [~] **One launch per simulator**: MuJoCo has `run_wall_pass.sh` (scripted strokes planned by MoveIt, recorded and scored) and `run_manager_pass.sh` (coverage planner + manager + MoveIt + JTAC: both columns dock, press, stroke and retract; scorer passes with coverage 0.93, peak 20.5 N, RMS 3.6 N, in-band 0.48; `docs/sim_mujoco.md`). Gazebo has `run_manager_pass.sh` too (UR10e, three columns dock, press, stroke and retract; scorer passes with coverage 0.93, peak 16.8 N, RMS 2.1 N, in-band 0.85; needs `jtac_position_only`, `docs/sim_gazebo.md`); there is no scripted Gazebo wall pass, and force along the manager strokes is still looser than the MuJoCo scripted pass (RMS 1.5 N, 81 percent in band)
+- [~] **A scorecard** for that run: `scoreRun` / `score_run` compute coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); `run_contact.sh --record` feeds it a MuJoCo contact run (`docs/sim_mujoco.md`); `run_manager_pass.sh` records and scores a full manager pass; collisions are not counted
 - [ ] Manager interface: an action or service to start, stop and monitor a coverage task (it runs once from `main` today). *Reuse: BehaviorTree.CPP (MIT) for the
       task flow, the way Nav2 does; keep the force FSM*
 - [ ] Scenario set: empty wall, wall with obstacles, panels needing several stands, each robot profile
@@ -173,28 +176,26 @@ without code, when we can implement it.
 ## 12. Hardware readiness
 
 - [~] UFACTORY path: `ft_bridge` default topic, JTAC yaml for `uf_ft_sensor`, a real-robot branch in the compliance demo; nothing verified on hardware
-- [ ] Hardware bring-up guide and commissioning tests (slow first contact, sign checks, payload identification, stiffness check, limits)
+- [~] Hardware bring-up guide: `docs/hardware_bringup.md` (procedure, abort thresholds, sim-vs-real differences); written from the code and simulations, no commissioning test exists and nothing was run on hardware
 - [ ] `hardware:=real` description branch and vendor-driver selection
 - [ ] Calibration procedures in one place: payload (services exist), tool TCP, wall plane, base-to-wall
 
 ## 13. Open source and plug-and-play
 
 - [x] Apache-2.0 licence; docs index; architecture, robot, reachability, simulation, F/T docs; Docker with nine targets
-- [~] Root README: overview, workflow, package map, Docker build and test, simulators; no one-command quickstart (none exists)
-- [ ] **Getting started**: one command to a running simulated wall pass
+- [x] Root README: overview, workflow, package map, Docker build and test, simulators, quickstart pointing at the one-command sim scripts
+- [x] **Getting started**: one command to a simulated wall pass (`sim_mujoco/scripts/run_wall_pass.sh`, `run_manager_pass.sh`; `sim_gazebo/scripts/run_manager_pass.sh`)
 - [x] `THIRD_PARTY.md` (licences, use, nothing vendored); revisit as adopted software lands (a few licences are marked unverified there; cddlib GPL-2.0 in the VAMP stage: reviewed 2026-11-15, source and recipes only, no binaries shipped, see THIRD_PARTY.md)
-- [~] CHANGELOG and CONTRIBUTING written; real package versions still all `0.0.0`
+- [x] CHANGELOG (#5 to #61) and CONTRIBUTING written; every package is at `0.1.0` (checked: nothing depends on an exact version; `colcon list` over all 28 packages works)
 - [x] `docs/docker.md` covers the `sim` and `sim-gazebo` targets
-- [ ] CI: none by decision; instead one documented "run all checks" command (`docker/build.sh test` + sim smoke tests)
+- [x] CI: none by decision; one documented "run all checks" section in `docs/docker.md` (`docker/build.sh test`, tool tests, public-readiness scan, sim scripts); the sim scripts are still not in `colcon test`
 - [ ] **Public-readiness cleanup**
-  - [ ] 63 references in 41 files to 9 documents that are not in the repo (`force_control_backend_admittance_vs_diffik.md`,
-        `implementation_plan_manipulation_architecture.md`, ...): strip them or distil into `docs/`
-  - [~] Earlier-project base and application names are removed from code, READMEs and comments; "mop" as the default tool name remains until tool profiles ship (section 4)
-  - [ ] Four launch files that look up packages that do not exist (`description`, `moveit_config`):
-        `jtac_compliance_demo`, `jtac_controller_test`, `jtac_gazebo_controllers`, `manipulation_manager.launch.py`
-  - [ ] `.claude/` is not in `.gitignore`
+  - [x] References to documents that are not in the repo: none left in code or docs (checked 2026-11-16 with a script over every `*.md` mention in tracked files; `docker/tools/check_public_readiness.py` keeps checking)
+  - [x] Earlier-project base and application names are removed (no `serum` anywhere; "mop" is a real tool in `coverage_planner/config/tool_profiles.yaml`, not a leftover)
+  - [x] Launch files that looked up packages that do not exist are fixed or removed (every remaining `*.launch.py` uses `mobile_manipulator_description` / `mobile_manipulator_moveit_config`)
+  - [x] `.claude/` is in `.gitignore`
   - [ ] Decide about the maintainer's email, which is in 97 files (70 `@author` tags plus `package.xml` maintainer entries; their own address: keep or drop)
-  - [ ] Final scan before making the repo public (names, paths, secrets); the visibility change itself is your command
+  - [ ] Final scan before making the repo public (names, paths, secrets): the procedure is `docs/release_checklist.md`, not yet run; the visibility change itself is your command
 
 ## 14. Docs that no longer match the code
 
@@ -232,7 +233,7 @@ Licences, versions and last-push dates were read from each repository's own file
 | Self filter | ours; `robot_body_filter` (BSD-3, `ros2` branch active since 2026-04 but not in the Jazzy or Kilted rosdistro: source build); `leggedrobotics/robot_self_filter` (BSD-3, ROS 2, 2026-10) | sphere-based filter with inflation margin (2-3 days) | learned filters |
 | Odometry / SLAM / localisation | `robot_localization` (Apache-2.0); KISS-ICP, KISS-SLAM, GLIM, PIN-SLAM (all MIT; the last three need a 3D lidar and, for GLIM, an IMU is usual); Nav2 AMCL and slam_toolbox are LGPL-2.1, run as separate nodes after a licence review | | FAST-LIO2, FAST-LIVO2, iG-LIO (GPL-2.0); Cartographer (barely maintained) |
 | Last metres to the wall | Nav2 `opennav_docking` (Apache-2.0, Jazzy branch v1.3.14) with a custom `NonChargingDock` plugin (the plane detector feeds `getRefinedPose`) | plane-distance and yaw servo (1-2 weeks) | |
-| Navigation | Nav2 (Apache-2.0): Smac lattice / Hybrid-A*, MPPI (omni, diff, Ackermann), costmap footprint | stand -> goal bridge, footprint per base | |
+| Navigation | Nav2 (Apache-2.0): Smac lattice / Hybrid-A*, MPPI (omni, diff, Ackermann), costmap footprint | stand -> goal bridge, footprint per base (`stand_navigator` is the interim version, `docs/stand_navigation.md`) | |
 | Base motion in sim | `mujoco_ros2_control` (Apache-2.0, v0.1.4: `base_velocity`, camera, 3D lidar; needs MuJoCo 3.12 through `mujoco_vendor`, MuJoCo 4 untested); ros2_controllers `diff_drive` and `mecanum_drive` (Apache-2.0); Ranger driver `ranger_ros2` (BSD-3) over `ugv_sdk` (Apache-2.0) | small 4-wheel-steering controller | |
 | Planar coverage | ours; Fields2Cover (BSD-3) and `opennav_coverage` (Apache-2.0, `jazzy-v2` branch, 2D only) as references | cellular decomposition | |
 | Mesh coverage | Noether (Apache-2.0, last commit 2026-01, tag 0.16.0, no GitHub release; `noether_ros2` separate, Apache-2.0, tag 0.2.0; `noether_tpp` is ROS-free; plane-slice and cross-hatch raster planners, mesh modifiers incl. RANSAC primitive fits, offset / approach / lead-in path modifiers). `industrial_reconstruction` (Apache-2.0, ROS 2, Open3D) builds a mesh from RGB-D plus TF; `scan_n_plan_workshop` (Apache-2.0, now under `ros-industrial-consortium`) is the reference pipeline | parameterise-then-sweep with adaptive spacing (geometry-central MIT or pmp-library MIT, 2-3 weeks; the DLR freeform-finishing paper, Schneyer et al., RA-L 2023, has no code); spray and standoff on top of Noether (line spacing from swath, offset modifier for standoff) | CGAL (GPL/LGPL); libigl unless per-file licences are checked (MPL-2.0 core, GPL modules); Tesseract / Descartes as a replacement (heavy; Tesseract 0.35.0 mixed Apache / BSD, Jazzy unconfirmed); RL coverage |
@@ -244,7 +245,7 @@ Licences, versions and last-push dates were read from each repository's own file
 | Backend selection | pluginlib | | a hand-rolled factory |
 | Orchestration | BehaviorTree.CPP (MIT); alternatives SMACC2 (Apache-2.0), FlexBE (BSD-3), py_trees (BSD-3) | | LLM planners, TAMP (no benefit for a deterministic task) |
 | Force control | ros2_controllers admittance (Apache-2.0, in use); `control_toolbox` gravity filter (Apache-2.0: gravity and CoG torque only); FZI `cartesian_controllers` (BSD-3, last `ros2` commit 2024-10) to evaluate; `force_feedback_mpc` (BSD-3) as a later option | force-CBF limiter + offset clamp (arXiv 2405.04859, no code); energy tank; excitation-based payload ID (arXiv 2504.21486; its code has no licence file); BO tuning (method reference arXiv 2512.03772, torque-level MPC) | learned F/T replacement; learned skills until the safety layer exists |
-| Simulation | core MuJoCo 4.0.1 (Apache-2.0) with calibrated soft contact; MuJoCo Warp (Apache-2.0) for sweeps; Newton (Apache-2.0, active) to watch; Gazebo for integration | compliant tool tip for Gazebo | Genesis, Isaac Lab on a 4 GB GPU |
+| Simulation | core MuJoCo 4.0.1 (Apache-2.0) with calibrated soft contact; MuJoCo Warp (Apache-2.0) for sweeps; Newton (Apache-2.0, active) to watch; Gazebo for integration | (compliant tool tip for Gazebo: done) | Genesis, Isaac Lab on a 4 GB GPU |
 
 Corrected from the first draft: nvblox is Apache-2.0 (not NVIDIA terms); `nav2_amcl` is LGPL-2.1 and `robot_localization` Apache-2.0; wavemap upstream is stale
 (last push 2024-12-30); the Noether swath/standoff awareness is ours to add; `mujoco_ros2_control` pins MuJoCo 3.12, not 4; arXiv 2604.01414 is a vision-torque
@@ -320,9 +321,9 @@ calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
   coverage, reachability `plan_stands` called by the manager, ROS coverage source. *Exit:* swap MoveIt / cuRobo / VAMP and the tool by config, in a test.
 - **M2 First full run in sim, base static** (what you can start testing with): one launch per simulator, a scenario set, the scorecard **with the coverage
   verification raster**, plus the force-CBF limiter and a compliant tip for Gazebo. MuJoCo first. *Exit:* an automated wall pass in MuJoCo with the scorecard
-  recorded on two robot profiles; Gazebo holds 10 N.
+  recorded on two robot profiles; Gazebo holds 10 N (done with the compliant tip).
 - **M3 Base motion and docking, by reuse**: planar-velocity bases, then ros2_control drive controllers; Nav2 with stands as goals; `opennav_docking` with a
-  wall-dock plugin; global stand selection by set cover + TSP; then local refinement. *Exit:* the base drives to a stand in sim and the pass succeeds from where it stopped.
+  wall-dock plugin; global stand selection by set cover + TSP; then local refinement. *Exit:* the base drives to a stand in sim (done, `run_stand_navigation.sh`) and the pass succeeds from where it stopped (not done: the manager still docks at a fixed offset assuming the base at the origin, see `docs/stand_navigation.md`).
 - **M4 Live perception, by reuse**: MoveIt octomap + `octomap_server`, PCL wall detection, our self filter on the live cloud, simulated depth/lidar, then a
   mapper (cuRobo Mapper or wavemap) and AMCL / KISS-ICP localisation. *Exit:* M2's scenario runs from a sensed wall, not a file.
 - **M5 Tools and surfaces**: spray model and the non-contact path; floors and ceilings as planar patches; Noether for meshes. *Exit:* a spray pass over a wall
@@ -335,7 +336,7 @@ calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
 1. **Local base placement**: a lightweight verify-and-nudge at each stand (re-check reachability on the live scan, shift within a small neighbourhood) or a
    full local optimiser? I recommend the lightweight one first; global placement exists.
 2. **Backend selection**: pluginlib, as the docs prescribe and as you asked for reuse, rather than my earlier idea of a hand-rolled factory. (I now recommend pluginlib.)
-3. **Gazebo contact**: add a compliant tool tip so Gazebo can hold 10 N, or accept MuJoCo as the contact simulator and use Gazebo for integration only?
+3. **Gazebo contact**: done: the compliant tool tip holds 10 N (9.69 N). Remaining: an identified tip stiffness and a smaller reference-depth residual, if Gazebo is to be a contact simulator rather than integration only.
 4. **MuJoCo plugin**: `mujoco_ros2_control` pins MuJoCo 3.12 (no MuJoCo 4 support found), ours builds against 4.0.1. Try building the upstream plugins (base velocity,
    camera, 3D lidar) against 4.0.1 and keep our own `SystemInterface` for the joints and F/T if that fails? I recommend trying it for base motion and sensors first.
 5. **Base motion**: planar-velocity bases first (recommended), real wheel physics later?

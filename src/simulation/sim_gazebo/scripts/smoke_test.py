@@ -154,8 +154,10 @@ def payload(urdf):
     The tool mounts on the sensor frame with no offset (see urdf/gazebo_tags.xacro)."""
     robot = ET.fromstring(urdf)
     m_tot, mc = 0.0, np.zeros(3)
-    for name in ('ft_sensor_link', 'tool_mount_link'):
+    for name in ('ft_sensor_link', 'tool_mount_link', 'tool_tip_link'):
         inertial = robot.find(f"link[@name='{name}']/inertial")
+        if inertial is None:
+            continue
         m = float(inertial.find('mass').get('value'))
         origin = inertial.find('origin')
         com = np.array([float(v) for v in origin.get('xyz').split()]) if origin is not None else np.zeros(3)

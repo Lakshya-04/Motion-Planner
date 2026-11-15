@@ -24,7 +24,9 @@ namespace manipulation_manager
 struct StanceWall
 {
   std::vector<core_types::Pose> targets;  ///< Every pose of the plan.
-  double wall_y{0.0};                     ///< Mean y of the targets: a point on the wall plane.
+  double wall_x{0.0};                     ///< Mean of the targets: a point on the wall plane.
+  double wall_y{0.0};
+  double wall_z{0.0};
 };
 
 /// A stand returned by the reachability planner (arm base x, y in the base frame, base yaw).

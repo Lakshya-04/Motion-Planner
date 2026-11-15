@@ -18,7 +18,7 @@ from rclpy.time import Time
 from ros_gz_interfaces.msg import Contacts
 from tf2_ros import Buffer, TransformListener
 
-TOOL_BODY = 'tool_mount_link'
+TOOL_BODY = 'tool_tip_link'   # the tool's collision (spring-loaded tip, urdf/gazebo_tags.xacro)
 
 
 def _quat_matrix(q):

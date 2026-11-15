@@ -223,6 +223,42 @@ so the lever-arm torque is small (0.165 m x 0.2 N); a lateral-load test would st
 Tests: `colcon test --packages-select sim_mujoco` (gtests need the SDK; Python tests skip what they
 lack), or `python -m pytest src/simulation/sim_mujoco/test` in the `sim` image.
 
+## Base motion (`base_motion:=true`)
+
+By default the base is welded to the world, as before (the MJCF is byte-identical, `run_wall_pass.sh` and
+`run_manager_pass.sh` are unchanged). `base_motion:=true` adds a planar-velocity base:
+
+```bash
+ros2 launch sim_mujoco sim_mujoco.launch.py base_motion:=true
+ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}}"
+```
+
+- **Model.** The generator puts three joints on the root body (`base_footprint`): slides `base_x_joint`,
+  `base_y_joint` and hinge `base_yaw_joint`, each with a stiff position actuator (kp 2e4 N/m, 2e4 N/m,
+  1e4 N m/rad; force limits 3000 N, 3000 N, 1500 N m), plus `<custom>` numerics `sim_mujoco_base_diff` and
+  `sim_mujoco_base_max_vel`. `--base-motion` on `generate_mjcf` does the same. The wheels stay visual links.
+- **Command.** `geometry_msgs/Twist` on `/cmd_vel`, body frame, read by the plugin (subscription spun in
+  `read()`). The plugin integrates a world-frame set point from it, so a zero command holds the pose
+  (a contact force pushes the base back by `F/kp`, 0.5 mm per 10 N), and the set point never runs more
+  than 5 cm / 0.05 rad ahead of a blocked base. A command older than 0.5 s counts as zero
+  (`cmd_vel_timeout`). Speeds are clamped to the profile's `max_linear_velocity_mps` and
+  `max_angular_velocity_radps`. `drive_type: diff` and `skid` drop `vy`; `omni` and `4ws` are treated as omni
+  (the 4-wheel-steering kinematics are not modelled).
+- **Output.** The plugin publishes the base pose (`sim_mujoco/base_pose`, PoseStamped in `odom`) and body
+  velocity (`sim_mujoco/base_twist`); the `base_odom.py` node (started by the launch file) turns them into
+  `nav_msgs/Odometry` on `/odom` and TF `odom -> base_footprint`, from the simulated base pose (ground
+  truth, no noise or drift); `odom` starts at the base's initial pose. `robot_state_publisher`
+  continues the tree from `base_footprint`, so `odom -> tcp_link` resolves.
+- **Why not `mujoco_ros2_control`.** Its `base_velocity` plugin needs a freejoint base, its own simulation
+  node, and MuJoCo 3.12 through `mujoco_vendor`; ours runs inside our own `SystemInterface` against MuJoCo
+  4.0.1. Adding the three joints in our generator and a velocity command to our plugin was less work than
+  porting that stack, so it was not tried; the roadmap's reuse entry stays as the reference.
+- **Test.** `scripts/run_base_motion.sh` (`base_motion_test.py`) drives 0.3 m forward and checks odom, TF,
+  the held arm and lift joints, F/T, the hold and the command timeout. Generator tests are in
+  `test/test_mjcf_generator.py`.
+- **Stand navigation.** `scripts/run_stand_navigation.sh` adds the reachability node and `stand_navigator`: plan stands for
+  the smoke wall, drive the arm base to the first one, check arrival, arm, F/T (`docs/stand_navigation.md`).
+
 ## MuJoCo 4 notes
 
 - 4.0 split the Python package into `mujoco-core` and `mujoco-studio` (the viewer lives with the
@@ -242,7 +278,8 @@ lack), or `python -m pytest src/simulation/sim_mujoco/test` in the `sim` image.
 
 ## Not modelled / limits
 
-- Mobile base and its wheels (the base is welded to the world), tool compliance, cable and hose
+- Wheels, wheel-ground contact and slip (`base_motion:=true` moves the base kinematically as a planar velocity
+  base, there is no floor), 4-wheel-steering kinematics, tool compliance, cable and hose
   dynamics, sensor noise, bias drift, temperature and the sensor's own dynamics (the wrench is the
   exact rigid-body value at every step; add a noise and filter stage downstream).
 - Actuator dynamics: ideal torque-limited PD joints, no gearbox backlash, friction beyond a small
@@ -270,3 +307,42 @@ lack), or `python -m pytest src/simulation/sim_mujoco/test` in the `sim` image.
 count), 85 percent of them within 1.5 N of the target. The contact test presses at one point, so coverage is not meaningful
 there (hence `--min-coverage 0`); a full wall pass would feed the same scorer.
 
+## Scripted wall pass
+
+`run_wall_pass.sh` launches the sim with `controller:=jtac conditioner:=true move_group:=true` (the conditioner payload is
+passed as launch parameters, no calibration step), runs `wall_pass_test.py` and scores the recording. For each stroke y
+(`--strokes-y`, default 0.07 and 0.19) MoveIt's `/compute_cartesian_path` plans an approach 3 cm in front of the wall, a
+press 1.5 mm past the wall surface (JTAC's tool-Z admittance axis engaged with the 10 N target on JTAC's own
+`~/target_force_n`) and a vertical stroke (z 1.28 to 1.02 at the smoke wall x = 0.98 m); JTAC executes them and the tool retreats. The
+launch argument `move_group:=true` starts `move_group` for planning only. The script exits nonzero if a stroke does not
+plan (fraction below 0.98) or execute, or coverage of the planned region is below 0.9.
+
+Runs (UR10e, two strokes). At 0.05 velocity scale every stroke planned and executed and coverage of the region was 1.0
+(806 of 806 cells), but the contact was poor: peak 21.5 N against the 10 N target, force RMS error 2.8 N, 34 percent of the
+working samples within 1.5 N, 192 strokes in the scorer (the contact breaks and re-makes along the stroke, stick-slip on the
+sliding wall). At 0.02 (the default now) the same pass gives peak 18.6 N, RMS error 1.5 N, 81 percent in band, 146 strokes.
+The 18.6 N peak is not first contact: the recording has 36 spikes of exactly two samples (20 ms) at about 18 N spread along the
+strokes (stick-slip micro-events on the sliding wall), while the mean is 10.4 N; a real F/T filter or a lower wall friction
+should remove them, and the scorer's default 15 N peak limit therefore fails this run. The first-contact creep (about 13 N for
+2 s, see the JTAC force-limit notes in the roadmap) is the second source. Still to improve: the
+sliding friction in the sim, the admittance gains, the press depth. The manager and the coverage planner are not in this
+loop yet, the strokes are scripted.
+
+### Manager pass (the real pipeline)
+
+`scripts/run_manager_pass.sh` runs the same wall with the pipeline instead of scripted strokes: the coverage planner
+plans the contact region (`wall_pass_coverage_scene.json` and a synthetic `walls.pcd`, tool `contact_wiper`, tool roll
+`tool_frame_yaw_deg` -90 to match the arm's ready pose), `world_model_loader_node` puts the wall into MoveIt's scene as an
+octomap, the arm goes to the smoke test's ready pose (`ready_pose.py`), and `manipulation_manager` (wall at `[1, 0, 0]`,
+`dock_at_stroke_start`) docks, presses, strokes and retracts per column through MoveIt and JTAC. The run is recorded
+(`record_run.py`) and scored like the wall pass. Everything is installed with `sim_mujoco`; outputs and logs go to
+`MANAGER_PASS_OUT` (default `/tmp/manager_pass`).
+
+Status: the pass runs end to end and the scorer passes (exit 0): coverage 0.93 (866 of 930 cells), both columns execute
+(dock, press, stroke, retract). Force: peak 20.5 N, RMS error 3.6 N against the 10 N target, in-band 0.48 (stroke 0.01 m/s; at 0.02 m/s: peak 27.7 N, RMS 6.0 N; the end-of-stroke spikes of 27-31 N, even 50 N with a position unload, came from disengaging the admittance with the 10 N target still set, so the manager now publishes a zero target and waits 1.5 s before disengaging)
+(the scorer limits are the script's, see `MANAGER_PASS_SCORE_ARGS` and `MANAGER_PASS_MIN_COVERAGE`). What it took: the wall
+in MoveIt's scene (without it OMPL plans through the wall), the tool roll (a 90 degree mismatch made the arm collide with
+the lift on every contact path), docking at the first pose of the stroke, the allowed-collision matrix (links mounted on
+the lift, `generate_acm.py`), a press-then-stroke sequence with a 2 s settle (`press_settle_s`), and planning for the sim
+tool's swath (0.14 m, `MANAGER_PASS_SWATH`) instead of the profile's 0.20 m. Next: the contact force (slower stroke,
+F/T filtering, JTAC gains).

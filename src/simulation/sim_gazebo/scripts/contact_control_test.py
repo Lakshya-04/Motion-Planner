@@ -184,7 +184,7 @@ def main():
     ap.add_argument('--require-hold', action='store_true',
                     help='count the force-hold result as a check (it is only reported by default)')
     ap.add_argument('--wall-tcp-x', type=float, default=0.965, help='tcp x where the tool touches the wall (m)')
-    ap.add_argument('--ref-penetration', type=float, default=0.0,
+    ap.add_argument('--ref-penetration', type=float, default=0.005,
                     help='reference pose this far (m) beyond the wall surface (the reference sets the force: '
                          'F ~ k_wall (F_t + K e)/(K + k_wall))')
     ap.add_argument('--approach-speed', type=float, default=0.002, help='last centimetre of the approach (m/s)')

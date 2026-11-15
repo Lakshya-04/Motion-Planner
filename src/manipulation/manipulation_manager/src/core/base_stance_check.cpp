@@ -9,15 +9,20 @@ namespace manipulation_manager
 StanceWall stanceWall(const std::vector<CoverageSegmentIntent> & intents)
 {
   StanceWall wall;
-  double sum_y = 0.0;
+  double sum_x = 0.0, sum_y = 0.0, sum_z = 0.0;
   for (const auto & intent : intents) {
     for (const auto & p : intent.poses) {
       wall.targets.push_back(p);
+      sum_x += p.x;
       sum_y += p.y;
+      sum_z += p.z;
     }
   }
   if (!wall.targets.empty()) {
-    wall.wall_y = sum_y / static_cast<double>(wall.targets.size());
+    const double n = static_cast<double>(wall.targets.size());
+    wall.wall_x = sum_x / n;
+    wall.wall_y = sum_y / n;
+    wall.wall_z = sum_z / n;
   }
   return wall;
 }

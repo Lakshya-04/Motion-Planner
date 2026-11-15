@@ -21,13 +21,15 @@ ros2 run sim_gazebo smoke_test.py [--controller jtc|jtac]                     # 
 ros2 launch sim_gazebo sim.launch.py controller:=jtac ft_conditioner:=true    # force path (see below)
 ros2 run sim_gazebo contact_control_test.py                                   # contact test, about 3 minutes
 ros2 run sim_gazebo wall_world_gen.py scene.json -o wall.sdf --standoff 0.9   # world only
+bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_manager_pass.sh         # coverage planner + manager + MoveIt + JTAC, scored (about 5 minutes)
 ```
 
 Launch arguments: `profile` (name in `config/profiles` or a path; its `robot.xacro_args`, joint
 names, frames and home pose drive everything), `world`, `wall_scene`/`wall_id`/`standoff`, `gui`,
 `controller` (`jtc` | `jtac` | `none`), `ft_conditioner` (`true` starts the conditioner and points JTAC at
 the sensor `ft_sensor_tcp`), `payload_mass_kg` (initial payload for the conditioner, 0: calibrate),
-`ft_filter` (JTAC `ft_sensor.filter_coefficient`). Several containers on one Docker bridge share DDS
+`ft_filter` (JTAC `ft_sensor.filter_coefficient`), `move_group` (also start MoveIt for planning, hardware `jtac_mock`),
+`jtac_position_only` (JTAC claims only the position command interface, see the manager pass). Several containers on one Docker bridge share DDS
 multicast: give each simulation its own `ROS_DOMAIN_ID` (or `ROS_LOCALHOST_ONLY=1`), otherwise
 another stack's `/robot_description` can reach the gz controller manager.
 
@@ -119,46 +121,98 @@ Steps and results (profile `generic_6dof_telescopic`, wall 0.9 m in front of the
    mass 0.8003 kg (URDF inertials 0.8000), centre of gravity (0, 0, 0.0075) m (known 0.0075), bias zero, fit
    residual 0.0000 N. In free space the conditioned wrench is then 0.000 N / 0.0000 Nm.
 2. **Conditioned vs ground truth in steady contact** (JTAC with no wrench axis selected and its default 0.1 m
-   offset clamp, tool pressed 5 mm and 35 mm past the wall; ground truth about 108 N along the tool, 120 N lateral
+   offset clamp, tool pressed 5 mm and 35 mm past the wall; with the rigid tool the ground truth was about 108 N
+   along the tool at both depths (with the compliant tip of step 3: 8.0 N at 5 mm, 105.6 N at 35 mm, where the tip is on its stop), 120 N lateral
    from friction and a contact torque of about 11 Nm about the tcp, so the lever-arm and payload terms are both
    exercised): force error |dF| mean 0.001 N (max 0.002) at 5 mm and 0.005 N (max 0.011) at 35 mm; torque error
    |dT| mean 0.0002 Nm (max 0.0005) and 0.0010 Nm (max 0.003). The checks gate the mean with 1 N and 0.2 Nm; the
    maxima are printed, not checked.
 3. **Force control with the tool-z admittance axis** (target 10 N through `~/target_wrench`, K 300 N/m, mass 8,
-   damping ratio 6, offset clamp 3 mm, approach 2 mm/s): **not reached.** Ground-truth force over the last 4 s:
-   mean 160 N, standard deviation 121 N, peaks 470 to 580 N, in contact 84 percent of the samples; the tool
-   bounces about 3 mm off the wall at about 2 Hz. The same happens with gains from K 100 to 300 N/m, mass 8 to 1e5 kg,
-   damping up to D = 1e7 Ns/m, approach 1 to 5 mm/s, a 0.02 to 0.05 JTAC low-pass and offset clamps from 3 mm to
-   the controller's 0.1 m default (those sweeps are earlier runs: the committed script runs one setting, set by its
-   options).
-   What the script itself measures: with JTAC and no axis, a position hold 5 mm and 35 mm past the wall gives
-   about 108 N at both depths. The smoke test, which uses plain `joint_trajectory_controller`, reads 209 N at
-   3.5 cm. So the push is not a property of the wall alone: it differs by a factor of two between the two
-   controllers, and in MuJoCo the same JTAC compliance offset cut a 208 N push to 50 N
-   ([sim_mujoco.md](sim_mujoco.md)). In free space the admittance converges to F/K (33 mm for K 300 and 10 N,
-   by that arithmetic; no overshoot seen).
-   **Why 10 N is not held is not established.** A force that stays near 108 N while the penetration grows by a
-   factor of seven fits a very stiff contact driven by servo-controlled joints, but it fits a controller-side limit
-   (the JTAC offset clamp or the velocity servo) at least as well. An earlier measurement, not recorded and not
-   reproduced by the committed script, gave a constant 104 to 108 N for position holds from 0.05 mm to 10 mm past
-   the wall and 0 N below that; if that holds, 10 N sits inside the first 0.05 mm and the loop would see either
-   10 N (free) or 300 to 500 N impulses (contact). Tracing the penetration sweep and JTAC's `~/debug_offset`
-   would separate the explanations; the script does not do it yet. By default the script only reports the hold
-   result; `--require-hold` turns it into a failing check.
+   damping ratio 6, offset clamp 3 mm, approach 2 mm/s, reference 5 mm past the wall): **held with the compliant tool
+   tip, not with the rigid one.** Ground-truth force over the last 4 s of the 8 s hold (`--require-hold` makes it a
+   check):
+
+   | tool                                            | mean   | std    | max (last 4 s) | peak since approach | in contact |
+   |-------------------------------------------------|--------|--------|----------------|---------------------|------------|
+   | rigid (before)                                  | 163.9 N | 120.6 N | 466 N          | 680 N               | 84 percent |
+   | spring tip 5 N/mm, reference at the wall        | 8.43 N | 0.00 N | 8.43 N         | 8.8 N               | 100 percent |
+   | spring tip 5 N/mm, reference 2 mm past          | 8.93 N | 0.00 N | 8.93 N         | 9.1 N               | 100 percent |
+   | spring tip 5 N/mm, reference 5 mm past (default)| 9.69 N | 0.00 N | 9.69 N         | 9.7 N               | 100 percent |
+   | spring tip 20 N/mm, reference 5 mm past         | 10.94 N | 0.00 N | 10.94 N        | 11.1 N              | 100 percent |
+
+   (one run each; the simulation is deterministic, so the standard deviation is the numerical resolution of a
+   settled contact, not a measured noise level). MuJoCo holds 10.13 N, std 0.03.
+   **Why it was not held:** the rigid tool on a servo joint meets the wall with an effectively infinite stiffness
+   (about 108 N for a position hold 5 mm and 35 mm past the wall, 209 N with plain trajectory control), so the
+   force loop sees either 0 N or hundreds of newtons within a fraction of a millimetre of travel, and the tool
+   bounces about 3 mm at 2 Hz. Gains from K 100 to 300 N/m, mass 8 to 1e5 kg, damping up to 1e7 Ns/m, approach
+   speeds, low-pass filters and offset clamps from 3 mm to 0.1 m had no effect (earlier sweeps, not in the
+   committed script). With 5 N/mm of real compliance the same controller, with unchanged gains, settles.
+   **Compliant tip** (`urdf/gazebo_tags.xacro`, parameters `tip_stiffness` 5000 N/m, `tip_damping` 100 Ns/m,
+   `tip_travel` 20 mm): the tool's collision moves from `tool_mount_link` to `tool_tip_link`, a side branch on a
+   prismatic joint along the tool axis (`tool_tip_joint`, `implicitSpringDamper`, spring reference at the rest
+   position, the wall can only push it back). The tcp stays on the rigid `tool_mount_link`, so kinematics and the
+   controller are unchanged; the generic tool takes `collision:=false` for `hardware:=gazebo`. The contact
+   sensor and the ground-truth wrench now read the tip. In steady contact the force follows
+   k_tip (F_t + K e)/(K + k_tip) where e is the reference penetration, as for the MuJoCo wall; the reference
+   pose therefore sets how close to the target the force settles (8.4 N at the wall, 9.7 N at 5 mm past the
+   wall). The residual (0.3 to 1.6 N) is the admittance spring acting on the reference offset; it was not tuned further.
+   Overpressing past the tip travel (35 mm past the wall in step 2) still ends on the hard stop and gives about
+   105 N, as before. With 20 N/mm the hold is at 10.94 N, but the conditioned-vs-truth check at 35 mm failed
+   (107 N difference, the hard-stop contact; not investigated), so 5 N/mm is the default.
 4. **Release:** target to zero, disengage, retreat to the standoff: ground-truth force 0.000 N after the retreat.
 
-Things to try, depending on the cause: a contact with real compliance (a softer tool tip, e.g. a spring joint in
-the tool, or contact parameters of a physics engine that supports them), or joint effort control instead of the
-velocity servo. Neither is done, and neither is justified until the cause is established.
+
+## Manager pass (the real pipeline)
+
+`scripts/run_manager_pass.sh` is the Gazebo twin of `sim_mujoco/scripts/run_manager_pass.sh` (same steps, same ready
+pose, same contact region): the sim (`profile:=ur10e_telescopic controller:=jtac jtac_position_only:=true
+ft_conditioner:=true move_group:=true`, wall world from `test/data/smoke_wall_scene.json`) comes up headless, the coverage
+planner plans the contact region (`test/data/wall_pass_coverage_scene.json` with `walls.pcd` beside it, tool
+`contact_wiper`, `tool_frame_yaw_deg` -90, swath 0.14 m), `world_model_loader_node` puts the whole 2 m x 2 m wall into
+MoveIt's scene as an octomap, the arm goes to the ready pose (`ready_pose.py`, the MuJoCo smoke test's FREE pose), and
+`manipulation_manager` (`controller_name combined_arm_lift_controller`, wall `[1, 0, 0]`, `dock_at_stroke_start`, 10 N,
+0.01 m/s, `hardware:=jtac_mock`, `profile:=ur10e_telescopic`, `use_sim_time` true: Gazebo has a `/clock`) docks, presses,
+strokes and retracts per column. `record_run.py` records the tool point and the ground-truth force; `score_run` scores it.
+Outputs and logs go to `MANAGER_PASS_OUT` (default `/tmp/manager_pass`); `MANAGER_PASS_SPEED/PRESS/TARGET/SWATH/TOOL_YAW`
+and `MANAGER_PASS_LAUNCH_ARGS` override the defaults.
+
+Geometry: the tool tip ends 6.5 cm short of the tcp, so the world wall is at x = 0.915 while the plane the coverage
+planner, the octomap and the scorer use is where the tcp touches it, x = 0.98 (the same numbers as the MuJoCo pass).
+
+Status: the pass runs end to end and the scorer passes (exit 0): all three columns dock, press, stroke and retract
+(`done=3 failed=0`), coverage 0.93 (865 of 930 cells), peak force 16.8 N, RMS error 2.14 N against the 10 N target, in-band
+(+-1.5 N) 0.85, about 190 s of sim time. Runs vary a little (three other runs of the final configuration: RMS 1.6 to 1.9 N,
+in-band 0.86 to 0.91, peak 15.9 to 18.1 N, coverage 0.93 each time). Ground-truth force is the compliant tool tip's
+(`/ft_sensor/ground_truth_wrench`), the tool point comes from TF.
+
+What it took, beyond the MuJoCo lessons (wall octomap, tool roll, `dock_at_stroke_start`, `press_settle_s`, swath, stale
+coverage file, zero force target before disengage):
+
+- **The wall in MoveIt must be the whole wall.** With only the contact patch as an octomap, free-space moves (OMPL
+  `prime_continuity`) swung over the patch edge (z up to 2.7 m) and hit the real wall top at 684 N.
+- **`jtac_position_only`** (a launch argument, off by default). With both JTAC command interfaces (position and velocity),
+  gz_ros2_control drives the joints from the velocity feed-forward and ignores the position command (open loop), so a
+  moving reference was tracked far behind: the 0.01 m/s stroke ended 8 cm short, the dock 20 cm short, coverage 0.88.
+  With the position interface only the same pass reaches coverage 0.93. The cost: gz_ros2_control's position loop has a
+  gain of 0.1 /s (10 s time constant), so the arm settles slowly (the ready pose needs about 20 s; the calibration poses of
+  `contact_control_test.py` do not settle in its 5 s moves and fail, so it keeps the default). A gain of 10
+  (`position_proportional_gain`) makes the joints stiff and the contact bounces (8 kN peaks); the soft loop is part of
+  why the contact holds. Not fixed: a properly tuned joint model.
+- JTAC's Cartesian offset clamp (3 mm instead of the default 0.1 m) made no difference to this pass and is not used.
+- The tool roll is -90 degrees because the UR10e ready pose has the same roll as in MuJoCo; the generic 6-DOF profile
+  (smoke test pose, wrist roll -46.4 degrees) also ran end to end but its ACM only has adjacent pairs, and
+  OMPL-chosen configurations then collided in the manager's Cartesian planner in some runs, so the pass uses the UR10e.
 
 ## Limits
 
-- Contact is stiff and impulsive: JTAC with no wrench axis gives about 108 N at 5 mm and 35 mm past the wall
-  (plain trajectory control read 209 N at 3.5 cm), and the compliant controller with a selected wrench axis
-  does not hold 10 N. The cause is not established (see the contact-controlled test above).
+- Contact is compliant only through the tool tip spring (5 N/mm, 20 mm travel). Past the travel the tool is
+  rigid again: about 105 N at 35 mm past the wall. It settles 0.3 to 1.6 N below the target depending on the reference depth (9.69 N with the
+  default 5 mm). The wall itself is still a rigid primitive. Spring and damper are plausible round numbers,
+  not an identified tool.
 - Joint dynamics are idealised: `gz_ros2_control` position/velocity interfaces, no gearbox
   friction, backlash, motor limits (URDF limits are not enforced) or sensor noise, bias and drift.
-- The tool and wall are rigid primitives with Coulomb friction; no compliance of the tool, no
+- The tool body and wall are rigid primitives with Coulomb friction; only the tip spring gives compliance, no
   wall material model, no wet or sticky effects.
 - The gz sensor measures rigid-body joint loads including dynamic terms, so the check above is
   exact only quasi-statically.

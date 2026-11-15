@@ -1,0 +1,133 @@
+# Hardware parameter template: every value a user sets when moving the force path from a
+# simulator to a real arm and a real wrist force/torque sensor.
+#
+# STATUS: a template, not a tested configuration. Nothing here has been run on hardware. No launch
+# file loads this file; each section is written so it can be passed as-is to the node it names with
+#   --params-file <this file>          (ros2 run / ros2 launch parameters)
+# or copied into the matching yaml. Work through docs/hardware_bringup.md in order.
+#
+# Legend on every value:
+#   MUST SET     no safe default: it depends on your sensor, tool or robot. Left at a placeholder.
+#   SAFE DEFAULT fine to leave while commissioning (the value the code or the simulations use);
+#                still revisit it for production.
+#   MEASURED     comes out of a calibration step; never type a guess.
+# Units: m, kg, N, Nm, rad, s.
+#
+# Frames and signs follow docs/ft_sensing.md: the controller works on the wrench the environment
+# applies to the tool, at the tool control point (TCP), in the tool axes; pressing along tool +Z
+# gives force_z of about minus the target.
+
+# ---------------------------------------------------------------------------------------------
+# 1. ft_conditioner (node name `wrench_conditioner`): raw sensor wrench -> contact wrench at the TCP.
+#    Needed for a raw sensor. If the robot's own controller already reports the external force at
+#    the TCP with the payload removed (the UFACTORY path), skip this node and leave section 3's
+#    gravity_compensation untouched.
+# ---------------------------------------------------------------------------------------------
+wrench_conditioner:
+  ros__parameters:
+    input_topic: /CHANGE_ME/raw_wrench        # MUST SET  geometry_msgs/WrenchStamped from the sensor driver
+    output_topic: /ft_conditioner/wrench_conditioned  # SAFE DEFAULT  what ft_bridge_hardware reads
+    sensor_frame: ""                          # SAFE DEFAULT  empty = the message's frame_id; set it if the driver leaves it blank
+    tool_frame: link_tcp                      # MUST SET  TCP frame of your tool (tcp_link in the simulated description)
+    world_frame: base_link                    # MUST SET  any frame whose +Z points up (gravity direction); see note below
+    gravity_world: [0.0, 0.0, -9.80665]       # SAFE DEFAULT  in world_frame; change only if its Z is not up
+    sign: 1.0                                 # MUST SET  +1 if the sensor reports the load on the tool, -1 if it reports the
+                                              #           reaction on the robot side. Verify with bringup step 3; the simulators use +1.
+    bias: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]      # MEASURED  fx fy fz tx ty tz at no load; from ~/identify
+    payload_mass_kg: 0.0                      # MEASURED  tool + plate + adapter beyond the sensor; from ~/identify
+    payload_cog_xyz: [0.0, 0.0, 0.0]          # MEASURED  m, centre of gravity in the SENSOR frame; from ~/identify
+    tool_in_sensor_from_tf: true              # SAFE DEFAULT  lever arm from TF (sensor frame -> tool_frame); needs both frames in TF
+    tool_in_sensor_xyz: [0.0, 0.0, 0.0]       # MUST SET only if tool_in_sensor_from_tf is false: TCP origin in the sensor frame (lever arm)
+    tool_in_sensor_rpy: [0.0, 0.0, 0.0]       # same, rotation
+    max_tf_age: 0.1                           # SAFE DEFAULT  s; older transforms drop the wrench instead of compensating with a stale pose
+    capture_window_s: 0.5                     # SAFE DEFAULT  calibration capture averaging window
+    capture_max_age_s: 0.25                   # SAFE DEFAULT  refuse a capture if the input is staler than this
+    capture_max_spread_n: 1.0                 # SAFE DEFAULT  refuse a capture if the force spread exceeds this (arm not still / touching)
+    capture_max_rotation_rad: 0.02            # SAFE DEFAULT  refuse a capture if the orientation drifts more than this
+    capture_min_samples: 5                    # SAFE DEFAULT
+# Note on world_frame: gravity is only rotated into the sensor frame, so any frame with Z up works.
+# A mobile base that tilts (ramp, uneven floor) needs an IMU-levelled frame; that is not handled here.
+
+# ---------------------------------------------------------------------------------------------
+# 2. ft_bridge_hardware: NOT a yaml file. It is a ros2_control hardware component configured by
+#    <param> tags in the robot's ros2_control xacro (see
+#    mobile_manipulator_description/urdf/mobile_manipulator.ros2_control.xacro, where the MuJoCo
+#    variant reads /ft_conditioner/wrench_conditioned). For hardware, set:
+#
+#      <plugin>ft_bridge_hardware/FtBridgeHardwareInterface</plugin>
+#      <param name="source_topic">/ft_conditioner/wrench_conditioned</param>   MUST SET  (the conditioner's
+#                                    output_topic, or the robot's own TCP-wrench topic; the code default is
+#                                    /ufactory/uf_ftsensor_ext_states)
+#      <param name="setpoint_topic">~/target_wrench</param>                    SAFE DEFAULT  force target is
+#                                    published here (geometry_msgs/Wrench, zero until something publishes)
+#      <param name="injection_mode">false</param>                              SAFE DEFAULT  must be false on
+#                                    hardware (true reads scripted test wrenches instead of the sensor)
+#      <sensor name="CHANGE_ME">  ...six force/torque state interfaces...      MUST SET  sensor name; it has to equal
+#                                    ft_sensor.name in section 3
+# ---------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------
+# 3. JTAC (compliant_trajectory_controller/JtacController). Override of
+#    config/jtac_controller.yaml, which holds the structure; only the values that change on
+#    hardware are listed. The controller name is the one MoveIt's controller config points at.
+#    Gains below are the diagnostic simulation values, NOT production gains.
+# ---------------------------------------------------------------------------------------------
+combined_arm_lift_controller:
+  ros__parameters:
+    joints: [lift_prismatic_joint, joint1, joint2, joint3, joint4, joint5, joint6]  # MUST SET  your joint names, lift first if present
+    kinematics:
+      base: base_link                         # MUST SET  chain root
+      tip: link_tcp                           # MUST SET  must be the TCP, the controlled point
+      alpha: 0.0005                           # SAFE DEFAULT  damping of the kinematics solve
+    ft_sensor:
+      name: CHANGE_ME                         # MUST SET  equals the <sensor name> in section 2
+      filter_coefficient: 1.0                 # MUST SET  1.0 = no smoothing (noise-free simulators). A real sensor needs
+                                              #           a value below 1 or an upstream low-pass; there is no tuned value yet
+      frame:
+        id: link_tcp                          # MUST SET  frame the wrench is ALREADY expressed in. JTAC only rotates, it never
+                                              #           applies a lever arm, so this is the TCP when the conditioner (or the
+                                              #           robot controller) delivers a TCP wrench
+    control:
+      frame:
+        id: link_tcp                          # MUST SET  keep equal to ft_sensor.frame.id
+    fixed_world_frame:
+      frame:
+        id: base_link                         # MUST SET  frame fixed in the world during a pass
+    gravity_compensation:
+      frame:
+        id: link_tcp
+      CoG:
+        pos: [0.0, 0.0, 0.0]                  # SAFE DEFAULT  leave zero: the conditioner (or the vendor controller) already
+        force: 0.0                            #               removes the payload. A nonzero force here compensates gravity twice
+    admittance:
+      selected_axes: [false, false, false, false, false, false]  # SAFE DEFAULT  all off at start; the manager engages Z live
+      # Per-tool gains. Start from the values below for a contact wiper and re-tune per tool and per robot:
+      # tool 1 (contact_wiper, wall normal = tool Z). Mass is 4x the static-reference test values because a
+      # moving reference erodes the stability margin (empirical factor, see jtac_controller.yaml).
+      mass: [16.0, 16.0, 8.0, 0.5, 0.5, 0.5]            # MUST SET per tool/robot  kg and kg m^2; do not lower without a stability check
+      damping_ratio: [5.59, 5.59, 6.0, 1.0, 1.0, 1.0]   # MUST SET per tool/robot
+      stiffness: [1000.0, 1000.0, 300.0, 50.0, 50.0, 50.0]  # MUST SET per tool/robot  N/m. The spring pulls toward the reference:
+                                                            # steady force = target + stiffness * (reference depth past the wall).
+                                                            # Put references ON the surface; every mm past it adds stiffness * 1e-3 N
+      joint_damping: 5.0                      # SAFE DEFAULT
+    enable_parameter_update_without_reactivation: true  # SAFE DEFAULT  required for live engage / disengage
+
+# ---------------------------------------------------------------------------------------------
+# 4. Force limits and the TCP per tool: coverage_planner/config/tool_profiles.yaml (a separate
+#    file: tool_profiles_file / tool_name arguments of the coverage launch files). Values to set for
+#    the real tool, with the shipped contact_wiper numbers as the starting point:
+#
+#      geometry.tcp_xyz / tcp_rpy            MUST SET   flange -> link_tcp, measured on the tool
+#      task.target_force_n        15.0       MUST SET   process requirement; equals control.admittance.wrench_reference_z_n
+#      task.force_band_n           3.0       SAFE DEFAULT  settled band
+#      task.force_zero_threshold_n 1.0       SAFE DEFAULT  "unloaded" below this; must exceed the sensor's noise after biasing
+#      task.overload_abort_n      60.0       MUST SET   instantaneous abort; commission with a much lower value (bringup, step 6)
+#      task.tangential_torque_abort_nm 8.0   MUST SET   abort on tangential torque at the TCP
+#      task.ee_speed_mps           0.10      MUST SET   commission at a small fraction of this
+#      task.approach_speed_mps     0.05      MUST SET   commission slower
+#      control.admittance.max_offset_m 0.05  MUST SET   largest compliance offset the controller may build while blocked
+#      control.ft.deadband_n / clamp_n       SAFE DEFAULT  0.3 N and 100 N
+#
+#    These abort thresholds exist in the tool profile; nothing yet connects them to an e-stop path
+#    (docs/ROADMAP.md section 8). They do not replace a hardware safety function.
+# ---------------------------------------------------------------------------------------------

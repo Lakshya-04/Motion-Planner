@@ -20,7 +20,9 @@ find_library(MUJOCO_LIBRARY NAMES mujoco HINTS ${MUJOCO_ROOT}/lib /opt/mujoco/li
 ament_python_install_package(${PROJECT_NAME})
 
 install(PROGRAMS scripts/generate_mjcf scripts/smoke_test.py scripts/contact_test.py scripts/viewer.py scripts/run_smoke.sh
-  scripts/run_contact.sh
+  scripts/run_contact.sh scripts/wall_pass_test.py scripts/run_wall_pass.sh
+  scripts/record_run.py scripts/ready_pose.py scripts/run_manager_pass.sh scripts/base_motion_test.py scripts/run_base_motion.sh
+  scripts/base_odom.py scripts/stand_navigation_test.py scripts/run_stand_navigation.sh
   DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch test/data DESTINATION share/${PROJECT_NAME})
 

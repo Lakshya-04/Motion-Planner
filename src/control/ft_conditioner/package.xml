@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>ft_conditioner</name>
-  <version>0.0.1</version>
+  <version>0.1.0</version>
   <description>
     ROS node around force_core's wrench conditioning: raw force/torque sensor wrench in, contact wrench at
     the tool point in the tool axes out (sign, bias, payload gravity, lever-arm move), with services to
