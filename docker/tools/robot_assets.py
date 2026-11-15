@@ -77,12 +77,18 @@ def robot_name(profile_path):
 
 
 def arm_only_args(profile):
-    """Xacro args for the arm-only model: the lift pinned at its home height (6 DOF)."""
+    """Xacro args for the arm-only model: the lift pinned (6 DOF).
+
+    A moving lift is pinned at its home height. A fixed lift (or a pinned `lift_fixed_height` in the
+    profile's xacro_args) keeps the height the full robot.urdf renders at, 0.4 m by default."""
     args = profile_args(profile)
     kind = (profile.get('lift') or {}).get('type', 'telescopic')
     if kind != 'none':
         args['lift'] = 'fixed' if kind in ('telescopic', 'fixed') else kind
-        args['lift_fixed_height'] = str((profile.get('home') or {}).get('lift_joint', 0.0))
+        if kind == 'fixed':
+            args.setdefault('lift_fixed_height', '0.4')
+        elif 'lift_fixed_height' not in args:
+            args['lift_fixed_height'] = str((profile.get('home') or {}).get('lift_joint', 0.0))
     return args
 
 
@@ -122,6 +128,8 @@ def inner_srdf(profile, out):
     mappings = {'arm': args['arm'], 'lift': args.get('lift', 'telescopic')}
     if args.get('lift_fixed_height'):
         mappings['lift_fixed_height'] = args['lift_fixed_height']
+    if args.get('lift_stages'):
+        mappings['lift_stages'] = args['lift_stages']
     srdf = xacro.process_file(str(DESC / 'srdf' / 'mobile_manipulator.srdf.xacro'), mappings=mappings).toxml()
     (out / 'robot.srdf').write_text(srdf)
     lift, joints = profile.get('lift') or {}, profile['joints']
