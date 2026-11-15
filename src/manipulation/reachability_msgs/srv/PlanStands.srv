@@ -22,6 +22,7 @@ float64 start_yaw
 ---
 bool success                    # every target reached by some stand
 reachability_msgs/Stand[] stands
-uint32[] unreachable
+uint32[] unreachable            # targets no stand can reach
+uint32[] not_planned            # targets left when the stand cap stopped planning; they may be reachable
 float64 total_travel_s
 string message

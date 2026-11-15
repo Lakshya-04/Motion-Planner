@@ -186,6 +186,7 @@ TEST(ReachabilityNode, PlanStandsCoversAWideWallAndAssignsEveryTargetOnce)
   EXPECT_FALSE(f.node->hasBase());
   ASSERT_GE(res->stands.size(), 2U) << res->message;
   std::multiset<uint32_t> seen(res->unreachable.begin(), res->unreachable.end());
+  seen.insert(res->not_planned.begin(), res->not_planned.end());
   for (const auto & s : res->stands) {seen.insert(s.target_indices.begin(), s.target_indices.end());}
   EXPECT_EQ(seen.size(), 10U);
   for (uint32_t i = 0; i < 10; ++i) {EXPECT_EQ(seen.count(i), 1U) << i;}

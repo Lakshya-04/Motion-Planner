@@ -186,10 +186,12 @@ ReachabilityNode::ReachabilityNode(const rclcpp::NodeOptions & options)
         res->stands.push_back(m);
       }
       res->unreachable.assign(plan.unreachable.begin(), plan.unreachable.end());
+      res->not_planned.assign(plan.not_planned.begin(), plan.not_planned.end());
       res->total_travel_s = plan.total_travel_s;
-      res->success = plan.unreachable.empty() && !plan.stands.empty();
+      res->success = plan.unreachable.empty() && plan.not_planned.empty() && !plan.stands.empty();
       if (!res->success) {
-        res->message = std::to_string(plan.unreachable.size()) + " target(s) no stand reaches";
+        res->message = std::to_string(plan.unreachable.size()) + " target(s) no stand reaches, " +
+          std::to_string(plan.not_planned.size()) + " not planned (stand cap)";
       }
     });
 }
