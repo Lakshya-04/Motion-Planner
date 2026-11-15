@@ -116,6 +116,7 @@ def _setup(context, *args, **kwargs):
         params[CONTROLLER_NAME]['ros__parameters'].update({
             'force_limit.enabled': True,
             'force_limit.f_max_n': force_limit,
+            'force_limit.barrier_gain': float(arg('force_limit_gain')),
             'force_limit.reading_offset_n': float(arg('force_limit_reading_offset_n')),
         })
     fd, params_file = tempfile.mkstemp(prefix='sim_mujoco_controllers_', suffix='.yaml')
@@ -178,6 +179,8 @@ def generate_launch_description():
         DeclareLaunchArgument('force_limit_n', default_value='0',
                               description='controller:=jtac: hard normal-force limit in N, enables the '
                                           'force limiter (0 = off)'),
+        DeclareLaunchArgument('force_limit_gain', default_value='5',
+                              description='force limiter barrier gain: extra force error per N above the limit'),
         DeclareLaunchArgument('force_limit_reading_offset_n', default_value='0',
                               description='N added to the pressing force JTAC reads; set it to the '
                                           'contact target when the target is carried by the F/T bridge'),

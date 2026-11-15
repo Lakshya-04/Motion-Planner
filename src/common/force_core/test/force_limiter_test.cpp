@@ -93,6 +93,19 @@ TEST(ForceLimiter, RetreatAndFreeSpaceMotionPassThrough)
   EXPECT_DOUBLE_EQ(limiter.limit(5.0, 0.0), ForceLimiterParams{}.free_space_speed_mps);   // a huge command is capped
 }
 
+TEST(ForceLimiter, BarrierForceIsZeroBelowTheLimitAndGrowsWithTheExcess)
+{
+  ForceLimiterParams p;
+  p.f_max_n = 15.0;
+  p.barrier_gain = 4.0;
+  ForceLimiter limiter(p);
+  EXPECT_DOUBLE_EQ(limiter.barrierForce(0.0), 0.0);
+  EXPECT_DOUBLE_EQ(limiter.barrierForce(15.0), 0.0);
+  EXPECT_DOUBLE_EQ(limiter.barrierForce(17.5), 10.0);   // 4 x 2.5 N over the limit
+  p.barrier_gain = -1.0;
+  EXPECT_THROW(ForceLimiter{p}, std::invalid_argument);
+}
+
 TEST(ForceLimiter, ResetForgetsTheEstimate)
 {
   ForceLimiter limiter;

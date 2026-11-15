@@ -188,7 +188,7 @@ controller_interface::CallbackReturn JtacController::on_configure(
     "~/max_offset_m", rclcpp::SystemDefaultsQoS(),
     std::bind(&JtacController::onMaxOffset, this, std::placeholders::_1));
 
-  // Opt-in force bound, see limitPressingStep(). Plain parameters: read once here, never per cycle.
+  // Opt-in force barrier, see update(). Plain parameters: read once here, never per cycle.
   {
     auto node = get_node();
     auto param = [&](const char * name, auto dflt) {
@@ -199,10 +199,7 @@ controller_interface::CallbackReturn JtacController::on_configure(
     if (force_limit_enabled_) {
       force_core::ForceLimiterParams fp;
       fp.f_max_n = param("force_limit.f_max_n", fp.f_max_n).as_double();
-      fp.alpha_per_s = param("force_limit.alpha_per_s", fp.alpha_per_s).as_double();
-      fp.free_space_speed_mps =
-        param("force_limit.free_space_speed_mps", 0.002).as_double();
-      fp.k_max_n_per_m = param("force_limit.k_max_n_per_m", fp.k_max_n_per_m).as_double();
+      fp.barrier_gain = param("force_limit.barrier_gain", fp.barrier_gain).as_double();
       force_limit_reading_offset_n_ = param("force_limit.reading_offset_n", 0.0).as_double();
       try {
         force_limiter_ = std::make_unique<force_core::ForceLimiter>(fp);
@@ -211,8 +208,8 @@ controller_interface::CallbackReturn JtacController::on_configure(
         return controller_interface::CallbackReturn::ERROR;
       }
       RCLCPP_INFO(
-        node->get_logger(), "force limit on: f_max %.1f N, alpha %.1f/s, free-space speed %.3f m/s",
-        fp.f_max_n, fp.alpha_per_s, fp.free_space_speed_mps);
+        node->get_logger(), "force limit on: f_max %.1f N, barrier gain %.1f",
+        fp.f_max_n, fp.barrier_gain);
     }
   }
 
@@ -381,7 +378,6 @@ controller_interface::CallbackReturn JtacController::on_activate(const rclcpp_li
   current_active_traj_msg_.reset();
   rt_active_goal_.writeFromNonRT(RealtimeGoalHandlePtr());
   terminal_goal_handled_.reset();
-  last_command_positions_.clear();
   if (force_limiter_) {force_limiter_->reset();}
 
   return controller_interface::CallbackReturn::SUCCESS;
@@ -519,60 +515,6 @@ void JtacController::clampCartesianOffset()
   for (size_t i = 0; i < num_joints_; ++i) {
     state_desired_.positions[i] =
       state_reference_.positions[i] + scale * (q_desired[static_cast<long>(i)] - q_reference[static_cast<long>(i)]);
-  }
-}
-
-void JtacController::limitPressingStep(const geometry_msgs::msg::Wrench & measured, double dt)
-{
-  if (!force_limit_enabled_ || !force_limiter_ || last_command_positions_.size() != num_joints_ ||
-    !(dt > 0.0))
-  {
-    return;
-  }
-  const Eigen::VectorXd q_desired = Eigen::VectorXd::Map(
-    state_desired_.positions.data(), static_cast<long>(num_joints_));
-  const Eigen::VectorXd q_last = Eigen::VectorXd::Map(
-    last_command_positions_.data(), static_cast<long>(num_joints_));
-  Eigen::Isometry3d desired_tf, last_tf;
-  if (!offset_clamp_kinematics_->calculate_link_transform(
-      q_desired, params_.kinematics.tip, desired_tf) ||
-    !offset_clamp_kinematics_->calculate_link_transform(q_last, params_.kinematics.tip, last_tf))
-  {
-    return;
-  }
-  const Eigen::Vector3d press_axis = desired_tf.linear().col(2);   // tool +Z, into the wall
-  const double force_n = std::max(0.0, -measured.force.z + force_limit_reading_offset_n_);
-  // The stiffness is estimated from the MEASURED tool position: with the admittance loop closed the command
-  // moves in response to the force, so force against command is not the wall's stiffness.
-  const Eigen::VectorXd q_current = Eigen::VectorXd::Map(
-    state_current_.positions.data(), static_cast<long>(num_joints_));
-  Eigen::Isometry3d current_tf;
-  if (offset_clamp_kinematics_->calculate_link_transform(q_current, params_.kinematics.tip, current_tf)) {
-    force_limiter_->update(current_tf.translation().dot(press_axis), force_n);
-  }
-  const double advance = (desired_tf.translation() - last_tf.translation()).dot(press_axis);
-  const double allowed = force_limiter_->maxApproachVelocity(force_n) * dt;
-  const double correction = allowed - advance;   // negative: advancing too fast, or must retreat
-  RCLCPP_DEBUG_THROTTLE(
-    get_node()->get_logger(), *get_node()->get_clock(), 500,
-    "force_limit: fz=%.2f force_n=%.2f k=%.0f allowed=%.5f advance=%.5f", measured.force.z, force_n,
-    force_limiter_->stiffness(), allowed, advance);
-  if (correction >= -1e-9) {
-    return;
-  }
-  // Pull the command back along the pressing axis by `correction` (a joint delta from the Jacobian):
-  // this slows the advance to the allowed one and, above the force limit (allowed < 0), retreats.
-  Eigen::Matrix<double, 6, 1> delta_x = Eigen::Matrix<double, 6, 1>::Zero();
-  delta_x.head<3>() = press_axis * correction;
-  Eigen::VectorXd delta_q;
-  if (!offset_clamp_kinematics_->convert_cartesian_deltas_to_joint_deltas(
-      q_desired, delta_x, params_.kinematics.tip, delta_q) ||
-    delta_q.size() != static_cast<long>(num_joints_) || !delta_q.allFinite())
-  {
-    return;
-  }
-  for (size_t i = 0; i < num_joints_; ++i) {
-    state_desired_.positions[i] += delta_q[static_cast<long>(i)];
   }
 }
 
@@ -855,6 +797,13 @@ controller_interface::return_type JtacController::update(
   // documents (force_z negative while pressing along the tool's own +Z).
   auto biased_wrench = measured_wrench;
   biased_wrench.force.z += *target_force_n_.readFromRT();
+  if (force_limit_enabled_ && force_limiter_) {
+    // Opt-in force barrier: above force_limit.f_max_n the force error grows with the excess, so the
+    // admittance retreats harder (see force_core::ForceLimiter::barrierForce). force_n is the pressing force
+    // the sensor reads (+Z of the tool presses, so the wall's reaction is -force.z) plus the reading offset.
+    const double force_n = std::max(0.0, -measured_wrench.force.z + force_limit_reading_offset_n_);
+    biased_wrench.force.z -= force_limiter_->barrierForce(force_n);
+  }
 
   state_desired_.positions = state_reference_.positions;
   state_desired_.velocities = state_reference_.velocities;
@@ -869,14 +818,10 @@ controller_interface::return_type JtacController::update(
   // result is ever written to the command interfaces.
   clampCartesianOffset();
 
-  // Opt-in hard force bound on the pressing advance, see limitPressingStep().
-  limitPressingStep(measured_wrench, period.seconds());
-
   // See enforceJointRateLimits()'s own doc comment -- must run last, after clampCartesianOffset(),
   // so a finite-but-real-joint-limit-violating Cartesian clamp result still gets bounded to what
   // the joint can physically do in one period.
   enforceJointRateLimits(period);
-  if (force_limit_enabled_) {last_command_positions_ = state_desired_.positions;}
 
   writeCommandsToCommandInterfaces(state_desired_);
 

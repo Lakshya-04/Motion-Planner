@@ -30,6 +30,7 @@ from geometry_msgs.msg import Wrench, WrenchStamped
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import SetParameters
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from std_msgs.msg import Float64
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
 
@@ -68,6 +69,8 @@ class ContactTest(Smoke):
             Wrench, '/ft_bridge_hardware_ft_sensor_tcp/target_wrench',
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                        reliability=ReliabilityPolicy.RELIABLE))
+        self.target_via = 'bridge'   # or 'jtac': JTAC's own ~/target_force_n, the bridge target stays 0
+        self.jtac_target_pub = self.create_publisher(Float64, f'/{CONTROLLER}/target_force_n', 10)
         self.params = self.create_client(SetParameters, f'/{CONTROLLER}/set_parameters')
         self.srv = {k: self.create_client(Trigger, f'/ft_conditioner/{k}')
                     for k in ('capture_pose', 'identify', 'clear_samples')}
@@ -139,6 +142,14 @@ class ContactTest(Smoke):
     def set_target(self, fz_push):
         """Contact target through the bridge: it subtracts this wrench, so the admittance error is zero
         when the wall pushes back with fz = -fz_push (pressing along the tool +z)."""
+        if self.target_via == 'jtac':
+            # JTAC adds its own target to the wrench it reads, so it sees the absolute force
+            m = Float64()
+            m.data = float(fz_push)
+            self.jtac_target_pub.publish(m)
+            w = Wrench()
+            self.target_pub.publish(w)
+            return
         w = Wrench()
         w.force.z = -float(fz_push)
         self.target_pub.publish(w)
@@ -206,10 +217,13 @@ def main():
     ap.add_argument('--no-calibrate', action='store_true', help='use the launch payload parameters')
     ap.add_argument('--tcp-z', type=float, default=0.165)
     ap.add_argument('--timeout', type=float, default=120.0)
+    ap.add_argument('--target-path', choices=['bridge', 'jtac'], default='bridge',
+                    help="where the contact target is carried: the F/T bridge (default) or JTAC's own ~/target_force_n")
     ap.add_argument('--record', default='', help='write the run as a score_run CSV (and PATH.wall.json)')
     args = ap.parse_args()
     rclpy.init()
     node = ContactTest()
+    node.target_via = args.target_path
     threading.Thread(target=rclpy.spin, args=(node,), daemon=True).start()
     failures = []
 

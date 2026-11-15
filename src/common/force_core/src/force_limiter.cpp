@@ -12,7 +12,7 @@ ForceLimiter::ForceLimiter(const ForceLimiterParams & params)
 {
   if (!(p_.f_max_n > 0.0) || !(p_.alpha_per_s > 0.0) || !(p_.k_min_n_per_m > 0.0) ||
     !(p_.k_max_n_per_m >= p_.k_min_n_per_m) || !(p_.forgetting > 0.0 && p_.forgetting <= 1.0) ||
-    !(p_.contact_force_n >= 0.0) || !(p_.min_step_m > 0.0) || !(p_.free_space_speed_mps > 0.0))
+    !(p_.contact_force_n >= 0.0) || !(p_.min_step_m > 0.0) || !(p_.free_space_speed_mps > 0.0) || !(p_.barrier_gain >= 0.0))
   {
     throw std::invalid_argument("force limiter: parameter out of range");
   }
@@ -59,6 +59,11 @@ double ForceLimiter::maxApproachVelocity(double force_n) const
 {
   if (force_n < p_.contact_force_n) {return p_.free_space_speed_mps;}
   return p_.alpha_per_s * (p_.f_max_n - force_n) / k_;
+}
+
+double ForceLimiter::barrierForce(double force_n) const
+{
+  return force_n > p_.f_max_n ? p_.barrier_gain * (force_n - p_.f_max_n) : 0.0;
 }
 
 double ForceLimiter::limit(double v_cmd, double force_n) const

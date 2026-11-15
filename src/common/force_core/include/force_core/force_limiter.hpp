@@ -41,6 +41,8 @@ struct ForceLimiterParams
   /// builds about k * speed * dt of force per control step, so pick it from the loop rate and the
   /// stiffest wall expected (50 kN/m, 1 kHz, 0.02 m/s gives 1 N a step).
   double free_space_speed_mps{0.02};
+  /// Barrier gain of `barrierForce`: extra force error per newton above f_max_n (dimensionless, >= 0).
+  double barrier_gain{5.0};
 };
 
 class ForceLimiter
@@ -59,6 +61,11 @@ public:
 
   /// min(commanded, maxApproachVelocity): `v_cmd` is positive into the wall.
   double limit(double v_cmd, double force_n) const;
+
+  /// Extra force error to add to a force controller's error above the limit: `barrier_gain * (F - F_max)`
+  /// for F > F_max, else 0. A force-error controller (the admittance rule) then retreats harder the more the
+  /// limit is exceeded, without any kinematics: it nonlinearly stiffens the force loop outside the allowed set.
+  double barrierForce(double force_n) const;
 
   double stiffness() const {return k_;}
   bool hasEstimate() const {return has_estimate_;}
