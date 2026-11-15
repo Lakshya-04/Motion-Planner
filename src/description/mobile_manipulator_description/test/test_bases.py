@@ -204,6 +204,7 @@ def test_profile_agrees_with_the_model(path):
     body = next(l for l in robot.links if l.name == 'base_link')
     bottom = pos['base_link'][2] - body.collision.geometry.size[2] / 2
     assert bottom == pytest.approx(b['ground_clearance_m'], abs=1e-5)
+    assert body.inertial.mass == pytest.approx(b['mass_kg'])
 
     wheels = [l for l in robot.links if l.name.endswith('_wheel_link')]
     if b['wheel_radius_m'] is None:

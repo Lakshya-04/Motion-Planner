@@ -78,8 +78,10 @@ controller drives the base through `cmd_vel`. Each macro exposes its dimensions 
 **The numbers are nominal**, taken from published spec sheets and rounded; wheel positions and
 body outlines are simplified (wheels inside the body envelope carry no collision shape, casters
 are visual only). Check every value against the unit you actually run (mounting plate height,
-tyre wear, payload derating, firmware speed limits) and override it through the macro
-parameters or the profile. The velocity and acceleration limits are the vehicle's, not a
+tyre wear, payload derating, firmware speed limits) and edit it in the base macro defaults
+(`urdf/base/<name>.xacro`) and in the profile's `base:` section together: the selector passes only
+`prefix`, so the profile does not drive the model, and `test/test_bases.py` fails when the two
+disagree. The velocity and acceleration limits are the vehicle's, not a
 recommendation for a loaded 1.5 m lift with an arm: derate them for the navigation stack.
 
 Each profile has a `base:` section next to `lift:`: `name`, `drive_type` (`omni | diff | skid |
@@ -87,14 +89,20 @@ Each profile has a `base:` section next to `lift:`: `name`, `drive_type` (`omni 
 casters, for costmaps and base stationing), `wheel_radius_m`, `track_m`, `wheelbase_m`,
 `max_linear_velocity_mps`, `max_angular_velocity_radps`, `max_linear_acceleration_mps2`,
 `max_angular_acceleration_radps2`, `lift_mount_height_m` (`lift_mount_link` above the ground),
-`ground_clearance_m`, `mass_kg`. Base stationing (`docs/reachability.md`) can use `can_strafe` and the footprint as inputs: a strafing base can take any station pose, a diff/skid base needs a heading along its motion. These fields are data only for now; nothing in the planner reads them yet. `test/test_bases.py` keeps the profile, the footprint and the macro in
-agreement. Profiles per base: `ur10e_<base>_telescopic.yaml` (for example
-`ur10e_ranger_mini_telescopic.yaml`); the TurtleBot3 profiles use the generic arm because a UR10e
-would tip it.
+`ground_clearance_m`, `mass_kg`. Base stationing (`docs/reachability.md`) can use `can_strafe` and
+the footprint as inputs: a strafing base can take any station pose, a diff/skid base needs a
+heading along its motion. These fields are data only for now; nothing in the planner reads them
+yet, and the URDF does not read them either. `test/test_bases.py` keeps the profile, the
+footprint, the mass and the macro in agreement. Profiles per base:
+`ur10e_<base>_telescopic.yaml` (for example `ur10e_ranger_mini_telescopic.yaml`); the TurtleBot3
+profiles use the generic arm because a UR10e would tip it. The `ur10e_scout_mini_telescopic.yaml`
+profile is a geometry example: the Scout Mini's rated payload is far below a UR10e on a 1.5 m
+lift, so check the platform rating before using it.
 
 Swap steps: `xacro urdf/mobile_manipulator.urdf.xacro arm:=ur10e base:=ranger_mini`, or pick the
-matching profile. The lift mounts at `lift_mount_link`; shift it with the macro's
-`mount_x`/`mount_y` or the `lift_mount_xyz` arg if your lift is not at the body centre. Vendor
+matching profile. The lift mounts at `lift_mount_link`; shift it with the `lift_mount_xyz` xacro
+arg (or edit `mount_x`/`mount_y` in the base macro's defaults) if your lift is not at the body
+centre. Vendor
 description packages (for example `ranger_ros2`, `husky_description`, `turtlebot3_description`)
 are not used; a branch that uses one when installed can be added the way `ur_arm.xacro` does for
 UR, provided the vendor frames are re-parented to the three contract links.
