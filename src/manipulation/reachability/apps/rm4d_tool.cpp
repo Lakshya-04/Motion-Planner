@@ -6,7 +6,7 @@
 //   rm4d_tool bands map.rm4d --wall-x X --z-min Z0 --z-max Z1 [--z-step dz] [--approach +x]
 //                            [--lift-max H] [--lift-step dh] [--mount-z dz] [--base-x bx] [--base-y by]
 //   rm4d_tool station map.rm4d --wall-x X --z-min Z0 --z-max Z1 [--width W] [--z-step dz] [--y-step dy]
-//                              [--lift-max H] [--mount-z dz] [--min-clearance c] [--base-profile profile.yaml]
+//                              [--lift-max H] [--mount-z dz] [--min-clearance c] [--grid-step g] [--base-profile profile.yaml]
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -49,7 +49,7 @@ int usage()
     "usage:\n  rm4d_tool build chain.yaml out.rm4d [--samples N --threads T --resolution m --extent m --zmin m --zmax m --seed S]\n"
     "  rm4d_tool info map.rm4d\n"
     "  rm4d_tool bands map.rm4d --wall-x X --z-min Z0 --z-max Z1 [--z-step dz --lift-max H --lift-step dh --mount-z dz --base-x bx --base-y by]\n"
-    "  rm4d_tool station map.rm4d --wall-x X --z-min Z0 --z-max Z1 [--width W --z-step dz --y-step dy --lift-max H --mount-z dz --min-clearance c --base-profile profile.yaml]\n");
+    "  rm4d_tool station map.rm4d --wall-x X --z-min Z0 --z-max Z1 [--width W --z-step dz --y-step dy --lift-max H --mount-z dz --min-clearance c --grid-step g --base-profile profile.yaml]\n");
   return 2;
 }
 }  // namespace
@@ -134,6 +134,12 @@ int main(int argc, char ** argv)
       const auto prof = o.find("base-profile");
       if (prof != o.end()) {
         r.base = loadBaseProfile(prof->second);
+        if (!o.count("mount-z")) {
+          if (const auto z = armBaseHeightAtLiftZero(*r.base)) {
+            r.arm_mount_offset_z = *z;
+            std::printf("arm base %.3f m above the ground at lift zero (from the profile; --mount-z overrides)\n", *z);
+          }
+        }
         std::printf("base %s (%s%s)\n", r.base->name.c_str(), r.base->can_strafe ? "strafes" : "no strafe",
           r.base->drive == DriveType::kDiff || r.base->drive == DriveType::kSkid ? ", diff/skid" : "");
       }

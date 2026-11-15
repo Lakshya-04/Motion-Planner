@@ -81,6 +81,18 @@ TEST(BaseModel, OrderStandsVisitsNeighboursFirst)
   EXPECT_EQ(order[2], 0U);
 }
 
+TEST(BaseModel, ArmBaseHeightFollowsTheProfilesLiftMount)
+{
+  const auto dir = std::filesystem::temp_directory_path() / "base_model_test";
+  std::filesystem::create_directories(dir);
+  const auto path = (dir / "mount.yaml").string();
+  std::ofstream(path) << "base:\n  drive_type: skid\n  lift_mount_height_m: 0.39\n"
+                         "  footprint: [[-0.4, -0.2], [0.4, -0.2], [0.4, 0.2], [-0.4, 0.2]]\n";
+  const BaseModel m = loadBaseProfile(path);
+  ASSERT_TRUE(armBaseHeightAtLiftZero(m));
+  EXPECT_NEAR(*armBaseHeightAtLiftZero(m), 0.39 + 0.8 + 0.02, 1e-12);
+}
+
 TEST(BaseModel, LoadsAProfileAndRejectsBadOnes)
 {
   const auto dir = std::filesystem::temp_directory_path() / "base_model_test";
@@ -96,6 +108,7 @@ TEST(BaseModel, LoadsAProfileAndRejectsBadOnes)
   EXPECT_EQ(m.footprint.size(), 4U);
   EXPECT_NEAR(m.arm_mount.x(), 0.1, 1e-12);
   EXPECT_NEAR(m.max_linear, 0.8, 1e-12);
+  EXPECT_FALSE(armBaseHeightAtLiftZero(m));   // no lift_mount_height_m in this profile
 
   const auto bad = (dir / "bad.yaml").string();
   std::ofstream(bad) << "base:\n  drive_type: hover\n  footprint: [[0,0],[1,0],[1,1]]\n";

@@ -84,10 +84,18 @@ rm4d_tool station ur10e.rm4d --wall-x 3.0 --z-min 0.3 --z-max 2.2 --width 2.0 \
   --base-profile config/profiles/ur10e_husky_telescopic.yaml
 ```
 
+With `--base-profile` the arm base height at lift zero comes from the profile's
+`lift_mount_height_m` plus the lift column and arm mount (`armBaseHeightAtLiftZero`: 1.08 m on the
+Ranger Mini, 1.12 m MPO-500, 1.17 m MiR100, 1.21 m Husky); `--mount-z` overrides it, and without a
+base profile the default stays `--mount-z 0.2`.
+
 Same 2 m x 1.9 m wall 3 m ahead, UR10e map, `min_clearance` 0.3 m: with no base model the arm base
 stands 0.50 m from the wall; with a base model 0.60 m (Ranger Mini, MiR100, MPO-500) or 0.70 m (Husky),
 every base turned side-on (yaw 90 degrees, short side to the wall), footprint clearance 0.31 to 0.36 m.
-Footprints are nominal rectangles from the profiles.
+Footprints are nominal rectangles from the profiles. The mount height changes the bands: the lift
+only goes up from 1.1 to 1.2 m, so the lowest targets of the wall (z = 0.3 m) are out of reach, and
+the tool reports 4 (Ranger Mini, MPO-500), 6 (MiR100) or 9 (Husky) of the 110 targets unreachable
+in 2 bands; the old `--mount-z 0.2` default reached all of them in 3 bands for every base.
 
 Not done: choosing several stands for a wide wall with travel cost in the objective (the pieces are
 there: `chooseStation` per panel and `orderStands`), a yaw preference for contact work, and passing the
