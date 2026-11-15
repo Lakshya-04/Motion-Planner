@@ -98,9 +98,31 @@ only goes up from 1.1 to 1.2 m, so the lowest targets of the wall (z = 0.3 m) ar
 the tool reports 4 (Ranger Mini, MPO-500), 6 (MiR100) or 9 (Husky) of the 110 targets unreachable
 in 2 bands; the old `--mount-z 0.2` default reached all of them in 3 bands for every base.
 
-Not done: choosing several stands for a wide wall with travel cost in the objective (the pieces are
-there: `chooseStation` per panel and `orderStands`), a yaw preference for contact work, and passing the
-base footprint to the ROS shell services.
+### Several stands for a wide wall
+
+`planStands(map, request, start)` (`core/stands.hpp`) covers a wall wider than the arm's reach: greedy
+cover, each round taking the station that reaches the most remaining targets (`chooseStation`) and, among
+equally good ones, the one the base reaches soonest from where it is (`StationRequest::from`, drive type
+and footprint through `travelTime`). It returns the stands in visiting order, the targets and lift bands
+of each, the driving time between them and the targets nothing reaches.
+
+```bash
+rm4d_tool station ur10e.rm4d --wall-x 3.0 --z-min 0.3 --z-max 2.2 --width 7.0 --multi 1 --start-y -3.5 \
+  --base-profile config/profiles/ur10e_husky_telescopic.yaml
+```
+
+A 7 m wide, 1.9 m high wall (360 targets), UR10e map, start at one end, 0.3 m clearance:
+
+| Base | Stands | Driving | Notes |
+|---|---|---|---|
+| Ranger Mini (strafes) | 3 | 5.1 s | 130 / 130 / 100 targets, 3, 3 and 2 lift bands |
+| MiR100 (diff) | 3 | 6.6 s | same stands, turn-drive-turn between them |
+| Husky (skid-steer) | 4 | 11.1 s | its 0.99 m footprint puts the arm 0.7 m from the wall: less reach, 7 bands per stand, and a fourth stand for 4 leftover targets |
+
+Limits: greedy cover can leave a few stragglers that cost an extra stand and a backtrack (the Husky
+row); a final pass that merges small stands into a neighbour, or a cover chosen for total time instead
+of count, would fix it. Each stand is chosen on its own, so the order is "nearest next", not the best
+tour. Not done: a yaw preference for contact work, passing the base footprint to the ROS shell services.
 
 ## Limits and next steps
 

@@ -22,6 +22,7 @@ add_library(reachability_core
   src/core/lift_bands.cpp
   src/core/station.cpp
   src/core/base_model.cpp
+  src/core/stands.cpp
   src/core/io.cpp
 )
 target_include_directories(reachability_core PUBLIC
@@ -61,7 +62,7 @@ install(DIRECTORY include/ DESTINATION include)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
-  foreach(t map4d builder lift_bands io station base_model)
+  foreach(t map4d builder lift_bands io station base_model stands)
     ament_add_gtest(${t}_test test/core/${t}_test.cpp)
     target_link_libraries(${t}_test reachability_core)
     target_include_directories(${t}_test PRIVATE test/core)

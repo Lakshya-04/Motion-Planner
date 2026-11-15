@@ -33,6 +33,9 @@ struct StationRequest
   /// station reports the base yaw that gives it, and stands where the footprint would not fit are
   /// skipped. `max_standoff` and `standoff` still refer to the arm base.
   std::optional<BaseModel> base;
+  /// Where the base is now. With a base model, ties between equally good stations go to the one
+  /// the base reaches soonest (travelTime), instead of the one nearest the middle of the work area.
+  std::optional<Stand> from;
 };
 
 struct Station
