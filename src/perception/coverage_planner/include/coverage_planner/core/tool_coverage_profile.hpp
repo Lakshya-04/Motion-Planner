@@ -55,7 +55,11 @@ struct ToolTask
  */
 struct ToolCoverage
 {
-  double swath_m{0.0};      ///< Effective tool footprint width.
+  double swath_m{0.0};      ///< Effective tool footprint width (fixed-swath tools).
+  /// Non-contact spray tools: cone half-angle in degrees. > 0 means the swath is derived from the
+  /// stand-off (see toolSwath) and swath_m is not used. 0 = fixed swath_m.
+  double spray_half_angle_deg{0.0};
+  double effective_width_fraction{1.0};  ///< Usable fraction of the cone width, in (0, 1].
   double overlap_pct{0.0};  ///< step_m = swath_m * (1 - overlap_pct / 100).
   std::vector<PassVariant> passes{
     PassVariant{}};                         ///< Per-strip pass list; single default = one pass.
@@ -84,5 +88,13 @@ struct ToolCoverageProfile
   ToolTask task;
   ToolCoverage coverage;
 };
+
+/// Swath the planner must use for this tool: the stand-off dependent cone model for a non-contact
+/// tool with spray_half_angle_deg > 0, else coverage.swath_m.
+/// @throws std::invalid_argument if the cone parameters or the stand-off are out of range.
+double toolSwath(const ToolCoverageProfile & tool);
+
+/// Distance between adjacent strips: toolSwath * (1 - overlap_pct / 100).
+double toolLineSpacing(const ToolCoverageProfile & tool);
 
 }  // namespace coverage_planner

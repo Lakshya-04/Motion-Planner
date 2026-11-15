@@ -13,6 +13,7 @@
   <depend>core_types</depend>
   <depend>scene_model</depend>
   <depend>ros_adapters</depend>
+  <depend>ament_index_cpp</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
   <depend>nav_msgs</depend>

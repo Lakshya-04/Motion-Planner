@@ -5,8 +5,8 @@
  *        GenerateCoveragePath service, lifts + pass-expands the result, and publishes both the
  *        flat and final paths plus ground-truth markers for RViz.
  * @details No dependency on MoveIt or any other * package -- reachability/execution is out
- *          of scope here. Tool coverage/orientation parameters are plain node params rather than
- *          a loaded tool_profiles.yaml, so this unit stands alone.
+ *          of scope here. The tool comes from tool_profiles.yaml (`tool_profiles_file`,
+ *          `tool_name`); explicit params override single fields.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 
@@ -38,6 +38,7 @@
 
 #include "coverage_planner/core/coverage_pass_expander.hpp"
 #include "coverage_planner/core/tool_coverage_profile.hpp"
+#include "coverage_planner/ros/tool_profile_params.hpp"
 #include "coverage_planner/core/wall_basis.hpp"
 #include "coverage_planner/core/wall_rasterizer.hpp"
 #include "coverage_planner/ros/conversions.hpp"
@@ -417,49 +418,6 @@ void writeCoverageOutputJson(
   file << output.dump(2);
 }
 
-/**
- * @brief Builds a ToolCoverageProfile straight from this node's own params -- replaces loading a
- *        tool_profiles.yaml (ros_adapters, not a dependency here) with the same field-by-field
- *        shape, so a caller who only cares about "PCD in, waypoints out" doesn't need any other
- *        * package installed.
- */
-coverage_planner::ToolCoverageProfile buildToolCoverageProfile(
-  const rclcpp::Node::SharedPtr & node)
-{
-  coverage_planner::ToolCoverageProfile profile;
-  profile.name = node->declare_parameter<std::string>("tool_name", "mop");
-
-  profile.task.contact = node->declare_parameter<bool>("contact", true);
-  profile.task.standoff_m = node->declare_parameter<double>("standoff_m", 0.0);
-  profile.task.tool_normal_policy =
-    node->declare_parameter<std::string>("tool_normal_policy", "constant");
-  profile.task.max_edge_tilt_deg = node->declare_parameter<double>("max_edge_tilt_deg", 0.0);
-  profile.task.tool_frame_yaw_deg = node->declare_parameter<double>("tool_frame_yaw_deg", 0.0);
-
-  profile.coverage.swath_m = node->declare_parameter<double>("swath_m", 0.2);
-  profile.coverage.overlap_pct = node->declare_parameter<double>("overlap_pct", 20.0);
-  profile.coverage.sweep_direction =
-    node->declare_parameter<std::string>("sweep_direction", "vertical");
-  profile.coverage.enable_boundary_pass =
-    node->declare_parameter<bool>("enable_boundary_pass", false);
-  profile.coverage.boundary_offset_m = node->declare_parameter<double>("boundary_offset_m", 0.0);
-  profile.coverage.obstacle_inflation =
-    node->declare_parameter<std::string>("obstacle_inflation", "uniform");
-  profile.coverage.obstacle_inflation_radius_m =
-    node->declare_parameter<double>("obstacle_inflation_radius_m", profile.coverage.swath_m / 2.0);
-  // Common real case (e.g. mop): two identical-standoff passes, second one reversed. A single
-  // pass (the default) is everything else.
-  const bool double_pass = node->declare_parameter<bool>("double_pass", false);
-  profile.coverage.passes =
-    double_pass
-      ? std::vector<
-          coverage_planner::
-            PassVariant>{coverage_planner::PassVariant{}, coverage_planner::PassVariant{0.0, true}}
-      : std::vector<coverage_planner::PassVariant>{coverage_planner::PassVariant{}};
-
-  return profile;
-}
-
 }  // namespace
 
 int main(int argc, char ** argv)
@@ -494,11 +452,18 @@ int main(int argc, char ** argv)
     return 1;
   }
 
-  const auto tool_profile = buildToolCoverageProfile(node);
+  coverage_planner::ToolCoverageProfile tool_profile;
+  try {
+    tool_profile = coverage_planner::loadToolCoverageProfileFromParams(*node);
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(node->get_logger(), "wall_coverage_demo: %s", e.what());
+    rclcpp::shutdown();
+    return 1;
+  }
   RCLCPP_INFO(
     node->get_logger(), "Tool coverage profile '%s' (contact=%s, swath_m=%.3f, passes=%zu)",
     tool_profile.name.c_str(), tool_profile.task.contact ? "true" : "false",
-    tool_profile.coverage.swath_m, tool_profile.coverage.passes.size());
+    coverage_planner::toolSwath(tool_profile), tool_profile.coverage.passes.size());
 
   // double_pass's last pass is reverse_direction=true, so a strip finishes at its own start pose
   // instead of its end pose. Every connector is generated once, against the flat (single-pass)
@@ -615,9 +580,8 @@ int main(int argc, char ** argv)
   auto request = std::make_shared<coverage_planner_msgs::srv::GenerateCoveragePath::Request>();
   request->map = coverage_planner::ros_conv::toRos(grid);
   request->pattern = "boustrophedon";
-  request->swath = static_cast<float>(tool_profile.coverage.swath_m);
-  request->step = static_cast<float>(
-    tool_profile.coverage.swath_m * (1.0 - tool_profile.coverage.overlap_pct / 100.0));
+  request->swath = static_cast<float>(coverage_planner::toolSwath(tool_profile));
+  request->step = static_cast<float>(coverage_planner::toolLineSpacing(tool_profile));
   request->sweep_direction = tool_profile.coverage.sweep_direction;
   request->start_corner = "bottom_left";
   request->obstacle_inflation_radius = 0.0f;  // already rasterized into the grid above.

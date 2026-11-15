@@ -29,6 +29,8 @@ add_library(coverage_planner_core
   src/core/wall_rasterizer.cpp
   src/core/coverage_patterns.cpp
   src/core/coverage_from_scan.cpp
+  src/core/tool_coverage_profile.cpp
+  src/core/tool_profile_loading.cpp
 )
 target_include_directories(coverage_planner_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -64,6 +66,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(coverage_planner_msgs REQUIRED)
 find_package(ros_adapters REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 
 add_executable(coverage_planner_node src/ros/coverage_planner_node.cpp)
 target_link_libraries(coverage_planner_node
@@ -80,15 +83,15 @@ if(PCL_FOUND)
 
   add_executable(wall_coverage_service_node src/ros/wall_coverage_service_node.cpp)
   target_link_libraries(wall_coverage_service_node
-    coverage_planner_pcd ${coverage_planner_msgs_TARGETS})
+    coverage_planner_pcd ros_adapters::ros_adapters ${coverage_planner_msgs_TARGETS})
   ament_target_dependencies(wall_coverage_service_node
-    rclcpp nav_msgs geometry_msgs std_srvs visualization_msgs)
+    rclcpp ament_index_cpp nav_msgs geometry_msgs std_srvs visualization_msgs)
 
   add_executable(wall_coverage_demo_node src/ros/wall_coverage_demo_node.cpp)
   target_link_libraries(wall_coverage_demo_node
-    coverage_planner_pcd ${coverage_planner_msgs_TARGETS})
+    coverage_planner_pcd ros_adapters::ros_adapters ${coverage_planner_msgs_TARGETS})
   ament_target_dependencies(wall_coverage_demo_node
-    rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs pcl_conversions)
+    rclcpp ament_index_cpp nav_msgs geometry_msgs sensor_msgs visualization_msgs pcl_conversions)
 
   list(APPEND ROS_NODES wall_coverage_service_node wall_coverage_demo_node)
 endif()
@@ -153,6 +156,11 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_coverage_from_scan test/core/coverage_from_scan_test.cpp)
   target_link_libraries(test_coverage_from_scan coverage_planner_core)
+
+  ament_add_gtest(test_tool_profiles test/core/tool_profiles_test.cpp)
+  target_link_libraries(test_tool_profiles coverage_planner_core ros_adapters::ros_adapters)
+  target_compile_definitions(test_tool_profiles PUBLIC
+    TOOL_PROFILES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/tool_profiles.yaml")
 
   # ros/ tests: message <-> core conversions.
   ament_add_gtest(test_conversions test/ros/conversions_test.cpp)
