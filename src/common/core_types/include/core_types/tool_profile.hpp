@@ -102,7 +102,13 @@ struct ToolTask
  */
 struct ToolCoverage
 {
-  double swath_m{0.0};                   ///< Effective tool footprint width.
+  double swath_m{0.0};                   ///< Effective tool footprint width. Ignored by the coverage
+                                         ///< planner for a non-contact tool with spray_half_angle_deg > 0.
+  /// Non-contact spray tools: cone half-angle in degrees. When > 0 the planner derives the swath
+  /// from the stand-off (sprayerEffectiveSwath) instead of using swath_m. 0 = fixed swath_m.
+  double spray_half_angle_deg{0.0};
+  /// Usable fraction of the geometric cone width (Gaussian-like deposition), in (0, 1].
+  double effective_width_fraction{1.0};
   double overlap_pct{0.0};               ///< step_m = swath_m * (1 - overlap_pct / 100).
   std::vector<PassVariant> passes{PassVariant{}}; ///< Per-strip pass list; single default = one pass.
   std::string sweep_direction{"vertical"}; ///< "vertical" | "horizontal".
