@@ -15,6 +15,7 @@ if(BUILD_TESTING)
   if(ament_cmake_pytest_FOUND)
     ament_add_pytest_test(test_wall_world test/test_wall_world.py)
     ament_add_pytest_test(test_description_gazebo test/test_description_gazebo.py)
+    ament_add_pytest_test(test_contact_script test/test_contact_script.py)
   endif()
 endif()
 

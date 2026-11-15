@@ -33,7 +33,7 @@ import rclpy.time
 import xacro
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import Wrench, WrenchStamped
-from rcl_interfaces.srv import SetParameters
+from rcl_interfaces.srv import GetParameters, SetParameters
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from std_msgs.msg import Float64
@@ -47,6 +47,10 @@ JTAC = 'combined_arm_lift_controller'
 SETPOINT_TOPIC = '/ft_bridge_hardware_ft_sensor_tcp/target_wrench'
 # wrist poses around pose A (the tool 0.3 m short of the wall): tool pitched up and down and rolled
 # about its axis, so gravity points in clearly different directions in the sensor frame
+# JTAC's own default for the Cartesian offset clamp (jtac_controller.hpp, max_offset_m_); it is a topic, not a
+# parameter, so it cannot be read back and is restored to this value
+DEFAULT_MAX_OFFSET_M = 0.1
+SAVED_PARAMS = ['admittance.mass', 'admittance.stiffness', 'admittance.damping_ratio']
 CAL_DELTAS = [(), ((4, -0.8),), ((4, 0.8),), ((6, 0.8),), ((6, -0.8),), ((4, 0.8), (6, 0.8))]
 
 
@@ -62,6 +66,8 @@ class ContactProbe(st.Probe):
                                  qos_profile_sensor_data)
         self.create_subscription(WrenchStamped, '/ft_sensor/ground_truth_wrench', self._truth, 50)
         self.set_params = self.create_client(SetParameters, f'/{JTAC}/set_parameters')
+        self.get_params = self.create_client(GetParameters, f'/{JTAC}/get_parameters')
+        self.offset_pub = self.create_publisher(Float64, f'/{JTAC}/max_offset_m', 10)
         self.setpoint = self.create_publisher(
             Wrench, SETPOINT_TOPIC, QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                                                reliability=ReliabilityPolicy.RELIABLE))
@@ -94,11 +100,24 @@ class ContactProbe(st.Probe):
         rclpy.spin_until_future_complete(self, fut, timeout_sec=10.0)
         return fut.result() is not None and all(r.successful for r in fut.result().results)
 
+    def read_jtac(self):
+        """The admittance gains now set on JTAC, as set_jtac() keyword arguments (None if unreadable)."""
+        self.get_params.wait_for_service(timeout_sec=10.0)
+        fut = self.get_params.call_async(GetParameters.Request(names=SAVED_PARAMS))
+        rclpy.spin_until_future_complete(self, fut, timeout_sec=10.0)
+        if fut.result() is None or len(fut.result().values) != len(SAVED_PARAMS):
+            return None
+        return {n.replace('.', '__'): list(v.double_array_value) for n, v in zip(SAVED_PARAMS, fut.result().values)}
+
     def set_max_offset(self, metres):
-        pub = self.create_publisher(Float64, f'/{JTAC}/max_offset_m', 10)
+        """Publish the clamp once a subscriber is matched (a message published before that is lost).
+        Returns False if JTAC never subscribed."""
+        if not self.spin_until(lambda: self.offset_pub.get_subscription_count() > 0, 10.0):
+            return False
         for _ in range(5):
-            pub.publish(Float64(data=float(metres)))
+            self.offset_pub.publish(Float64(data=float(metres)))
             self.sim_wait(0.1)
+        return True
 
     def target(self, fz):
         """Contact force `fz` along the tool z at the tcp (negative: pressing). The bridge exports
@@ -106,6 +125,28 @@ class ContactProbe(st.Probe):
         w = Wrench()
         w.force.z = float(fz)
         self.setpoint.publish(w)
+
+
+def restore(node, saved):
+    """Leave a running sim as found: axes off, no target latched, the gains and offset clamp as they were.
+    Every step is tried even if an earlier one fails (an aborted run must not leave JTAC pushing)."""
+    steps = [lambda: node.set_jtac(admittance__selected_axes=[False] * 6),
+             lambda: node.target(0.0)]
+    if saved:
+        steps.append(lambda: node.set_jtac(**saved))
+    steps.append(lambda: node.set_max_offset(DEFAULT_MAX_OFFSET_M))
+    for step in steps:
+        try:
+            step()
+        except Exception as e:  # noqa: BLE001
+            print(f'[WARN] cleanup step failed: {e}', flush=True)
+
+
+def last_high_time(log, t0, t1, limit=0.5):
+    """Sim time of the last |Fz| >= limit sample in [t0, t1]; None if there is none."""
+    t, v = window(log, t0, t1)
+    high = t[np.abs(v[:, 2]) >= limit] if len(t) else t
+    return float(high[-1]) if len(high) else None
 
 
 def window(log, t0, t1):
@@ -147,6 +188,8 @@ def main():
                     help='reference pose this far (m) beyond the wall surface (the reference sets the force: '
                          'F ~ k_wall (F_t + K e)/(K + k_wall))')
     ap.add_argument('--approach-speed', type=float, default=0.002, help='last centimetre of the approach (m/s)')
+    ap.add_argument('--release-s', type=float, default=4.0,
+                    help='the force must be gone this many seconds after the retreat starts (it lasts 8 s)')
     ap.add_argument('--hold-s', type=float, default=8.0)
     ap.add_argument('--force-tol-n', type=float, default=2.0, help='|steady force - target| tolerance (N)')
     ap.add_argument('--force-std-n', type=float, default=1.0, help='steady force standard deviation limit (N)')
@@ -174,6 +217,7 @@ def main():
         return A + (B - A) * 0.5 * (lo + hi)
 
     results = []
+    saved, touched = None, False
 
     def check(name, ok, detail=''):
         results.append(bool(ok))
@@ -199,7 +243,9 @@ def main():
         check('JTAC active, action server up',
               node.wait_active(JTAC) and node.client.wait_for_server(timeout_sec=30))
         node.target(0.0)
-        node.spin_until(lambda: bool(node.cond_log) and bool(node.truth_log), 20)
+        if not check('conditioner and ground truth publish (TF, ft_conditioner node)',
+                     node.spin_until(lambda: bool(node.cond_log) and bool(node.truth_log), 20)):
+            return 1
 
         # 1. calibration of the conditioner against the known tool
         for i, delta in enumerate(CAL_DELTAS):
@@ -272,7 +318,9 @@ def main():
         node.send(pose_at_x(wall_x - 0.02), 5.0)
 
         # 4. engage the tool-z admittance with the force target and press
-        node.set_max_offset(args.max_offset_m)
+        saved = node.read_jtac()
+        touched = True               # from here on a running sim is restored when the test ends
+        check('offset clamp applied (JTAC subscribed)', node.set_max_offset(args.max_offset_m))
         node.target(-args.target_n)
         ok = node.set_jtac(admittance__mass=[16.0, 16.0, args.mass, 0.5, 0.5, 0.5],
                            admittance__stiffness=[1000.0, 1000.0, K, 50.0, 50.0, 50.0],
@@ -310,13 +358,21 @@ def main():
         node.sim_wait(3.0)
         ok = node.set_jtac(admittance__selected_axes=[False] * 6)
         node.sim_wait(1.0)
+        t_ret = node.sim_time
         node.send(A, 8.0)
         node.sim_wait(1.5)
+        t_high = last_high_time(node.truth_log, t_ret, node.sim_time)
         _, gt_f = window(node.truth_log, node.sim_time - 1.0, node.sim_time)
         check('disengaged (parameters set live)', ok)
+        check('force released early in the retreat', t_high is None or t_high - t_ret <= args.release_s,
+              'no force during the retreat' if t_high is None else
+              f'last |Fz| >= 0.5 N {t_high - t_ret:.1f} s after the retreat began (limit {args.release_s} s of the '
+              f'8 s trajectory)')
         check('force released after the retreat (ground truth ~ 0)', np.abs(gt_f[:, :3]).max() < 0.5,
               f'max|F| {np.abs(gt_f[:, :3]).max():.3f} N, tcp x {node.pose("tcp_link")[1][0]:.3f} m')
     finally:
+        if touched and proc is None:
+            restore(node, saved)
         node.destroy_node()
         rclpy.shutdown()
         if proc:
