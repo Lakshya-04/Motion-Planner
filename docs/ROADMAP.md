@@ -148,8 +148,7 @@ without code, when we can implement it.
 - [x] Backend contract and `hardware:=mujoco|gazebo` selection; both run headless with smoke tests (`docs/simulation.md`)
 - [x] MuJoCo 4: own `SystemInterface`, MJCF and wall generators, raw + ground-truth F/T, 10 N contact control
 - [x] Gazebo Harmonic: package, wall world, raw + ground-truth F/T, `FtBridgeSimSystem`, conditioned path validated
-- [~] Gazebo does not hold a 10 N contact: JTAC gave about 108 N at two depths and the cause is not established (rigid contact is one hypothesis; `docs/sim_gazebo.md`). *Fix: a compliant tool tip (a spring-damper joint)
-      or effort control; physical stiffness of 5-50 N/mm, physics 5-10x faster than the controller*
+- [x] Gazebo holds a 10 N contact with a compliant tool tip (prismatic spring-damper joint, 5 N/mm, `docs/sim_gazebo.md`): mean 9.69 N, std 0.00 N over the last 4 s, was 163.9 N, std 120.6 N (rigid tool). Not yet: the 35 mm overpress still hits the hard stop (about 105 N), the residual of 0.3 to 1.6 N depends on the reference depth, MuJoCo still holds 10.13 N.
 - [ ] Evaluate `mujoco_ros2_control` (Apache-2.0, v0.1.4; Humble, Jazzy, Kilted, Lyrical; plugins `base_velocity`, `camera`, `mujoco_3d_lidar`,
       `external_wrench`, `fts_grav_comp`, `free_joint_state_publisher`) against our own plugin. Its `mujoco_vendor` pins MuJoCo 3.12.0 and no MuJoCo 4 work was
       found, while ours builds against 4.0.1: try building it against 4.0.1, otherwise borrow its plugin designs
@@ -244,7 +243,7 @@ Licences, versions and last-push dates were read from each repository's own file
 | Backend selection | pluginlib | | a hand-rolled factory |
 | Orchestration | BehaviorTree.CPP (MIT); alternatives SMACC2 (Apache-2.0), FlexBE (BSD-3), py_trees (BSD-3) | | LLM planners, TAMP (no benefit for a deterministic task) |
 | Force control | ros2_controllers admittance (Apache-2.0, in use); `control_toolbox` gravity filter (Apache-2.0: gravity and CoG torque only); FZI `cartesian_controllers` (BSD-3, last `ros2` commit 2024-10) to evaluate; `force_feedback_mpc` (BSD-3) as a later option | force-CBF limiter + offset clamp (arXiv 2405.04859, no code); energy tank; excitation-based payload ID (arXiv 2504.21486; its code has no licence file); BO tuning (method reference arXiv 2512.03772, torque-level MPC) | learned F/T replacement; learned skills until the safety layer exists |
-| Simulation | core MuJoCo 4.0.1 (Apache-2.0) with calibrated soft contact; MuJoCo Warp (Apache-2.0) for sweeps; Newton (Apache-2.0, active) to watch; Gazebo for integration | compliant tool tip for Gazebo | Genesis, Isaac Lab on a 4 GB GPU |
+| Simulation | core MuJoCo 4.0.1 (Apache-2.0) with calibrated soft contact; MuJoCo Warp (Apache-2.0) for sweeps; Newton (Apache-2.0, active) to watch; Gazebo for integration | (compliant tool tip for Gazebo: done) | Genesis, Isaac Lab on a 4 GB GPU |
 
 Corrected from the first draft: nvblox is Apache-2.0 (not NVIDIA terms); `nav2_amcl` is LGPL-2.1 and `robot_localization` Apache-2.0; wavemap upstream is stale
 (last push 2024-12-30); the Noether swath/standoff awareness is ours to add; `mujoco_ros2_control` pins MuJoCo 3.12, not 4; arXiv 2604.01414 is a vision-torque
@@ -320,7 +319,7 @@ calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
   coverage, reachability `plan_stands` called by the manager, ROS coverage source. *Exit:* swap MoveIt / cuRobo / VAMP and the tool by config, in a test.
 - **M2 First full run in sim, base static** (what you can start testing with): one launch per simulator, a scenario set, the scorecard **with the coverage
   verification raster**, plus the force-CBF limiter and a compliant tip for Gazebo. MuJoCo first. *Exit:* an automated wall pass in MuJoCo with the scorecard
-  recorded on two robot profiles; Gazebo holds 10 N.
+  recorded on two robot profiles; Gazebo holds 10 N (done with the compliant tip).
 - **M3 Base motion and docking, by reuse**: planar-velocity bases, then ros2_control drive controllers; Nav2 with stands as goals; `opennav_docking` with a
   wall-dock plugin; global stand selection by set cover + TSP; then local refinement. *Exit:* the base drives to a stand in sim and the pass succeeds from where it stopped.
 - **M4 Live perception, by reuse**: MoveIt octomap + `octomap_server`, PCL wall detection, our self filter on the live cloud, simulated depth/lidar, then a
@@ -335,7 +334,7 @@ calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
 1. **Local base placement**: a lightweight verify-and-nudge at each stand (re-check reachability on the live scan, shift within a small neighbourhood) or a
    full local optimiser? I recommend the lightweight one first; global placement exists.
 2. **Backend selection**: pluginlib, as the docs prescribe and as you asked for reuse, rather than my earlier idea of a hand-rolled factory. (I now recommend pluginlib.)
-3. **Gazebo contact**: add a compliant tool tip so Gazebo can hold 10 N, or accept MuJoCo as the contact simulator and use Gazebo for integration only?
+3. **Gazebo contact**: done: the compliant tool tip holds 10 N (9.69 N). Remaining: an identified tip stiffness and a smaller reference-depth residual, if Gazebo is to be a contact simulator rather than integration only.
 4. **MuJoCo plugin**: `mujoco_ros2_control` pins MuJoCo 3.12 (no MuJoCo 4 support found), ours builds against 4.0.1. Try building the upstream plugins (base velocity,
    camera, 3D lidar) against 4.0.1 and keep our own `SystemInterface` for the joints and F/T if that fails? I recommend trying it for base motion and sensors first.
 5. **Base motion**: planar-velocity bases first (recommended), real wheel physics later?
