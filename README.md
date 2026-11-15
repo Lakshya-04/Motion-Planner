@@ -53,7 +53,7 @@ hardware ([docs/simulation.md](docs/simulation.md)).
 | Docs | [docs/sim_mujoco.md](docs/sim_mujoco.md) | [docs/sim_gazebo.md](docs/sim_gazebo.md) |
 | Environment | `build` image with the MuJoCo SDK mounted (`MUJOCO_ROOT`); Python tools also in the `sim` image | `sim-gazebo` image |
 | Can do today | Position and JTAC control of lift + arm, wall worlds from `wall_scene.json`, raw wrist F/T plus ground-truth contact wrench, conditioned force path, a 10 N contact test that holds (10.13 N for a 10 N target) | Same joint control and wall worlds, raw F/T plus ground truth, conditioned path validated against ground truth |
-| Cannot do today | Move the base, simulate sensors | Hold 10 N (rigid contact, about 108 N for any penetration of 0.05 mm or more), move the base, simulate sensors |
+| Cannot do today | Move the base, simulate sensors | Hold 10 N in Gazebo (about 108 N was measured, cause not established; MuJoCo holds it), move the base, simulate sensors |
 
 Isaac Sim is a stub. Neither simulator yet runs coverage, MoveIt and the manager as one launch.
 

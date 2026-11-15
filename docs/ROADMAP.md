@@ -151,7 +151,7 @@ without code, when we can implement it.
 - [x] Backend contract and `hardware:=mujoco|gazebo` selection; both run headless with smoke tests (`docs/simulation.md`)
 - [x] MuJoCo 4: own `SystemInterface`, MJCF and wall generators, raw + ground-truth F/T, 10 N contact control
 - [x] Gazebo Harmonic: package, wall world, raw + ground-truth F/T, `FtBridgeSimSystem`, conditioned path validated
-- [~] Gazebo cannot hold a 10 N contact (rigid contact: 108 N for any penetration of 0.05 mm or more). *Fix: a compliant tool tip (a spring-damper joint)
+- [~] Gazebo does not hold a 10 N contact: JTAC gave about 108 N at two depths and the cause is not established (rigid contact is one hypothesis; `docs/sim_gazebo.md`). *Fix: a compliant tool tip (a spring-damper joint)
       or effort control; physical stiffness of 5-50 N/mm, physics 5-10x faster than the controller*
 - [ ] Evaluate `mujoco_ros2_control` (Apache-2.0, v0.1.4; Humble, Jazzy, Kilted, Lyrical; plugins `base_velocity`, `camera`, `mujoco_3d_lidar`,
       `external_wrench`, `fts_grav_comp`, `free_joint_state_publisher`) against our own plugin. Its `mujoco_vendor` pins MuJoCo 3.12.0 and no MuJoCo 4 work was
