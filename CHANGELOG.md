@@ -6,7 +6,7 @@ with evidence, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## [Unreleased]
 
-First entry: the stack as it stands on the `docs/roadmap` branch (the pull-request stack #5 to #22 and the
+First entry: the stack as it stands, covering the pull-request stack (#5 to #22 and the
 documentation on top of it), summarised by area. Not included: a launch that runs perception to execution,
 anything verified on hardware.
 
