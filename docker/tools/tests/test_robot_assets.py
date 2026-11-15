@@ -70,6 +70,19 @@ def test_spheres_stage_drops_a_stale_ignore_list(tmp_path, monkeypatch):
     assert not (tmp_path / 'vamp' / 'robot.srdf').exists()
 
 
+def test_a_crash_in_a_stage_is_recorded_before_it_propagates(tmp_path, monkeypatch):
+    profile = tmp_path / 'p.yaml'
+    profile.write_text('frames: {tcp: tcp}\n')
+
+    def boom(*a, **k):
+        raise FileNotFoundError('docker')
+    monkeypatch.setattr(ra, 'in_image', boom)
+    monkeypatch.setattr(sys, 'argv', ['robot_assets.py', str(profile), '--out', str(tmp_path / 'out'), '--only', 'urdf'])
+    with pytest.raises(FileNotFoundError):
+        ra.main()
+    assert json.loads((tmp_path / 'out' / 'status.json').read_text())['urdf']['status'] == 'failed'
+
+
 def test_srdf_stage_passes_lift_stages(tmp_path, monkeypatch):
     import xacro
     seen = {}

@@ -356,6 +356,11 @@ def main():
             print(f'stage {stage} failed: {e}', file=sys.stderr)
             failed = True
             break
+        except Exception as e:  # noqa: BLE001  e.g. docker missing: record which stage died, then show the traceback
+            status[stage] = {'status': 'failed', 'error': f'{type(e).__name__}: {e}'[:200],
+                             'seconds': round(time.time() - t0, 1)}
+            status_file.write_text(json.dumps(status, indent=2))
+            raise
         status_file.write_text(json.dumps(status, indent=2))
     if 'manifest' not in stages or failed:
         status_file.write_text(json.dumps(status, indent=2))
