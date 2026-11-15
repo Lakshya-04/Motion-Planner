@@ -65,14 +65,6 @@ def _load(path):
     return yaml.safe_load(path.read_text())
 
 
-def _base_profile(base):
-    """The profile whose `base:` section describes `base` (any arm)."""
-    for p in _profile_files():
-        if _load(p)['base']['name'] == base:
-            return _load(p)
-    raise AssertionError(f'no profile has a base section for {base}')
-
-
 def _positions(robot):
     """Translation of every link in base_footprint (the base joints carry no rotation)."""
     pos = {'base_footprint': (0.0, 0.0, 0.0)}
@@ -159,9 +151,10 @@ def test_base_contract_and_tree(base):
     assert pos['lift_mount_link'][2] > pos['base_link'][2] > 0.0
 
 
-@pytest.mark.parametrize('base', BASES)
-def test_footprint_contains_the_base_body(base):
-    profile = _base_profile(base)['base']
+@pytest.mark.parametrize('path', _profile_files(), ids=lambda p: p.stem)
+def test_footprint_contains_the_base_body(path):
+    profile = _load(path)['base']
+    base = profile['name']
     poly = profile['footprint']
     assert len(poly) >= 3
     xs, ys = [p[0] for p in poly], [p[1] for p in poly]
@@ -171,6 +164,8 @@ def test_footprint_contains_the_base_body(base):
     robot = _render_base(base)
     pos = _positions(robot)
     checked = 0
+    lo_x = lo_y = float('inf')
+    hi_x = hi_y = float('-inf')
     for link in robot.links:
         if link.name not in _base_links(robot):
             continue
@@ -180,18 +175,18 @@ def test_footprint_contains_the_base_body(base):
             x0, x1, y0, y1 = _xy_extent(shape.geometry, shape.origin, pos[link.name])
             assert min(xs) - 1e-3 <= x0 and x1 <= max(xs) + 1e-3, f'{base}/{link.name} x outside'
             assert min(ys) - 1e-3 <= y0 and y1 <= max(ys) + 1e-3, f'{base}/{link.name} y outside'
+            lo_x, hi_x, lo_y, hi_y = min(lo_x, x0), max(hi_x, x1), min(lo_y, y0), max(hi_y, y1)
             checked += 1
     assert checked >= 2
-    # Not absurdly loose: the footprint is within 5 cm of the tightest box.
-    body = next(l for l in robot.links if l.name == 'base_link').collision.geometry.size
-    assert (max(xs) - min(xs)) >= body[0] - TOL and (max(ys) - min(ys)) >= body[1] - TOL
-    assert (max(xs) - min(xs)) <= body[0] + 0.6 and (max(ys) - min(ys)) <= body[1] + 0.4
+    # Not absurdly loose: within 5 cm of the tightest box around body, wheels and casters.
+    assert (max(xs) - min(xs)) <= (hi_x - lo_x) + 0.05 and (max(ys) - min(ys)) <= (hi_y - lo_y) + 0.05
 
 
-@pytest.mark.parametrize('base', BASES)
-def test_profile_agrees_with_the_model(base):
-    profile = _base_profile(base)
+@pytest.mark.parametrize('path', _profile_files(), ids=lambda p: p.stem)
+def test_profile_agrees_with_the_model(path):
+    profile = _load(path)
     b = profile['base']
+    base = b['name']
     assert profile['robot']['xacro_args']['base'] == base
     assert b['drive_type'] in DRIVE_TYPES
     assert isinstance(b['can_strafe'], bool)
