@@ -9,7 +9,7 @@
 # environment with sim_mujoco, ft_conditioner, compliant_trajectory_controller, coverage_planner, manipulation_manager
 # and mobile_manipulator_moveit_config installed. Extra arguments go to `ros2 launch manipulation_manager`.
 #   SPRAY_PASS_OUT (default /tmp/spray_pass)  SPRAY_PASS_STANDOFF (m, 0.30)  SPRAY_PASS_HALF_ANGLE (deg, 20)
-#   SPRAY_PASS_OVERLAP (percent, 20)  SPRAY_PASS_SPEED (m/s, 0.05)  SPRAY_PASS_MIN_COVERAGE (0.9)
+#   SPRAY_PASS_OVERLAP (percent, 20)  SPRAY_PASS_SPEED (m/s, 0.05)  SPRAY_PASS_MIN_COVERAGE (0.9)  SPRAY_PASS_MAX_PEAK (N, 0 = no force limit)
 #   SPRAY_PASS_SCORE_ARGS (extra score_run arguments, e.g. "--max-thickness-cov 0.6")  SPRAY_PASS_LAUNCH_ARGS
 set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
@@ -28,9 +28,10 @@ MP_MANAGER_YAML_EXTRA=$'    contact: false\n    valve_topic: /tool/valve'
 MP_MANAGER_GREP="spray success|valve |Coverage plan complete|dock failed|retract failed"
 mp_score() {
   # the valve column: some samples spraying, not all of them; the tool never presses on the wall
-  awk -F, 'NR>1 {n++; if ($6 == 1) on++; if ($5 > m) m = $5} END {printf "recorded %d samples, valve open in %d, peak force %.2f N\n", n, on, m}' "$REC"
+  awk -F, 'NR>1 {n++; if ($6 == 1) on++; if ($5 > m) m = $5; if ($6 == 1 && $5 > mo) mo = $5} END {printf "recorded %d samples, valve open in %d, peak force %.2f N (%.2f N while spraying)\n", n, on, m, mo}' "$REC"
   ros2 run coverage_planner score_run --no-contact --samples "$REC" --wall "$REC.wall.json" --swath $SWATH \
     --spray-standoff $STANDOFF --spray-half-angle $HALF_ANGLE --min-coverage "${SPRAY_PASS_MIN_COVERAGE:-0.9}" \
+    --max-peak "${SPRAY_PASS_MAX_PEAK:-0}" \
     ${SPRAY_PASS_SCORE_ARGS:-}
 }
 

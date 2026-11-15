@@ -368,12 +368,17 @@ other knobs: `SPRAY_PASS_SPEED` (0.05 m/s), `SPRAY_PASS_MIN_COVERAGE`, `SPRAY_PA
 `--max-thickness-cov 0.6`).
 
 Result (one run, UR10e, smoke wall, standoff 0.30 m): three columns, all `done` (valve ON/OFF once per stroke, six
-waypoints each); 9087 samples, the valve open in 1561 (15.6 s of 90.9 s); peak force 0.00 N (the tool never touched the
+waypoints each); 9087 samples, the valve open in 1561 (15.6 s of 90.9 s); peak force 0.00 N while spraying (the tool never touched the
 wall); coverage 1.0 (930 of 930 cells, mean overlap 1.39); thickness mean 0.0185 (relative), CoV 0.52, min 0, max 0.059;
 the scorer exits 0. The CoV is high because the wall is only 0.30 m wide: three strokes, and the cells at the wall edges
 and at the ends of the strokes get the tail of the Gaussian only; it is a number to improve with spacing and standoff
 optimisation (roadmap section 4), not a pass criterion (no limit is set by default). Regression: `run_manager_pass.sh` on
 the same build gives coverage 0.931, peak 19.4 N, RMS error 3.58 N (the contact scorecard has no `thickness` section).
+Over five runs the thickness CoV was 0.52, 0.61, 0.52, 0.53 and 0.52 and coverage 1.0 every time. No force limit is set by
+default (`SPRAY_PASS_MAX_PEAK=0`): the whole-run peak force was 0, 237, 10, 0 and 0 N. The two spikes happened during valve-closed
+free-space moves in the air (z 1.6-1.8 m, x 0.7 m, far from the wall) and never while spraying; they are transients of the fast
+OMPL moves (or an arm-link touch), not wall contact, so a 5 N limit over the whole run would fail some runs for a reason that is
+not the tool. Worth chasing before a force limit is turned on (the script prints the peak while spraying separately).
 Limits: the standoff is open loop (no feedback on the wall distance), the valve timing is one open and one close per
 stroke, and the sim has no spray: the deposit is computed by the scorer from the recorded path.
 
