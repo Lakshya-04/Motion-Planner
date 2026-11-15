@@ -151,8 +151,11 @@ public:
     planning_config_ = this->declare_parameter<std::string>("planning_config", "");
     manager_.setLogger(std::make_shared<ros_adapters::RclcppLogger>(this->get_logger()));
 
+    // The JTAC controller's node name: its action, parameters and force topic hang off it.
+    controller_name_ = this->declare_parameter<std::string>(
+      "controller_name", "combined_arm_lift_controller");
     force_pub_ = this->create_publisher<std_msgs::msg::Float64>(
-      "/combined_arm_lift_controller/target_force_n", 10);
+      "/" + controller_name_ + "/target_force_n", 10);
   }
 
   /// Two-phase init: JtacExecutionAdapter needs a live node shared_ptr for its action client,
@@ -163,13 +166,14 @@ public:
     if (!buildPlanners()) {
       return false;
     }
-    execution_adapter_ = std::make_shared<JtacExecutionAdapter>(shared_from_this());
+    execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
+      shared_from_this(), "/" + controller_name_ + "/follow_joint_trajectory");
     manager_.setExecutionPort(execution_adapter_);
 
     param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(
-      shared_from_this(), "/combined_arm_lift_controller");
+      shared_from_this(), "/" + controller_name_);
     if (!param_client_->wait_for_service(std::chrono::seconds(10))) {
-      RCLCPP_ERROR(this->get_logger(), "combined_arm_lift_controller param service unavailable");
+      RCLCPP_ERROR(this->get_logger(), "%s param service unavailable", controller_name_.c_str());
       return false;
     }
     return true;
@@ -549,6 +553,7 @@ private:
   double contact_y_overshoot_{0.0};
   double max_wall_penetration_{0.0};
   double target_force_n_{0.0};
+  std::string controller_name_{"combined_arm_lift_controller"};
   double press_settle_s_{2.0};
   double unload_m_{0.0};
 };

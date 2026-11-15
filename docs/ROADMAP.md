@@ -94,7 +94,7 @@ without code, when we can implement it.
 - [x] Lifts: telescopic, scissor, fixed, none; recipe for a column lift
 - [x] Bases: ranger_mini, scout, scout_mini, husky, mpo_500, mir100, two turtlebot3, generic (omni / diff / skid / 4ws)
 - [x] One command from a profile to every per-robot asset (spheres, cuRobo config, VAMP header, ACM, reach map, manifest)
-- [~] Still hard-coded: controller name `lift_arm_controller`, `/combined_arm_lift_controller/target_force_n`, `z_offset_m` 0.31, default group
+- [~] Still hard-coded (the manager takes `controller_name` now): controller name `lift_arm_controller`, `/combined_arm_lift_controller/target_force_n`, `z_offset_m` 0.31, default group
       `lift_arm`, three legacy diagnostic nodes with a `joint1..6` chain
 - [ ] VAMP / cuRobo robot models built from the profile at run time (today: the asset command, compile-time for VAMP)
 - [ ] MoveIt swap verified for the Panda arm in docs (tests exist; no recorded evidence)
