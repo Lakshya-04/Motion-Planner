@@ -48,7 +48,8 @@ COPY docker/apt-extra.txt /tmp/apt-extra.txt
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
-    && (rosdep init 2>/dev/null || true) && rosdep update --rosdistro ${ROS_DISTRO} \
+    && (rosdep init 2>/dev/null || true) \
+    && (for i in 1 2 3 4 5; do rosdep update --rosdistro ${ROS_DISTRO} && exit 0; echo "rosdep update failed (try $i), retrying"; sleep 10; done; exit 1) \
     && rosdep install --from-paths /tmp/src-manifest --ignore-src -y --rosdistro ${ROS_DISTRO} \
          --skip-keys "ament_cmake_clang_format" \
     && rm -rf /var/lib/apt/lists/* /tmp/src-manifest
@@ -112,6 +113,18 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 ENV PATH=/opt/venv/bin:$PATH \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility
+USER ${USERNAME}
+
+############################ sim ##############################
+# MuJoCo 4 + MJX (JAX) on top of the gpu image. Optional: not needed for planning.
+#   docker build -f docker/Dockerfile --target sim -t motion-planner:sim .
+FROM gpu AS sim
+ARG USERNAME=dev
+USER root
+COPY docker/requirements-sim.txt /tmp/requirements-sim.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    /opt/venv/bin/pip install -r /tmp/requirements-sim.txt \
+    && chown -R ${USERNAME}: /opt/venv
 USER ${USERNAME}
 
 ############################ vamp #############################

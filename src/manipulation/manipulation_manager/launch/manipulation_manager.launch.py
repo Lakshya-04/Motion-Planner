@@ -8,7 +8,10 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from moveit_configs_utils import MoveItConfigsBuilder
 
 
@@ -37,7 +40,12 @@ def generate_launch_description():
             moveit_config.to_dict(),
             {"use_sim_time": True},
             {"planning_pipelines.pipeline_names": ["ompl"]},
+            # seed-preferring IK in the backend: 0 = one plain solve (see coverage_pass_demo.launch.py)
+            {"ik_extra_seeds": ParameterValue(LaunchConfiguration("ik_seeds"), value_type=int)},
         ],
     )
 
-    return LaunchDescription([manipulation_manager_node])
+    return LaunchDescription([
+        DeclareLaunchArgument("ik_seeds", default_value="0", description="extra perturbed-seed IK solves (0 = off)"),
+        manipulation_manager_node,
+    ])

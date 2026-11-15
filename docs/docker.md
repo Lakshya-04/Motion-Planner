@@ -14,6 +14,13 @@ dependency listed in the repo. Files live in [`docker/`](../docker/).
 | `gpu` | dev + CUDA PyTorch + cuRobo v2 (pinned) | GPU planning, needs NVIDIA runtime |
 | `vamp` (build stage) | upstream VAMP at a pinned commit, SIMD baseline x86-64-v3 + AVX2 | feeds `full` |
 | `full` | `gpu` + VAMP | everything |
+| `sim` | `gpu` + MuJoCo 4 (`mujoco-core`) + MJX with JAX (`docker/requirements-sim.txt`) | simulation and RL, optional |
+
+`sim` is built on its own (`docker build -f docker/Dockerfile --target sim -t motion-planner:sim .`) and
+is not part of `full`. MuJoCo 4 splits the Python package: `mujoco-core` is the headless library and
+bindings, which is all a container needs; `mujoco` and `mujoco-studio` add the viewer and renderer.
+MJX needs Python 3.11 or newer. 4.0 removed the `composite` element, the `cable` plugin and `flexvert`
+equality constraints, so older models that use them need updating.
 
 ## Usage
 

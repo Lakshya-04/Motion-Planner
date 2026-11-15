@@ -74,7 +74,6 @@ docker run --rm -v $PWD/src:/ws/src:ro -v mp_build:/ws/build -v mp_install:/ws/i
   the compliant controller's force topics, so it needs that controller under `controller_name`.
   Its names and the base-to-footprint offset are parameters now.
 - Pairs that are never or always in collision for one arm's geometry beyond the sampled check.
-- Seed-preferring IK solver.
 
 ## Compliant controller (JTAC) variant
 
@@ -93,3 +92,63 @@ config and the wall-pass demo (`controller_name`, the `…/target_force_n` topic
   `scripts/smoke_plan.py --execute` plans with `lift_arm` through MoveIt, executes through the
   controller, and checks the joints arrived. The 6-joint `arm` group stays plan-only: the single
   controller takes all seven joints (no partial goals), same as the plain trajectory controller.
+
+## IK solvers: `ik:=kdl | trac_ik | pick_ik`
+
+`demo.launch.py ik:=...` / `build_moveit_config(arm, ik=...)` choose the kinematics plugin
+(`config/kinematics*.yaml`). Measured with `scripts/smoke_plan.py --stress --spread=R` on Jazzy: 20
+poses taken from random configurations within R rad of the current state, IK started from that state;
+"excess" is how much further the solution lands from the seed than the configuration the pose came from,
+"jump" is an excess over 0.5 rad.
+
+| UR10e, R = 1.2 rad | group | solved | mean excess | jumps | worst move |
+|---|---|---|---|---|---|
+| KDL | lift_arm (7) | 20/20 | 0.60 rad | 4 | 6.4 rad (wrapped) |
+| KDL | arm (6) | 20/20 | 0.12 rad | 2 | 3.1 rad |
+| TRAC-IK `solve_type: Distance` | lift_arm | 20/20 | 0.13 rad | 2 | 2.3 rad |
+| TRAC-IK `solve_type: Distance` | arm | 20/20 | 0.007 rad | 0 | 1.3 rad |
+| pick_ik (default and a longer timeout) | lift_arm / arm | 2/20, 0/20 | | | |
+
+The generic 6-DOF arm gives the same picture (KDL excess 0.65 / 0.29 with 4 / 2 jumps; TRAC-IK 0.15 /
+0.00 with 1 / 0). For targets within 0.4 rad of the seed all three behave (KDL and TRAC-IK 20/20, no
+excess), so the difference only shows on larger moves, where KDL can return a far or wrapped branch.
+
+- **Default: `trac_ik`**, `Distance` on `arm` (it prefers the seed's branch) and `Speed` on `lift_arm`:
+  `Distance` uses the whole timeout on every call, which is 0.1 s per waypoint of a Cartesian pass on the
+  7-DOF group. The table above was measured with `Distance` on both; `Speed` on `lift_arm` was not
+  measured, and its branch preference comes from `ik_seeds:=N` (`SeedPreferringIk`, off by default). `kdl` ships with MoveIt and
+  stays available as `ik:=kdl`. The plugin is an `exec_depend`, so the Docker deps layer installs it.
+- `pick_ik` is kept as an opt-in config but performed poorly here (tolerances / scales untuned for
+  these poses); do not use it without tuning.
+- **Seed preferring (`SeedPreferringIk`, parameter `ik_extra_seeds`, off by default):** N extra solves from
+  seeds perturbed by up to 0.3 rad, wrapped by whole turns toward the real seed, closest kept. With
+  TRAC-IK `Distance`, R = 1.2 rad, `--seeds=8` (same algorithm, applied in `smoke_plan.py`): `lift_arm`
+  mean excess 0.132 -> 0.069 rad, worst move 2.26 -> 1.70 rad, jumps 2 -> 2 (of 20); `arm` 0.007 -> 0.000,
+  0 jumps. It trims the redundant group's drift but does not remove the two branch jumps, and each
+  extra seed costs one more solve.
+- Switch it on from the launch line: `ros2 launch motion_planner_moveit coverage_pass_demo.launch.py ik_seeds:=8`
+  (`ik_seed_perturbation:=0.3` sets the noise in rad). The parameters are written for a wildcard node name, so
+  they reach the backend's own `motion_planner_backend` node.
+- "Closest" is a weighted distance: prismatic joints (the lift) weigh `ik_prismatic_factor`^2 (default 6,
+  so 1 m of lift counts as 6 rad, from the 0.3 rad / 0.05 m jump thresholds in `design_principles.md`
+  section 4) and revolute joints weigh 1. The same knob exists on the cuRobo node (`prismatic_joints`,
+  `ik_prismatic_factor`, `ik_weights`).
+- The 7-DOF `lift_arm` group is redundant, so even TRAC-IK still jumps branch on a couple of poses;
+  `SeedPreferringIk` (above) is the solver-agnostic wrapper that trims this.
+
+### Prior art: a modified TRAC-IK from an earlier production stack
+
+An earlier stack carried a TRAC-IK fork (ROS 2, installed into its image). What it changed, as ideas to
+re-implement on top of the unmodified upstream solver, not to copy:
+
+- a **continuous mode** on `CartToJnt` (stay on the seed's branch) vs the stock "any solution" mode;
+- **several distinct solutions** per query (a configurable maximum, deduplicated), not just the first;
+- **prioritised seeds**: noise-perturbed variants of the caller's seed (a configurable count and
+  amplitude), tried best first, written for 6 joints;
+- a **prefilter** that drops seeds whose forward kinematics are already far from the target, backed by
+  an **FK cache** keyed by joint configuration;
+- every solution **re-validated by forward kinematics** against position and orientation tolerances;
+- joint angles **wrapped / normalised** against the seed.
+The benchmark that came with it compared continuous against discontinuous mode over 1000 solves
+(solve time, success rate, CSV per mode). Measuring both on our own poses (above) already shows why
+seed continuity matters.
