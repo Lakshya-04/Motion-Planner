@@ -95,3 +95,10 @@ tool was not working. Obstacles are excluded from the target. The limits are the
 (`ScorecardLimits`); each one that fails adds a line to `failures`. It does not count collisions (the recorder must),
 and the coverage is geometric. It scores recorded samples; recording them from a simulator run is not wired yet.
 
+`ros2 run coverage_planner score_run --samples run.csv --wall wall.json [--swath 0.2] [--target-force 10] [--band 1]
+[--no-contact] [--min-coverage 0.95] [--max-rms N] [--max-peak N] [--min-in-band F]` scores a recording and prints the
+card as JSON (exit 0 passed, 1 failed a limit, 2 bad input). The CSV has the header `t,x,y,z,force,active` (seconds,
+metres, newtons pressing on the wall, 0/1 valve); the wall JSON is `{"origin": [x,y,z], "u": [..], "v": [..],
+"u_range": [min,max], "v_range": [min,max]}` in the same frame as the positions, with `u` and `v` orthonormal and the
+normal `u x v`. It takes any recording, a simulator run or a hardware log.
+

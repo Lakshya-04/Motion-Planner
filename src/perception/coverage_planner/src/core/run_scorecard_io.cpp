@@ -1,0 +1,107 @@
+#include "coverage_planner/core/run_scorecard_io.hpp"
+
+#include <sstream>
+#include <stdexcept>
+#include <string>
+
+#include "coverage_planner/core/wall_basis.hpp"
+
+namespace coverage_planner
+{
+
+std::vector<RunSample> parseRunCsv(std::istream & in)
+{
+  std::vector<RunSample> out;
+  std::string line;
+  bool header_seen = false;
+  size_t line_no = 0;
+  while (std::getline(in, line)) {
+    ++line_no;
+    if (!line.empty() && line.back() == '\r') {line.pop_back();}
+    if (line.empty() || line[0] == '#') {continue;}
+    if (!header_seen) {
+      if (line != "t,x,y,z,force,active") {
+        throw std::runtime_error("sample csv: the header must be t,x,y,z,force,active");
+      }
+      header_seen = true;
+      continue;
+    }
+    std::vector<double> v;
+    std::stringstream ss(line);
+    std::string cell;
+    while (std::getline(ss, cell, ',')) {
+      try {
+        size_t used = 0;
+        v.push_back(std::stod(cell, &used));
+        if (used != cell.size()) {throw std::invalid_argument(cell);}
+      } catch (const std::exception &) {
+        throw std::runtime_error("sample csv line " + std::to_string(line_no) + ": '" + cell + "' is not a number");
+      }
+    }
+    if (v.size() != 6) {
+      throw std::runtime_error("sample csv line " + std::to_string(line_no) + ": expected 6 columns");
+    }
+    RunSample s;
+    s.t_s = v[0]; s.x = v[1]; s.y = v[2]; s.z = v[3]; s.force_n = v[4]; s.tool_active = v[5] != 0.0;
+    out.push_back(s);
+  }
+  if (!header_seen) {throw std::runtime_error("sample csv: empty, no header");}
+  return out;
+}
+
+namespace
+{
+Eigen::Vector3d vec3(const nlohmann::json & j, const char * key)
+{
+  if (!j.contains(key) || !j.at(key).is_array() || j.at(key).size() != 3) {
+    throw std::runtime_error(std::string("wall json: '") + key + "' must be an array of 3 numbers");
+  }
+  return {j.at(key)[0].get<double>(), j.at(key)[1].get<double>(), j.at(key)[2].get<double>()};
+}
+std::pair<double, double> range(const nlohmann::json & j, const char * key)
+{
+  if (!j.contains(key) || !j.at(key).is_array() || j.at(key).size() != 2) {
+    throw std::runtime_error(std::string("wall json: '") + key + "' must be [min, max]");
+  }
+  const double lo = j.at(key)[0].get<double>(), hi = j.at(key)[1].get<double>();
+  if (!(hi > lo)) {throw std::runtime_error(std::string("wall json: '") + key + "' needs max > min");}
+  return {lo, hi};
+}
+}  // namespace
+
+WallPlane wallFromJson(const nlohmann::json & j)
+{
+  const Eigen::Vector3d origin = vec3(j, "origin"), u = vec3(j, "u"), v = vec3(j, "v");
+  WallPlane wall;
+  wall.id = j.value("id", 1U);
+  try {
+    wall.pose.pose = encodeWallBasis(origin, u, v, u.cross(v));
+  } catch (const std::runtime_error & e) {
+    throw std::runtime_error(std::string("wall json: ") + e.what());
+  }
+  std::tie(wall.u_min, wall.u_max) = range(j, "u_range");
+  std::tie(wall.v_min, wall.v_max) = range(j, "v_range");
+  return wall;
+}
+
+nlohmann::json scorecardToJson(const RunScorecard & c)
+{
+  return {
+    {"passed", c.passed},
+    {"failures", c.failures},
+    {"coverage", {
+      {"covered_fraction", c.coverage.covered_fraction},
+      {"target_cells", c.coverage.target_cells},
+      {"covered_cells", c.coverage.covered_cells},
+      {"missed_cells", c.coverage.missed.size()},
+      {"mean_overlap", c.coverage.mean_overlap},
+      {"outside_cells", c.coverage.outside_cells}}},
+    {"force", {
+      {"rms_error_n", c.force_rms_error_n},
+      {"peak_n", c.force_peak_n},
+      {"in_band_fraction", c.in_band_fraction}}},
+    {"time", {{"duration_s", c.duration_s}, {"engaged_s", c.engaged_s}}},
+    {"strokes", c.strokes}};
+}
+
+}  // namespace coverage_planner
