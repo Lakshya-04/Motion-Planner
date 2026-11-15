@@ -25,6 +25,10 @@ export MUJOCO_ROOT=/opt/mujoco-sdk/mujoco-4.0.1
 colcon build --packages-select sim_mujoco mobile_manipulator_description
 ```
 
+No SDK download is needed when the `sim` image's Python wheel is at hand: `mujoco-core` ships `libmujoco.so.4.0.1` and the
+headers, so a `MUJOCO_ROOT` can be assembled from it (`include/` copied from `site-packages/mujoco/include`, `lib/libmujoco.so.4.0.1`
+plus a `libmujoco.so` symlink). This is how the contact test was run on a machine with a slow link to GitHub.
+
 Without `MUJOCO_ROOT` (or `/opt/mujoco`) CMake prints a warning and builds only the Python tools,
 launch files and data, so the repo-wide `colcon build` of the `build` image stays green. With it,
 `libmujoco.so.4.0.1` is installed next to the plugin (`$ORIGIN` rpath), so the install tree is
@@ -254,3 +258,15 @@ lack), or `python -m pytest src/simulation/sim_mujoco/test` in the `sim` image.
 - Single F/T sensor, one tool. No rendering sensors, no viewer inside the plugin: `viewer:=true`
   starts `viewer.py`, which only mirrors `/joint_states` (needs a display and the `mujoco` Python
   package; not run in the headless images).
+
+## Recording a run and scoring it
+
+`run_contact.sh --record /tmp/run.csv` (extra arguments go to `contact_test.py`) writes the whole run as a `score_run` CSV
+(`t,x,y,z,force,active`: the tool point in `base_footprint` from TF, the ground-truth force along the tool axis) and
+`/tmp/run.csv.wall.json` (the wall plane x = 0.98 m, u along y, v along z). Score it with
+`ros2 run coverage_planner score_run --samples /tmp/run.csv --wall /tmp/run.csv.wall.json --target-force 10 --band 1.5 --swath 0.05
+--min-coverage 0 --max-rms 2 --max-peak 15` (see `docs/coverage_patterns.md`). One recorded run (UR10e, smoke wall, 10 N target):
+9188 samples, 6 strokes, force peak 12.3 N, force RMS error 1.25 N over the working samples (the approach and release ramps
+count), 85 percent of them within 1.5 N of the target. The contact test presses at one point, so coverage is not meaningful
+there (hence `--min-coverage 0`); a full wall pass would feed the same scorer.
+
