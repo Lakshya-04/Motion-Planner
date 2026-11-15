@@ -52,7 +52,7 @@ manipulation_manager:
     coverage_z_step_m: 0.05
     coverage_z_min_m: 1.0
     coverage_z_max_m: 1.3
-    coverage_eef_speed_mps: ${MANAGER_PASS_SPEED:-0.02}
+    coverage_eef_speed_mps: ${MANAGER_PASS_SPEED:-0.01}
     dock_at_stroke_start: true
     dock_standoff_m: ${MANAGER_PASS_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MANAGER_PASS_PRESS:-0.0015}
