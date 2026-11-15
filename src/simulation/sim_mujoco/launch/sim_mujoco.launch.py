@@ -12,8 +12,11 @@ MuJoCo plugin), robot_state_publisher, joint_state_broadcaster and one trajector
 
 controller:=jtc  joint_trajectory_controller (position command; default)
 controller:=jtac compliant_trajectory_controller/JtacController from the repo's own
-                 jtac_controller.yaml, with the joint names, kinematics chain and F/T sensor name
-                 overridden for this robot; it reads `ft_sensor` from this plugin.
+                 jtac_controller.yaml, with the joint names, kinematics chain, F/T sensor name and
+                 frames overridden for this robot; it reads `ft_sensor` from this plugin. That is the
+                 raw wrench at tool_mount_link, so the sensor frame is the mount and the tool weight
+                 is compensated through JTAC's gravity_compensation (CoG from the URDF). The lever
+                 arm to the TCP and the bias are not removed: engage force axes only.
 """
 import os
 import tempfile
@@ -29,7 +32,8 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
-from sim_mujoco.generate import command_joints, generate, load_profile, render_urdf
+from sim_mujoco.generate import (command_joints, generate, jtac_overrides, load_profile, render_urdf,
+                                 tool_payload)
 
 CONTROLLER_NAME = 'combined_arm_lift_controller'
 FT_SENSOR = 'ft_sensor'
@@ -52,22 +56,14 @@ def _jtc_params(joints, update_rate):
     }
 
 
-def _jtac_params(joints, update_rate, robot_description):
+def _jtac_params(joints, update_rate, robot_description, profile):
     base = yaml.safe_load(open(os.path.join(
         get_package_share_directory('compliant_trajectory_controller'), 'config',
         'jtac_controller.yaml')))
     base['controller_manager']['ros__parameters']['update_rate'] = update_rate
-    p = base[CONTROLLER_NAME]['ros__parameters']
-    p['joints'] = joints
-    p['robot_description'] = robot_description
-    p['kinematics']['base'] = 'base_link'
-    p['kinematics']['tip'] = 'tcp_link'
-    p['ft_sensor']['name'] = FT_SENSOR
-    p['ft_sensor']['frame']['id'] = 'tcp_link'
-    p['control']['frame']['id'] = 'tcp_link'
-    p['gravity_compensation']['frame']['id'] = 'tcp_link'
-    p['fixed_world_frame']['frame']['id'] = 'base_link'
-    return base
+    frames = profile.get('frames', {})
+    mass, cog = tool_payload(robot_description, frames.get('tool_mount', 'tool_mount_link'))
+    return jtac_overrides(base, joints, robot_description, frames, FT_SENSOR, mass, cog)
 
 
 def _setup(context, *args, **kwargs):
@@ -94,7 +90,7 @@ def _setup(context, *args, **kwargs):
 
     update_rate = int(arg('update_rate'))
     jtac = arg('controller') == 'jtac'
-    params = (_jtac_params(joints, update_rate, description) if jtac
+    params = (_jtac_params(joints, update_rate, description, profile) if jtac
               else _jtc_params(joints, update_rate))
     fd, params_file = tempfile.mkstemp(prefix='sim_mujoco_controllers_', suffix='.yaml')
     with os.fdopen(fd, 'w') as f:

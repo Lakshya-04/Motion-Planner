@@ -49,8 +49,17 @@ dir (`out_dir:=` to keep it), exports its path as `SIM_MUJOCO_MJCF` (read by the
 `joint_state_broadcaster` and a controller named `combined_arm_lift_controller` (the name MoveIt's
 controller config uses). `controller:=jtc` is a `JointTrajectoryController` (position command);
 `controller:=jtac` loads `compliant_trajectory_controller/JtacController` from the repo's own
-`jtac_controller.yaml`, overriding only the joint names, the kinematics chain and the F/T sensor
-name from the profile. Joint names always come from the profile.
+`jtac_controller.yaml`, overriding the joint names, the kinematics chain (`frames.base` to
+`frames.tcp`), the F/T sensor name and frames from the profile. Joint names always come from the profile.
+
+What `controller:=jtac` compensates. The plugin's `ft_sensor` is the raw wrench at `tool_mount_link` in
+the sensor axes, with the tool weight. The launch therefore sets the sensor frame and the gravity
+compensation frame to `tool_mount_link` (the control frame stays the TCP) and fills JTAC's
+`gravity_compensation.CoG` from the URDF: force = tool mass x 9.81, position = tool centre of gravity in
+the mount frame. So the tool weight is removed. Not compensated: the sensor bias (use `ft_tare`) and the
+lever arm from the sensor to the TCP, because JTAC only rotates the wrench into the control frame
+(see [ft_sensing.md](ft_sensing.md)); a contact force at the TCP therefore shows a torque error of
+`r x F` (r = 0.165 m). Engage force axes only. Torque axes need a conditioner in front of JTAC.
 
 If several ROS 2 containers share a host, give the sim its own `ROS_DOMAIN_ID` (and
 `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`): containers on one Docker bridge discover each other,
