@@ -2,7 +2,7 @@
 <!-- Mobile manipulator: base + lift + 6-DOF arm + tool = 7 actuated DOF (lift + six arm joints).
 
      Every part is swappable behind a small contract (see each file's header):
-       base  urdf/base/generic_base.xacro
+       base  urdf/base/base.xacro  (generic_base | ranger_mini | scout_mini | scout | husky | mpo_500 | mir100 | turtlebot3_*)
        lift  urdf/lift/telescopic_lift.xacro
        arm   urdf/arms/arm.xacro  (generic_6dof | ur3 | ur5 | ur10 | ur10e | ur16e | ur20 | ...)
        tool  urdf/tools/generic_tool.xacro
@@ -14,6 +14,7 @@
               tool_mount_link > tcp_link -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="mobile_manipulator">
 
+  <xacro:arg name="base" default="generic_base"/>
   <xacro:arg name="arm" default="ur10e"/>
   <xacro:arg name="lift_stroke" default="1.5"/>
   <xacro:arg name="lift_stages" default="2"/>
@@ -29,6 +30,15 @@
   <xacro:arg name="hardware" default="none"/>
 
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/generic_base.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/ranger_mini.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/scout_mini.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/scout.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/husky.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/mpo_500.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/mir100.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/turtlebot3_burger.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/turtlebot3_waffle.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/base.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/lift/telescopic_lift.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/tools/generic_tool.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/generic_6dof_arm.xacro"/>
@@ -37,7 +47,7 @@
   </xacro:if>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/arm.xacro"/>
 
-  <xacro:generic_base/>
+  <xacro:base base_type="$(arg base)"/>
 
   <xacro:telescopic_lift parent="lift_mount_link"
     stroke="$(arg lift_stroke)" stages="$(arg lift_stages)" max_velocity="$(arg lift_max_velocity)"
