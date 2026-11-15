@@ -9,7 +9,7 @@ sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware
         -> navigation / docking -> motion planning -> execution (JTAC + F/T) -> monitoring
 ```
 
-Last verified: 2026-11-15, by a code survey of the stack #5 to #22. Legend: `[x]` done, `[~]` partial (what is
+Last verified: 2026-11-15, after merging the stack #5 to #29. Legend: `[x]` done, `[~]` partial (what is
 missing is stated), `[ ]` not done (some are design-only). Each item names its evidence. Tick items as they land
 and update the date. **Policy:** reuse maintained open source before writing our own (section 17); ROS 2 distro
 support is not a reason to reject a candidate (we port); prefer the newest method that fits, including papers
@@ -77,8 +77,7 @@ without code, when we can implement it.
 - [x] Contact / non-contact: ACM exclusion scoped to the wall octomap; approach, contact and retreat as separate segments
 - [x] IK: KDL, trac_ik (default), pick_ik (opt-in, untuned), `SeedPreferringIk`, cuRobo IK
 - [x] cuRobo v2 backend (plan, IK, scene, ESDF) and VAMP backend (joint-goal plan, collision, scene)
-- [ ] **Runtime backend selection**: no pluginlib anywhere; the manager hard-wires MoveIt Cartesian + OMPL; `docs/package_layout.md` and
-      `docs/curobo_v2_notes.md` describe a mechanism that does not exist. *Reuse: pluginlib (the ROS standard)*
+- [x] **Runtime backend selection**: pluginlib plugins for planner, IK, collision and scene (MoveIt, cuRobo, VAMP); the manager builds them from a `planning_config` YAML (PR #29)
 - [ ] VAMP and cuRobo used by the manager for free-space transitions (the architecture example: IK cuRobo, free-space VAMP)
 - [~] VAMP: no pose goal, no IK, robots compiled in, not a contact planner
 - [~] cuRobo: pose-based collision unsupported, no wall-contact equivalent, one planner per process
@@ -192,7 +191,7 @@ without code, when we can implement it.
 - [ ] **Public-readiness cleanup**
   - [ ] 63 references in 41 files to 9 documents that are not in the repo (`force_control_backend_admittance_vs_diffik.md`,
         `implementation_plan_manipulation_architecture.md`, ...): strip them or distil into `docs/`
-  - [ ] "serum" (the earlier project's base type and `serum_demo_bt`) in 21 places (12 files); "mop" as the default tool name
+  - [~] Earlier-project base and application names are removed from code, READMEs and comments; "mop" as the default tool name remains until tool profiles ship (section 4)
   - [ ] Four launch files that look up packages that do not exist (`description`, `moveit_config`):
         `jtac_compliance_demo`, `jtac_controller_test`, `jtac_gazebo_controllers`, `manipulation_manager.launch.py`
   - [ ] `.claude/` is not in `.gitignore`
@@ -206,7 +205,7 @@ without code, when we can implement it.
 - [x] `curobo_v2_notes.md` and `moveit_config.md` "Not done"
 - [x] `scene_model.md` and `robot_self_filter.md` (the node is described; test counts 53 and 29)
 - [x] `coverage_planner` README rewritten
-- [ ] `package_layout.md` prescribes pluginlib selection; implement it (section 5)
+- [x] `package_layout.md` pluginlib selection implemented (PR #29)
 
 ## 15. Tests and quality
 
@@ -282,7 +281,7 @@ here were dropped. Placement is the milestone that should carry it.
 - [ ] Lift-aware planning: time metric max|dq|/vmax for ordering, strips by ascending lift height, in-band passes with the lift held, lift-travel KPI
 - [ ] Rate-feasible-by-construction IK; failure-aware resequencing (forbidden arcs, bounded rounds, committed prefix frozen)
 - [ ] Contact strips must plan to at least 98 percent or split (manager default `min_path_fraction` is 0.5 today)
-- [ ] **Weighted IK on the 7-DOF group**: `kinematics_trac_ik.yaml` uses `solve_type: Distance` on `lift_arm`, which uses the whole timeout on every call and counts 1 m of lift like 1 rad
+- [x] **Weighted IK on the 7-DOF group**: prismatic joints weighted (1 m of lift about 6 rad) and TRAC-IK Speed for `lift_arm` (PR #5 fixes)
 
 **Scorecard and verification (M2)**
 - [ ] Numeric pass/fail thresholds per mode (for example any contact above 5 N fails a non-contact run; force, standoff, coverage, no controller switch under load)
@@ -318,7 +317,7 @@ calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
 ## Proposed order (each milestone has an exit test)
 
 - **M0 Housekeeping** (days): push the cleanup, `.gitignore`, fix or delete the four broken launch files, reconcile section 14, strip the dangling
-  references and "serum". *Exit:* the section 13 scan finds nothing; docs match the code.
+  references and earlier-project names. *Exit:* the section 13 scan finds nothing; docs match the code.
 - **M1 Pipeline core, by reuse**: pluginlib backend selection, BehaviorTree.CPP task flow behind a manager action, ship tool profiles and wire them to
   coverage, reachability `plan_stands` called by the manager, ROS coverage source. *Exit:* swap MoveIt / cuRobo / VAMP and the tool by config, in a test.
 - **M2 First full run in sim, base static** (what you can start testing with): one launch per simulator, a scenario set, the scorecard **with the coverage
