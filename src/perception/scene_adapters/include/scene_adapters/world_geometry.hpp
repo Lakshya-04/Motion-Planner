@@ -24,7 +24,7 @@ struct WorldGeometryOptions
 {
   double surface_spacing{0.05};         ///< Sampling spacing for contact-surface points (m).
   double obstacle_voxel{0.05};          ///< Cube size for cloud / mesh / voxel obstacles (m).
-  size_t max_obstacle_boxes{2000};      ///< Cap on boxes made from one object; the cube grows to fit.
+  size_t max_obstacle_boxes{2000};      ///< Cap on boxes made from one object (at least 8); the cube grows to fit.
   bool unknown_voxels_occupied{false};  ///< Treat kVoxelUnknown cells as occupied.
   /// Pose of another frame in the scene frame (scene_T_frame), keyed by frame id. An object whose
   /// own frame_id is set and differs from the scene frame is transformed with its entry; without

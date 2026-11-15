@@ -228,6 +228,11 @@ mp::WorldGeometryUpdate toWorldGeometry(
     options.obstacle_voxel = defaults.obstacle_voxel;
     rep.approximated.push_back("obstacle_voxel must be > 0, using " + std::to_string(defaults.obstacle_voxel));
   }
+  if (options.max_obstacle_boxes < 8) {
+    // an extent that straddles the lattice origin needs up to 8 cubes at any cube size
+    options.max_obstacle_boxes = 8;
+    rep.approximated.push_back("max_obstacle_boxes must be >= 8, using 8");
+  }
 
   for (const auto & original : scene.objects()) {
     sm::SceneObject o = original;

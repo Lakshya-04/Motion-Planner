@@ -327,3 +327,27 @@ TEST(WorldGeometry, ObjectInAnotherFrameIsRejectedUnlessATransformIsGiven)
   for (const auto & p : w.points) {EXPECT_NEAR(p.y, 5.0, 0.11);}
   EXPECT_TRUE(rep.skipped.empty());
 }
+
+TEST(WorldGeometry, TinyBoxCapStillCoversEveryPoint)
+{
+  sm::SceneModel scene("base");
+  sm::PointCloud pc;
+  for (int i = 0; i < 8; ++i) {
+    pc.points.push_back({(i & 1) ? 0.01 : -0.01, (i & 2) ? 0.01 : -0.01, (i & 4) ? 0.01 : -0.01});
+  }
+  scene.add(object("corners", pc));
+  WorldGeometryOptions opt;
+  opt.max_obstacle_boxes = 1;
+  const auto w = toWorldGeometry(scene, opt);
+  ASSERT_FALSE(w.boxes.empty());
+  for (const auto & p : pc.points) {
+    bool covered = false;
+    for (const auto & b : w.boxes) {
+      covered = covered || (std::abs(p.x() - b.center_x) <= b.size_x / 2 + 1e-12 &&
+        std::abs(p.y() - b.center_y) <= b.size_y / 2 + 1e-12 &&
+        std::abs(p.z() - b.center_z) <= b.size_z / 2 + 1e-12);
+    }
+    EXPECT_TRUE(covered);
+  }
+  for (const auto & b : w.boxes) {EXPECT_LT(b.size_x, 10.0);}
+}
