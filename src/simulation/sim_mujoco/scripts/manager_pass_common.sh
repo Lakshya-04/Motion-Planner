@@ -9,6 +9,11 @@
 #   mp_world_model pcd start world_model_loader_node for the wall cloud (pid in WM)
 #   mp_record          start the recorder (pid in REC_PID)
 #   mp_run_and_score "$@"  ready pose, manager, stop recording, score; the exit code is left in MP_EXIT
+# Hooks for another tool kind (run_spray_pass.sh), all optional and unset for the contact passes:
+#   MP_COVERAGE_PARAMS     replaces the default `-p swath_m:=.. -p overlap_pct:=..` of mp_coverage
+#   MP_MANAGER_YAML_EXTRA  lines appended to manager.yaml (4-space indented parameters)
+#   MP_MANAGER_GREP        egrep pattern of the manager log lines echoed after the run
+#   mp_score               a function that scores $REC instead of the contact score_run call; its status is the score
 mp_init() {
   OUT=${1:?output dir}
   mkdir -p "$OUT"
@@ -39,7 +44,8 @@ mp_coverage() {
   timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args \
     -p wall_scene_json:=$scene -p output_json:=$COV \
     -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${MANAGER_PASS_TOOL_YAW:--90.0} \
-    -p swath_m:=${MANAGER_PASS_SWATH:-0.14} -p overlap_pct:=${MANAGER_PASS_OVERLAP:-15.0} > "$OUT/coverage_demo.log" 2>&1 &
+    ${MP_COVERAGE_PARAMS-"-p swath_m:=${MANAGER_PASS_SWATH:-0.14} -p overlap_pct:=${MANAGER_PASS_OVERLAP:-15.0}"} \
+    > "$OUT/coverage_demo.log" 2>&1 &
   local demo=$!
   for _ in $(seq 100); do [ -s "$COV" ] && break; sleep 0.5; done
   kill -INT $demo 2>/dev/null
@@ -62,6 +68,7 @@ manipulation_manager:
     dock_standoff_m: ${MANAGER_PASS_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MANAGER_PASS_PRESS:-0.0015}
     target_force_n: ${MANAGER_PASS_TARGET:-10.0}
+${MP_MANAGER_YAML_EXTRA:-}
 YAML
 }
 
@@ -83,11 +90,15 @@ mp_run_and_score() {
     params_file:=$OUT/manager.yaml "$@" > "$OUT/manager.log" 2>&1
   local rc=$?
   echo "manager exit code $rc (logs in $OUT)"
-  grep -E "contact success|Coverage plan complete|dock failed|retract failed" "$OUT/manager.log" | cut -c1-200
+  grep -E "${MP_MANAGER_GREP:-contact success|Coverage plan complete|dock failed|retract failed}" "$OUT/manager.log" | cut -c1-200
   kill -INT "$REC_PID" 2>/dev/null; wait "$REC_PID" 2>/dev/null; REC_PID=
   cat "$OUT/record.log"
   local sc=0
-  if [ -f "$REC" ]; then
+  if [ -f "$REC" ] && declare -F mp_score > /dev/null; then
+    mp_score
+    sc=$?
+    echo "score exit code $sc"
+  elif [ -f "$REC" ]; then
     ros2 run coverage_planner score_run --samples "$REC" --wall "$REC.wall.json" --target-force "${MANAGER_PASS_TARGET:-10}" \
       --band 1.5 --swath ${MANAGER_PASS_SWATH:-0.14} --min-coverage "${MANAGER_PASS_MIN_COVERAGE:-0.9}" ${MANAGER_PASS_SCORE_ARGS:-}
     sc=$?
