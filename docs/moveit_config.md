@@ -92,10 +92,10 @@ docker run --rm -v $PWD/src:/ws/src:ro -v mp_build:/ws/build -v mp_install:/ws/i
 
 ## Not done
 
-- A JTAC (compliant controller) variant of the controller config: `coverage_pass_demo_node` drives
-  the compliant controller's force topics, so it needs that controller under `controller_name`.
-  Its names and the base-to-footprint offset are parameters now.
 - Pairs that are never or always in collision for one arm's geometry beyond the sampled check.
+- Done since the first version: the JTAC variant (`controller:=jtac`, next section) and the
+  seed-preferring IK (`SeedPreferringIk` in `motion_planner`, wired in `motion_planner_moveit`,
+  off by default).
 
 ## Compliant controller (JTAC) variant
 

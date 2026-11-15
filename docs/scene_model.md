@@ -2,7 +2,7 @@
 
 Backend-neutral container for everything known about the world, so any input can be given to
 the coverage planner or to any motion-planning backend. ROS-free (C++17 + Eigen + yaml-cpp).
-Package: [`src/perception/scene_model`](../src/perception/scene_model). 41 tests.
+Package: [`src/perception/scene_model`](../src/perception/scene_model). 53 tests.
 
 ## Types
 
@@ -27,7 +27,7 @@ bounds and merges scenes.
 | Mesh | `loadObj` (polygons triangulated, negative indices), `loadStl` (ascii and binary) |
 | Static collision objects, planning scenes | `loadSceneFile` / `loadSceneYaml`: the native layout (`objects:` list with id, type, size, pose, role) **or** a cuRobo-style world dict (`cuboid:` / `sphere:` / ... with `[x y z qw qx qy qz]` poses). Mesh and cloud files resolve relative to the description |
 | Voxel / depth-fused maps | `VoxelGrid` / `EsdfGrid` filled by a perception source (cuRobo mapper, nvblox), see [nvblox_notes.md](nvblox_notes.md) |
-| MoveIt `PlanningScene`, `PointCloud2`, `octomap` | planned: ROS shell converters (`scene_model/ros/`) |
+| MoveIt `PlanningScene` / `CollisionObject`, `PointCloud2` | ROS converters in `src/ros/conversions.cpp` (`scene_model::ros_conv::fromRos` / `toRos`); `octomap` input is not converted |
 
 ## Processing
 
@@ -46,14 +46,15 @@ bounds and merges scenes.
 | Backend | Converter |
 |---|---|
 | cuRobo v2 | `toCuroboWorldYaml(scene)`: primitives and meshes as a world dict; clouds / voxels / ESDF are listed as skipped so they go through the mapper or ESDF path |
-| MoveIt, VAMP | planned adapters next to each backend (boxes, meshes, octomap from points) |
-| Coverage planner | wall plane + obstacle regions from `fitPlane` plus the scene's obstacles (planned adapter) |
+| MoveIt, VAMP, cuRobo client | `scene_adapters::toWorldGeometry` (below); an octomap built from points is not done |
+| Coverage planner | `fitPlane` feeds `planCoverageFromScan` in the library; a scene-to-coverage adapter is not done |
 
 ## Not yet done
 
-ROS shell (topics, services, `PlanningScene` / `PointCloud2` conversion), TSDF fusion and mesh
-extraction on CPU, ESDF slicing, sliding-window ESDF, and the MoveIt / VAMP / coverage
-adapters. See [architecture.md](architecture.md).
+A ROS node around the model (topics, services, a live `PointCloud2` -> `SceneModel` ingest; only the
+converters exist, and `robot_self_filter` is their one caller), TSDF fusion and mesh extraction on CPU,
+ESDF slicing, sliding-window ESDF, and the coverage adapter. The MoveIt, VAMP and cuRobo adapters exist
+(`scene_adapters`, below). See [architecture.md](architecture.md).
 
 ## Feeding the planners: `scene_adapters`
 

@@ -160,8 +160,14 @@ Facts learned integrating it:
   the bridge returns only the active joints, in planner order.
 - Poses and quaternions are `[x y z]` + `[w x y z]`; results come back as `(1, 1, T, dof)` tensors.
 
-Not done: a cuRobo robot config for our mobile manipulator (URDF + sphere fit via cuRobo's
-`robot_builder`), the point-cloud ESDF path, and the ROS / C++ client.
+Done since this was written (see the sections below): the robot config for our arm
+(`docker/tools/generate_curobo_robot.py`), the ESDF world path (`curobo_bridge/planner.py`), the ROS
+node and services (`curobo_bridge`, `curobo_bridge_msgs`) and the C++ client (`curobo_planner`, a
+`Planner` + `ScenePort` with IK and state / motion validity).
+
+Not done: runtime selection of the backend (nothing is wired through pluginlib; the manager
+uses MoveIt), pose-based collision checks, a wall-contact equivalent, more than one planner per
+process, and live mapping (nothing produces an ESDF from a sensor yet).
 
 ## Our own robot in cuRobo (verified)
 

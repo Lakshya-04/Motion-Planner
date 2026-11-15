@@ -24,5 +24,7 @@
 | [simulation.md](simulation.md) | Simulation backends behind ros2_control (`hardware:=` choice; `mock` and `mujoco` exist so far): the contract each must meet, layout, status; Isaac Sim is a stub |
 | [sim_mujoco.md](sim_mujoco.md) | MuJoCo 4 simulation backend: ros2_control plugin (hardware:=mujoco), MJCF and wall world generators, raw wrist F/T and ground truth, smoke test, limits |
 | [sim_gazebo.md](sim_gazebo.md) | Gazebo Harmonic backend (`hardware:=gazebo`): headless launch, wall worlds from wall_scene.json, raw F/T sensor and ground-truth contact wrench, smoke test, limits |
-| [docker.md](docker.md) | Reproducible Docker environment: targets, dependency lists, GPU, VAMP SIMD build |
+| [docker.md](docker.md) | Reproducible Docker environment: targets (including `sim` and `sim-gazebo`), dependency lists, GPU, VAMP SIMD build |
 | [adr/](adr/) | Decision records (modular pipeline, upstream backends, core/ros split, C++ standard) |
+
+Repository root files: [README.md](../README.md) (overview), [THIRD_PARTY.md](../THIRD_PARTY.md) (third-party software and licences), [CONTRIBUTING.md](../CONTRIBUTING.md) (layout, checks, commit rules), [CHANGELOG.md](../CHANGELOG.md). Package READMEs: [coverage_planner](../src/perception/coverage_planner/README.md).
