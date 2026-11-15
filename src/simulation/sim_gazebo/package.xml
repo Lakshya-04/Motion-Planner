@@ -23,6 +23,11 @@
   <exec_depend>joint_trajectory_controller</exec_depend>
   <exec_depend>force_torque_sensor_broadcaster</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <!-- Gazebo Harmonic itself (ros_gz_sim, ros_gz_bridge, gz_ros2_control) is deliberately not a
