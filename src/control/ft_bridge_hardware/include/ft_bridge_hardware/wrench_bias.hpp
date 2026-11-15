@@ -2,8 +2,7 @@
  * @file wrench_bias.hpp
  * @brief Pure force-setpoint bias math for the FT bridge.
  * @details admittance_controller drives toward a measured wrench of zero -- it has no force
- *          setpoint of its own (verified against the installed Humble 2.52.1 source: see
- *          force_control_derisking_plan.md's Context section). Subtracting the active setpoint
+ *          setpoint of its own (verified against the installed Humble 2.52.1 source). Subtracting the active setpoint
  *          from the raw measured wrench before exporting it turns that zero-seeking law into a
  *          target-seeking one with no controller changes at all. Kept as a free function,
  *          independent of core_types::Wrench, because this component is a ROS adapter and

@@ -2,10 +2,10 @@
  * @file wall_contact_force_simulator_node.cpp
  * @brief Persistent MOCK contact-force sensor: continuously reports a physically-plausible wrench
  *        derived from REAL penetration into the live pushed wall octomap, replacing the one-shot
- *        scripted force injection T8/T9/jtac_wall_approach_test_node.cpp used until now.
- * @details This is the T5 gap this whole session's wall-approach work kept running into: mock has
+ *        scripted force injection jtac_wall_approach_test_node.cpp and the engage test used until now.
+ * @details This is the wall-contact-model gap wall-approach testing kept running into: mock has
  *          no contact-dynamics model at all, so nothing at the CONTROLLER level (JtacController's
- *          own admittance loop, already built and already proven in T8/T9) can genuinely "move
+ *          own admittance loop, already built and already proven in the engage and wall-approach tests) can genuinely "move
  *          until contact" -- there was no real-time force for it to react to. Every workaround
  *          tried before this (hand-derived through-wall poses, waypoint chains, per-step
  *          cancel-on-octomap-contact logic in the TEST node) was compensating for that missing
@@ -31,8 +31,8 @@
  *          positive while loaded), at rate_hz, continuously, for as long as this node runs --
  *          matching wall_mount_publisher_node's own "persistent node, not a one-shot script"
  *          pattern (a one-shot process here would silently stop feeding the controller the
- *          instant it exited, exactly the TF-lifecycle bug KNOWN_ISSUES.md #20 already documents
- *          for a different persistent-vs-one-shot mistake).
+ *          instant it exited, exactly the TF-lifecycle bug wall_mount_publisher_node avoids:
+ *          a one-shot process loses what it published the moment it exits).
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 

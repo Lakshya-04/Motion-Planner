@@ -80,9 +80,8 @@ public:
    *          N's execution fails, the speculative N+1 plan is discarded and
    *          N+1 is planned fresh next -- this does not change today's
    *          existing behavior of continuing to the next segment regardless
-   *          of a failed one. See implementation_plan_manipulation_
-   *          architecture.md §6.6 for the full design rationale and residual
-   *          risk (a speculative plan reflects the planning scene as it
+   *          of a failed one. Residual
+   *          risk of speculative planning: (a speculative plan reflects the planning scene as it
    *          existed before N's execution completes).
    */
   void setPipeliningEnabled(bool enabled);

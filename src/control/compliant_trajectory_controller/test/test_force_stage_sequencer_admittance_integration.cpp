@@ -1,9 +1,9 @@
 /**
  * @file test_force_stage_sequencer_admittance_integration.cpp
- * @brief Gate T6: drive the REAL force_core::ForceStageSequencer/ForceStageFsm through a full
+ * @brief Sequencer-over-admittance-port test: drive the REAL force_core::ForceStageSequencer/ForceStageFsm through a full
  *        APPROACH -> CARTESIAN -> RETRACT group against the REAL AdmittanceRule physics proven in
- *        test_admittance_rule_integration.cpp (T4a), via AdmittanceRuleCompliancePort.
- * @details T4a proved AdmittanceRule is reusable standalone; this proves the SEQUENCING layer
+ *        test_admittance_rule_integration.cpp (the admittance-rule integration test), via AdmittanceRuleCompliancePort.
+ * @details the admittance-rule integration test proved AdmittanceRule is reusable standalone; this proves the SEQUENCING layer
  *          (extracted to force_core specifically so platform could depend on it -- see
  *          that package's own package.xml) correctly drives it end to end: engage on approach,
  *          detect contact, settle onto a target force, hold it through a simulated coverage-path
@@ -11,16 +11,16 @@
  *          switch_safe_force_n at both the engage and disengage boundaries).
  *
  *          The measured wrench is SCRIPTED by contact phase (free air / in contact / unloaded),
- *          the same style T4a's own runToSteadyState() already uses (a caller-chosen wrench, not
+ *          the same style the admittance-rule integration test's own runToSteadyState() already uses (a caller-chosen wrench, not
  *          a self-consistent environment model) -- deliberately, not for lack of trying: an
  *          earlier version of this test computed contact as a real spring reaction from the
  *          tool's actual FK position against a virtual surface (environment stiffness in series
  *          with the admittance spring). That closed a SECOND feedback loop around the already-
  *          closed admittance loop, and the combined system went unstable (a slow limit cycle,
  *          joints swinging through radians) for reasons unrelated to the sequencer this test
- *          exists to validate -- exactly the kind of realistic-environment-model work T5
- *          ("Realistic-geometry mock re-run of R10", force_control_backend_admittance_vs_diffik.md
- *          section 10) is scoped to do properly, with a measured K_e from T1, not invented here.
+ *          exists to validate -- exactly the kind of realistic-environment-model work a proper wall-contact model
+ *          (a realistic-geometry mock re-run) is scoped to do properly, with a measured
+ *          environment stiffness K_e, not one invented here.
  *          Scripting the wrench keeps this test's scope honest: does the SEQUENCER drive real
  *          AdmittanceRule physics through the right states in the right order, not "is this
  *          particular hand-picked environment stiffness stable."
@@ -115,9 +115,9 @@ constexpr const char * kTestUrdf =
 </robot>)";
 
 constexpr size_t kNumJoints = 7;
-constexpr double kDt = 0.01;  // 100 Hz, matching T4a and combined_arm_lift_controllers.yaml.
+constexpr double kDt = 0.01;  // 100 Hz, matching the admittance-rule integration test and combined_arm_lift_controllers.yaml.
 
-// Same diagnostic Z gains T4a's own suite proved stable (M > K*(zeta*dt)^2 with margin: M_min =
+// Same diagnostic Z gains the admittance-rule integration test's own suite proved stable (M > K*(zeta*dt)^2 with margin: M_min =
 // 300*(6*0.01)^2 = 1.08 kg, shipped/used here 2.0). Deliberately NOT mop's shipped zeta_z=20.4 --
 // that divergence is a separately pinned regression (AdmittanceRuleUnconditionallyDivergesAtMops
 // ShippedGains); this suite is about sequencing, and needs stable physics under it.
@@ -133,7 +133,7 @@ double rawDamping(double ratio, double mass, double stiffness)
   return ratio * 2.0 * std::sqrt(mass * stiffness);
 }
 
-// Same non-singular reference pose T4a's own suite uses -- see that file's own comment on why the
+// Same non-singular reference pose the admittance-rule integration test's own suite uses -- see that file's own comment on why the
 // all-zero pose is a trap.
 const std::vector<double> kReferencePose{0.40, 0.0, 0.6, -0.9, 0.0, 0.5, 0.0};
 
@@ -177,7 +177,7 @@ core_types::ToolProfile buildTestToolProfile()
   profile.control.admittance.max_offset_m = 0.05;
 
   profile.control.ft.lpf_cutoff_hz = 0.0;  // Disabled: this suite wants deterministic physics,
-                                            // not filter dynamics -- T4a's own suite makes the
+                                            // not filter dynamics -- the admittance-rule integration test's own suite makes the
                                             // same call (ft_sensor.filter_coefficient = 1.0).
   profile.control.ft.deadband_n = 0.1;
   profile.control.ft.clamp_n = 100.0;
@@ -203,7 +203,7 @@ protected:
     options.robot_description = kTestUrdf;
     options.joint_names = kJointNames;
     options.kinematics_base = "base_link";
-    // Deliberately base_link, not link_tcp -- reuses T4a's own already-proven control-frame
+    // Deliberately base_link, not link_tcp -- reuses the admittance-rule integration test's own already-proven control-frame
     // convention (Cartesian Z == the compliant axis) rather than introducing an unverified
     // tip-frame admittance configuration in this first sequencer-level integration test. A real
     // ToolProfile-driven deployment against a wall would set control_frame to the tool tip
@@ -215,7 +215,7 @@ protected:
 
     // Independent kinematics instance, used only to build small joint-space moves (via a one-shot
     // Jacobian pseudo-inverse step) representing APPROACH/CARTESIAN/RETRACT trajectories -- never
-    // reuses the port's internal kinematics, matching T4a's own "verification never shares state
+    // reuses the port's internal kinematics, matching the admittance-rule integration test's own "verification never shares state
     // with the thing it verifies" convention.
     loader_ = std::make_shared<pluginlib::ClassLoader<kinematics_interface::KinematicsInterface>>(
       "kinematics_interface", "kinematics_interface::KinematicsInterface");
@@ -225,7 +225,7 @@ protected:
     // kdl's KinematicsInterface::initialize() retains the node_parameters_interface it is given
     // rather than copying what it needs out of it, so a node that dies when SetUp() returns
     // leaves kinematics_ reading through a dangling interface for the rest of the test -- exactly
-    // T4a's own node_ member pattern, reused here for the same reason.
+    // the admittance-rule integration test's own node_ member pattern, reused here for the same reason.
     probe_node_ = std::make_shared<rclcpp::Node>("t6_kinematics_probe");
     probe_node_->declare_parameter("robot_description", std::string(kTestUrdf));
     // Jazzy's kinematics_interface reads the tip from a "<param_namespace>.tip" parameter rather
@@ -239,7 +239,7 @@ protected:
   /// One-shot Gauss-Newton IK step: joint delta that would produce cartesian_delta_base (a 6-
   /// vector, translation-only here) from `from_positions`, via the Jacobian pseudo-inverse.
   /// Adequate for this test's small (<=5 cm) moves against the well-conditioned reference pose
-  /// T4a's own suite already validated -- not a general IK solver.
+  /// the admittance-rule integration test's own suite already validated -- not a general IK solver.
   std::vector<double> stepToward(
     const std::vector<double> & from_positions, const Eigen::Vector3d & cartesian_delta_base)
   {

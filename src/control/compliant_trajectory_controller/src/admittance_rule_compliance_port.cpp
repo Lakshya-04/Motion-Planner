@@ -63,8 +63,8 @@ void AdmittanceRuleCompliancePort::buildRule(const core_types::ComplianceConfig 
     config.stiffness[0], config.stiffness[1], config.stiffness[2], kRotationalStiffness,
     kRotationalStiffness, kRotationalStiffness};
   // ComplianceConfig carries raw damping (ToolAdmittance's field, per tool_profiles.yaml); the
-  // controller wants damping_ratio -- see force_control_backend_admittance_vs_diffik.md's
-  // tool_profiles.yaml landmine list for why re-deriving this, not passing it through, matters.
+  // controller wants damping_ratio -- re-derive it, do not pass the raw damping through, or the
+  // effective damping is wrong.
   std::vector<double> damping_ratio6{
     dampingRatio(config.damping[0], config.mass[0], config.stiffness[0]),
     dampingRatio(config.damping[1], config.mass[1], config.stiffness[1]),
@@ -93,15 +93,15 @@ void AdmittanceRuleCompliancePort::buildRule(const core_types::ComplianceConfig 
     // while pressing along the tool's own +Z") is only correct if AdmittanceRule's Cartesian Z
     // axis literally IS the tool's own Z -- exactly matching wall_penetration_check.hpp's own
     // convention that a tool's local +Z is the outward wall normal. Setting this to a fixed base
-    // frame instead (as the demo node and T4a's gtest both do, for their own simplicity) would
+    // frame instead (as the demo node and the admittance-rule integration test both do, for their own simplicity) would
     // silently redefine "the normal" to mean "world-frame Z" -- correct for a ceiling tool by
     // coincidence, wrong for a wall.
     rclcpp::Parameter("control.frame.id", config.control_frame),
     rclcpp::Parameter("fixed_world_frame.frame.id", options_.kinematics_base),
     rclcpp::Parameter("gravity_compensation.frame.id", config.control_frame),
     rclcpp::Parameter("gravity_compensation.CoG.pos", std::vector<double>{0.0, 0.0, 0.0}),
-    // Must stay 0.0: UFACTORY's ft_ext_force already removes payload/gravity -- see
-    // force_control_backend_admittance_vs_diffik.md's tool_profiles.yaml landmine list.
+    // Must stay 0.0: UFACTORY's ft_ext_force already removes payload/gravity, so
+    // a nonzero value would compensate gravity twice.
     rclcpp::Parameter("gravity_compensation.CoG.force", 0.0),
     rclcpp::Parameter("admittance.selected_axes", selected_axes6),
     rclcpp::Parameter("admittance.mass", mass6),

@@ -3,13 +3,13 @@
  * @brief A real core_types::CompliancePort implementation that is a ROS CLIENT of a RUNNING
  *        JtacController instance -- the missing piece connecting force_core::
  *        ForceStageSequencer's per-segment engage()/disengage()/setTargetForce() calls to the
- *        actually-deployed controller (T7), rather than the in-process
- *        AdmittanceRuleCompliancePort (T6), which owns its own throwaway AdmittanceRule instance
+ *        actually-deployed controller (the raw-trajectory test), rather than the in-process
+ *        AdmittanceRuleCompliancePort (the sequencer-admittance test), which owns its own throwaway AdmittanceRule instance
  *        and cannot reach a controller running in a different process.
  * @details The sequencer and the controller are two separate processes/nodes once JtacController
  *          is real (unlike AdmittanceRuleCompliancePort, which ticks AdmittanceRule in-process) --
  *          this class's whole job is bridging that gap over ordinary ROS interfaces, with NO new
- *          mechanism added to JtacController itself beyond what T7 already built:
+ *          mechanism added to JtacController itself beyond what the raw-trajectory test already built:
  *
  *            - engage()/disengage() call rclcpp::SyncParametersClient::set_parameters() against
  *              the controller's own node (admittance.selected_axes/mass/damping_ratio/stiffness/
@@ -63,8 +63,7 @@
  *              tracking any further commanded motion immediately, with compliance still live.
  *            - FT hygiene (deadband_n/clamp_n from ComplianceConfig): not applied anywhere in this
  *              path -- these fields have no home in admittance_controller OR ft_bridge_
- *              hardware yet, a landmine already named in force_control_backend_admittance_vs_
- *              diffik.md's tool_profiles.yaml section.
+ *              hardware yet, a known gap to close before real hardware.
  *
  *          CONSTRAINT this class relies on rather than works around: ComplianceStatus::wrench is
  *          only meaningful as "in control_frame" when the deployment sets ft_sensor.frame.id ==

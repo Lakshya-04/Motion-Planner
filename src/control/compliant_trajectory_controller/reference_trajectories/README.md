@@ -32,7 +32,7 @@ the two at any timestamp is the live compliance offset.
 State captured at the moment this was recorded, both since-fixed in the same session:
 
 - `kHomeWallPose`/`kCeilingPose`: `joint1 = +45deg` (the robot's actual front, per `attach_rpy`'s
-  own +45deg `base_serum` mount) -- lands the tool's local Z on pure base -Y at the wall pose,
+  own +45deg arm mount) -- lands the tool's local Z on pure base -Y at the wall pose,
   pure +Z at the ceiling pose (see those constants' own doc comments in
   `jtac_compliance_demo_node.cpp`).
 - `admittance.mass`/`stiffness`/`damping_ratio`: X/Y triple reduced to exactly match Z
@@ -67,8 +67,7 @@ ros2 run manipulation_manager record_joint_trajectory.py \
   --joint-state-topic /joint_states --max-duration-sec 60
 ```
 
-See `force_control_backend_admittance_vs_diffik.md`'s T11 section for the full mechanism, the
-literature it's drawn from, and the verified range this default sits inside (1.2% lift share at an
+The mechanism is drawn from the literature (Whitney 1969, Khatib, Chan & Dubey 1995); the verified range this default sits inside is (1.2% lift share at an
 extreme 1000:1 arm-biased ratio, ~93-96% at the natural 1:1 unweighted split, 100% at the opposite
 1:1000 extreme). At this chosen default: CEILING +Z hold lift share **55.8%** (down from the
 unweighted ~93-96%, per the "arm more compliant than the lift" design choice), WALL +X hold

@@ -5,11 +5,10 @@
  *          samples and returns a requested ForceFsmAction -- it never calls a CompliancePort or
  *          ExecutionPort itself. That split is what makes every abort path here unit-testable
  *          against fabricated force traces with synthetic timestamps, with zero ROS and zero
- *          hardware, per force_control_derisking_plan.md's Gate 0 (R12).
+ *          hardware (the first, hardware-free de-risking step for force control).
  *
- *          PORTABILITY CONSTRAINT (see implementation_plan_manipulation_architecture.md's
- *          decision to split by directory, not by package, until a genuine second consumer
- *          exists): this file and force_stage_fsm.cpp may include only cstdint, string, vector,
+ *          PORTABILITY CONSTRAINT (the core is split by directory, not by package, until a
+ *          genuine second consumer exists): this file and force_stage_fsm.cpp may include only cstdint, string, vector,
  *          array, plus core_types headers. No force_core-external header, no clock, no
  *          thread -- so the eventual split into a standalone force_core package
  *          (triggered when a 100Hz ros2_control-side trim loop needs this FSM, per the

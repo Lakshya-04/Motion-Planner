@@ -1,11 +1,11 @@
 /**
  * @file test_admittance_rule_integration.cpp
- * @brief Gate T4a: drive ros2_control's AdmittanceRule from OUTSIDE its own controller.
+ * @brief Admittance-rule integration test: drive ros2_control's AdmittanceRule from OUTSIDE its own controller.
  * @details The fused-controller ("JTAC") plan rests on one assumption: that the maintained
  *          upstream compliance law is reusable standalone, so we build a trajectory host rather
  *          than reimplementing physics. This suite proves that against a MIXED
  *          prismatic+revolute 7-joint chain -- the configuration we could find no public
- *          precedent for (see force_control_backend_admittance_vs_diffik.md section 7).
+ *          precedent for.
  *
  *          It also pins the SEMANTICS we are relying on, not merely that it links:
  *            - a zero wrench must be a byte-exact no-op on the reference (the off-switch property)
@@ -38,7 +38,7 @@ namespace
 
 /// Mixed prismatic + revolute 7-joint chain at roughly UF850+lift scale. Deliberately synthetic
 /// and self-contained so this stays a hermetic unit test; the realistic-geometry run against the
-/// production URDF is a separate gate (T5).
+/// production URDF is a separate gate (a proper wall-contact model).
 constexpr const char * kTestUrdf =
   R"(<?xml version="1.0"?>
 <robot name="jtac_test_7dof">
@@ -122,7 +122,7 @@ constexpr double kDiagnosticMassXY = 4.0;
 constexpr double kDiagnosticDampingRatioZ = 6.0;
 
 /// Deliberately non-singular: the all-zero pose stacks every link along a common axis and
-/// collapses the Jacobian pseudo-inverse (a failure mode already hit live during R10).
+/// collapses the Jacobian pseudo-inverse (a failure mode already hit live).
 const std::vector<double> kReferencePose{0.40, 0.0, 0.6, -0.9, 0.0, 0.5, 0.0};
 
 std::vector<rclcpp::Parameter> buildParameters(
@@ -257,7 +257,7 @@ protected:
 };
 
 // ---------------------------------------------------------------------------------------------
-// T4a proper: the rule is constructible, configurable, and runnable outside its own controller.
+// the admittance-rule integration test proper: the rule is constructible, configurable, and runnable outside its own controller.
 // ---------------------------------------------------------------------------------------------
 
 TEST_F(AdmittanceRuleIntegrationTest, ConfiguresStandaloneAgainstMixedPrismaticRevoluteChain)
@@ -296,7 +296,7 @@ TEST_F(AdmittanceRuleIntegrationTest, ZeroWrenchLeavesTheReferenceUntouched)
 // Regression: mop's SHIPPED gains (tool_profiles.yaml, K_z=300, zeta_z=20.4, M_z=2.0) are
 // unconditionally unstable at 100 Hz under this integrator, independent of contact stiffness or
 // rig geometry. This was originally (and incorrectly) attributed to the mock rig's toy-arm link
-// lengths during the R10 verification; running the identical gains here, against a realistic-scale
+// lengths during live verification; running the identical gains here, against a realistic-scale
 // mixed 7-joint chain, reproduces the same divergence -- proving the real cause is the integrator
 // stability bound above, not geometry. Keep this test failing (i.e. keep asserting divergence)
 // until tool_profiles.yaml's mop.control.admittance is re-derived to satisfy M > K*(zeta*dt)^2;

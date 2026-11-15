@@ -13,7 +13,7 @@ namespace
 
 constexpr auto kDwellTickDuration = std::chrono::milliseconds(20);  // ~50Hz, matches the
                                                                     // sequencer's documented tick rate.
-// Matches this codebase's own established bumpless-transfer convention (T8/T9's own
+// Matches this codebase's own established bumpless-transfer convention (the engage and wall-approach tests' own
 // "max_abs_force_at_switch_n < 3.0" check) -- see handleAbort()'s own doc comment.
 constexpr double kAbortSafeDisengageForceN = 3.0;
 // Trim doesn't need the dwell loop's own contact-detection responsiveness -- 20Hz is plenty for

@@ -6,8 +6,7 @@
  *          type never crosses that boundary itself. This is the type that
  *          lets a Planner (see motion_planner::Planner) return what it
  *          planned without also executing it -- see the ports-and-adapters
- *          split and the plan/execute decoupling described in
- *          implementation_plan_manipulation_architecture.md §6.1/§6.5.
+ *          split and the plan/execute decoupling (docs/design_principles.md).
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 

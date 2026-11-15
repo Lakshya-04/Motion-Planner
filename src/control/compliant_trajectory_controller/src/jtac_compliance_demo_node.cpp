@@ -2,7 +2,7 @@
  * @file jtac_compliance_demo_node.cpp
  * @brief Live RViz demo of AdmittanceRule's redundancy split between the lift and the arm.
  * @details Runs the SAME AdmittanceRule at the SAME 100 Hz rate used by
- *          test_admittance_rule_integration.cpp (T4a), against the SAME synthetic 7-joint chain
+ *          test_admittance_rule_integration.cpp (the admittance-rule integration test), against the SAME synthetic 7-joint chain
  *          (urdf/jtac_demo_robot.urdf), closed loop exactly as that test does (the compliant
  *          output feeds back in as "current" every cycle). It is not a new experiment -- it is a
  *          visualization of the two experiments already proven there
@@ -53,15 +53,14 @@ namespace
 
 constexpr double kDt = 0.01;  // 100 Hz -- same as combined_arm_lift_controllers.yaml.
 
-// Same diagnostic gains as the T4a gtest suite, satisfying M > K*(zeta*dt)^2 on every Cartesian
+// Same diagnostic gains as the admittance-rule integration test suite, satisfying M > K*(zeta*dt)^2 on every Cartesian
 // channel -- see test_admittance_rule_integration.cpp's own comment for the full derivation and
 // why mop's actual shipped gains diverge at this rate. This demo is about the redundancy split,
 // not about mop's specific (and currently broken) tuning.
 //
 // EXPERIMENT (2026-08-21, live wall_ceiling comparison): XY triple reduced to exactly match the
 // Z triple -- was mass=4.0/damping_ratio=5.59/stiffness=1000.0 (X/Y) vs mass=2.0/damping_ratio=
-// 6.0/stiffness=300.0 (Z), a real "arm feels 3.3x stiffer than the lift" asymmetry (see
-// force_control_backend_admittance_vs_diffik.md's stiffness discussion). Removed here to observe
+// 6.0/stiffness=300.0 (Z), a real "arm feels 3.3x stiffer than the lift" asymmetry. Removed here to observe
 // unified behavior; shared by BOTH pose_set schedules (buildParameters() is not duplicated per
 // mode), so this also changes redundancy_split mode's tuning, not only wall_ceiling's.
 constexpr double kDiagnosticMassXYZ = 2.0;
@@ -106,7 +105,7 @@ std::vector<std::string> chainJointNames(
 // ~19.5 at link6, versus effectively singular (condition number = inf, smallest singular value
 // ~1e-17) at BOTH the all-zero pose and the SRDF "home" group_state (joint1=0.7854, rest 0) --
 // this arm's zero configuration is a genuine wrist singularity, the same class of trap the
-// synthetic T4a chain's all-zero pose was, just independently rediscovered on real geometry.
+// synthetic chain of the admittance-rule integration test's all-zero pose was, just independently rediscovered on real geometry.
 // Overridable via the reference_pose parameter for a different URDF.
 const std::vector<double> kDefaultReferencePose{0.40, 0.0, -0.5, 1.2, 0.0, 0.6, 0.0};
 
@@ -118,7 +117,7 @@ const std::vector<double> kDefaultReferencePose{0.40, 0.0, -0.5, 1.2, 0.0, 0.6, 
 // arm_7dof).
 //
 // joint1 yawed +45deg from validate_7dof_sync.py's own joint1=0: at joint1=0 the tool's local Z
-// pointed diagonally in base frame ([-0.706, -0.708, 0.002], the +45deg base_serum attach_rpy
+// pointed diagonally in base frame ([-0.706, -0.708, 0.002], the +45deg arm-mount attach_rpy
 // rotating what would otherwise be pure -X into that diagonal) -- +45deg is the actual front of
 // the robot, and lands the tool's local Z on pure base -Y ([0.0016, -0.999999, 0.0]), a cleaner
 // "tool facing a wall" configuration to read pushes against. -45deg was the other candidate
@@ -247,7 +246,7 @@ public:
   JtacComplianceDemoNode()
   : Node("jtac_compliance_demo_node")
   {
-    // robot_description defaults to the synthetic T4a-style chain (self-contained, no external
+    // robot_description defaults to the synthetic chain (as in the admittance-rule integration test) (self-contained, no external
     // xacro render needed) but is meant to be overridden -- see
     // launch/jtac_compliance_demo.launch.py's real_robot argument, which renders
     // robot.urdf.xacro at launch time and passes the result here.
@@ -273,8 +272,8 @@ public:
     // unweighted split, 100% at the opposite 1:1000 extreme -- 10:1 sits clearly on the
     // arm-compliant side without being the maximal, all-or-nothing extreme used to make that
     // range measurable in the first place. Swap freely via this same parameter; nothing else
-    // depends on this specific ratio. See force_control_backend_admittance_vs_diffik.md for the
-    // full rationale and the literature (Whitney 1969, Khatib's dynamically-consistent
+    // depends on this specific ratio. The mechanism is drawn from
+    // the literature (Whitney 1969, Khatib's dynamically-consistent
     // generalized inverse, Chan & Dubey 1995) this mechanism is drawn from.
     // Empty = the lift (joint 0) weighted 10x every other joint, sized to the chain's DOF.
     declare_parameter("redundancy_weights", std::vector<double>{});
@@ -740,8 +739,8 @@ private:
   /// buildParameters() derives it); joint_acc = J_W+ * X_ddot - joint_damping*joint_vel, where
   /// J_W+ = W^-1 J^T (J W^-1 J^T)^-1 is the weighted pseudo-inverse (W = diag(redundancy_weights),
   /// J the 3xN linear-velocity Jacobian rows) -- reduces to the plain Moore-Penrose pseudo-inverse
-  /// when every weight is equal, by construction. See force_control_backend_admittance_vs_diffik.md
-  /// for the literature this is drawn from (Whitney 1969, Khatib's dynamically-consistent
+  /// when every weight is equal, by construction. Drawn from
+  /// the literature (Whitney 1969, Khatib's dynamically-consistent
   /// generalized inverse, Chan & Dubey 1995's weighted least-norm).
   void tickWallCeilingWeighted(const WallCeilingPhase & plan)
   {

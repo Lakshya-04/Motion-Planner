@@ -1,6 +1,6 @@
 /**
  * @file force_stage_fsm_test.cpp
- * @brief R12 (force_control_derisking_plan.md Gate 0): unit tests for ForceStageFsm against
+ * @brief Unit tests for ForceStageFsm against
  *        fabricated ComplianceStatus traces with synthetic timestamps. No ROS, no hardware, no
  *        clock -- every timeout/debounce assertion here would otherwise be first exercised
  *        against a real wall at 15 N.
@@ -163,7 +163,7 @@ TEST(ForceStageFsm, SettleTimeoutFiresAtSettleTimeoutSeconds)
 // large enough to trip settle_timeout_s. A naive `status.stamp_ns - settle_entry_ns_` (unsigned
 // uint64_t subtraction) UNDERFLOWS to a value near UINT64_MAX here, aborting on the very first
 // tick regardless of how small settle_timeout_s actually is. Hit live: JtacControllerCompliancePort
-// (compliant_trajectory_controller, T8) aborted CARTESIAN settle in under 100 microseconds
+// (compliant_trajectory_controller, the engage/disengage test) aborted CARTESIAN settle in under 100 microseconds
 // with the measured force already exactly at target, because ForceStageSequencer's now_ns_fn
 // captured settle_entry_ns_ a few milliseconds AFTER the last cached wrench sample's own stamp.
 TEST(ForceStageFsm, StaleFirstSampleOlderThanSettleEntryDoesNotFalseTimeout)

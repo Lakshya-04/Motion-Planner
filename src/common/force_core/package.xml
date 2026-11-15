@@ -8,8 +8,7 @@
     APPROACH/CARTESIAN/RETRACT contact-force lifecycle -- no rclcpp, no ROS message
     dependencies, no clock, no I/O. Builds and tests with ROS not sourced.
 
-    Extracted from manipulation_manager at the trigger named in
-    implementation_plan_manipulation_architecture.md's roadmap (P2.1/P2.2): a genuine
+    Extracted from manipulation_manager once a genuine
     cross-tree consumer at the platform tier (compliant_trajectory_controller,
     a fused JTC+admittance controller prototype) needed this logic, and platform
     packages may not depend on capabilities orchestration packages (the repo's
