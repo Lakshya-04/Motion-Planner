@@ -66,11 +66,43 @@ The simulation backends ([simulation.md](simulation.md)) publish what a real sen
 the sensor's own frame, with the payload's weight, plus a ground-truth contact wrench at `tcp_link` for
 evaluation. The same conditioner then runs on simulated and real data, and the ground truth checks it.
 
+## The ROS node: `ft_conditioner`
+
+`src/control/ft_conditioner` wraps the conditioner: `wrench_conditioner_node` takes a raw
+`geometry_msgs/WrenchStamped` in the sensor's frame and publishes the contact wrench in the tool frame
+(`output_topic`, frame `tool_frame`), ready for `ft_bridge_hardware` (point its `source_topic` or
+`injection_topic` at it).
+
+| Parameter | Default | |
+|---|---|---|
+| `input_topic`, `output_topic` | `wrench_raw`, `wrench_conditioned` | |
+| `sensor_frame` | empty: the message's `frame_id` | |
+| `tool_frame` | `tcp_link` | the output frame |
+| `world_frame` | `base_footprint` | any frame whose z axis is up: gravity's direction |
+| `tool_in_sensor_from_tf` | `true` | `false`: use `tool_in_sensor_xyz` / `_rpy` (a simulator with no TF frame for its sensor) |
+| `sign` | `1.0` | `-1.0` for a sensor that reports the reaction on the robot side |
+| `payload_mass_kg`, `payload_cog_xyz`, `bias` | 0 | what calibration finds |
+
+The sensor's orientation (for the payload's weight) comes from TF at the message's stamp, falling back to the
+newest transform if that stamp is not there yet, but only if that transform is at most `max_tf_age` seconds
+(default 0.1) older than the wrench; a static transform never ages. Beyond that the wrench is dropped, so a
+stalled TF publisher stops the output instead of leaving it compensating with a frozen orientation. The
+sensor-to-tool offset is looked up once (the sensor is rigid on the tool). A wrench with no usable TF is
+dropped and counted, with a throttled warning, never guessed. `max_tf_age: 0` turns the limit off.
+
+**Calibrating.** With the arm still and nothing touching the tool, move to a pose and call
+`~/capture_pose` (it averages the raw wrenches of the last 0.5 s, and refuses with a message if the input is stale, too short, or the arm is not still: force spread or orientation drift above `capture_max_spread_n` / `capture_max_rotation_rad`); repeat in at least four poses that point gravity in clearly different directions in the
+sensor frame (rotate the wrist about at least two non-parallel axes); then `~/identify`. The node fits mass,
+centre of gravity and bias, starts using them immediately, and returns a YAML snippet to keep in the
+parameters. `~/clear_samples` starts over. A degenerate set of poses is rejected with a reason.
+
+Gazebo's wrench is `/force_torque_sensor_broadcaster/wrench` (frame `ft_sensor_link`) and MuJoCo's is
+`/sim_mujoco/ft_raw`; both are raw readings of the form environment wrench plus weight, so `sign` stays
+`1.0`. Launch: `ros2 launch ft_conditioner ft_conditioner.launch.py input_topic:=... payload_mass_kg:=0.8`.
+
 ## Not done yet
 
-- A ROS node around the conditioner: subscribe to the raw `WrenchStamped`, get the sensor's orientation
-  from TF, publish the conditioned wrench to the topic `ft_bridge_hardware` already consumes.
-- Reading the sensor-to-tool offset and the payload from the robot profile / URDF (a `ft_sensor_link`
-  between the flange and the tool mount) and a calibration command that writes the payload and bias back.
-- Inertial compensation (acceleration terms), a low-pass filter ahead of the controller, temperature
-  drift, and checking the real sensor's sign and frame against this convention on hardware.
+- Reading the sensor-to-tool offset and the payload from the robot profile / URDF, so no parameter has to
+  be set by hand.
+- Inertial compensation (acceleration terms), a low-pass filter ahead of the controller, temperature drift,
+  and checking a real sensor's sign and frame against this convention on hardware.
