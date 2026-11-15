@@ -132,6 +132,7 @@
 
 #include <Eigen/Dense>
 
+#include "force_core/force_limiter.hpp"
 #include "admittance_controller/admittance_rule.hpp"
 #include "control_msgs/action/follow_joint_trajectory.hpp"
 #include "controller_interface/controller_interface.hpp"
@@ -222,6 +223,15 @@ private:
   /// desired_ left untouched) if the FK call fails or the offset is already within bound.
   void clampCartesianOffset();
 
+  /// Opt-in hard force bound (`force_limit.enabled`, default false), after clampCartesianOffset().
+  /// Keeps the tool's advance along its +Z axis (the pressing direction) within the velocity
+  /// force_core::ForceLimiter allows at the force JTAC reads (`-force.z + reading_offset_n`): when
+  /// this cycle's command (state_desired_) advances faster than that, it is pulled back along the axis
+  /// through the Jacobian (a retreat above the force limit). It limits whatever drives the command, the
+  /// reference trajectory or the compliance offset. A no-op when disabled, on the first cycle after
+  /// activation, or when a kinematics call fails.
+  void limitPressingStep(const geometry_msgs::msg::Wrench & measured, double dt);
+
   /// Real-actuator rate limiting -- a defense-in-depth safety net, not the primary fix for the
   /// instability below (that fix is tool_profiles.yaml's own admittance.damping values -- see its
   /// own comment there for the actual root cause). Clamps state_desired_ to what the joint's own
@@ -263,6 +273,12 @@ private:
   /// a real value, but finite -- never literally unbounded even if a caller forgets to publish.
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr max_offset_subscriber_;
   realtime_tools::RealtimeBuffer<double> max_offset_m_{0.1};
+
+  /// force_limit.* parameters, read once in on_configure (not live-reconfigurable).
+  bool force_limit_enabled_{false};
+  double force_limit_reading_offset_n_{0.0};
+  std::unique_ptr<force_core::ForceLimiter> force_limiter_;
+  std::vector<double> last_command_positions_;   ///< The command written last cycle (valid when non-empty).
 
   /// Per-joint redundancy weighting -- see this class's own header doc for the full mechanism and disclosed scope limits.
   /// Fills state_desired_ directly (mirroring AdmittanceRule::update()'s own output convention:

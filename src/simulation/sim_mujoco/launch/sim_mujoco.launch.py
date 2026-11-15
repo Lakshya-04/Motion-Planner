@@ -111,6 +111,13 @@ def _setup(context, *args, **kwargs):
                            FT_SENSOR_CONDITIONED if conditioner else FT_SENSOR,
                            conditioned=conditioner) if jtac
               else _jtc_params(joints, update_rate))
+    force_limit = float(arg('force_limit_n'))
+    if jtac and force_limit > 0.0:
+        params[CONTROLLER_NAME]['ros__parameters'].update({
+            'force_limit.enabled': True,
+            'force_limit.f_max_n': force_limit,
+            'force_limit.reading_offset_n': float(arg('force_limit_reading_offset_n')),
+        })
     fd, params_file = tempfile.mkstemp(prefix='sim_mujoco_controllers_', suffix='.yaml')
     with os.fdopen(fd, 'w') as f:
         yaml.safe_dump(params, f)
@@ -168,6 +175,12 @@ def generate_launch_description():
                                           'capture_pose / identify services'),
         DeclareLaunchArgument('payload_cog', default_value='0 0 0',
                               description='conditioner payload centre of gravity in the sensor frame'),
+        DeclareLaunchArgument('force_limit_n', default_value='0',
+                              description='controller:=jtac: hard normal-force limit in N, enables the '
+                                          'force limiter (0 = off)'),
+        DeclareLaunchArgument('force_limit_reading_offset_n', default_value='0',
+                              description='N added to the pressing force JTAC reads; set it to the '
+                                          'contact target when the target is carried by the F/T bridge'),
         DeclareLaunchArgument('update_rate', default_value='100', description='control rate, Hz'),
         DeclareLaunchArgument('out_dir', default_value='', description='where to write the MJCF'),
         DeclareLaunchArgument('viewer', default_value='false',

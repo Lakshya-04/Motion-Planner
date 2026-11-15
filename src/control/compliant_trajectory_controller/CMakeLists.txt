@@ -83,6 +83,7 @@ target_link_libraries(jtac_controller
   admittance_controller::admittance_controller
   admittance_controller::admittance_controller_parameters
   joint_trajectory_controller::joint_trajectory_controller
+  force_core::force_core
 )
 ament_target_dependencies(jtac_controller
   control_msgs

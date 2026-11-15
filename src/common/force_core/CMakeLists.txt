@@ -20,6 +20,8 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
+# Linked into shared libraries (the JTAC controller plugin), so the static archive must be position independent.
+set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # Threads::Threads -- force_stage_sequencer.cpp's own trim loop (ForceStageSequencer::trimLoop())
 # runs on a real std::thread, see that file's own "FORCE TRIM" doc comment.
 target_link_libraries(${PROJECT_NAME} PUBLIC core_types::core_types Threads::Threads)
