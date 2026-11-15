@@ -177,7 +177,8 @@ The earlier attempts (Cricket's sampled pairs, an SRDF from cuRobo's matrix, mor
 these two pairs, so none changed the result. It was not the base or tool frame, and not the radii.
 
 Fix: `rigid_pairs_srdf.py` now treats each rigid group as one body (the neighbours of a group are
-neighbours of every member) and takes `--hops N`, allowing links up to N joints apart. Use `--hops 2`
+neighbours of every member) and takes `--hops N`, allowing links up to N joints apart (a rigid group is one body for its direct
+neighbours only; further out every joint counts, so a fixed-lift platform does not hide the upper arm from the chassis). Use `--hops 2`
 for a serial 6-DOF arm, then hand the SRDF to Cricket instead of `-`:
 
 ```
