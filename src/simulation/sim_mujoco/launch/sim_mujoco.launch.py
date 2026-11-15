@@ -148,6 +148,13 @@ def _setup(context, *args, **kwargs):
                 'payload_mass_kg': float(arg('payload_mass_kg')),
                 'payload_cog_xyz': [float(v) for v in arg('payload_cog').split()],
             }]))
+    if arg('move_group') == 'true':
+        # MoveIt for planning only (compute_cartesian_path): the same description the sim runs, execution
+        # stays with the controller started above.
+        from mobile_manipulator_moveit_config import build_moveit_config
+        moveit_config = build_moveit_config(profile=arg('profile'), hardware='jtac_mock')
+        nodes.append(Node(package='moveit_ros_move_group', executable='move_group', output='screen',
+                          parameters=[moveit_config.to_dict()]))
     return nodes
 
 
@@ -168,6 +175,8 @@ def generate_launch_description():
                                           'capture_pose / identify services'),
         DeclareLaunchArgument('payload_cog', default_value='0 0 0',
                               description='conditioner payload centre of gravity in the sensor frame'),
+        DeclareLaunchArgument('move_group', default_value='false',
+                              description='also start move_group (planning only) for scripted cartesian passes'),
         DeclareLaunchArgument('update_rate', default_value='100', description='control rate, Hz'),
         DeclareLaunchArgument('out_dir', default_value='', description='where to write the MJCF'),
         DeclareLaunchArgument('viewer', default_value='false',

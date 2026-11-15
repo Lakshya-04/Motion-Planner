@@ -270,3 +270,20 @@ lack), or `python -m pytest src/simulation/sim_mujoco/test` in the `sim` image.
 count), 85 percent of them within 1.5 N of the target. The contact test presses at one point, so coverage is not meaningful
 there (hence `--min-coverage 0`); a full wall pass would feed the same scorer.
 
+## Scripted wall pass
+
+`run_wall_pass.sh` launches the sim with `controller:=jtac conditioner:=true move_group:=true` (the conditioner payload is
+passed as launch parameters, no calibration step), runs `wall_pass_test.py` and scores the recording. For each stroke y
+(`--strokes-y`, default 0.07 and 0.19) MoveIt's `/compute_cartesian_path` plans an approach 3 cm in front of the wall, a
+press 1.5 mm past the wall surface (JTAC's tool-Z admittance axis engaged with the 10 N target on JTAC's own
+`~/target_force_n`) and a vertical stroke (z 1.28 to 1.02 at the smoke wall x = 0.98 m); JTAC executes them and the tool retreats. The
+launch argument `move_group:=true` starts `move_group` for planning only. The script exits nonzero if a stroke does not
+plan (fraction below 0.98) or execute, or coverage of the planned region is below 0.9.
+
+First run (UR10e, two strokes, 0.05 velocity scale): every stroke planned and executed, coverage of the region 1.0 (806
+of 806 cells), but the contact force is not good: peak 21.5 N against the 10 N target, force RMS error 2.8 N, only 34 percent
+of the working samples within 1.5 N, and 192 strokes in the scorer, which means the contact breaks and re-makes along the
+stroke (stick-slip on the sliding wall). That is the honest baseline for improving the contact (sliding friction in the sim,
+admittance gains, the press depth, the stroke speed); the manager and the coverage planner are not in this loop yet, the
+strokes are scripted.
+
