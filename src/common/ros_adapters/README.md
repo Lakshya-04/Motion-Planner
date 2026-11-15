@@ -16,7 +16,7 @@ algorithm code built on it) never includes a ROS message header directly; it dep
 implementation injected at the node boundary.
 
 It exists to be shared: multiple ROS adapter packages (`motion_planner`,
-`manipulation_manager`, and `serum_demo_bt`) need the same `RclcppLogger` and
+`manipulation_manager`, and the wall-cleaning application) need the same `RclcppLogger` and
 `toCore()`/`toRos()` conversions, so they live here once instead of being duplicated or one package
 depending on another just to reuse them.
 
@@ -114,7 +114,7 @@ target `ros_adapters::ros_adapters` by:
   `FollowJointTrajectory` goal; `ManipulationManagerActionServer`
   (`src/ros/manipulation_manager_action_server.cpp`) calls `ros_adapters::toCore(pose_stamped.pose)`
   converting incoming waypoints off the `ExecuteMotionSegments` action goal.
-- **`serum_demo_bt`** (`applications`) -- `wall_cleaning_action_server.cpp` constructs an
+- **The wall-cleaning application** (outside this repo) -- its action server constructs an
   `RclcppLogger` from `this->get_logger()` and calls `ros_adapters::toCore(pose)` when building
   core waypoints from a behavior-tree action goal.
 

@@ -1,65 +1,74 @@
 # Motion Planner
 
-ROS 2 packages for wall coverage planning and arm motion planning, through
-execution on a compliant (admittance) joint trajectory controller (JTAC).
+ROS 2 packages for covering a surface with a tool using a mobile manipulator: sensor data to coverage
+plan, base stands, arm motion planning and execution on a compliant (admittance) controller with force
+feedback. The target is a stack that works for any arm, lift and base (chosen by a robot profile) and any
+tool (contact like a mop, non-contact like a spray gun), in simulation first and on hardware by parameters.
+
+**Status in one line:** the building blocks exist and are tested; **nothing runs them together yet**.
+There is no launch that goes from a scan to an executed wall pass, and nothing here has run on hardware.
+The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/ROADMAP.md).
+
+```
+sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware) -> base stands
+        -> navigation / docking -> motion planning -> execution (JTAC + F/T) -> monitoring
+```
 
 ## Packages
 
-| Package | Description |
-|---|---|
-| [`robot_self_filter`](src/perception/robot_self_filter) | Robot self filter (ROS-free): removes the robot's own body from point clouds from the URDF |
-| [`reachability`](src/manipulation/reachability) | RM4D reachability map (ROS-free): forward / inverse queries, lift-band planning, CLI |
-| [`mobile_manipulator_moveit_config`](src/description/mobile_manipulator_moveit_config) | MoveIt 2 config for the description: groups `arm` / `lift_arm`, OMPL, mock-hardware demo, smoke test |
-| [`scene_model`](src/perception/scene_model) | Backend-neutral scene model: clouds, meshes, primitives, voxels, ESDF; loaders, plane fit, exporters |
-| [`mobile_manipulator_description`](src/description/mobile_manipulator_description) | Generic 7-DOF robot model: base + swappable telescopic lift + swappable 6-DOF arm (UR10e, generic) + tool |
-| [`coverage_planner`](src/perception/coverage_planner) | Wall coverage planning: boustrophedon and sweepline planners, vertical / horizontal / zigzag wall patterns, scan-to-plan pipeline |
-| [`coverage_planner_msgs`](src/perception/coverage_planner_msgs) | Messages and services for the coverage planner |
-| [`motion_planner`](src/manipulation/motion_planner) | ROS-free motion planning core: planner, IK, collision and scene ports, `MotionPlanner` orchestration |
-| [`motion_planner_moveit`](src/manipulation/motion_planner_moveit) | MoveIt / OMPL backend implementing those ports (Cartesian + free-space planners) |
-| [`manipulation_manager`](src/manipulation/manipulation_manager) | Orchestrates coverage -> planning -> execution |
-| [`compliant_trajectory_controller`](src/control/compliant_trajectory_controller) | JTAC: compliant trajectory controller for `ros2_control` |
-| [`ft_bridge_hardware`](src/control/ft_bridge_hardware) | Force/torque sensor bridge (`ros2_control` hardware interface) |
-| [`force_core`](src/common/force_core) | Force-control core library |
-| [`core_types`](src/common/core_types) | ROS-free domain types and ports |
-| [`ros_adapters`](src/common/ros_adapters) | Conversions between core types and ROS messages |
+Under `src/`, by area (layout rules: [docs/package_layout.md](docs/package_layout.md)).
 
-## Requirements
+| Area | Packages | What they do |
+|---|---|---|
+| Common | `core_types`, `ros_adapters`, `force_core` | ROS-free types and ports, conversions to ROS messages, the force-control core (contact state machine, wrench conditioning) |
+| Description | `mobile_manipulator_description`, `mobile_manipulator_moveit_config`, `mobile_manipulator_profile` | Generic robot model (base + lift + N-DOF arm + tool, all swappable) with 13 profiles, MoveIt 2 config generated from a profile, header-only profile loader |
+| Perception | `scene_model`, `scene_adapters`, `robot_self_filter`, `coverage_planner`, `coverage_planner_msgs` | Scene model (clouds, meshes, voxels, ESDF, loaders), scene to planner geometry, robot self filter (library and node), wall coverage planning (boustrophedon, sweepline, wall patterns, scan to plan) |
+| Manipulation | `motion_planner`, `motion_planner_moveit`, `vamp_planner`, `curobo_bridge`, `curobo_bridge_msgs`, `curobo_planner`, `reachability`, `reachability_msgs`, `manipulation_manager` | Planner, IK, collision and scene ports; MoveIt/OMPL, VAMP and cuRobo v2 backends; RM4D reachability map and multi-stand planning; the manager that runs coverage, planning and execution |
+| Control | `compliant_trajectory_controller`, `ft_bridge_hardware`, `ft_conditioner` | JTAC (admittance joint trajectory controller for `ros2_control`), F/T sensor bridge, wrench conditioning node |
+| Simulation | `sim_mujoco`, `sim_gazebo`, `sim_isaac` | MuJoCo 4 and Gazebo Harmonic backends behind `hardware:=mujoco` / `hardware:=gazebo`; `sim_isaac` is a stub |
 
-- ROS 2 (Jazzy recommended), `colcon`, MoveIt 2, `ros2_control`
-- PCL, Eigen, nlohmann-json, Octomap
+## Build and test (Docker)
 
-A robot description (URDF/xacro) and a MoveIt configuration for your arm are
-not included; the packages expect them to be supplied by your own workspace.
-
-## Build
+The supported environment is the Docker image (ROS 2 Jazzy). From the repo root:
 
 ```bash
-mkdir -p ~/ws/src && cd ~/ws/src
-git clone https://github.com/Lakshya-04/Motion-Planner.git
-cd ~/ws
-rosdep install --from-paths src --ignore-src -y
-colcon build --symlink-install
-source install/setup.bash
+docker compose -f docker/compose.yaml build dev
+docker compose -f docker/compose.yaml run --rm test     # colcon build + colcon test, no GPU
+docker compose -f docker/compose.yaml run --rm dev      # interactive shell, repo mounted at /ws
 ```
 
-## Test
+Inside a shell: `docker/build.sh test` builds the workspace and prints the test summary. GPU targets
+(`gpu`, `full`: cuRobo v2, VAMP) and the simulator images are described in [docs/docker.md](docs/docker.md).
+Building outside Docker needs ROS 2, MoveIt 2, `ros2_control` and the packages in `docker/apt-extra.txt`.
+The last full run recorded in the roadmap: 736 colcon tests in 26 packages, no failures. There is
+deliberately no CI; [CONTRIBUTING.md](CONTRIBUTING.md) lists how to run every check locally.
 
-```bash
-colcon test && colcon test-result --verbose
-```
+## Simulators
 
-## Contributing
+Both run headless and sit behind `ros2_control`, so the same controllers run against them as against
+hardware ([docs/simulation.md](docs/simulation.md)).
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+| | MuJoCo 4 (`sim_mujoco`) | Gazebo Harmonic (`sim_gazebo`) |
+|---|---|---|
+| Docs | [docs/sim_mujoco.md](docs/sim_mujoco.md) | [docs/sim_gazebo.md](docs/sim_gazebo.md) |
+| Environment | `build` image with the MuJoCo SDK mounted (`MUJOCO_ROOT`); Python tools also in the `sim` image | `sim-gazebo` image |
+| Can do today | Position and JTAC control of lift + arm, wall worlds from `wall_scene.json`, raw wrist F/T plus ground-truth contact wrench, conditioned force path, a 10 N contact test that holds (10.13 N for a 10 N target) | Same joint control and wall worlds, raw F/T plus ground truth, conditioned path validated against ground truth |
+| Cannot do today | Move the base, simulate sensors | Hold 10 N in Gazebo (about 108 N was measured, cause not established; MuJoCo holds it), move the base, simulate sensors |
 
+Isaac Sim is a stub. Neither simulator yet runs coverage, MoveIt and the manager as one launch.
 
+## What you can run today
 
-## Design
+- MoveIt demo on the description with mock hardware: `ros2 launch mobile_manipulator_moveit_config demo.launch.py arm:=ur10e`
+- Wall coverage planning from a scene file: `ros2 launch coverage_planner wall_coverage_demo.launch.py`
+- Reachability map building and stand planning (`rm4d_tool`, `reachability_node`): [docs/reachability.md](docs/reachability.md)
+- A simulated wall contact through the full force path: the smoke and contact tests of each simulator
 
-Every stage (perception, scene, surface, coverage, sequencing, motion planning, timing,
-execution, control, and a slot for learned policies) is a swappable module selected by
-config. Planning backends: MoveIt, cuRobo v2 and VAMP. See [docs/](docs/README.md), starting
-with [architecture.md](docs/architecture.md).
+## Documentation
+
+[docs/README.md](docs/README.md) is the index: [architecture](docs/architecture.md), [robot description](docs/robot_description.md),
+[design principles](docs/design_principles.md), [decision records](docs/adr/). Third-party software and licences:
+[THIRD_PARTY.md](THIRD_PARTY.md). Changes: [CHANGELOG.md](CHANGELOG.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

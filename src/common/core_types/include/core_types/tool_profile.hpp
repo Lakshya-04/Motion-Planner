@@ -1,9 +1,8 @@
 /**
  * @file tool_profile.hpp
  * @brief Plain, data-driven description of one physical end-effector tool, independent of ROS.
- * @details The four-facet shape (geometry / task / coverage / control) decided in
- *          implementation_plan_manipulation_architecture.md §5.1, field-for-field matching
- *          reference_docs/13_cleaning_modes_spec.md §2.1's `tool_profiles.yaml` schema. Adapters
+ * @details The four-facet shape (geometry / task / coverage / control) matches
+ *          the `tool_profiles.yaml` schema field for field. Adapters
  *          (ros_adapters) load this from YAML at the boundary -- this type never depends on
  *          ROS or YAML itself. One tool difference, one struct: the coverage core, manipulation
  *          manager, and force layer all read the same `ToolProfile` instead of forking per tool.
@@ -84,7 +83,7 @@ struct ToolTask
   /// 0.0 (default) disables it. MUST stay 0.0 whenever `contact` is true -- tilting a tool meant
   /// to be in contact with the wall changes the force/contact-normal semantics, not just reach;
   /// consumers must gate on `!contact` explicitly rather than trusting this field alone
-  /// (implementation_plan_manipulation_architecture.md's coverage-planner redesign notes).
+  /// (a tilted tool in contact has different force/contact-normal semantics).
   double reachability_tilt_deg_max{0.0};
 
   double settle_timeout_s{0.0};           ///< FSM watchdog for force settle.
@@ -103,7 +102,13 @@ struct ToolTask
  */
 struct ToolCoverage
 {
-  double swath_m{0.0};                   ///< Effective tool footprint width.
+  double swath_m{0.0};                   ///< Effective tool footprint width. Ignored by the coverage
+                                         ///< planner for a non-contact tool with spray_half_angle_deg > 0.
+  /// Non-contact spray tools: cone half-angle in degrees. When > 0 the planner derives the swath
+  /// from the stand-off (sprayerEffectiveSwath) instead of using swath_m. 0 = fixed swath_m.
+  double spray_half_angle_deg{0.0};
+  /// Usable fraction of the geometric cone width (Gaussian-like deposition), in (0, 1].
+  double effective_width_fraction{1.0};
   double overlap_pct{0.0};               ///< step_m = swath_m * (1 - overlap_pct / 100).
   std::vector<PassVariant> passes{PassVariant{}}; ///< Per-strip pass list; single default = one pass.
   std::string sweep_direction{"vertical"}; ///< "vertical" | "horizontal".
@@ -114,7 +119,7 @@ struct ToolCoverage
   /// side). "primary_axis": inflate only along the sweep axis (non-contact -- the fan is long
   /// perpendicular to travel, so passes shift away along the sweep direction only).
   std::string obstacle_inflation{"uniform"};
-  double obstacle_inflation_radius_m{0.0}; ///< margin = swath_m / 2 by convention (industryCode's
+  double obstacle_inflation_radius_m{0.0}; ///< margin = swath_m / 2 by convention (the earlier prototype's
                                            ///< proven formula), stored explicitly rather than
                                            ///< recomputed so a profile author can override it.
   bool ensure_coverage_within_boundary{false}; ///< Force a final pass exactly at the region edge.

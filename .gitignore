@@ -53,3 +53,6 @@ calibration_output/
 .env
 .env.local
 config/env/*.secret.env
+
+# --- Claude Code local state (agent worktrees, settings) -------------------
+.claude/

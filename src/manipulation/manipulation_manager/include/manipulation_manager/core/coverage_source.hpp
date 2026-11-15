@@ -6,7 +6,7 @@
  *          test/validation config) -- a second implementation backed by
  *          coverage_planner's real service is a plain follow-on once that
  *          package populates real segment metadata (see
- *          implementation_plan_manipulation_architecture.md §4.1/§4.4), not a
+ *          docs/architecture.md), not a
  *          redesign of this interface.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
@@ -24,8 +24,7 @@ namespace manipulation_manager
 /**
  * @struct CoverageSegmentIntent
  * @brief One segment of a coverage plan, in the shape the coverage planner is
- *        already committed to emitting (implementation_plan_manipulation_
- *        architecture.md §4.1: strip -> cartesian + requires_contact,
+ *        already committed to emitting (strip -> cartesian + requires_contact,
  *        connector/gap -> fsp + requires_retraction). requires_contact and
  *        requires_retraction are carried through as data for now -- nothing
  *        yet acts on them automatically (no force-layer gating, no

@@ -23,12 +23,15 @@ import sys
 import threading
 import time
 
+import json
+
 import rclpy
 from geometry_msgs.msg import Wrench, WrenchStamped
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import SetParameters
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from std_srvs.srv import Trigger
+from tf2_ros import Buffer, TransformListener
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from smoke_test import FREE, HOME, PRESS, Smoke, mean  # noqa: E402
@@ -54,6 +57,9 @@ class ContactTest(Smoke):
         self.truth_by_stamp = {}
         self.cond_last = None
         self.record = False
+        self.run_rows = []   # (t_s, x, y, z, |Fz|) of the whole run, tool point in base_footprint
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
         self.create_subscription(WrenchStamped, '/ft_conditioner/wrench_conditioned', self._cond,
                                  qos_profile_sensor_data)
         self.create_subscription(WrenchStamped, '/sim_mujoco/ft_ground_truth', self._truth_stamped,
@@ -77,9 +83,33 @@ class ContactTest(Smoke):
                 self.cond[self._stamp(m)] = self._w(m)
 
     def _truth_stamped(self, m):
+        pos = None
+        try:
+            tf = self.tf_buffer.lookup_transform('base_footprint', 'tcp_link', rclpy.time.Time())
+            pos = (tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z)
+        except Exception:  # noqa: BLE001  (no transform yet: skip the row)
+            pass
         with self.lock:
             if self.record:
                 self.truth_by_stamp[self._stamp(m)] = self._w(m)
+            if pos is not None:
+                self.run_rows.append((self._stamp(m) * 1e-9, *pos, abs(self._w(m)[2])))
+
+    def write_recording(self, path, wall_x, wall_range_y, wall_range_z):
+        """The whole run as the score_run CSV (t,x,y,z,force,active) plus a wall JSON beside it. The wall is
+        the plane x = wall_x in base_footprint: u along y, v along z, normal u x v = +x into the wall."""
+        with self.lock:
+            rows = list(self.run_rows)
+        t0 = rows[0][0] if rows else 0.0
+        with open(path, 'w') as f:
+            f.write('t,x,y,z,force,active\n')
+            for t, x, y, z, fz in rows:
+                f.write(f'{t - t0:.4f},{x:.5f},{y:.5f},{z:.5f},{fz:.4f},0\n')
+        wall = {'origin': [wall_x, 0.0, 0.0], 'u': [0, 1, 0], 'v': [0, 0, 1],
+                'u_range': list(wall_range_y), 'v_range': list(wall_range_z)}
+        with open(path + '.wall.json', 'w') as f:
+            json.dump(wall, f)
+        return len(rows)
 
     def cond_now(self):
         with self.lock:
@@ -176,6 +206,7 @@ def main():
     ap.add_argument('--no-calibrate', action='store_true', help='use the launch payload parameters')
     ap.add_argument('--tcp-z', type=float, default=0.165)
     ap.add_argument('--timeout', type=float, default=120.0)
+    ap.add_argument('--record', default='', help='write the run as a score_run CSV (and PATH.wall.json)')
     args = ap.parse_args()
     rclpy.init()
     node = ContactTest()
@@ -334,6 +365,9 @@ def main():
 
     guarded(node, run)
 
+    if args.record:
+        n = node.write_recording(args.record, 0.98, (0.0, 0.3), (1.0, 1.3))
+        print(f'recorded {n} samples to {args.record}', flush=True)
     print('CONTACT TEST', 'FAILED: ' + ', '.join(failures) if failures else 'PASSED', flush=True)
     os._exit(1 if failures else 0)
 

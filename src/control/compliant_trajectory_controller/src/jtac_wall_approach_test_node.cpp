@@ -1,7 +1,7 @@
 /**
  * @file jtac_wall_approach_test_node.cpp
- * @brief Bridges T8/T9's abstract engage/APPROACH/CARTESIAN/RETRACT cycle and the full production
- *        pipeline (T10): the SAME real force_core::ForceStageSequencer cycle, against a REAL,
+ * @brief Bridges the engage and wall-approach tests' abstract engage/APPROACH/CARTESIAN/RETRACT cycle and the full production
+ *        pipeline (MoveGroupInterface execute test): the SAME real force_core::ForceStageSequencer cycle, against a REAL,
  *        visible, collision-checkable wall (wall_scene.json's own wall_id=0, mounted via
  *        cartesian_test.launch.py's mount_robot_to_wall:=true) -- and now also a REAL,
  *        collision-checked FSP entry/exit and a REAL Cartesian coverage-strip trajectory tracked
@@ -9,7 +9,7 @@
  * @details Run against cartesian_test.launch.py (mount_robot_to_wall:=true, use_jtac_controller:=
  *          true, push_world_geometry:=true), PLUS wall_mount_publisher_node running alongside it
  *          (coverage_planner -- motion_validator_node's own mount transform dies the moment
- *          its own mission finishes, KNOWN_ISSUES.md #20), PLUS wall_contact_force_simulator_node
+ *          its own mission finishes), PLUS wall_contact_force_simulator_node
  *          (this package) -- see that file's own doc comment for why it exists and what it
  *          replaces.
  *
@@ -29,8 +29,7 @@
  *          jtac or whatever then we move z till we achieve contact and then continue with the
  *          joint trajectory we have planned for that" -- i.e. move-until-contact/retract is NOT a
  *          separate service or mechanism; it is what JtacController's own admittance loop already
- *          does for free once engaged with a target force (see force_control_backend_admittance_
- *          vs_diffik.md's own Context section), and the ONLY missing piece was a real, continuous
+ *          does for free once engaged with a target force (docs/ft_sensing.md), and the ONLY missing piece was a real, continuous
  *          contact force in mock (wall_contact_force_simulator_node). The FSP legs and the
  *          Cartesian strip are the two genuinely-planned pieces of a real coverage mission this
  *          test was still missing -- both reuse REAL MoveIt planning (MoveGroupInterface), not
@@ -53,7 +52,7 @@
  *
  *          kApproachStandoffPose was derived via moveit_pose_finder (this package) against the
  *          LIVE planning scene: collision-free (/check_state_validity-confirmed), well-
- *          conditioned, and shares the SAME fixed orientation this whole session's "wall-facing"
+ *          conditioned, and shares the SAME fixed orientation this "wall-facing"
  *          pose family uses (tip local Z == base_link -Y, reconfirmed via pose_conditioning_probe
  *          AFTER that tool's own Euler-angle-convention bug was found and fixed -- see that file's
  *          own doc comment). It sits ~5cm short of wall_surface_probe's own ray-marched real wall
@@ -234,7 +233,7 @@ const std::array<double, 3> kStripOrientationRpy{1.41922, -1.56707, 0.152887};
 // against.
 constexpr double kTargetForceN = 12.0;
 
-// Same diagnostic gains jtac_engage_disengage_test_node.cpp (T8) uses -- this test is about the
+// Same diagnostic gains jtac_engage_disengage_test_node.cpp (the engage/disengage test) uses -- this test is about the
 // wall-approach mechanism against real scene geometry, not about (re-)validating mop's own real,
 // never-hardware-tuned gains.
 constexpr double kMassZ = 8.0;
@@ -619,7 +618,7 @@ int main(int argc, char ** argv)
   //     point that is STILL IN FREE AIR. wall_contact_force_simulator_node (a separate, persistent
   //     process -- see its own doc comment) is continuously publishing a REAL, geometry-derived
   //     wrench throughout; JtacController's own admittance offset (already built, already proven
-  //     in T8/T9) is what actually advances past the raw reference and stops at genuine contact --
+  //     in the engage and wall-approach tests) is what actually advances past the raw reference and stops at genuine contact --
   //     this test does not compute, poll, or cancel anything itself. ---
   core_types::ForceIntent approach_intent;
   approach_intent.stage = core_types::ForceStage::kApproach;

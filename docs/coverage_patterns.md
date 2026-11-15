@@ -73,3 +73,32 @@ surface abstraction in [architecture.md](architecture.md) (`SurfaceModel`: `proj
 - **What does not:** the `CoveragePlannerBase` contract, pattern logic and segment semantics.
 
 Learned or non-grid planners (including RL) are further implementations of the same port.
+
+## Verifying what a run covered
+
+`CoverageVerifier` (`coverage_planner/core/coverage_verification.hpp`, ROS-free) rasterises a wall's (u, v)
+rectangle and marks the cells each executed stroke reached: a band of `swath_m` around the stroke's path, counted
+once per stroke per cell, only where the tool was working (`engaged`: contact held or valve open). `report()` gives
+the covered fraction of the target cells (a mask excludes obstacles), the mean number of strokes per covered cell
+(overlap), the number of worked cells outside the target (overspray) and the indices of the missed cells.
+
+It is a geometric model: no deposition thickness, spray falloff or timing. It is not wired to execution yet: nothing
+converts the executed tool poses from a run into wall (u, v) strokes, which is the next step toward a scorecard.
+
+### Run scorecard
+
+`scoreRun` (`coverage_planner/core/run_scorecard.hpp`, ROS-free) turns a recorded run into a pass/fail card on one
+wall: coverage (through `CoverageVerifier`), contact force RMS error against the target, force peak, the fraction
+of working samples inside the force band, and the duration. A contact tool counts as working while it presses at
+least `engaged_force_n`; a non-contact tool while `tool_active` is set. A new stroke starts after every sample where the
+tool was not working. Obstacles are excluded from the target. The limits are the caller's numbers
+(`ScorecardLimits`); each one that fails adds a line to `failures`. It does not count collisions (the recorder must),
+and the coverage is geometric. It scores recorded samples; recording them from a simulator run is not wired yet.
+
+`ros2 run coverage_planner score_run --samples run.csv --wall wall.json [--swath 0.2] [--target-force 10] [--band 1]
+[--no-contact] [--min-coverage 0.95] [--max-rms N] [--max-peak N] [--min-in-band F]` scores a recording and prints the
+card as JSON (exit 0 passed, 1 failed a limit, 2 bad input). The CSV has the header `t,x,y,z,force,active` (seconds,
+metres, newtons pressing on the wall, 0/1 valve); the wall JSON is `{"origin": [x,y,z], "u": [..], "v": [..],
+"u_range": [min,max], "v_range": [min,max]}` in the same frame as the positions, with `u` and `v` orthonormal and the
+normal `u x v`. It takes any recording, a simulator run or a hardware log.
+

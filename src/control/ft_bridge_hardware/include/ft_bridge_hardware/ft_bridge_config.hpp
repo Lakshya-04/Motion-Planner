@@ -32,8 +32,8 @@ struct FtBridgeConfig
 
   /// Test-only topic (geometry_msgs/WrenchStamped) this component reads from instead of
   /// source_topic when injection_mode is true -- the mechanism that lets the whole admittance
-  /// loop be exercised in mock/ufactory_sim with scripted forces (force_control_derisking_plan.md
-  /// §1.1's "highest-leverage item in the whole effort").
+  /// loop be exercised in mock/ufactory_sim with scripted forces -- the highest-leverage
+  /// de-risking tool for force control (see docs/ft_sensing.md).
   std::string injection_topic{"~/injected_wrench"};
 
   /// Setpoint topic (geometry_msgs/Wrench, not stamped -- a target, not a live reading), always

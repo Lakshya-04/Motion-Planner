@@ -1,12 +1,12 @@
 /**
  * @file tool_profile_yaml_loader.hpp
  * @brief Loads core_types::ToolProfile from tool_profiles.yaml.
- * @details Schema matches reference_docs/13_cleaning_modes_spec.md §2.1 exactly (top-level
+ * @details Schema: top-level
  *          `schema_version` + `tools: {<name>: {geometry, task, coverage, control}}`). Enforces
- *          three of doc 13's four loader invariants purely from the YAML's own internal
+ *          three of the four loader invariants purely from the YAML's own internal
  *          consistency (the fourth -- TCP transform matching the *running* URDF -- needs live
  *          robot_description context this loader doesn't have, and is left to the caller to
- *          cross-check at the ROS boundary), plus one new invariant this project added: a
+ *          cross-check at the ROS boundary), plus one more invariant: a
  *          reachability tilt fallback is never permitted on a contact tool.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
@@ -128,6 +128,12 @@ inline core_types::ToolCoverage loadCoverage(const YAML::Node & node)
   core_types::ToolCoverage coverage;
   if (node["swath_m"]) {coverage.swath_m = node["swath_m"].as<double>();}
   if (node["overlap_pct"]) {coverage.overlap_pct = node["overlap_pct"].as<double>();}
+  if (node["spray_half_angle_deg"]) {
+    coverage.spray_half_angle_deg = node["spray_half_angle_deg"].as<double>();
+  }
+  if (node["effective_width_fraction"]) {
+    coverage.effective_width_fraction = node["effective_width_fraction"].as<double>();
+  }
   if (node["passes"]) {
     coverage.passes = loadPasses(node["passes"]);
   }
@@ -235,6 +241,21 @@ inline void validateToolProfile(const core_types::ToolProfile & profile)
       fail("task.contact == false requires geometry.contact_allowed_links to be empty");
     }
   }
+  if (profile.coverage.spray_half_angle_deg != 0.0) {
+    if (profile.task.contact) {
+      fail("coverage.spray_half_angle_deg is for non-contact tools (task.contact == false)");
+    }
+    if (!(profile.coverage.spray_half_angle_deg > 0.0 &&
+      profile.coverage.spray_half_angle_deg < 90.0))
+    {
+      fail("coverage.spray_half_angle_deg must be in (0, 90)");
+    }
+    if (!(profile.coverage.effective_width_fraction > 0.0 &&
+      profile.coverage.effective_width_fraction <= 1.0))
+    {
+      fail("coverage.effective_width_fraction must be in (0, 1]");
+    }
+  }
   // This project's own addition, not in doc 13: a reachability tilt fallback changes the tool's
   // final orientation, which is unsafe for a tool meant to be in contact with the wall -- gate
   // explicitly here rather than trusting a profile author to leave the default alone.
@@ -247,7 +268,7 @@ inline void validateToolProfile(const core_types::ToolProfile & profile)
 
 /**
  * @brief Loads one named tool's profile from a tool_profiles.yaml file.
- * @param[in] yaml_path Path to a schema_version: 1 tool_profiles.yaml (reference_docs/13 §2.1).
+ * @param[in] yaml_path Path to a schema_version: 1 tool_profiles.yaml.
  * @param[in] tool_name Key under the top-level `tools:` map (e.g. "sprayer", "mop", "contact_soap").
  * @return The fully-populated, invariant-checked ToolProfile.
  * @throws std::runtime_error if the file, the `tools:` section, or the named tool is missing, or

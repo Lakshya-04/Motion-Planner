@@ -4,7 +4,7 @@
  * @details Adapters (e.g. motion_planner) translate to/from
  *          geometry_msgs::msg::Pose at the ROS boundary -- this type never
  *          crosses that boundary itself. See the ports-and-adapters split
- *          described in implementation_plan_manipulation_architecture.md.
+ *          described in docs/design_principles.md.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 

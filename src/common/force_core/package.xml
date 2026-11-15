@@ -8,12 +8,11 @@
     APPROACH/CARTESIAN/RETRACT contact-force lifecycle -- no rclcpp, no ROS message
     dependencies, no clock, no I/O. Builds and tests with ROS not sourced.
 
-    Extracted from manipulation_manager at the trigger named in
-    implementation_plan_manipulation_architecture.md's roadmap (P2.1/P2.2): a genuine
+    Extracted from manipulation_manager once a genuine
     cross-tree consumer at the platform tier (compliant_trajectory_controller,
     a fused JTC+admittance controller prototype) needed this logic, and platform
-    packages may not depend on capabilities orchestration packages -- see CLAUDE.md's
-    core/adapter split and dependency-direction rule. force_segment_expander stayed behind
+    packages may not depend on capabilities orchestration packages (the repo's
+    dependency-direction rule; docs/package_layout.md covers the core/adapter split). force_segment_expander stayed behind
     in manipulation_manager: unlike the FSM/sequencer, it depends on manager-specific
     types (MotionSegmentSpec, CoverageSource) and was never designed to be portable.
   </description>

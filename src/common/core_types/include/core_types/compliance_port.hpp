@@ -5,8 +5,8 @@
  *          manipulation_manager) because its implementations live OUTSIDE that package --
  *          a ros2_control admittance-chain adapter and a UFACTORY ft_mode adapter both belong in
  *          ros_adapters/platform, neither of which may depend on manipulation_manager.
- *          See force_control_derisking_plan.md and implementation_plan_manipulation_
- *          architecture.md §8 for the backend candidates this abstracts over.
+ *          The port abstracts over the candidate force-control backends (see docs/ft_sensing.md
+ *          and docs/architecture.md).
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 

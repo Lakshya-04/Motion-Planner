@@ -4,8 +4,7 @@
  *        parameters.
  * @details This is where per-segment planning params (eef_step, target speed,
  *          contact/wall bounds, ...) live in deployment -- fed later from
- *          ToolProfile/coverage output (§5/§7 of
- *          implementation_plan_manipulation_architecture.md). Replaces the
+ *          ToolProfile/coverage output. Replaces the
  *          idea of a single global request-defaults side-channel, which
  *          cannot express per-segment overrides.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>

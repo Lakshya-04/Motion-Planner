@@ -1,8 +1,7 @@
 /**
  * @file force_stage.hpp
  * @brief Per-segment force-control intent, independent of ROS.
- * @details Mirrors reference_docs/13_cleaning_modes_spec.md §2.2's proposed
- *          MotionPlanSegment.msg force_stage field (FORCE_STAGE_NONE/APPROACH/CARTESIAN/RETRACT),
+ * @details Mirrors the MotionPlanSegment.msg force_stage field (FORCE_STAGE_NONE/APPROACH/CARTESIAN/RETRACT),
  *          kept here as the pure-core representation adapters convert the wire uint8 into.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
@@ -37,8 +36,8 @@ struct ForceIntent
 };
 
 /// True for the two stages where the tool is expected to be in physical contact with the
-/// surface -- the producer-side assertion reference_docs/13_cleaning_modes_spec.md §2.2 proposes
-/// as "requires_contact == (force_stage in {APPROACH, CARTESIAN})", shared by both producer and
+/// surface -- the producer-side assertion
+///  "requires_contact == (force_stage in {APPROACH, CARTESIAN})", shared by both producer and
 /// consumer so they cannot drift apart.
 inline bool isContactStage(ForceStage stage)
 {
@@ -46,8 +45,7 @@ inline bool isContactStage(ForceStage stage)
 }
 
 /// Converts a wire (uint8) force_stage value to the enum. Any value outside the four known ones
-/// degrades to kNone rather than freezing or aborting -- see
-/// reference_docs/13_cleaning_modes_spec.md's explicit requirement that an unrecognized stage
+/// degrades to kNone rather than freezing or aborting -- an unrecognized stage
 /// must fail safe into "no force control", not into an undefined state.
 inline ForceStage forceStageFromWireValue(uint8_t value)
 {

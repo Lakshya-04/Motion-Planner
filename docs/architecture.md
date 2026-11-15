@@ -49,20 +49,20 @@ Status: **exists** = port in the code today; **planned** = to be added.
 | Stage | Port (status) | Implementations (now / planned) |
 |---|---|---|
 | Robot model | `mobile_manipulator_description` (exists) — see [robot_description.md](robot_description.md) | telescopic lift + UR10e (now); any lift / 6-DOF arm via contracts |
-| Reachability | `ReachabilityMap` (planned) — see [reachability.md](reachability.md) | RM4D map: forward + inverse queries, base stationing, lift bands |
-| Robot self filter | `RobotSelfFilter` (planned) — see [robot_self_filter.md](robot_self_filter.md) | geometry containment, collision-sphere model, GPU depth mask (cuRobo-style), learned segmentation later |
+| Reachability | `reachability::Map4D` (exists, `src/manipulation/reachability`) — see [reachability.md](reachability.md) | RM4D map: forward + inverse queries, base stationing, lift bands, multi-stand planning, ROS services (`~/plan_stands`, `GetBaseCandidates`, `IsReachable`, `PlanLiftBands`); the manager does not call it yet |
+| Robot self filter | `robot_self_filter::SelfFilter` (exists, `src/perception/robot_self_filter`) — see [robot_self_filter.md](robot_self_filter.md) | geometry containment (now, with a ROS node); collision-sphere model, GPU depth mask (cuRobo-style), learned segmentation (planned) |
 | Perception | `PerceptionSource` (planned) | point-cloud topic, depth + camera (cuRobo `Mapper`), file replay |
-| World / scene | `SceneModel` (exists, `scene_model`, see [scene_model.md](scene_model.md)); `ScenePort` (exists, `motion_planner/core/scene_port.hpp`) | loaders: `.pcd`/`.ply`, meshes, primitives YAML/JSON, voxel/ESDF, MoveIt `PlanningScene`, depth; consumers: MoveIt, cuRobo v2, VAMP |
+| World / scene | `SceneModel` (exists, `scene_model`, see [scene_model.md](scene_model.md)); `ScenePort` (exists, `motion_planner/core/scene_port.hpp`) | loaders: `.pcd`/`.ply`, meshes, primitives YAML/JSON, voxel/ESDF, ROS converters for MoveIt `PlanningScene` / `CollisionObject` and `PointCloud2`; depth (planned); consumers: MoveIt, cuRobo v2, VAMP |
 | Surface | `SurfaceModel` (planned) | planar fit from scene (`WallPlane` today); later: mesh / parametric / height-map surfaces |
 | Coverage planner | `CoveragePlannerBase` + `CoveragePlannerFactory` (exists) | boustrophedon, sweepline (now); cell decomposition (BCD), spiral, learned (planned) |
 | Coverage pattern | `planWallPattern` (exists) — see [coverage_patterns.md](coverage_patterns.md) | vertical, horizontal, zigzag (now), over any coverage planner; non-planar surfaces later |
 | Coverage feed | `CoverageSource` (exists, `manipulation_manager`) | JSON source (now); ROS service source |
 | Sequencing | `SegmentOrderingPolicy` (exists) | input order (now); TSP with time metric `max_i \|Δq_i\|/v_max_i`, failure-aware resequencing (planned) |
-| IK | `IkPort` (exists) | MoveIt/KDL via `motion_planner_moveit` (now); TRAC-IK, cuRobo IK, analytic (planned) |
-| Collision | `CollisionPort` (exists) | MoveIt/FCL (now); VAMP, cuRobo (planned) |
-| Planning | `Planner` (exists: plan + ik + collision) | MoveIt Cartesian + OMPL (now); VAMP free-space, cuRobo v2 trajopt, velocity-constrained IK seam planner (planned) |
+| IK | `IkPort` (exists) | MoveIt IK through `motion_planner_moveit` with a selectable solver (TRAC-IK default, KDL, pick_ik) and the `SeedPreferringIk` decorator; cuRobo IK through `curobo_planner` (now); analytic (planned) |
+| Collision | `CollisionPort` (exists) | MoveIt/FCL, VAMP (`vamp_planner`), cuRobo (`curobo_planner`) (now) |
+| Planning | `Planner` (exists: plan + ik + collision) | MoveIt Cartesian + OMPL, VAMP free-space (joint goals), cuRobo v2 plan through the Python node (now; the manager hard-wires MoveIt, see [ROADMAP.md](ROADMAP.md) section 5); velocity-constrained IK seam planner (planned) |
 | Timing | `TimeParameterizer` (planned) | S-curve Cartesian for contact seams, TOPP-RA for transitions |
-| Execution | `ExecutionPort` (exists) | JTAC / `FollowJointTrajectory` (now); mock, sim (planned) |
+| Execution | `ExecutionPort` (exists) | JTAC / `FollowJointTrajectory` (now); mock, MuJoCo and Gazebo run behind the same controllers through `ros2_control` `hardware:=` ([simulation.md](simulation.md)), so no separate sim `ExecutionPort` exists |
 | Control | `CompliancePort` (exists, `core_types`) | JTAC admittance (now); other force controllers (planned) |
 | Recovery | `RecoveryProposer` (planned) | retract along normal, path retrace, global plan to nearest safe target set; learned proposer later — see [learned_recovery.md](learned_recovery.md) |
 | Policy | `Policy` (planned) | none yet — see below |

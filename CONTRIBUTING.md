@@ -1,9 +1,97 @@
 # Contributing
 
-1. Fork the repo and create a branch from `main`.
-2. Keep changes focused; one concern per pull request.
-3. Follow the existing style (`.clang-format`, `.clang-tidy`, `.editorconfig`).
-4. Add or update tests, and make sure `colcon build` and `colcon test` pass.
-5. Open a pull request describing what changed and why.
+Thanks for helping. This page is the working agreement; the design rules are in
+[docs/design_principles.md](docs/design_principles.md) and the status of everything is in
+[docs/ROADMAP.md](docs/ROADMAP.md) (pick an unchecked item, or open an issue first for anything large).
+By contributing you agree your work is licensed under the Apache License 2.0 ([LICENSE](LICENSE)).
 
-By contributing you agree your work is licensed under the Apache License 2.0.
+## Repository layout
+
+```
+src/common/        core_types, ros_adapters, force_core            ROS-free types, ports, force core
+src/description/   robot description, MoveIt config, profile loader
+src/perception/    scene_model, scene_adapters, robot_self_filter, coverage_planner(+_msgs)
+src/manipulation/  motion_planner (+_moveit), vamp_planner, curobo_bridge(+_msgs), curobo_planner,
+                   reachability(+_msgs), manipulation_manager
+src/control/       compliant_trajectory_controller (JTAC), ft_bridge_hardware, ft_conditioner
+src/simulation/    sim_mujoco, sim_gazebo, sim_isaac (stub)
+docker/            Dockerfile, compose.yaml, build.sh, per-robot asset tools (docker/tools)
+docs/              architecture, per-module notes, ROADMAP.md, decision records (docs/adr)
+```
+
+Every module splits into `core/` (plain C++17, no ROS) and `ros/` (a thin shell) with tests mirrored
+under `test/core` and `test/ros`: [docs/package_layout.md](docs/package_layout.md). Keep new algorithms in
+`core/` so they can be tested without ROS. Decisions that shaped the layout: [docs/adr/](docs/adr/).
+
+## Building and testing
+
+The supported environment is Docker ([docs/docker.md](docs/docker.md)); everything below runs from the repo root.
+
+```bash
+docker compose -f docker/compose.yaml build dev
+docker compose -f docker/compose.yaml run --rm test          # docker/build.sh test: colcon build, colcon test, summary
+docker compose -f docker/compose.yaml run --rm dev           # shell, repo mounted at /ws
+```
+
+Inside the shell, `docker/build.sh test` is the one build entry point. For a single package:
+`colcon build --packages-select <pkg> && colcon test --packages-select <pkg> && colcon test-result --verbose`.
+GPU tests (cuRobo) need the `gpu` image and skip without CUDA; simulator tests need the `sim` /
+`sim-gazebo` images (and the MuJoCo SDK for the plugin) and skip what they lack.
+
+## There is deliberately no CI
+
+No workflow files are kept in this repository, by decision. The replacement is that every contributor
+runs the checks locally before opening a pull request. "Run all checks" today is:
+
+1. `docker compose -f docker/compose.yaml run --rm test` (all colcon tests, C++ and Python).
+2. Python tool tests: `python -m pytest docker/tools/tests` (the MuJoCo cross-check tests skip without MuJoCo).
+3. For changes to a simulator or the force path, the scripts the simulator docs describe:
+   `ros2 run sim_gazebo smoke_test.py` and `contact_control_test.py` ([docs/sim_gazebo.md](docs/sim_gazebo.md)),
+   `scripts/run_smoke.sh` and `run_contact.sh` of `sim_mujoco` ([docs/sim_mujoco.md](docs/sim_mujoco.md)).
+   These are not part of `colcon test` yet (roadmap section 10).
+4. A link check over the Markdown you touched (relative links must resolve).
+
+## Code style
+
+- C++17. Formatting follows `.clang-format` (Google-based, 100 columns, braces on their own line for
+  classes, functions, namespaces and structs; run `clang-format` on what you change) and `.clang-tidy`;
+  `.editorconfig` covers the rest (UTF-8, LF, final newline, 2 spaces for C++, YAML, XML, xacro; 4 spaces and
+  99 columns for Python). The ament style linters (uncrustify, flake8, pep257) are switched off in
+  `colcon test`, so run the formatter yourself.
+- Ports are small abstract classes in `core/` (`Planner`, `IkPort`, `CollisionPort`, `ScenePort`, ...);
+  backends implement them, nodes only wire parameters, topics and conversions.
+- Names that vary per robot (joint, group, frame and controller names) come from the robot profile, not
+  from constants in code.
+- Tests: gtest for C++, pytest for Python (launch `ament_cmake_pytest`). A fix comes with a test that fails
+  without it. Say in the test or the docs when a result is an estimate.
+- Docs state what exists. Do not write "planned" next to something that is built or the reverse; when you
+  are unsure, write "unverified".
+
+## Adding things
+
+| To add | Start here |
+|---|---|
+| An arm | [docs/robot_description.md](docs/robot_description.md), "Adding an arm": xacro macro, profile YAML, ACM, MoveIt controller configs; swap tests pick it up from their profile lists |
+| A base | same doc, "Swapping parts" and "Bases": a `<name>_base` macro, one branch in `urdf/base/base.xacro`, a `base:` section in the profile |
+| A lift | same doc, "Lift variants": keep the three lift outputs, add one branch in `lift/lift.xacro`; recipe for a chain / column lift |
+| Per-robot planner assets (spheres, cuRobo config, VAMP header, reach map) | [docs/robot_assets.md](docs/robot_assets.md): one command from the profile |
+| A tool | There is no "how to add a tool" guide yet (roadmap section 4). Today a tool is a `ToolProfile` / `ToolCoverageProfile` (`core_types`, `coverage_planner/core/tool_coverage_profile.hpp`) filled from node parameters; mind the TCP offset (`tcp_xyz`, `tcp_rpy`) in the profile |
+| A simulation backend | [docs/simulation.md](docs/simulation.md): the contract every backend meets (joints, clock, tool wrench, world, base), then follow [docs/sim_mujoco.md](docs/sim_mujoco.md) or [docs/sim_gazebo.md](docs/sim_gazebo.md) as a model |
+| A planning, IK or collision backend | [docs/architecture.md](docs/architecture.md) for the ports; [docs/vamp_notes.md](docs/vamp_notes.md) and [docs/curobo_v2_notes.md](docs/curobo_v2_notes.md) for the two existing out-of-tree backends. Runtime backend selection (pluginlib) is not implemented yet |
+| A coverage planner | `CoveragePlannerBase` and the factory in `coverage_planner`; [docs/coverage_patterns.md](docs/coverage_patterns.md) |
+| Third-party software | Consume it upstream and unpatched ([docs/adr/0002-third-party-backends.md](docs/adr/0002-third-party-backends.md)); add a row with its licence to [THIRD_PARTY.md](THIRD_PARTY.md); do not vendor source |
+
+## Commits and pull requests
+
+- One concern per pull request, branched from `main`; small commits with a message that says what changed
+  and why. Imperative subject, an area prefix is welcome (`reachability: ...`, `docs: ...`).
+- **No AI attribution** in commits or pull request text: no `Co-Authored-By` lines for tools, no
+  "generated with" lines.
+- **No company or earlier-project names** in code, docs, commit messages or test data. Describe a design
+  by what it does; cite public papers and open-source projects by name.
+- Do not commit generated artefacts (`build/`, `install/`, `log/`, reachability maps, robot assets under
+  `robots/`) or secrets. `.claude/` stays out of the repository.
+- Update the docs and [CHANGELOG.md](CHANGELOG.md) (under `Unreleased`) with the change, and tick or edit
+  the matching item in [docs/ROADMAP.md](docs/ROADMAP.md) with its evidence.
+- In the pull request: what changed, how you tested it (which of the checks above), and what you did not
+  verify.

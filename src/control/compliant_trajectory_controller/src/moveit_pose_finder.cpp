@@ -26,8 +26,8 @@
  *          the literal MoveIt itself assigns to octomap world geometry (verified against the
  *          installed libmoveit_planning_scene.so -- hardcoded here rather than pulled from
  *          motion_planner::kWallOctomapCollisionObjectId, matching the SAME already-existing
- *          precedent of inlining this literal directly in serum_demo_bt's wall_cleaning_*
- *          servers rather than adding a cross-tree header dependency for one string).
+ *          precedent of inlining this literal directly in the wall-cleaning application's
+ *          action servers rather than adding a cross-tree header dependency for one string).
  *
  *          This is the CORRECT way to find a wall-approach pose that genuinely touches real
  *          collision geometry: it keeps MoveIt's own collision-aware planning in the loop (the

@@ -2,7 +2,7 @@
  * @file execution_port.hpp
  * @brief Port for executing an already-planned trajectory on the robot.
  * @details The other half of the plan/execute decoupling described in
- *          implementation_plan_manipulation_architecture.md §6.1/§6.5:
+ *          docs/design_principles.md:
  *          Planner::plan() only plans; ManipulationManager hands the
  *          resulting core_types::Trajectory to an ExecutionPort to
  *          actually move the robot. ROS-optional -- adapters (e.g.

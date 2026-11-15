@@ -196,7 +196,7 @@ bool JtacControllerCompliancePort::disengage(std::string & error_message)
   }
   // All axes deselected -- matches core_types::ForceStage::kNone's own convention (see this
   // class's own header doc). Mass/stiffness/damping_ratio are left as whatever engage() set --
-  // harmless, since a deselected axis's spring dynamics are masked regardless (T4a's own
+  // harmless, since a deselected axis's spring dynamics are masked regardless (the admittance-rule integration test's own
   // ForceOnADeselectedAxisProducesOnlyItsSelectedAxisProjection).
   if (!setSelectedAxes({false, false, false, false, false, false}, error_message)) {
     return false;

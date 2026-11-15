@@ -16,6 +16,7 @@
 #include "coverage_planner/core/wall_rasterizer.hpp"
 #include "coverage_planner/core/wall_scene_loader.hpp"
 #include "coverage_planner/ros/conversions.hpp"
+#include "coverage_planner/ros/tool_profile_params.hpp"
 
 namespace coverage_planner
 {
@@ -39,21 +40,8 @@ WallCoverageServiceNode::WallCoverageServiceNode(const rclcpp::NodeOptions & opt
   this->declare_parameter<bool>("add_strip_connectors", false);
   this->declare_parameter<bool>("allow_unknown", false);
 
-  // Tool coverage/orientation params -- see wall_coverage_demo_node's own
-  // buildToolCoverageProfile() doc comment.
-  this->declare_parameter<std::string>("tool_name", "mop");
-  this->declare_parameter<bool>("contact", true);
-  this->declare_parameter<double>("standoff_m", 0.0);
-  this->declare_parameter<std::string>("tool_normal_policy", "constant");
-  this->declare_parameter<double>("max_edge_tilt_deg", 0.0);
-  this->declare_parameter<double>("tool_frame_yaw_deg", 0.0);
-  this->declare_parameter<double>("swath_m", 0.2);
-  this->declare_parameter<double>("overlap_pct", 20.0);
-  this->declare_parameter<std::string>("sweep_direction", "vertical");
-  this->declare_parameter<bool>("enable_boundary_pass", false);
-  this->declare_parameter<double>("boundary_offset_m", 0.0);
-  this->declare_parameter<std::string>("obstacle_inflation", "uniform");
-  this->declare_parameter<bool>("double_pass", false);
+  // Tool profile: tool_profiles_file + tool_name select it, optional params override fields.
+  tool_profile_ = loadToolCoverageProfileFromParams(*this);
 
   plan_pub_ = this->create_publisher<msg::CoveragePlan>("~/coverage_plan", rclcpp::QoS(1));
 
@@ -67,32 +55,6 @@ WallCoverageServiceNode::WallCoverageServiceNode(const rclcpp::NodeOptions & opt
       &WallCoverageServiceNode::stopCallback, this, std::placeholders::_1, std::placeholders::_2));
 
   RCLCPP_INFO(this->get_logger(), "Services ready: ~/start, ~/stop. Publishing on ~/coverage_plan");
-}
-
-ToolCoverageProfile WallCoverageServiceNode::buildToolCoverageProfile() const
-{
-  ToolCoverageProfile profile;
-  profile.name = this->get_parameter("tool_name").as_string();
-
-  profile.task.contact = this->get_parameter("contact").as_bool();
-  profile.task.standoff_m = this->get_parameter("standoff_m").as_double();
-  profile.task.tool_normal_policy = this->get_parameter("tool_normal_policy").as_string();
-  profile.task.max_edge_tilt_deg = this->get_parameter("max_edge_tilt_deg").as_double();
-  profile.task.tool_frame_yaw_deg = this->get_parameter("tool_frame_yaw_deg").as_double();
-
-  profile.coverage.swath_m = this->get_parameter("swath_m").as_double();
-  profile.coverage.overlap_pct = this->get_parameter("overlap_pct").as_double();
-  profile.coverage.sweep_direction = this->get_parameter("sweep_direction").as_string();
-  profile.coverage.enable_boundary_pass = this->get_parameter("enable_boundary_pass").as_bool();
-  profile.coverage.boundary_offset_m = this->get_parameter("boundary_offset_m").as_double();
-  profile.coverage.obstacle_inflation = this->get_parameter("obstacle_inflation").as_string();
-
-  const bool double_pass = this->get_parameter("double_pass").as_bool();
-  profile.coverage.passes = double_pass
-                              ? std::vector<PassVariant>{PassVariant{}, PassVariant{0.0, true}}
-                              : std::vector<PassVariant>{PassVariant{}};
-
-  return profile;
 }
 
 void WallCoverageServiceNode::startCallback(
@@ -150,7 +112,7 @@ void WallCoverageServiceNode::requestCoveragePath()
   }
   wall_ = scene.wall;
 
-  const auto tool_profile = buildToolCoverageProfile();
+  const auto & tool_profile = tool_profile_;
 
   // Mask against the actual point cloud so coverage only plans where the wall was really
   // measured -- see wall_coverage_demo_node's own use of this same pair of calls.
@@ -170,9 +132,8 @@ void WallCoverageServiceNode::requestCoveragePath()
   auto request = std::make_shared<GenerateCoveragePath::Request>();
   request->map = ros_conv::toRos(grid);
   request->pattern = "boustrophedon";
-  request->swath = static_cast<float>(tool_profile.coverage.swath_m);
-  request->step = static_cast<float>(
-    tool_profile.coverage.swath_m * (1.0 - tool_profile.coverage.overlap_pct / 100.0));
+  request->swath = static_cast<float>(toolSwath(tool_profile));
+  request->step = static_cast<float>(toolLineSpacing(tool_profile));
   request->sweep_direction = tool_profile.coverage.sweep_direction;
   request->start_corner = "bottom_left";
   request->obstacle_inflation_radius = 0.0f;  // already rasterized into the grid above.
@@ -224,7 +185,7 @@ void WallCoverageServiceNode::coveragePathResponseCallback(
     return;
   }
 
-  const auto tool_profile = buildToolCoverageProfile();
+  const auto & tool_profile = tool_profile_;
   std::vector<MotionPlanSegment> flat_segments;
   flat_segments.reserve(response->segments.size());
   for (const auto & segment : response->segments) {

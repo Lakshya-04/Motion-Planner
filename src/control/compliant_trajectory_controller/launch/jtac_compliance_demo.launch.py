@@ -1,65 +1,49 @@
 """Launch the JTAC compliance demo: the demo node plus two robot_state_publisher instances
-(actual + a "ghost_"-prefixed reference overlay) and RViz, so the redundancy split proven in
+(actual + a "ghost/"-prefixed reference overlay) and RViz, so the redundancy split proven in
 test_admittance_rule_integration.cpp (T4a) can actually be watched rather than read off numbers.
 
-Defaults to this repo's real description chain (urdf/robot.urdf.xacro, base_type:=serum), not
-the synthetic T4a stand-in -- pass real_robot:=false to fall back to the small self-contained demo
-geometry. Ported from an earlier internal repo, where this rendered robot_description's own
-robot.urdf.xacro -- see jtac_controller_test.launch.py's own header for why that package isn't
-in this repo and how the render was adapted.
+By default the robot is rendered from a robot profile through mobile_manipulator_description
+(`profile:=` or `arm:=`, default ur10e_telescopic; hardware mode jtac_mock, so it stays purely
+kinematic), and the demo node takes the controlled tip and the home pose from that profile. Pass
+real_robot:=false to fall back to the small self-contained demo geometry (jtac_demo_robot.urdf).
+pose_set:=wall_ceiling is vetted for one 7-joint chain whose tip is named link_tcp; the node
+refuses to start otherwise (see its argument description).
 
 Usage:
     ros2 launch compliant_trajectory_controller jtac_compliance_demo.launch.py
+    ros2 launch compliant_trajectory_controller jtac_compliance_demo.launch.py profile:=panda_telescopic
     ros2 launch compliant_trajectory_controller jtac_compliance_demo.launch.py real_robot:=false
     ros2 launch compliant_trajectory_controller jtac_compliance_demo.launch.py show_rviz:=false
-    ros2 launch compliant_trajectory_controller jtac_compliance_demo.launch.py pose_set:=wall_ceiling
 """
 import os
-import subprocess
 
+import xacro
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from mobile_manipulator_description import DEFAULT_PROFILE, load_profile, profile_for_arm
 
 
-# Vetted with pose_conditioning_probe AND reference_pose_collision_probe (this package) against
-# THIS EXACT rendering -- base_type:=serum, attach_rpy:="0 0 0.7854", mop tool geometry attached
-# -- not the plain-default render, and checked with kinematics.tip=link_tcp (the real controlled
-# point once the tool is attached, not the bare link6 flange). A pose checked only for Jacobian
-# conditioning, or against a different base_type/attach_rpy/tip, is not validated for this robot.
-#
-# An earlier candidate (elbow bent the "wrong" way: joint3=1.2) was NEVER PHYSICALLY REACHABLE --
-# joint3's real limit is [-3.11, 0.061] -- and slipped through undetected because neither probe
-# checked joint limits at the time (fixed in reference_pose_collision_probe.cpp; it now refuses
-# any out-of-bounds pose outright). A reachable, more genuinely "arm reaching toward a wall"
-# extended pose (elbow only slightly bent, condition number 17.5) was found by sweeping poses
-# within the real joint limits and confirmed collision-free with 3x the compliance offset margin
-# actually observed live, in both push directions.
-REAL_ROBOT_REFERENCE_POSE = [0.40, 0.0, -0.15, -0.15, 0.0, -0.15, 0.0]
 # Matches jtac_demo_robot.urdf's own bent, non-singular pose (see that file's own comment).
 SYNTHETIC_REFERENCE_POSE = [0.40, 0.0, 0.6, -0.9, 0.0, 0.5, 0.0]
 
 
-def _render_real_robot_description(context):
-    """Renders description/urdf/robot.urdf.xacro (base_type:=serum, the default -- lift +
-    UF850 arm + mop tool, matching jtac_controller_test.launch.py's own real-robot render) with
-    arm_control_mode:=joint_trajectory (that xacro's own non-production joint-command interface --
-    see its header) so this demo's KDL kinematics has real joint state to work from.
-    use_mock_hardware:=true keeps this purely kinematic; no hardware ports touched.
-    """
-    pkg_desc_dir = get_package_share_directory("description")
-    xacro_path = os.path.join(pkg_desc_dir, "urdf", "robot.urdf.xacro")
-    command = [
-        "xacro",
-        xacro_path,
-        "base_type:=serum",
-        "use_mock_hardware:=true",
-        "arm_control_mode:=joint_trajectory",
-    ]
-    return subprocess.run(command, check=True, capture_output=True, text=True).stdout
+def _profile_robot(context):
+    """(robot_description xml, profile name, tcp link) for the requested profile/arm."""
+    arm = LaunchConfiguration("arm").perform(context) or None
+    profile = LaunchConfiguration("profile").perform(context) or None
+    resolved = load_profile(profile or (profile_for_arm(arm) if arm else DEFAULT_PROFILE))
+    xacro_path = os.path.join(
+        get_package_share_directory("mobile_manipulator_description"),
+        "urdf", "mobile_manipulator.urdf.xacro")
+    mappings = dict(resolved.xacro_mappings(), profile=resolved.name, hardware="jtac_mock")
+    if arm:
+        mappings["arm"] = arm
+    robot_description = xacro.process_file(xacro_path, mappings=mappings).toxml()
+    return robot_description, resolved.name, resolved.tcp_link
 
 
 def _launch_setup(context, *args, **kwargs):
@@ -68,21 +52,17 @@ def _launch_setup(context, *args, **kwargs):
     pkg_share = get_package_share_directory("compliant_trajectory_controller")
     rviz_config_path = os.path.join(pkg_share, "rviz", "jtac_compliance_demo.rviz")
 
+    node_params = {}
     if real_robot:
-        robot_description = _render_real_robot_description(context)
-        reference_pose = REAL_ROBOT_REFERENCE_POSE
-        # link_tcp, not link6: the real chain is rendered with add_other_geometry:=true (the
-        # mop tool from the wall_cleaning_default profile), so link6 is the bare wrist flange,
-        # NOT the controlled tool point -- CLAUDE.md's own convention ("Controlled tool point:
-        # link_tcp... link_eef is reserved for the bare flange, not the tool tip"). Using link6
-        # here means admittance has no awareness of the tool geometry swinging further out on
-        # every correction, which is exactly what let a real self-collision through undetected.
-        kinematics_tip = "link_tcp"
+        robot_description, profile_name, kinematics_tip = _profile_robot(context)
+        # The tcp link is the controlled tool point; the bare flange is not the tool tip. The
+        # reference pose is left unset so the node uses the profile's home pose.
+        node_params["profile"] = profile_name
     else:
         demo_urdf_path = os.path.join(pkg_share, "urdf", "jtac_demo_robot.urdf")
         with open(demo_urdf_path, "r") as urdf_file:
             robot_description = urdf_file.read()
-        reference_pose = SYNTHETIC_REFERENCE_POSE
+        node_params["reference_pose"] = SYNTHETIC_REFERENCE_POSE
         kinematics_tip = "link6"
 
     # Comma-separated string, not a repeated launch arg -- ros2 launch has no native list-typed
@@ -101,7 +81,7 @@ def _launch_setup(context, *args, **kwargs):
         parameters=[
             {
                 "robot_description": robot_description,
-                "reference_pose": reference_pose,
+                **node_params,
                 "kinematics_tip": kinematics_tip,
                 "pose_set": LaunchConfiguration("pose_set"),
                 "enable_redundancy_weighting": LaunchConfiguration("enable_redundancy_weighting"),
@@ -179,21 +159,26 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "real_robot",
                 default_value="true",
-                description="true: render the real robot_description chain "
-                "(robot.urdf.xacro, base_type:=serum, the real attach_rpy, the "
-                "wall_cleaning_default tool geometry -- matching cartesian_test.launch.py). "
+                description="true: render the robot from the profile (profile:=/arm:=). "
                 "false: use the small synthetic T4a-style stand-in geometry instead.",
             ),
+            DeclareLaunchArgument(
+                "profile", default_value="",
+                description="robot profile name or path (default ur10e_telescopic); "
+                "real_robot:=true only."),
+            DeclareLaunchArgument(
+                "arm", default_value="",
+                description="arm name; picks the matching profile when `profile` is empty."),
             DeclareLaunchArgument(
                 "pose_set",
                 default_value="redundancy_split",
                 description="'redundancy_split' (default): the original demo, base-frame axis "
-                "pushes at REAL_ROBOT_REFERENCE_POSE/SYNTHETIC_REFERENCE_POSE. 'wall_ceiling': "
-                "tool-local-frame X/Y/Z pushes at a real, validated HOME/WALL pose (the same "
-                "joint3=-25deg/joint5=65deg seed workflow_orchestrator's "
-                "validate_7dof_sync.py uses), then the same at a raised CEILING pose -- requires "
-                "real_robot:=true (its default). See jtac_compliance_demo_node.cpp's "
-                "kHomeWallPose/kCeilingPose for how each was vetted.",
+                "pushes at the profile's home pose "
+                "(SYNTHETIC_REFERENCE_POSE with real_robot:=false). 'wall_ceiling': tool-local "
+                "X/Y/Z pushes at a wall pose, then at a raised ceiling pose; the node only "
+                "accepts it on the 7-joint chain whose tip link is named link_tcp, so with "
+                "profile tips (tcp_link) it refuses to start. See "
+                "jtac_compliance_demo_node.cpp's kHomeWallPose/kCeilingPose.",
             ),
             DeclareLaunchArgument(
                 "enable_redundancy_weighting",

@@ -2,8 +2,8 @@
  * @file test_pose.cpp
  * @brief Unit tests for core_types::Pose.
  * @details Also serves as the litmus test that this package builds and runs
- *          its tests with ROS not sourced (see §2.2 of
- *          implementation_plan_manipulation_architecture.md).
+ *          its tests with ROS not sourced (the pure-core rule in
+ *          docs/design_principles.md).
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 

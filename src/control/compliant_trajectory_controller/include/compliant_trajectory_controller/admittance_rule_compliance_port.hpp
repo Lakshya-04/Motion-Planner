@@ -2,15 +2,14 @@
  * @file admittance_rule_compliance_port.hpp
  * @brief A real core_types::CompliancePort implementation, backed by ros2_control's
  *        AdmittanceRule -- the JTAC compliance mechanism proven in test_admittance_rule_
- *        integration.cpp (T4a), now wired to the real port interface so it can be driven by
+ *        integration.cpp (the admittance-rule integration test), now wired to the real port interface so it can be driven by
  *        force_core::ForceStageSequencer.
  * @details Lives here (platform), not capabilities, because CompliancePort implementations
  *          are adapters over rclcpp/admittance_controller/kinematics_interface -- see
  *          compliance_port.hpp's own doc comment on why the port itself sits in core_types.
  *
  *          The installed Humble AdmittanceRule drives toward measured-wrench == 0 and has no
- *          force setpoint (see force_control_backend_admittance_vs_diffik.md's Context section,
- *          option (a)). This class supplies the setpoint the same way a real FT bridge would:
+ *          force setpoint (docs/ft_sensing.md). This class supplies the setpoint the same way a real FT bridge would:
  *          it biases the measured wrench by target_force_n_ along the tool's own +Z before
  *          feeding AdmittanceRule::update(), so "drive to zero" becomes "drive to target". It
  *          also owns the FT hygiene (low-pass filter, deadband, clamp) ComplianceConfig carries --
@@ -62,9 +61,8 @@ public:
     std::string robot_description;                ///< Flat (already xacro-rendered) URDF.
     std::vector<std::string> joint_names;          ///< Positional order matches the URDF chain.
     std::string kinematics_base{"base_link"};      ///< Must not include the compliant joints' root
-                                                    ///< above the chain -- see kinematics.base note
-                                                    ///< in force_control_backend_admittance_vs_diffik.md.
-    std::string kinematics_tip{"link_tcp"};        ///< Controlled tool point (CLAUDE.md convention).
+                                                    ///< above the chain (the controller's kinematics.base rule).
+    std::string kinematics_tip{"link_tcp"};        ///< Controlled tool point (docs/ft_sensing.md).
     double dt_s{0.01};                             ///< AdmittanceRule tick period (100 Hz default).
   };
 

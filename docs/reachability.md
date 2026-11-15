@@ -134,9 +134,12 @@ tour. Not done: a yaw preference for contact work.
   before trusting a map for cluttered arms.
 - **Joint range assumption.** The reduction needs the first joint to rotate a full turn and the
   last joint to rotate fully (UR family: yes). Check a new arm against brute force.
-- **Not done:** ROS shell (services `GetBaseCandidates` / `IsReachable`, RViz slices), a
-  validation harness against brute-force 6D sampling, base-station selection over several
-  stations, orientation-constrained wall queries.
+- **Done since the first version:** the ROS shell (`reachability_node`, see below: `~/is_reachable`,
+  `~/get_base_candidates`, `~/plan_lift_bands`, `~/plan_stands`) and selection over several stands
+  (`planStands`, `orderStands`).
+- **Not done:** RViz slices of the map, a validation harness against brute-force 6D sampling,
+  orientation-constrained wall queries, a yaw preference for contact work, and any caller:
+  the manipulation manager docks at a fixed offset and never asks this module for a base pose.
 
 ## File format
 
@@ -184,3 +187,15 @@ the target plane; the caller (stationing logic) picks the free side.
 ```
 ros2 launch reachability reachability.launch.py map_file:=/path/ur10e.rm4d
 ```
+
+## Checking the base stance from the manager
+
+`manipulation_manager` can ask `~/plan_stands` whether the base, where it stands, reaches the whole coverage plan
+(`base_check:=off|warn|enforce`, default `off`). It sends the plan's poses in the base frame with the wall on the
++y side (the assumption the dock pose already makes) and accepts the stance only when exactly one stand covers
+every target and that stand is within `base_check_tol_xy_m` (0.15) and `base_check_tol_yaw_rad` (0.1) of the
+origin. Otherwise it reports where the base would have to be, or that several stands are needed. `warn` logs and
+runs the plan; `enforce` does not run it, and also refuses when the service is unreachable. Set
+`base_check_lift_min_m`, `base_check_lift_max_m` and `base_check_arm_mount_z_m` to match the robot (0 selects the
+service defaults). This only verifies; it never moves the base (that waits for base motion in the simulators).
+

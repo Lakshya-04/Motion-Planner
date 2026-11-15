@@ -117,10 +117,8 @@ double poseDistance(
   return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-// Segment-emission mapping decided in implementation_plan_manipulation_architecture.md's
-// coverage-planner redesign notes (reference_docs/13_cleaning_modes_spec.md SS2.2's landing map):
-// strips and the boundary pass are cartesian/contact-driven; connectors are fsp/ompl and always
-// force a retraction (never contact-adjacent).
+// Segment-emission mapping: strips and the boundary pass are cartesian/contact-driven; connectors
+// are free-space (OMPL) moves and always force a retraction (never contact-adjacent).
 MotionPlanSegment makeSegment(
   const std::string & label, uint32_t start_index, uint32_t end_index, const std::string & frame_id,
   const std::string & mode, const std::string & planner, bool requires_contact,

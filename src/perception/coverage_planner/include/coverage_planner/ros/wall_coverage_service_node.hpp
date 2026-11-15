@@ -61,9 +61,8 @@ private:
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
 
-  /// Builds this node's own ToolCoverageProfile from its parameters -- see
-  /// wall_coverage_demo_node's own buildToolCoverageProfile() for the doc comment this mirrors.
-  ToolCoverageProfile buildToolCoverageProfile() const;
+  /// The selected tool profile (tool_profiles_file + tool_name, with parameter overrides).
+  ToolCoverageProfile tool_profile_;
 
   /// Loads/rasterizes the wall and sends the GenerateCoveragePath request. Throws on any failure
   /// (a bad path, an unknown wall id) -- caught by the caller (startCallback), since this is

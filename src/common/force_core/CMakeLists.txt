@@ -12,6 +12,7 @@ find_package(Threads REQUIRED)
 add_library(${PROJECT_NAME}
   src/force_stage_fsm.cpp
   src/force_stage_sequencer.cpp
+  src/force_limiter.cpp
   src/wrench_conditioning.cpp
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -50,6 +51,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(force_stage_sequencer_test test/force_stage_sequencer_test.cpp)
   target_link_libraries(force_stage_sequencer_test ${PROJECT_NAME})
+
+  ament_add_gtest(force_limiter_test test/force_limiter_test.cpp)
+  target_link_libraries(force_limiter_test ${PROJECT_NAME})
 
   ament_add_gtest(wrench_conditioning_test test/wrench_conditioning_test.cpp)
   target_link_libraries(wrench_conditioning_test ${PROJECT_NAME})

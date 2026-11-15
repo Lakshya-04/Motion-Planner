@@ -181,5 +181,37 @@ TEST(ToolProfileYamlLoader, ThrowsWhenReachabilityTiltAllowedOnContactTool)
   EXPECT_THROW(loadToolProfile(file.path(), "bad"), std::runtime_error);
 }
 
+TEST(ToolProfileYamlLoader, LoadsSprayConeFields)
+{
+  TempYamlFile file(
+    "schema_version: 1\n"
+    "tools:\n"
+    "  gun:\n"
+    "    task: {contact: false, standoff_m: 0.3}\n"
+    "    coverage: {spray_half_angle_deg: 20.0, effective_width_fraction: 0.8}\n");
+  const auto profile = loadToolProfile(file.path(), "gun");
+  EXPECT_DOUBLE_EQ(profile.coverage.spray_half_angle_deg, 20.0);
+  EXPECT_DOUBLE_EQ(profile.coverage.effective_width_fraction, 0.8);
+}
+
+TEST(ToolProfileYamlLoader, ThrowsOnBadSprayCone)
+{
+  TempYamlFile contact(
+    "schema_version: 1\n"
+    "tools:\n"
+    "  bad:\n"
+    "    task: {contact: true, target_force_n: 5.0}\n"
+    "    coverage: {spray_half_angle_deg: 20.0}\n"
+    "    control: {controller: admittance_chain, admittance: {wrench_reference_z_n: 5.0}}\n");
+  EXPECT_THROW(loadToolProfile(contact.path(), "bad"), std::runtime_error);
+  TempYamlFile fraction(
+    "schema_version: 1\n"
+    "tools:\n"
+    "  bad:\n"
+    "    task: {contact: false, standoff_m: 0.3}\n"
+    "    coverage: {spray_half_angle_deg: 20.0, effective_width_fraction: 1.4}\n");
+  EXPECT_THROW(loadToolProfile(fraction.path(), "bad"), std::runtime_error);
+}
+
 }  // namespace
 }  // namespace ros_adapters

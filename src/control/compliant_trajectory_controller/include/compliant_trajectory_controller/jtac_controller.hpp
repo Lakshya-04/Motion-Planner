@@ -3,24 +3,23 @@
  * @brief A real ros2_control controller_interface::ControllerInterface plugin: fused joint-
  *        trajectory-following + admittance for the 7-DOF arm+lift chain ("JTAC").
  * @details Replaces joint_trajectory_controller/JointTrajectoryController outright for the
- *          arm+lift chain -- this is the (B) "fused" design from
- *          force_control_backend_admittance_vs_diffik.md section 11, chosen over the (A) chained
+ *          arm+lift chain -- this is the "fused" design, chosen over a chained
  *          admittance_controller-under-JTC design specifically because chaining only gives the
  *          arm's 6 joints admittance authority (the lift is claimed directly by JTC's hardware
  *          command_joints and never sees a force error) -- it cannot reproduce the genuine 7-DOF
  *          redundancy split (lift absorbing ~98% of a vertical push) that
- *          test_admittance_rule_integration.cpp (T4a) and AdmittanceRuleCompliancePort (T6)
+ *          test_admittance_rule_integration.cpp (the admittance-rule integration test) and AdmittanceRuleCompliancePort (the sequencer-admittance test)
  *          already proved. This controller runs the SAME real
  *          admittance_controller::AdmittanceRule across all 7 joints instead.
  *
  *          Two upstream ros2_control libraries are reused directly rather than reimplemented,
- *          both confirmed exported/linkable from their installed .so (the same check T4a already
+ *          both confirmed exported/linkable from their installed .so (the same check the admittance-rule integration test already
  *          did for AdmittanceRule):
  *            - joint_trajectory_controller::Trajectory -- time-sampling (linear/cubic/quintic
  *              spline, matching stock JTC) of the multi-waypoint JointTrajectory goal into a
  *              per-cycle reference point, which admittance then applies its compliant offset to.
  *            - admittance_controller::AdmittanceRule -- the compliance law itself, unchanged from
- *              T4a/T6, reused via the SAME admittance_controller::ParamListener mechanism so this
+ *              the admittance integration tests, reused via the SAME admittance_controller::ParamListener mechanism so this
  *              controller's own `admittance.*`/`kinematics.*`/`ft_sensor.*` ROS parameters are
  *              exactly admittance_controller's own parameter schema, addressable the normal way
  *              (`ros2 param ... /jtac_controller admittance.mass`) -- not hidden behind an
@@ -89,7 +88,7 @@
  *          JtacControllerCompliancePort's own header doc for exactly what it does and doesn't
  *          cover.
  *
- *          T11 -- per-joint redundancy weighting (`enable_redundancy_weighting`,
+ *          per-joint redundancy weighting (`enable_redundancy_weighting`,
  *          `redundancy_weights`, both plain params on THIS controller's own node, read once at
  *          on_configure(), NOT routed through admittance_controller::ParamListener's own schema):
  *          ported from jtac_compliance_demo_node.cpp's own prototype (tickWallCeilingWeighted())
@@ -97,10 +96,9 @@
  *          existing as a standalone re-implementation rather than a parameter on
  *          AdmittanceRule::update(): that call computes the Cartesian spring law AND converts to
  *          joint space via the UNWEIGHTED convert_cartesian_deltas_to_joint_deltas() in the same
- *          function body, with no seam to swap in a weighted conversion from outside -- see
- *          force_control_backend_admittance_vs_diffik.md's T11 section for the full derivation,
- *          the literature it's drawn from (Whitney 1969, Khatib's dynamically-consistent
- *          generalized inverse, Chan & Dubey 1995), and the live-verified range.
+ *          function body, with no seam to swap in a weighted conversion from outside. The mechanism is drawn from
+ *          the literature (Whitney 1969, Khatib's dynamically-consistent
+ *          generalized inverse, Chan & Dubey 1995), and the live-verified range is quoted below.
  *
  *          updateWeighted() replicates AdmittanceRule::update()'s OWN spring law faithfully
  *          (including the K/D-rotated-into-base-frame vs. mass-applied-directly-in-base-frame
@@ -160,10 +158,9 @@ namespace compliant_trajectory_controller
  * @details Extracted as its own free function (rather than inlined in JtacController::
  *          updateWeighted()) specifically so it is unit-testable in isolation from the rest of
  *          that method's frame-rotation/masking logic, which needs a real kinematics instance to
- *          exercise meaningfully and is verified LIVE instead (see force_control_backend_
- *          admittance_vs_diffik.md's T11 section) -- matching this codebase's own established
- *          convention for logic that is live-verified rather than unit-covered (KNOWN_ISSUES.md
- *          #18 names the same tradeoff for CartesianPlanner). See test/test_redundancy_weighting
+ *          exercise meaningfully and is verified LIVE instead -- matching this codebase's own established
+ *          convention for logic that is live-verified rather than unit-covered (the same
+ *          tradeoff applies to CartesianPlanner's truncation recovery). See test/test_redundancy_weighting
  *          .cpp for what IS pinned here: equal weights reduce to the plain Moore-Penrose
  *          pseudo-inverse exactly, and a heavily-weighted column's contribution to the solution
  *          collapses toward zero relative to an unweighted solve on the same input.
@@ -239,7 +236,7 @@ private:
   void enforceJointRateLimits(const rclcpp::Duration & period);
 
   /// Loaded once at on_configure() from this node's own `joint_limits.<joint_name>.max_velocity`/
-  /// `max_acceleration` parameters (see cartesian_test.launch.py / 7dof_serum_moveit.launch.py
+  /// `max_acceleration` parameters (see jtac_controller_test.launch.py or any MoveIt launch that uses this controller
   /// for how robot_description's own joint_limits.yaml gets wired onto this controller's node
   /// under its own name -- the same canonical file MoveIt's own time parameterization already
   /// uses, not a duplicated copy). A joint missing from that file falls back to a generous but
@@ -267,7 +264,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr max_offset_subscriber_;
   realtime_tools::RealtimeBuffer<double> max_offset_m_{0.1};
 
-  /// T11 -- see this class's own header doc for the full mechanism and disclosed scope limits.
+  /// Per-joint redundancy weighting -- see this class's own header doc for the full mechanism and disclosed scope limits.
   /// Fills state_desired_ directly (mirroring AdmittanceRule::update()'s own output convention:
   /// reference + an accumulated joint-space offset), in place of calling admittance_rule_->
   /// update(). Returns false on a kinematics failure or a disallowed rotational-axis selection
@@ -285,7 +282,7 @@ private:
   std::vector<std::string> command_interface_types_;  ///< e.g. ["position", "velocity"].
   std::vector<std::string> state_interface_types_;
 
-  // -- T11: per-joint redundancy weighting -- see this class's own header doc. --
+  // -- redundancy weighting: per-joint Per-joint redundancy weighting -- see this class's own header doc. --
   bool enable_redundancy_weighting_{false};
   std::vector<double> redundancy_weights_;
   /// A SEPARATE instance from admittance_rule_'s own internal kinematics_ (private, not exposed)

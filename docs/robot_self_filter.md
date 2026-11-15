@@ -5,9 +5,9 @@ checking or perception. Without it the arm, base, lift and tool show up as obsta
 the planner refuses motions because the robot "collides with itself" as seen by the sensor.
 It is a generic perception module: any robot, any sensor, any consumer.
 
-Status: **core implemented** ([`src/perception/robot_self_filter`](../src/perception/robot_self_filter), 24 tests);
-ROS shell (cloud subscription, TF / joint-state time alignment, lifecycle node) and the GPU / learned
-implementations are not built yet. Design written from a review of an earlier production stack (a
+Status: **core and a ROS node implemented** ([`src/perception/robot_self_filter`](../src/perception/robot_self_filter), 29 tests);
+the node is a plain node (not a lifecycle node), nothing in the repo feeds it a live sensor yet, and the
+sphere-model, GPU and learned implementations are not built. Design written from a review of an earlier production stack (a
 point-cloud self filter run as a lifecycle node in front of mapping and in front of the
 planning cloud) and from cuRobo v2's `RobotSegmenter` (see [curobo_v2_notes.md](curobo_v2_notes.md)).
 
@@ -75,9 +75,10 @@ struct SelfFilterResult {
 class RobotSelfFilter { virtual SelfFilterResult filter(const SelfFilterInput&) = 0; };
 ```
 
-ROS shell (`ros/`): subscribes to the cloud, looks up TF and joint states, publishes the
-filtered cloud (and optionally the mask). It is a **lifecycle node** so startup can be
-ordered (the robot model and TF must exist before configure).
+ROS shell (`ros/`): subscribes to the cloud, looks up TF, publishes the filtered cloud. The
+design asks for a **lifecycle node** so startup can be ordered (the robot model and TF must exist
+before configure); today it is a plain node that drops clouds until a robot description has arrived
+(see "The ROS node" below).
 
 ## Implementations (swappable)
 
@@ -164,6 +165,27 @@ wall; label ground truth by geometry. Metrics, on the shared benchmark:
 | Output | kept points with labels and colors still aligned, a per-point removed mask, and counts per link |
 | Checks | on the rendered generic mobile manipulator: 99.5%+ of points sampled on the robot's surface are removed and none of 5,000 free-space points are; the filtered region follows the lift; 200k points x 15 shapes in well under a second |
 
-The caller supplies link poses at the cloud's time stamp (joint state + TF), so this core stays
-free of ROS; the ROS shell will do that lookup and publish the filtered cloud. For depth cameras
-with cuRobo the GPU `RobotSegmenter` path replaces this one, behind the same port.
+The caller supplies link poses at the cloud's time stamp, so this core stays free of ROS; the ROS
+node (next section) does that lookup. For depth cameras with cuRobo the GPU `RobotSegmenter` path
+replaces this one, behind the same port.
+
+## The ROS node
+
+`self_filter_node` (`src/ros/self_filter_node.cpp`, node name `self_filter`, launch
+`self_filter.launch.py cloud_in:=... cloud_out:=...`, example parameters in `config/self_filter.yaml`):
+
+- subscribes `cloud_in` (`PointCloud2`, sensor QoS) and `contact_mode` (`std_msgs/Bool`, transient local);
+  publishes `cloud_out` (the cloud with the robot's points removed, other fields kept);
+- takes the robot from the `robot_description` parameter, otherwise from the `robot_description` topic;
+  mesh collision shapes become their bounding box if the mesh (`.stl` / `.obj`, via `package://` or
+  `file://`) can be read, otherwise they are skipped with a warning;
+- looks up TF from the cloud frame and from each link to `root_link` at the cloud's own time stamp
+  (the TF buffer interpolates); there is no joint-state subscription, the link poses come from TF alone;
+- drops a cloud, with a throttled warning, when TF is missing or the filter fails, instead of passing
+  it through unfiltered;
+- parameters: padding per shape kind with per-link overrides, `links`, `min_sensor_distance`, `shadow`,
+  `contact_link` / `contact_padding`, `tf_timeout_sec`.
+
+Not built: a lifecycle node, a live sensor wired in (no simulated or real depth / lidar source exists in
+the repo, see [ROADMAP.md](ROADMAP.md) section 1), the `sphere_model`, GPU depth-mask and learned
+implementations, organized-cloud modes, and the optional mask output.

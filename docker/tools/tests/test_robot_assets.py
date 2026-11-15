@@ -30,6 +30,12 @@ def test_moving_lift_is_pinned_at_its_home_height():
     assert args['lift'] == 'fixed' and float(args['lift_fixed_height']) == pytest.approx(0.3)
 
 
+def test_no_lift_profile_needs_no_pinned_height():
+    """`lift: none` is already a pedestal (fixed joint): lift stays none and no lift_fixed_height is added."""
+    args = ra.arm_only_args({'robot': {}, 'lift': {'type': 'none'}, 'home': {}})
+    assert 'lift_fixed_height' not in args and args.get('lift') == 'none'
+
+
 class FakeModel:
     dof = ['j1', 'j2']
 

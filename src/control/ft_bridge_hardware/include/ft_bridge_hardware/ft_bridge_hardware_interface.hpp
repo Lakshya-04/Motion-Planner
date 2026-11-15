@@ -6,7 +6,7 @@
  *          geometry_msgs/WrenchStamped on /ufactory/uf_ftsensor_ext_states -- this component
  *          subscribes to that (or, in injection_mode, a settable test topic instead) and
  *          re-exposes it as ros2_control state interfaces, which is the one piece the vendored
- *          arm hardware component doesn't provide. See force_control_derisking_plan.md §1.1: the
+ *          arm hardware component doesn't provide. The
  *          injection_mode is what lets the whole admittance loop be exercised in mock/
  *          ufactory_sim with scripted forces, at zero hardware risk.
  *

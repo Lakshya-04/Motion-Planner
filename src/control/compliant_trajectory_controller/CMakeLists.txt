@@ -5,6 +5,12 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# MoveIt's apt binaries are built against the system octomap (liboctomap1.9), while ros-jazzy-octomap
+# ships a newer one that find_package(octomap) would pick first. Two octomap copies in one process
+# free the same statics twice at exit (malloc_consolidate abort). Resolve the one MoveIt links.
+if(NOT octomap_DIR AND EXISTS /usr/share/octomap/octomap-config.cmake)
+  set(octomap_DIR /usr/share/octomap CACHE PATH "octomap package directory (same copy as MoveIt)")
+endif()
 find_package(ament_cmake REQUIRED)
 find_package(admittance_controller REQUIRED)
 find_package(ament_index_cpp REQUIRED)
@@ -116,8 +122,7 @@ ament_target_dependencies(jtac_controller_compliance_port
   std_msgs
 )
 
-# Live RViz demo of the redundancy split T4a's gtest proves numerically -- see
-# applications/force_control_backend_admittance_vs_diffik.md section 10.
+# Live RViz demo of the redundancy split that the admittance-rule integration test proves numerically.
 add_executable(jtac_compliance_demo_node
   src/jtac_compliance_demo_node.cpp
 )
@@ -167,7 +172,7 @@ ament_target_dependencies(reference_pose_collision_probe
   rclcpp
 )
 
-# Gate T10 (Level 2): proves moveit::planning_interface::MoveGroupInterface can plan AND execute a
+# MoveGroupInterface plan-and-execute test: proves moveit::planning_interface::MoveGroupInterface can plan AND execute a
 # real joint-space goal through JtacController -- see the file's own doc comment.
 add_executable(moveit_jtac_execution_probe
   src/moveit_jtac_execution_probe.cpp
@@ -242,9 +247,9 @@ ament_target_dependencies(wall_contact_force_simulator_node
   sensor_msgs
 )
 
-# Gate T8: force_core::ForceStageSequencer driven end to end (APPROACH -> CARTESIAN ->
+# Engage/disengage test: force_core::ForceStageSequencer driven end to end (APPROACH -> CARTESIAN ->
 # RETRACT) against JtacControllerCompliancePort, talking over ROS to an ALREADY-RUNNING
-# JtacController instance -- see the file's own doc comment for what this proves beyond T6.
+# JtacController instance -- see the file's own doc comment for what this proves beyond the sequencer-admittance test.
 add_executable(jtac_engage_disengage_test_node
   src/jtac_engage_disengage_test_node.cpp
 )
@@ -261,8 +266,8 @@ ament_target_dependencies(jtac_engage_disengage_test_node
   sensor_msgs
 )
 
-# Bridges T8/T9's abstract engage/APPROACH/CARTESIAN/RETRACT cycle and the full production
-# pipeline (T10): the SAME cycle, against a REAL, visible wall -- see the file's own doc comment.
+# Bridges the engage and wall-approach tests' abstract engage/APPROACH/CARTESIAN/RETRACT cycle and the full production
+# pipeline (MoveGroupInterface execute test): the SAME cycle, against a REAL, visible wall -- see the file's own doc comment.
 add_executable(jtac_wall_approach_test_node
   src/jtac_wall_approach_test_node.cpp
 )
@@ -336,10 +341,9 @@ ament_export_dependencies(core_types force_core joint_trajectory_controller real
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
-  # Gate T4a: proves ros2_control's AdmittanceRule can be driven from OUTSIDE its own controller,
+  # Admittance-rule integration test: proves ros2_control's AdmittanceRule can be driven from OUTSIDE its own controller,
   # against a mixed prismatic+revolute 7-joint chain. This is the load-bearing assumption behind
-  # building a fused controller at all -- see
-  # applications/force_control_backend_admittance_vs_diffik.md section 10 (T4a).
+  # building a fused controller at all.
   #
   # Note admittance_rule.hpp does NOT include admittance_rule_impl.hpp: the implementation is
   # compiled into libadmittance_controller.so, and all 8 AdmittanceRule symbols are exported from
@@ -365,7 +369,7 @@ if(BUILD_TESTING)
     )
   endif()
 
-  # Gate T6: force_core::ForceStageSequencer/ForceStageFsm driven end to end (APPROACH ->
+  # Sequencer-over-admittance-port test: force_core::ForceStageSequencer/ForceStageFsm driven end to end (APPROACH ->
   # CARTESIAN -> RETRACT) against AdmittanceRuleCompliancePort's real AdmittanceRule physics. See
   # the test file's own doc comment for why this needs no ExecutionPort/ManipulationManager.
   ament_add_gtest(test_force_stage_sequencer_admittance_integration
@@ -385,7 +389,7 @@ if(BUILD_TESTING)
     )
   endif()
 
-  # Gate T11: pins weightedPseudoInverse() (JtacController's per-joint redundancy weighting) --
+  # Redundancy-weighting test: pins weightedPseudoInverse() (JtacController's per-joint redundancy weighting) --
   # see the test file's own doc comment for why this tests the extracted pure-math function in
   # isolation rather than JtacController::updateWeighted()'s surrounding frame-rotation logic,
   # which is verified live instead.
