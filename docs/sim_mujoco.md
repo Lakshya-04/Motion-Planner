@@ -301,11 +301,11 @@ octomap, the arm goes to the smoke test's ready pose (`ready_pose.py`), and `man
 (`record_run.py`) and scored like the wall pass. Everything is installed with `sim_mujoco`; outputs and logs go to
 `MANAGER_PASS_OUT` (default `/tmp/manager_pass`).
 
-Status (honest): all seven segments now execute (dock, six contact waypoints and retract for both columns), but the pass
-still fails the scorer: coverage 0.73, peak force 27 N against 10 N, force RMS error 6.6 N, in-band 0.44. What it took:
-the wall in MoveIt's scene (without it OMPL plans through the wall), the tool roll (a 90 degree roll mismatch made the arm
-collide with the lift on every contact path), docking at the first pose of the stroke instead of the middle (otherwise the
-contact path starts with an IK branch jump), and the allowed-collision matrix: the arm's root link and shoulder, bolted
-to the carriage, were not excluded against the lift stages, so MoveIt reported a false self-collision that truncated
-every dock and retract (`generate_acm.py` now excludes links mounted on the lift). Next: the contact force (the manager's
-contact segments do not yet get the press-depth and speed tuning the scripted pass has) and the coverage shortfall.
+Status: the pass runs end to end and the scorer passes (exit 0): coverage 0.93 (866 of 930 cells), both columns execute
+(dock, press, stroke, retract). Force is still loose: peak 27.7 N, RMS error 6.0 N against the 10 N target, in-band 0.49
+(the scorer limits are the script's, see `MANAGER_PASS_SCORE_ARGS` and `MANAGER_PASS_MIN_COVERAGE`). What it took: the wall
+in MoveIt's scene (without it OMPL plans through the wall), the tool roll (a 90 degree mismatch made the arm collide with
+the lift on every contact path), docking at the first pose of the stroke, the allowed-collision matrix (links mounted on
+the lift, `generate_acm.py`), a press-then-stroke sequence with a 2 s settle (`press_settle_s`), and planning for the sim
+tool's swath (0.14 m, `MANAGER_PASS_SWATH`) instead of the profile's 0.20 m. Next: the contact force (slower stroke,
+F/T filtering, JTAC gains).
