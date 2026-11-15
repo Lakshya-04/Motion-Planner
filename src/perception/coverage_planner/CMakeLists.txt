@@ -32,6 +32,7 @@ add_library(coverage_planner_core
   src/core/tool_coverage_profile.cpp
   src/core/coverage_verification.cpp
   src/core/run_scorecard.cpp
+  src/core/run_scorecard_io.cpp
   src/core/tool_profile_loading.cpp
 )
 target_include_directories(coverage_planner_core PUBLIC
@@ -69,6 +70,10 @@ find_package(visualization_msgs REQUIRED)
 find_package(coverage_planner_msgs REQUIRED)
 find_package(ros_adapters REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+
+add_executable(score_run src/core/score_run_main.cpp)
+target_link_libraries(score_run coverage_planner_core)
+install(TARGETS score_run DESTINATION lib/${PROJECT_NAME})
 
 add_executable(coverage_planner_node src/ros/coverage_planner_node.cpp)
 target_link_libraries(coverage_planner_node
@@ -164,6 +169,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_run_scorecard test/core/run_scorecard_test.cpp)
   target_link_libraries(test_run_scorecard coverage_planner_core)
+
+  ament_add_gtest(test_run_scorecard_io test/core/run_scorecard_io_test.cpp)
+  target_link_libraries(test_run_scorecard_io coverage_planner_core)
 
   ament_add_gtest(test_tool_profiles test/core/tool_profiles_test.cpp)
   target_link_libraries(test_tool_profiles coverage_planner_core ros_adapters::ros_adapters)
