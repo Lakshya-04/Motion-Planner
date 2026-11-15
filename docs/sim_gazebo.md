@@ -29,7 +29,9 @@ names, frames and home pose drive everything), `world`, `wall_scene`/`wall_id`/`
 `controller` (`jtc` | `jtac` | `none`), `ft_conditioner` (`true` starts the conditioner and points JTAC at
 the sensor `ft_sensor_tcp`), `payload_mass_kg` (initial payload for the conditioner, 0: calibrate),
 `ft_filter` (JTAC `ft_sensor.filter_coefficient`), `move_group` (also start MoveIt for planning, hardware `jtac_mock`),
-`jtac_position_only` (JTAC claims only the position command interface, see the manager pass). Several containers on one Docker bridge share DDS
+`jtac_position_only` (JTAC claims only the position command interface, see the manager pass),
+`base_motion` and `depth_sensor` (+ `depth_sensor_pose`, `depth_sensor_noise_m`, `depth_sensor_rate_hz`; both off by default, see
+below). Several containers on one Docker bridge share DDS
 multicast: give each simulation its own `ROS_DOMAIN_ID` (or `ROS_LOCALHOST_ONLY=1`), otherwise
 another stack's `/robot_description` can reach the gz controller manager.
 
@@ -98,10 +100,53 @@ sensor reads minus the setpoint.
 - Friction: mu 0.8 on tool, wall and ground. Inertials come from the description; the sensor link
   adds 0.3 kg with its centre of mass 2 cm out.
 
+## Base motion (`base_motion:=true`)
+
+Default `false`: the base is pinned to the world and the rendered description is identical to before (checked by rendering both).
+With `true` the world joint is dropped and the model is driven by two gz-sim systems that already exist, no custom C++:
+`VelocityControl` (a `geometry_msgs/Twist` on `/cmd_vel`, bridged by `ros_gz_bridge`) and `OdometryPublisher` (planar,
+`nav_msgs/Odometry` on `/odom` and TF `odom -> base_footprint` on `/tf`, bridged). Same ROS interface as the MuJoCo sim.
+The wheels stay visual: a flat 0.8 x 0.5 m skid with friction 0.02 under the base keeps it at the right height (the base box floats
+5 cm above the floor) and upright. The arm, lift, JTC/JTAC, F/T sensor and the compliant tool tip are unchanged.
+
+```bash
+bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_base_motion.sh     # about 1 minute
+```
+
+`scripts/base_motion_test.py` (mirror of the MuJoCo one) drives 0.2 m/s until `/odom` says 0.3 m and checks: odom starts at the
+origin, frames `odom -> base_footprint`, travel 0.3 m +-0.03, lateral and yaw error below 2 cm / 0.02 rad, TF equals odom,
+`odom -> tcp_link` resolves, arm and lift joints hold (< 0.02), raw F/T within 3 N of the resting reading, no drift at rest.
+Result: travelled 0.294 m, lateral and yaw error 0.0000, joint deviation 0.0000, F/T change 0.17 N, drift 0.00 mm.
+Differences from MuJoCo: `VelocityControl` has no command timeout (a stale `/cmd_vel` keeps driving; send zero), no velocity or
+acceleration limits (use `stand_navigator`'s), omni only (the profile `drive_type` is not applied, `vy` is not dropped for
+`diff`), and no odom noise. Not tried: the wall contact and the manager pass with a free base.
+
+## Depth sensor (`depth_sensor:=true`)
+
+Default `false`: nothing is added. With `true` the description gets `depth_sensor_link` (on `base_footprint` at
+`depth_sensor_pose`, default `0.1 0 1.15 0 0 0`, x forward) with a gz-sim `depth_camera` (96 x 64, 60 degree horizontal field of view,
+0.1 to 5 m, `depth_sensor_rate_hz` 5, optional Gaussian range noise `depth_sensor_noise_m`), the launch file adds the `Sensors` system
+(ogre2) to the world, and `ros_gz_bridge` publishes the gz point cloud as `sensor_msgs/PointCloud2` on `/depth_sensor/points`
+in frame `depth_sensor_link` (TF from `robot_state_publisher`). The cloud is organised (96 x 64) with NaN for rays that hit nothing.
+This is a rendered depth image: it sees every visual in the world (wall, obstacles and the robot's own links), unlike the MuJoCo
+ray cast against scene geoms. Headless rendering works in the `sim-gazebo` image with no display and no GPU: gz prints "Unable to open
+display ... Trying to run in headless mode" and renders in software (about 6144 points per scan at 5 Hz, no problem seen).
+
+```bash
+bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_depth_wall.sh      # needs wall_detector and coverage_planner too
+```
+
+`run_depth_wall.sh` starts the sim with the smoke wall world (front face `x = 0.915` in the world and `base_footprint`; the tcp
+plane is 0.98), `wall_detector` and the coverage planner nodes, then `scripts/depth_wall_test.py` checks the cloud (frame, points,
+median sensor-frame x equal to the wall distance), the fitted plane (normal within 1 degree, plane within 1 cm at the visible corners and
+centre, extent), and that the coverage planner accepts the written scene. Result with 3 mm range noise: 6144 points,
+median x 0.8150 m (wall at 0.8150), normal error 0.008 degrees, plane error 0.08 mm, rms 2.99 mm, extent 0.95 x 0.64 m, coverage plan 14 waypoints
+and 1.02 m^2. At the home pose the fit is clean (the robot does not block the view); an arm raised in front of the sensor would appear in the cloud and is not filtered.
+
 ## Tests
 
 ```bash
-colcon test --packages-select sim_gazebo     # generator (9) and hardware:=gazebo rendering (3), no gz needed
+colcon test --packages-select sim_gazebo     # generator (9) and hardware:=gazebo rendering (6, incl. base_motion / depth_sensor off by default), no gz needed
 ros2 run sim_gazebo smoke_test.py            # gz server, spawn, trajectory, wall contact (about 2 minutes)
 ```
 
@@ -216,7 +261,7 @@ coverage file, zero force target before disengage):
   wall material model, no wet or sticky effects.
 - The gz sensor measures rigid-body joint loads including dynamic terms, so the check above is
   exact only quasi-statically.
-- Base motion is not simulated (static base); lift mimic stages are visual only; collision uses the
+- Base motion is a velocity-commanded planar body (see above), not wheel physics; lift mimic stages are visual only; collision uses the
   description's primitives.
 - Gazebo needs the `sim-gazebo` image; it is not a rosdep dependency of the package, so the
   common `deps` image stays small.
