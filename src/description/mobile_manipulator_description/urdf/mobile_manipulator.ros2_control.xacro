@@ -24,6 +24,11 @@
 
   <xacro:macro name="mobile_manipulator_ros2_control" params="hardware:=mock">
     <xacro:property name="vel_cmd" value="${hardware == 'jtac_mock'}"/>
+    <!-- Fail loudly instead of emitting a <hardware> block with no plugin; a backend adds itself to the
+         tuple here and below. The dict lookup raises a KeyError that names the bad value. -->
+    <xacro:unless value="${hardware in ('mock', 'jtac_mock')}">
+      <xacro:if value="${dict()['unknown hardware: ' + hardware + ' (add a branch in mobile_manipulator.ros2_control.xacro)']}"/>
+    </xacro:unless>
     <ros2_control name="mobile_manipulator_system" type="system">
       <hardware>
         <xacro:if value="${hardware in ('mock', 'jtac_mock')}">
