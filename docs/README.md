@@ -2,6 +2,7 @@
 
 | Document | What it covers |
 |---|---|
+| [ROADMAP.md](ROADMAP.md) | Status checklist for the whole workflow (done / partial / not done), the reuse map of open source and recent papers, the milestone order and the open decisions |
 | [architecture.md](architecture.md) | The modular pipeline, every port, selection by config, surface and policy slots |
 | [package_layout.md](package_layout.md) | `core/` + `ros/` split per module, how modules connect (pluginlib in-process, ROS interfaces across processes) |
 | [design_principles.md](design_principles.md) | Rules and lessons learned (frames, the slow lift axis, timing, safety) |
