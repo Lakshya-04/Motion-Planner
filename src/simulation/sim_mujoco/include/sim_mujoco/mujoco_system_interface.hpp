@@ -20,6 +20,15 @@
  *            tcp_frame_id  frame_id of the ground-truth topic (default "tcp_link")
  *            ft_tare       "true": subtract the reading at activation (default "false")
  *
+ *          Planar base: when the MJCF has the base joints (launch base_motion:=true), a
+ *          geometry_msgs/Twist on `cmd_vel` (body frame) moves the base, stopping after
+ *          `cmd_vel_timeout` seconds without a message (hardware parameter, default 0.5); the plugin
+ *          publishes the base pose in the odom frame (geometry_msgs/PoseStamped, frame
+ *          `odom_frame_id`, default "odom") on `sim_mujoco/base_pose` and the body-frame velocity
+ *          (TwistStamped) on `sim_mujoco/base_twist`; the `base_odom.py` node turns them into
+ *          nav_msgs/Odometry on `/odom` and TF odom -> base_footprint (so the plugin needs only
+ *          geometry_msgs). Without the joints none of this exists.
+ *
  *          Threading: read() and write() run on the controller manager thread; the model is stepped
  *          in write() by the controller period, so simulated time follows the update rate.
  */
@@ -30,7 +39,10 @@
 #include <string>
 #include <vector>
 
+#include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/wrench_stamped.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <hardware_interface/handle.hpp>
 #include <hardware_interface/hardware_info.hpp>
 #include <hardware_interface/system_interface.hpp>
@@ -70,6 +82,16 @@ private:
   rclcpp::Node::SharedPtr node_;
   rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr raw_pub_;
   rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr truth_pub_;
+
+  rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr base_pose_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr base_twist_pub_;
+  std::string odom_frame_id_;
+  double cmd_vel_timeout_{0.5};
+  rclcpp::Time last_cmd_time_;
+  std::array<double, 3> cmd_vel_{};
+  void publishBase(const rclcpp::Time & stamp);
 
   std::vector<double> initial_position_;
   std::vector<double> state_position_;

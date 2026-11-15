@@ -192,3 +192,69 @@ def test_sensor_reads_tool_weight(mjcf):
     # at the sensor frame the weight vector is gravity rotated into that frame
     r = d.site('ft_sensor').xmat.reshape(3, 3)
     assert force == pytest.approx(r.T @ np.array([0, 0, -mass * 9.81]), abs=0.15)
+
+
+# ------------------------------------------------------------------ planar base (base_motion)
+BASE = {'drive': 'omni', 'max_linear': 0.4, 'max_angular': 0.8}
+
+
+def test_base_motion_off_leaves_the_model_unchanged(mjcf):
+    root = ET.parse(mjcf).getroot()
+    assert root.find('custom') is None
+    assert not [j for j in root.iter('joint') if j.get('name', '').startswith('base_')]
+
+
+def test_base_motion_adds_joints_actuators_and_custom(tmp_path):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME, commanded=COMMANDED,
+                        base_motion=BASE)
+    root = ET.parse(path).getroot()
+    base = [j for j in root.iter('joint') if j.get('name', '').startswith('base_')]
+    assert [(j.get('name'), j.get('type'), j.get('axis')) for j in base] == [
+        ('base_x_joint', 'slide', '1 0 0'), ('base_y_joint', 'slide', '0 1 0'),
+        ('base_yaw_joint', 'hinge', '0 0 1')]
+    root_body = root.find('worldbody').find('body')
+    assert root_body.get('name') == 'base_link' and len(root_body.findall('joint')) == 3
+    assert [a.get('joint') for a in root.find('actuator')] == COMMANDED + [j.get('name') for j in base]
+    nums = {n.get('name'): n.get('data') for n in root.find('custom')}
+    assert nums == {'sim_mujoco_base_diff': '0', 'sim_mujoco_base_max_vel': '0.4 0.8'}
+    key = root.find('keyframe').find('key').get('qpos').split()
+    assert key[:3] == ['0', '0', '0'] and len(key) == 3 + 4  # base first, then the 4 arm / lift joints
+
+
+def test_base_motion_diff_and_bad_drive(tmp_path):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, base_motion=dict(BASE, drive='diff'))
+    nums = {n.get('name'): n.get('data') for n in ET.parse(path).getroot().find('custom')}
+    assert nums['sim_mujoco_base_diff'] == '1'
+    with pytest.raises(ValueError, match='omni'):
+        urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, base_motion=dict(BASE, drive='4ws'))
+
+
+def test_base_motion_options_from_profile():
+    from sim_mujoco.generate import base_motion_options
+    assert base_motion_options({'base': {'drive_type': 'skid', 'max_linear_velocity_mps': 1.2,
+                                         'max_angular_velocity_radps': 2.0}}) == \
+        dict(drive='diff', max_linear=1.2, max_angular=2.0)
+    assert base_motion_options({}) == dict(drive='omni', max_linear=0.5, max_angular=1.0)
+    assert base_motion_options({'base': {'drive_type': '4ws'}})['drive'] == 'omni'
+
+
+@needs_mujoco
+def test_base_moves_when_commanded_and_holds_otherwise(tmp_path):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME, commanded=COMMANDED,
+                        base_motion=BASE)
+    m = load(path)
+    d = mujoco.MjData(m)
+    mujoco.mj_resetDataKeyframe(m, d, 0)
+    ix = m.actuator('act_base_x_joint').id
+    qx, qy, qw = (m.jnt_qposadr[m.joint(f'base_{n}_joint').id] for n in ('x', 'y', 'yaw'))
+    d.ctrl[:3] = [HOME[j] for j in COMMANDED]
+    for _ in range(int(2.0 / m.opt.timestep)):
+        mujoco.mj_step(m, d)
+    assert abs(d.qpos[qx]) < 1e-3 and abs(d.qpos[qy]) < 1e-3 and abs(d.qpos[qw]) < 1e-3  # holds
+    target = 0.0
+    for _ in range(int(2.0 / m.opt.timestep)):  # 0.2 m/s along x for 2 s
+        target += 0.2 * m.opt.timestep
+        d.ctrl[ix] = target
+        mujoco.mj_step(m, d)
+    assert d.qpos[qx] == pytest.approx(0.4, abs=0.03)
+    assert abs(d.qpos[qy]) < 1e-3

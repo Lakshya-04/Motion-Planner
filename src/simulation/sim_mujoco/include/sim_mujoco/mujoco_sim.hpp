@@ -80,6 +80,18 @@ public:
   /// Ground-truth contact wrench on the tool at tcp_site, in the tcp_site frame (not for control).
   Wrench groundTruthWrench() const;
 
+  /// Planar base (present when the MJCF has base_x_joint, base_y_joint, base_yaw_joint).
+  bool hasBase() const {return base_.present;}
+  /// Body-frame velocity command (vx, vy, wz), limited to the MJCF's velocity limits; vy is
+  /// dropped for a diff drive. Held until changed (the caller applies its own timeout).
+  void setBaseVelocity(double vx, double vy, double wz);
+  struct BasePose
+  {
+    double x, y, yaw;      ///< world (odom) frame
+    double vx, vy, wz;     ///< body frame
+  };
+  BasePose basePose() const;
+
   double time() const {return data_->time;}
   int contactCount() const {return data_->ncon;}
   const mjModel * model() const {return model_;}
@@ -94,6 +106,20 @@ private:
     double kv_over_kp{0.0};
     double target{0.0};
   };
+  struct Base
+  {
+    bool present{false};
+    bool diff{false};
+    double max_linear{0.5};
+    double max_angular{1.0};
+    int qpos_adr[3]{};
+    int dof_adr[3]{};
+    int actuator[3]{};
+    double kv_over_kp[3]{};
+    double target[3]{};    ///< x, y, yaw set points, integrated from the velocity command
+    double cmd[3]{};       ///< body-frame command
+  };
+  void initBase();
   Wrench rawWrench() const;
   void applyMimic();
 
@@ -106,6 +132,7 @@ private:
   int force_adr_{-1};
   int torque_adr_{-1};
   Wrench tare_{};
+  Base base_;
   double carry_{0.0};
 };
 

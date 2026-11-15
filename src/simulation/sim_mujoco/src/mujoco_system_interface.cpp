@@ -1,6 +1,7 @@
 #include "sim_mujoco/mujoco_system_interface.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
@@ -80,6 +81,24 @@ CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::Hardware
     "sim_mujoco/ft_raw", rclcpp::SensorDataQoS());
   truth_pub_ = node_->create_publisher<geometry_msgs::msg::WrenchStamped>(
     "sim_mujoco/ft_ground_truth", rclcpp::SensorDataQoS());
+  if (sim_->hasBase()) {
+    odom_frame_id_ = param(info_, "odom_frame_id", "odom");
+    cmd_vel_timeout_ = std::stod(param(info_, "cmd_vel_timeout", "0.5"));
+    last_cmd_time_ = node_->now();
+    executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+    executor_->add_node(node_);
+    cmd_vel_sub_ = node_->create_subscription<geometry_msgs::msg::Twist>(
+      "cmd_vel", rclcpp::SystemDefaultsQoS(), [this](geometry_msgs::msg::Twist::ConstSharedPtr m) {
+        cmd_vel_ = {m->linear.x, m->linear.y, m->angular.z};
+        last_cmd_time_ = node_->now();
+      });
+    base_pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>(
+      "sim_mujoco/base_pose", rclcpp::SensorDataQoS());
+    base_twist_pub_ = node_->create_publisher<geometry_msgs::msg::TwistStamped>(
+      "sim_mujoco/base_twist", rclcpp::SensorDataQoS());
+    RCLCPP_INFO(kLogger, "Planar base: cmd_vel -> sim_mujoco/base_pose (frame %s)",
+      odom_frame_id_.c_str());
+  }
   RCLCPP_INFO(
     kLogger, "MuJoCo %s: '%s', %zu joints, timestep %.4f s, F/T sensor '%s' (tare %s)",
     mj_versionString(), mjcf.c_str(), n, sim_->timestep(), sensor_name_.c_str(),
@@ -164,9 +183,32 @@ hardware_interface::return_type MujocoSystemInterface::read(
       m.wrench.torque.z = w[5];
       return m;
     };
+  if (sim_->hasBase()) {
+    executor_->spin_some(std::chrono::nanoseconds(0));
+    publishBase(stamp);
+  }
   raw_pub_->publish(fill(ft_frame_id_, ft_));
   truth_pub_->publish(fill(tcp_frame_id_, sim_->groundTruthWrench()));
   return hardware_interface::return_type::OK;
+}
+
+void MujocoSystemInterface::publishBase(const rclcpp::Time & stamp)
+{
+  const auto p = sim_->basePose();
+  geometry_msgs::msg::PoseStamped pose;
+  pose.header.stamp = stamp;
+  pose.header.frame_id = odom_frame_id_;
+  pose.pose.position.x = p.x;
+  pose.pose.position.y = p.y;
+  pose.pose.orientation.z = std::sin(p.yaw / 2.0);
+  pose.pose.orientation.w = std::cos(p.yaw / 2.0);
+  base_pose_pub_->publish(pose);
+  geometry_msgs::msg::TwistStamped twist;
+  twist.header = pose.header;
+  twist.twist.linear.x = p.vx;
+  twist.twist.linear.y = p.vy;
+  twist.twist.angular.z = p.wz;
+  base_twist_pub_->publish(twist);
 }
 
 hardware_interface::return_type MujocoSystemInterface::write(
@@ -174,6 +216,11 @@ hardware_interface::return_type MujocoSystemInterface::write(
 {
   for (size_t i = 0; i < command_position_.size(); ++i) {
     sim_->setCommand(i, command_position_[i], command_velocity_[i]);
+  }
+  if (sim_->hasBase()) {
+    const bool fresh = (node_->now() - last_cmd_time_).seconds() <= cmd_vel_timeout_;
+    sim_->setBaseVelocity(fresh ? cmd_vel_[0] : 0.0, fresh ? cmd_vel_[1] : 0.0,
+      fresh ? cmd_vel_[2] : 0.0);
   }
   // A long stall must not become hundreds of mj_step in one write(): clamp (5 periods at 100 Hz).
   const double dt = std::min(period.seconds(), kMaxAdvanceS);

@@ -22,6 +22,11 @@ controller:=jtac compliant_trajectory_controller/JtacController from the repo's 
                  TCP) instead, with the sensor frame at the TCP and no gravity compensation, because
                  the conditioner already removed the tool weight.
 
+base_motion:=true adds a planar base (three joints under base_footprint, stiff position hold): send
+                 geometry_msgs/Twist on /cmd_vel (body frame; vy ignored for diff / skid profiles,
+                 limited to the profile's max velocities, zero after 0.5 s without a command); the plugin
+                 publishes nav_msgs/Odometry on /odom and TF odom -> base_footprint. Wheels stay visual.
+
 conditioner:=true also starts the ft_conditioner node (raw /sim_mujoco/ft_raw -> contact wrench at
                  tcp_link on /ft_conditioner/wrench_conditioned, which the description's second
                  ros2_control block `ft_conditioned_bridge` exports as the sensor `ft_sensor_tcp`).
@@ -91,7 +96,8 @@ def _setup(context, *args, **kwargs):
     offset = [float(v) for v in arg('scene_offset').split()]
 
     mjcf, skipped = generate(profile, render_urdf(profile), out_dir, scene=scene,
-                             scene_offset=tuple(offset))
+                             scene_offset=tuple(offset),
+                             base_motion=arg('base_motion') == 'true')
     for s in skipped:
         print(f'[sim_mujoco] skipped scene object {s}')
     print(f'[sim_mujoco] MJCF: {mjcf}')
@@ -133,6 +139,11 @@ def _setup(context, *args, **kwargs):
                   output='screen')
     nodes = [control_node, rsp, jsb,
              RegisterEventHandler(OnProcessExit(target_action=jsb, on_exit=[controller])), viewer]
+    if arg('base_motion') == 'true':
+        # the plugin publishes the base pose as geometry_msgs only; this turns it into /odom and TF
+        nodes.append(Node(package='sim_mujoco', executable='base_odom.py', name='base_odom', output='screen',
+                          parameters=[{'base_frame': (profile.get('frames', {}).get('world_base')
+                                                      or 'base_footprint')}]))
     if conditioner:
         # raw wrench is in tool_mount_link (the sensor frame) and includes the payload weight; sign
         # +1 (the plugin reports the load the tool puts on the sensor); the sensor-to-tcp offset and
@@ -177,6 +188,10 @@ def generate_launch_description():
                               description='conditioner payload centre of gravity in the sensor frame'),
         DeclareLaunchArgument('move_group', default_value='false',
                               description='also start move_group (planning only) for scripted cartesian passes'),
+        DeclareLaunchArgument('base_motion', default_value='false',
+                              description='planar base (x, y, yaw) driven by geometry_msgs/Twist on /cmd_vel '
+                                          '(omni or diff per the profile drive_type), odom on /odom and TF '
+                                          'odom -> base_footprint; false keeps the base static'),
         DeclareLaunchArgument('update_rate', default_value='100', description='control rate, Hz'),
         DeclareLaunchArgument('out_dir', default_value='', description='where to write the MJCF'),
         DeclareLaunchArgument('viewer', default_value='false',
