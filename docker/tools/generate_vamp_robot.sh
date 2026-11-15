@@ -12,7 +12,9 @@
 # The URDF's collision geometry may be primitives or package-relative-free meshes; primitives are
 # converted to meshes first because FOAM only spherizes meshes. Needs the two tool images from
 # docker/tools/build_robot_tools.sh. FOAM_ARGS passes extra options to FOAM (e.g. FOAM_ARGS="--branch 16"
-# for more spheres per link). The header is large: write it to a build directory, do not
+# for more spheres per link). FOAM_ONLY=1 stops after the spherized URDF; SKIP_FOAM=1 reuses an existing
+# spherized.urdf in <out_dir> and only runs Cricket (docker/tools/robot_assets.py splits the two so each
+# can be skipped). The header is large: write it to a build directory, do not
 # commit it.
 set -euo pipefail
 [ $# -ge 5 ] || { sed -n 2,11p "$0"; exit 2; }
@@ -26,6 +28,7 @@ CRICKET_SRC=${CRICKET_SRC:-$HOME/.cache/motion-planner-tools/cricket}
 [ -d "$CRICKET_SRC/resources/templates" ] || { echo "Cricket templates not found in $CRICKET_SRC (set CRICKET_SRC)" >&2; exit 2; }
 [[ $NAME =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "name '$NAME' is not a valid C++ identifier" >&2; exit 2; }
 
+if [ -z "${SKIP_FOAM:-}" ]; then
 mkdir -p "$OUT/meshed"
 python3 "$HERE/primitives_to_meshes.py" "$URDF" "$OUT/meshed"
 
@@ -45,6 +48,10 @@ PY
 
 docker run --rm --user "$(id -u):$(id -g)" -v "$OUT:/work" -w /work "$FOAM_IMG" \
   --filename meshed/robot.urdf --output spherized.urdf --database sphere_database.json ${FOAM_ARGS:-}
+else
+  [ -f "$OUT/spherized.urdf" ] || { echo "SKIP_FOAM set but $OUT/spherized.urdf is missing" >&2; exit 2; }
+fi
+if [ -n "${FOAM_ONLY:-}" ]; then echo "wrote $OUT/spherized.urdf"; exit 0; fi
 
 rm -rf "$OUT/templates" && cp -r "$CRICKET_SRC/resources/templates" "$OUT/templates"
 SRDF_LINE=""
