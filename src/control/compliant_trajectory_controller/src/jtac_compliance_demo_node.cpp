@@ -311,6 +311,9 @@ public:
       std::string profile_warning;
       const auto profile = mobile_manipulator_profile::loadProfileOrDefaults(
         get_parameter("profile").as_string(), profile_warning);
+      if (!profile_warning.empty()) {
+        RCLCPP_WARN(get_logger(), "%s", profile_warning.c_str());
+      }
       if (num_joints_ == kDefaultReferencePose.size()) {
         reference_pose_ = kDefaultReferencePose;
       } else if (profile.dof() == num_joints_ && profile.joints() == joint_names_) {
