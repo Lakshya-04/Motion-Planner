@@ -44,8 +44,7 @@ without code, when we can implement it.
 - [~] Spiral is listed in the service but is a stub (the README now says so)
 - [ ] Cellular decomposition (BCD) for large cluttered walls (`docs/coverage_patterns.md`)
 - [ ] Coverage feed over ROS (the manager reads `coverage_output.json`; a ROS `CoverageSource` is planned)
-- [ ] **Coverage verification**: estimate what was actually covered from executed tool poses (a per-cell deposition/contact raster);
-      the highest-leverage new piece, also the evaluator for the spray model (section 4)
+- [~] **Coverage verification**: `CoverageVerifier` raster (covered fraction, overlap, overspray, missed cells; `docs/coverage_patterns.md`). Not wired to executed poses yet; it is also the evaluator for the spray model (section 4)
 
 ## 3. Non-planar surfaces (floors, ceilings, columns, curved walls, meshes)
 
