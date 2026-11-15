@@ -165,8 +165,10 @@ Done since this was written (see the sections below): the robot config for our a
 node and services (`curobo_bridge`, `curobo_bridge_msgs`) and the C++ client (`curobo_planner`, a
 `Planner` + `ScenePort` with IK and state / motion validity).
 
-Not done: runtime selection of the backend (nothing is wired through pluginlib; the manager
-uses MoveIt), pose-based collision checks, a wall-contact equivalent, more than one planner per
+Runtime selection of the backend is done (pluginlib plugins chosen by the manager's
+`planning.yaml`, MoveIt by default; see [backend_selection.md](backend_selection.md)).
+
+Not done: pose-based collision checks, a wall-contact equivalent, more than one planner per
 process, and live mapping (nothing produces an ESDF from a sensor yet).
 
 ## Our own robot in cuRobo (verified)

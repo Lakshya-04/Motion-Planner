@@ -25,9 +25,9 @@ without code, when we can implement it.
 - [x] Scene to planner geometry: `ScenePort` for VAMP, cuRobo, MoveIt (`scene_adapters`, 12 tests)
 - [~] Robot self filter: geometry containment node, 29 tests (`robot_self_filter/src/ros/self_filter_node.cpp`); no live
       sensor wired, not a lifecycle node, no sphere-model / GPU / learned variants
-- [ ] **Live ingest**: PointCloud2 or depth -> `SceneModel` (+ octomap for MoveIt). Only file loaders exist. *Reuse: MoveIt's `pointcloud_octomap_updater` and `point_containment_filter` (always built; BSD-3), `octomap_server` (`ros2` branch); MoveIt's depth updater and mesh-filter shape mask need OpenGL*
-- [ ] Simulated sensors (depth camera, lidar) in MuJoCo and Gazebo. *Reuse: Gazebo `depth_camera` / `rgbd_camera` / `gpu_lidar` through `ros_gz_bridge` (Apache-2.0); MuJoCo: `mujoco_ros2_control` camera and `mujoco_3d_lidar` plugins, or `MuJoCo-LiDAR` (MIT); depth rendering in the headless `mujoco-core` wheel is unconfirmed, test it*
-- [ ] Wall detection from a live scan (`planCoverageFromScan` is a library; no ROS node calls it). *Reuse: PCL multi-plane segmentation behind our plane port*
+- [~] **Live ingest**: PointCloud2 -> wall plane -> `wall_scene.json` + a MoveIt collision box (`wall_detector`, `docs/perception_live.md`), checked in the MuJoCo sim. Not done: PointCloud2 -> `SceneModel` update, octomap for MoveIt, obstacles, scan merging. *Reuse: MoveIt's `pointcloud_octomap_updater` and `point_containment_filter` (always built; BSD-3), `octomap_server` (`ros2` branch); MoveIt's depth updater and mesh-filter shape mask need OpenGL*
+- [~] Simulated sensors (depth camera, lidar) in MuJoCo and Gazebo. MuJoCo: ray-cast depth in the plugin (`depth_sensor:=true`, `mj_multiRay`, PointCloud2 + TF, optional range noise, scene geoms only; `docs/perception_live.md`). Not done: Gazebo, rendered depth / RGB, lidar model. *Reuse: Gazebo `depth_camera` / `rgbd_camera` / `gpu_lidar` through `ros_gz_bridge` (Apache-2.0); MuJoCo: `mujoco_ros2_control` camera and `mujoco_3d_lidar` plugins, or `MuJoCo-LiDAR` (MIT); depth rendering in the headless `mujoco-core` wheel is unconfirmed, test it*
+- [~] Wall detection from a live scan: `wall_detector_node` (scene_model RANSAC + PCA, TF to the target frame, writes `wall_scene.json` + `walls.pcd`, 7 tests; sim check: normal 0.012 deg, plane 0.13 mm, coverage planner accepts it). One plane per scan, no obstacles, not PCL; `planCoverageFromScan` is still not called by a node. *Reuse: PCL multi-plane segmentation behind our plane port*
 - [ ] External data: prior map / BIM / merging scans (nothing beyond the nvblox design note)
 - [ ] Live mapping (TSDF/ESDF): *reuse cuRobo's Mapper or nvblox (GPU, both Apache-2.0); CPU: VDBFusion (MIT) or a ROS 2 fork of wavemap (upstream stale)*; design only today (`docs/nvblox_notes.md`)
 - [ ] Live ESDF to the planners (cuRobo `set_esdf` exists; nothing produces a field)
@@ -59,14 +59,14 @@ without code, when we can implement it.
 - [x] `ToolProfile` with geometry, task, coverage and control facets, and a YAML loader (`core_types`, `ros_adapters`)
 - [x] Coverage uses swath, overlap, inflation, standoff, yaw, tilt, contact flag (`ToolCoverageProfile`)
 - [x] Tool offset from the arm TCP: kinematics via `tcp_xyz/rpy` in the profile; force via the conditioner's lever arm
-- [ ] **Ship tool profiles**: no `tool_profiles.yaml` exists; nodes take parameters and default to "mop"
-- [ ] Connect the YAML loader to the coverage planner (not wired end to end)
+- [x] **Ship tool profiles**: `coverage_planner/config/tool_profiles.yaml` ships `contact_wiper` and `spray_gun` (`docs/tools.md`)
+- [x] The YAML loader is wired into the coverage launch files and the demo node (`tool_profiles_file`, `tool_name`, per-field overrides; the manager pass uses it)
 - [~] Spray model: `sprayerEffectiveSwath` is a placeholder (slope 1, intercept 0); swath is not derived from standoff;
       no overspray/overlap model, no valve/pump timing along the path. *Implement: parametric swath w(d), Gaussian/beta profile,
       thickness-accumulation raster, choose spacing and standoff by minimising thickness variance (about 16-18% overlap is a published optimum for an elliptical pattern)*
 - [ ] Non-contact segments end to end: hold standoff, no force engage, trigger the valve along the path (contact approach/retreat exist)
 - [ ] Contact tools: adaptive line spacing from a contact-area model (a cheap published idea, 2-3 days on top of a planner)
-- [ ] "How to add a tool" guide
+- [x] "How to add a tool" guide (`docs/tools.md`)
 
 ## 5. Motion planning (any backend, contact and non-contact)
 
@@ -123,7 +123,7 @@ without code, when we can implement it.
 - [x] Verified in MuJoCo: 10.13 N for a 10 N target (std 0.03); conditioner error vs ground truth under 0.005 N in both simulators
 - [~] JTAC compliance offset accumulates on every axis while blocked and releases over about 3 s after the reference retreats (`docs/sim_mujoco.md`)
 - [~] **Force-CBF limiter on JTAC** (arXiv 2405.04859 idea, no code used): `force_core::ForceLimiter` bounds the velocity into the wall by `alpha (F_max - F) / k` with an online stiffness estimate and a free-space speed cap; closed-loop tests keep the force under the limit on 1-40 kN/m walls (`docs/ft_sensing.md`). Not wired into JTAC's command path yet (needs a simulator run), and there is no energy tank around the slow release; the existing `max_offset_m` clamp stays
-- [ ] **Hardware parameter template**: gains, sensor name, source topic, payload and bias live in yaml comments marked "diagnostic"
+- [~] **Hardware parameter template**: `compliant_trajectory_controller/config/hardware_template.yaml` lists every value to set (conditioner, bridge, JTAC, tool profile) with safe defaults marked; documented only, no launch file loads it yet and nothing is tested on hardware
 - [ ] Payload identification with safe excitation trajectories and bounds (arXiv 2504.21486, about 1.5 weeks; its code, `roahmlab/OnlineSafeSysID`, has no licence file, so implement from the paper) and bias/temperature drift tracking (3-5 days);
       optionally replace the gravity step with the `control_toolbox` gravity-compensation filter (Apache-2.0; gravity and centre-of-gravity torque only, so sign, bias and the lever arm stay ours)
 - [ ] Gain auto-tuning by Bayesian optimisation on the MuJoCo twin (cost: force RMS + overshoot + windup; method reference arXiv 2512.03772: SAASBO tuning of a torque-level MPC on a UR10e with a digital twin, not admittance gains, no code; 1-2 weeks)
@@ -166,7 +166,7 @@ without code, when we can implement it.
 
 ## 11. The end-to-end gap (the main remaining work)
 
-- [~] **One launch per simulator**: MuJoCo has `run_wall_pass.sh` (scripted strokes planned by MoveIt, recorded and scored) and `run_manager_pass.sh` (coverage planner + manager + MoveIt + JTAC: both columns dock, press, stroke and retract; scorer passes with coverage 0.93, peak 20.5 N, RMS 3.6 N, in-band 0.48; `docs/sim_mujoco.md`). Gazebo has none yet; force along the stroke is still looser than the scripted pass (RMS 1.5 N, 81 percent in band)
+- [~] **One launch per simulator**: MuJoCo has `run_wall_pass.sh` (scripted strokes planned by MoveIt, recorded and scored) and `run_manager_pass.sh` (coverage planner + manager + MoveIt + JTAC: both columns dock, press, stroke and retract; scorer passes with coverage 0.93, peak 20.5 N, RMS 3.6 N, in-band 0.48; `docs/sim_mujoco.md`). Gazebo has `run_manager_pass.sh` too (UR10e, three columns dock, press, stroke and retract; scorer passes with coverage 0.93, peak 16.8 N, RMS 2.1 N, in-band 0.85; needs `jtac_position_only`, `docs/sim_gazebo.md`); there is no scripted Gazebo wall pass, and force along the manager strokes is still looser than the MuJoCo scripted pass (RMS 1.5 N, 81 percent in band)
 - [~] **A scorecard** for that run: `scoreRun` / `score_run` compute coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); `run_contact.sh --record` feeds it a MuJoCo contact run (`docs/sim_mujoco.md`); `run_manager_pass.sh` records and scores a full manager pass; collisions are not counted; `run_stand_pass.sh` adds the base move (plan stands, drive, pass from the stand, scored in odom)
 - [ ] Manager interface: an action or service to start, stop and monitor a coverage task (it runs once from `main` today). *Reuse: BehaviorTree.CPP (MIT) for the
       task flow, the way Nav2 does; keep the force FSM*
@@ -176,28 +176,26 @@ without code, when we can implement it.
 ## 12. Hardware readiness
 
 - [~] UFACTORY path: `ft_bridge` default topic, JTAC yaml for `uf_ft_sensor`, a real-robot branch in the compliance demo; nothing verified on hardware
-- [ ] Hardware bring-up guide and commissioning tests (slow first contact, sign checks, payload identification, stiffness check, limits)
+- [~] Hardware bring-up guide: `docs/hardware_bringup.md` (procedure, abort thresholds, sim-vs-real differences); written from the code and simulations, no commissioning test exists and nothing was run on hardware
 - [ ] `hardware:=real` description branch and vendor-driver selection
 - [ ] Calibration procedures in one place: payload (services exist), tool TCP, wall plane, base-to-wall
 
 ## 13. Open source and plug-and-play
 
 - [x] Apache-2.0 licence; docs index; architecture, robot, reachability, simulation, F/T docs; Docker with nine targets
-- [~] Root README: overview, workflow, package map, Docker build and test, simulators; no one-command quickstart (none exists)
-- [ ] **Getting started**: one command to a running simulated wall pass
+- [x] Root README: overview, workflow, package map, Docker build and test, simulators, quickstart pointing at the one-command sim scripts
+- [x] **Getting started**: one command to a simulated wall pass (`sim_mujoco/scripts/run_wall_pass.sh`, `run_manager_pass.sh`; `sim_gazebo/scripts/run_manager_pass.sh`)
 - [x] `THIRD_PARTY.md` (licences, use, nothing vendored); revisit as adopted software lands (a few licences are marked unverified there; cddlib GPL-2.0 in the VAMP stage: reviewed 2026-11-15, source and recipes only, no binaries shipped, see THIRD_PARTY.md)
-- [~] CHANGELOG and CONTRIBUTING written; real package versions still all `0.0.0`
+- [x] CHANGELOG (#5 to #61) and CONTRIBUTING written; every package is at `0.1.0` (checked: nothing depends on an exact version; `colcon list` over all 28 packages works)
 - [x] `docs/docker.md` covers the `sim` and `sim-gazebo` targets
-- [ ] CI: none by decision; instead one documented "run all checks" command (`docker/build.sh test` + sim smoke tests)
+- [x] CI: none by decision; one documented "run all checks" section in `docs/docker.md` (`docker/build.sh test`, tool tests, public-readiness scan, sim scripts); the sim scripts are still not in `colcon test`
 - [ ] **Public-readiness cleanup**
-  - [ ] 63 references in 41 files to 9 documents that are not in the repo (`force_control_backend_admittance_vs_diffik.md`,
-        `implementation_plan_manipulation_architecture.md`, ...): strip them or distil into `docs/`
-  - [~] Earlier-project base and application names are removed from code, READMEs and comments; "mop" as the default tool name remains until tool profiles ship (section 4)
-  - [ ] Four launch files that look up packages that do not exist (`description`, `moveit_config`):
-        `jtac_compliance_demo`, `jtac_controller_test`, `jtac_gazebo_controllers`, `manipulation_manager.launch.py`
-  - [ ] `.claude/` is not in `.gitignore`
+  - [x] References to documents that are not in the repo: none left in code or docs (checked 2026-11-16 with a script over every `*.md` mention in tracked files; `docker/tools/check_public_readiness.py` keeps checking)
+  - [x] Earlier-project base and application names are removed (no `serum` anywhere; "mop" is a real tool in `coverage_planner/config/tool_profiles.yaml`, not a leftover)
+  - [x] Launch files that looked up packages that do not exist are fixed or removed (every remaining `*.launch.py` uses `mobile_manipulator_description` / `mobile_manipulator_moveit_config`)
+  - [x] `.claude/` is in `.gitignore`
   - [ ] Decide about the maintainer's email, which is in 97 files (70 `@author` tags plus `package.xml` maintainer entries; their own address: keep or drop)
-  - [ ] Final scan before making the repo public (names, paths, secrets); the visibility change itself is your command
+  - [ ] Final scan before making the repo public (names, paths, secrets): the procedure is `docs/release_checklist.md`, not yet run; the visibility change itself is your command
 
 ## 14. Docs that no longer match the code
 

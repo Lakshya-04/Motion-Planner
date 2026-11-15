@@ -97,6 +97,7 @@ MujocoSim::MujocoSim(
       throw std::runtime_error("site '" + ft_site + "' needs a force and a torque sensor");
     }
     initBase();
+    initDepth();
   } catch (...) {
     mj_deleteData(data_);
     mj_deleteModel(model_);
@@ -145,6 +146,89 @@ void MujocoSim::initBase()
   base_.max_linear = numeric("sim_mujoco_base_max_vel", 0, 0.5);
   base_.max_angular = numeric("sim_mujoco_base_max_vel", 1, 1.0);
   base_.present = true;
+}
+
+void MujocoSim::initDepth()
+{
+  depth_.site = mj_name2id(model_, mjOBJ_SITE, "depth_sensor");
+  const int id = mj_name2id(model_, mjOBJ_NUMERIC, "sim_mujoco_depth");
+  if (depth_.site < 0 && id < 0) {
+    return;
+  }
+  if (depth_.site < 0 || id < 0 || model_->numeric_size[id] < 8) {
+    throw std::runtime_error(
+      "depth sensor needs the site 'depth_sensor' and the 8-value numeric 'sim_mujoco_depth'");
+  }
+  const mjtNum * d = model_->numeric_data + model_->numeric_adr[id];
+  DepthConfig & c = depth_.cfg;
+  c.width = static_cast<int>(d[0]);
+  c.height = static_cast<int>(d[1]);
+  c.hfov = d[2];
+  c.vfov = d[3];
+  c.min_range = d[4];
+  c.max_range = d[5];
+  c.rate_hz = d[6];
+  c.noise_std = d[7];
+  if (c.width < 1 || c.height < 1 || !(c.hfov > 0.0 && c.hfov < M_PI) ||
+    !(c.vfov > 0.0 && c.vfov < M_PI) || !(c.max_range > c.min_range) || !(c.rate_hz > 0.0))
+  {
+    throw std::runtime_error("sim_mujoco_depth: invalid configuration");
+  }
+  // pinhole grid of pixel centres: first column is +y (left), first row is +z (up)
+  const size_t n = static_cast<size_t>(c.width) * static_cast<size_t>(c.height);
+  depth_.dirs.resize(3 * n);
+  for (int r = 0; r < c.height; ++r) {
+    for (int k = 0; k < c.width; ++k) {
+      const double sy = 1.0 - 2.0 * (k + 0.5) / c.width;
+      const double sz = 1.0 - 2.0 * (r + 0.5) / c.height;
+      const double v[3] = {1.0, sy * std::tan(c.hfov / 2.0), sz * std::tan(c.vfov / 2.0)};
+      const double norm = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+      const size_t i = static_cast<size_t>(r) * c.width + k;
+      for (int a = 0; a < 3; ++a) {
+        depth_.dirs[3 * i + a] = v[a] / norm;
+      }
+    }
+  }
+  depth_.world_dirs.resize(3 * n);
+  depth_.dist.resize(n);
+  depth_.geomid.resize(n);
+  depth_.present = true;
+}
+
+std::vector<std::array<float, 3>> MujocoSim::depthScan()
+{
+  std::vector<std::array<float, 3>> points;
+  if (!depth_.present) {
+    return points;
+  }
+  const size_t n = depth_.dist.size();
+  const mjtNum * origin = data_->site_xpos + 3 * depth_.site;
+  const mjtNum * rot = data_->site_xmat + 9 * depth_.site;  // row-major, columns are the site axes
+  for (size_t i = 0; i < n; ++i) {
+    mju_mulMatVec(&depth_.world_dirs[3 * i], rot, &depth_.dirs[3 * i], 3, 3);
+  }
+  // the scene's geoms only (the generator puts them in group 1); the robot is not scanned
+  const mjtByte groups[mjNGROUP] = {0, 1, 0, 0, 0, 0};
+  mj_multiRay(model_, data_, origin, depth_.world_dirs.data(), groups, 1, -1, depth_.geomid.data(),
+    depth_.dist.data(), nullptr, static_cast<int>(n), depth_.cfg.max_range);
+  std::normal_distribution<double> noise(0.0, std::max(depth_.cfg.noise_std, 1e-12));
+  points.reserve(n);
+  for (size_t i = 0; i < n; ++i) {
+    double range = depth_.dist[i];
+    if (range < 0.0) {
+      continue;
+    }
+    if (depth_.cfg.noise_std > 0.0) {
+      range += noise(depth_.rng);
+    }
+    if (range < depth_.cfg.min_range || range > depth_.cfg.max_range) {
+      continue;
+    }
+    points.push_back({static_cast<float>(range * depth_.dirs[3 * i]),
+        static_cast<float>(range * depth_.dirs[3 * i + 1]),
+        static_cast<float>(range * depth_.dirs[3 * i + 2])});
+  }
+  return points;
 }
 
 void MujocoSim::setBaseVelocity(double vx, double vy, double wz)
