@@ -26,14 +26,15 @@ struct RawPoint
 
 CoverageOutputJsonSource::CoverageOutputJsonSource(
   std::string json_path, std::string frame_id, double z_offset, double z_step_m,
-  double z_min_m, double z_max_m, double target_eef_speed)
+  double z_min_m, double z_max_m, double target_eef_speed, WallDirection wall_direction)
 : json_path_(std::move(json_path)),
   frame_id_(std::move(frame_id)),
   z_offset_(z_offset),
   z_step_m_(z_step_m),
   z_min_m_(z_min_m),
   z_max_m_(z_max_m),
-  target_eef_speed_(target_eef_speed)
+  target_eef_speed_(target_eef_speed),
+  wall_dir_(wall_direction)
 {
 }
 
@@ -52,6 +53,10 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
   file >> doc;
   const auto & poses = doc.at("final_lifted_and_expanded").at("path").at("poses");
 
+  // Group raw points by their position along the wall's horizontal tangent (direction x up; x for
+  // the +y wall)
+  const auto & wd = wall_dir_.d;
+  const double tx = wd[1], ty = -wd[0];
   // Group raw points by x (rounded to kill float noise between two points on the same
   // column) -- the boustrophedon path visits each column as a top/bottom pair, sorted here
   // left-to-right (ascending x) so a caller sweeping the wall naturally starts at the left.
@@ -66,7 +71,7 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
     pt.qy = p.at("orientation").at("y").get<double>();
     pt.qz = p.at("orientation").at("z").get<double>();
     pt.qw = p.at("orientation").at("w").get<double>();
-    const long key = static_cast<long>(std::round(pt.x / kXQuantum));
+    const long key = static_cast<long>(std::round((pt.x * tx + pt.y * ty) / kXQuantum));
     columns_by_x_key[key].push_back(pt);
   }
 

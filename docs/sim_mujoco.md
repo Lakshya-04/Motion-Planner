@@ -291,3 +291,20 @@ should remove them, and the scorer's default 15 N peak limit therefore fails thi
 sliding friction in the sim, the admittance gains, the press depth. The manager and the coverage planner are not in this
 loop yet, the strokes are scripted.
 
+### Manager pass (the real pipeline)
+
+`scripts/run_manager_pass.sh` runs the same wall with the pipeline instead of scripted strokes: the coverage planner
+plans the contact region (`wall_pass_coverage_scene.json` and a synthetic `walls.pcd`, tool `contact_wiper`, tool roll
+`tool_frame_yaw_deg` -90 to match the arm's ready pose), `world_model_loader_node` puts the wall into MoveIt's scene as an
+octomap, the arm goes to the smoke test's ready pose (`ready_pose.py`), and `manipulation_manager` (wall at `[1, 0, 0]`,
+`dock_at_stroke_start`) docks, presses, strokes and retracts per column through MoveIt and JTAC. The run is recorded
+(`record_run.py`) and scored like the wall pass. Everything is installed with `sim_mujoco`; outputs and logs go to
+`MANAGER_PASS_OUT` (default `/tmp/manager_pass`).
+
+Status (honest): column 0 docks and all six contact waypoints execute, but the pass fails the scorer: coverage 0.48 (one of
+two columns), peak force 94 N against 10 N, force RMS error 16 N, and the retract and the second column's dock fail in
+planning. What it took to get this far: the wall in MoveIt's scene (without it OMPL plans through the wall), the tool roll
+(a 90 degree roll mismatch made the arm collide with the lift on every contact path), and docking at the first pose of the
+stroke instead of the middle (otherwise the contact path starts with an IK branch jump). Next: the retract and second dock
+planning failures, and the contact force (the manager's contact segments do not yet get the press-depth and speed tuning the
+scripted pass has).

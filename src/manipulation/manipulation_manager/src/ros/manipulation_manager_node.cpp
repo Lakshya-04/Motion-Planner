@@ -121,6 +121,13 @@ public:
       }
       wall_dir_ = WallDirection::from(v[0], v[1], v[2]);
     }
+    // Resampling of each wall column and its z limits in frame_id (the defaults are the original
+    // wall-cleaning values), and the contact speed.
+    coverage_z_step_ = this->declare_parameter<double>("coverage_z_step_m", 0.1);
+    coverage_z_min_ = this->declare_parameter<double>("coverage_z_min_m", 1.20);
+    coverage_z_max_ = this->declare_parameter<double>("coverage_z_max_m", 1.60);
+    coverage_eef_speed_ = this->declare_parameter<double>("coverage_eef_speed_mps", 0.02);
+    dock_at_stroke_start_ = this->declare_parameter<bool>("dock_at_stroke_start", false);
     dock_standoff_ = this->declare_parameter<double>("dock_standoff_m", 0.12);
     contact_y_overshoot_ = this->declare_parameter<double>("contact_y_overshoot_m", 0.045);
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
@@ -190,7 +197,9 @@ public:
    */
   void runCoveragePlan()
   {
-    CoverageOutputJsonSource source(coverage_json_path_, frame_id_, z_offset_);
+    CoverageOutputJsonSource source(
+      coverage_json_path_, frame_id_, z_offset_, coverage_z_step_, coverage_z_min_, coverage_z_max_,
+      coverage_eef_speed_, wall_dir_);
     const auto intents = source.getCoveragePlan();
     RCLCPP_INFO(this->get_logger(), "Loaded %zu wall column(s) from %s",
       intents.size(), coverage_json_path_.c_str());
@@ -368,7 +377,10 @@ private:
   ColumnOutcome runColumn(const CoverageSegmentIntent & intent)
   {
     const auto & rep = intent.poses.front();
-    const double dock_z = intent.poses[intent.poses.size() / 2].z;
+    // Docking in the middle of the column is the original behaviour; at the stroke's first pose the
+    // contact path starts from the arm configuration it docked in (no IK branch jump at the start).
+    const double dock_z = dock_at_stroke_start_ ? intent.poses.front().z
+                                                : intent.poses[intent.poses.size() / 2].z;
 
     core_types::Pose standoff_pose = rep;
     standoff_pose.z = dock_z;
@@ -485,6 +497,11 @@ private:
   std::string coverage_json_path_;
   double z_offset_{0.0};
   WallDirection wall_dir_;
+  bool dock_at_stroke_start_{false};
+  double coverage_z_step_{0.1};
+  double coverage_z_min_{1.20};
+  double coverage_z_max_{1.60};
+  double coverage_eef_speed_{0.02};
   double dock_standoff_{0.0};
   std::string base_check_mode_{"off"};
   std::string base_check_service_;
