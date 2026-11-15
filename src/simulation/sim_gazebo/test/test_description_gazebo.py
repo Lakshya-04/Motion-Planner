@@ -54,7 +54,12 @@ def test_gazebo_branch(profile_name):
     # the sensor sits between the flange and the tool, on the flange (same kinematics as other backends)
     tool = next(j for j in robot.findall('joint') if j.find('child').get('link') == 'tool_mount_link')
     assert tool.find('parent').get('link') == 'ft_sensor_link'
-    assert robot.find("gazebo[@reference='tool_mount_link']/sensor[@type='contact']") is not None
+    assert robot.find("gazebo[@reference='tool_tip_link']/sensor[@type='contact']") is not None
+    # the tool collision is on the spring-loaded tip, a side branch (not in the arm-to-tcp chain)
+    assert robot.find("link[@name='tool_mount_link']/collision") is None
+    tip = next(j for j in robot.findall('joint') if j.get('name') == 'tool_tip_joint')
+    assert tip.get('type') == 'prismatic' and tip.find('parent').get('link') == 'tool_mount_link'
+    assert float(robot.find("gazebo[@reference='tool_tip_joint']/springStiffness").text) > 0
 
     pinned = [j for j in robot.findall('joint') if j.find('parent').get('link') == 'world']
     assert [j.find('child').get('link') for j in pinned] == [profile.frames['world_base']]
