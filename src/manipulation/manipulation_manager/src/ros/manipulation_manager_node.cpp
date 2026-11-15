@@ -21,6 +21,8 @@
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include "geometry_msgs/msg/pose.hpp"
+#include "reachability_msgs/srv/plan_stands.hpp"
 #include "std_msgs/msg/float64.hpp"
 
 #include "core_types/pose.hpp"
@@ -30,6 +32,7 @@
 #include "mobile_manipulator_profile/profile.hpp"
 #include "ros_adapters/rclcpp_logger.hpp"
 
+#include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
 #include "manipulation_manager/ros/coverage/coverage_output_json_source.hpp"
 #include "manipulation_manager/ros/execution/jtac_execution_adapter.hpp"
@@ -114,6 +117,17 @@ public:
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
 
+    // Base stance check against the reachability planner: "off" (default), "warn" (log and go on)
+    // or "enforce" (do not run the plan from a stance the planner says cannot reach it).
+    base_check_mode_ = this->declare_parameter<std::string>("base_check", "off");
+    base_check_service_ = this->declare_parameter<std::string>(
+      "base_check_service", "/reachability_node/plan_stands");
+    base_check_lift_min_ = this->declare_parameter<double>("base_check_lift_min_m", 0.0);
+    base_check_lift_max_ = this->declare_parameter<double>("base_check_lift_max_m", 0.0);
+    base_check_arm_mount_z_ = this->declare_parameter<double>("base_check_arm_mount_z_m", 0.0);
+    base_check_tol_xy_ = this->declare_parameter<double>("base_check_tol_xy_m", 0.15);
+    base_check_tol_yaw_ = this->declare_parameter<double>("base_check_tol_yaw_rad", 0.1);
+
     // Which planning backends to use: a YAML selection (see docs/backend_selection.md), the
     // packaged default when empty. The planners are built in init().
     planning_config_ = this->declare_parameter<std::string>("planning_config", "");
@@ -172,6 +186,10 @@ public:
     RCLCPP_INFO(this->get_logger(), "Loaded %zu wall column(s) from %s",
       intents.size(), coverage_json_path_.c_str());
 
+    if (!baseStanceAllowsRun(intents)) {
+      return;
+    }
+
     primeContinuityFromLiveState();
 
     size_t columns_done = 0;
@@ -196,6 +214,78 @@ public:
   }
 
 private:
+  /// Asks the reachability planner whether the base, where it stands, reaches the whole plan.
+  /// Returns false only in "enforce" mode when the stance fails; an unreachable service counts as
+  /// a failed check (the answer is unknown), so enforce never runs blind.
+  bool baseStanceAllowsRun(const std::vector<CoverageSegmentIntent> & intents)
+  {
+    if (base_check_mode_ == "off") {
+      return true;
+    }
+    if (base_check_mode_ != "warn" && base_check_mode_ != "enforce") {
+      RCLCPP_ERROR(
+        this->get_logger(), "base_check must be off, warn or enforce (got '%s')",
+        base_check_mode_.c_str());
+      return false;
+    }
+    const bool enforce = base_check_mode_ == "enforce";
+    auto fail = [&](const std::string & why) {
+        RCLCPP_WARN(this->get_logger(), "base stance check: %s", why.c_str());
+        if (enforce) {
+          RCLCPP_ERROR(this->get_logger(), "base_check=enforce: not running the plan");
+        }
+        return !enforce;
+      };
+
+    const auto wall = stanceWall(intents);
+    if (wall.targets.empty()) {
+      return true;
+    }
+    auto client = this->create_client<reachability_msgs::srv::PlanStands>(base_check_service_);
+    if (!client->wait_for_service(std::chrono::seconds(5))) {
+      return fail("service " + base_check_service_ + " is not available");
+    }
+    auto req = std::make_shared<reachability_msgs::srv::PlanStands::Request>();
+    for (const auto & p : wall.targets) {
+      geometry_msgs::msg::Pose m;
+      m.position.x = p.x;
+      m.position.y = p.y;
+      m.position.z = p.z;
+      m.orientation.x = p.qx;
+      m.orientation.y = p.qy;
+      m.orientation.z = p.qz;
+      m.orientation.w = p.qw;
+      req->targets_world.push_back(m);
+    }
+    // The wall is on the +y side of the base (the same assumption the dock pose makes); the normal
+    // points into the free side, back towards the robot.
+    req->wall_point.y = wall.wall_y;
+    req->wall_normal.y = -1.0;
+    req->lift_min = base_check_lift_min_;
+    req->lift_max = base_check_lift_max_;
+    req->arm_mount_offset_z = base_check_arm_mount_z_;
+    auto future = client->async_send_request(req);
+    if (rclcpp::spin_until_future_complete(
+        shared_from_this(), future, std::chrono::seconds(30)) != rclcpp::FutureReturnCode::SUCCESS)
+    {
+      return fail("no reply from " + base_check_service_);
+    }
+    const auto res = future.get();
+    std::vector<StanceStand> stands;
+    for (const auto & st : res->stands) {
+      stands.push_back({st.x, st.y, st.yaw});
+    }
+    StanceTolerance tol;
+    tol.xy_m = base_check_tol_xy_;
+    tol.yaw_rad = base_check_tol_yaw_;
+    const auto verdict = evaluateStance(stands, res->unreachable.size(), res->not_planned.size(), tol);
+    if (verdict.ok) {
+      RCLCPP_INFO(this->get_logger(), "base stance check: %s", verdict.message.c_str());
+      return true;
+    }
+    return fail(verdict.message);
+  }
+
   /// Builds the planners the YAML selection names, through pluginlib. Plugins that need a ROS
   /// node (cuRobo) get a dedicated one, created and spun only if one of them asks for it.
   bool buildPlanners()
@@ -383,6 +473,13 @@ private:
   std::string coverage_json_path_;
   double z_offset_{0.0};
   double dock_standoff_{0.0};
+  std::string base_check_mode_{"off"};
+  std::string base_check_service_;
+  double base_check_lift_min_{0.0};
+  double base_check_lift_max_{0.0};
+  double base_check_arm_mount_z_{0.0};
+  double base_check_tol_xy_{0.15};
+  double base_check_tol_yaw_{0.1};
   double contact_y_overshoot_{0.0};
   double max_wall_penetration_{0.0};
   double target_force_n_{0.0};

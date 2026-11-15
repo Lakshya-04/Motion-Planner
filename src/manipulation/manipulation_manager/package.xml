@@ -23,6 +23,7 @@
   <depend>rclcpp_action</depend>
   <depend>control_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>reachability_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>core_types</depend>
   <depend>ros_adapters</depend>

@@ -12,6 +12,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(reachability_msgs REQUIRED)
 find_package(core_types REQUIRED)
 find_package(ros_adapters REQUIRED)
 # PCL (and its own Findlibusb.cmake module) must be resolved BEFORE motion_planner --
@@ -36,6 +37,7 @@ add_library(${PROJECT_NAME}_core
   src/core/manipulation_manager.cpp
   src/core/motion_exec_reporter.cpp
   src/core/coverage_feasibility_analyzer.cpp
+  src/core/base_stance_check.cpp
   src/ros/execution/jtac_execution_adapter.cpp
   src/ros/coverage/coverage_output_json_source.cpp
 )
@@ -68,6 +70,7 @@ target_include_directories(manipulation_manager_node PUBLIC
 )
 ament_target_dependencies(manipulation_manager_node
   rclcpp
+  reachability_msgs
   std_msgs
   sensor_msgs
   ament_index_cpp
@@ -121,6 +124,11 @@ if(BUILD_TESTING)
   )
   if(TARGET coverage_feasibility_analyzer_test)
     target_link_libraries(coverage_feasibility_analyzer_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(base_stance_check_test test/base_stance_check_test.cpp)
+  if(TARGET base_stance_check_test)
+    target_link_libraries(base_stance_check_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
   ament_add_gtest(planning_config_test test/planning_config_test.cpp)

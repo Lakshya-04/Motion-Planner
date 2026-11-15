@@ -105,7 +105,7 @@ without code, when we can implement it.
 - [x] RM4D reachability map, builder, CLI; forward and inverse queries; lift bands (`reachability`, 56 tests)
 - [x] `chooseStation` (free side of the wall, footprint clearance, yaw), `planStands`, `orderStands`, drive-type travel time
 - [x] ROS service `~/plan_stands` with a base profile (`reachability_node`)
-- [ ] **Reachability -> manager**: the manager docks with a fixed `dock_standoff_m` offset; it never asks for a base pose
+- [~] **Reachability -> manager**: verify-only stance check (`base_check:=warn|enforce`, `docs/reachability.md`); the manager still never moves the base or asks for a different stand
 - [ ] Stand -> navigation goal (`NavigateToPose`, `NavigateThroughPoses`) with the arm-base vs `base_footprint` frame conversion. *Reuse: Nav2*
 - [ ] Docking approach to the wall. *Reuse: Nav2 `opennav_docking` (Jazzy branch, v1.3.14) with a custom `NonChargingDock` plugin: `configure` / `cleanup` / `activate` / `deactivate`, `getStagingPose(pose, frame)`, `getRefinedPose(pose, id)` (where the plane detector overwrites the dock pose) and `isDocked()`*
 - [ ] Wall-plane standoff and yaw servoing for the last metres from the fitted plane (about 1-2 weeks; no off-the-shelf package, published
