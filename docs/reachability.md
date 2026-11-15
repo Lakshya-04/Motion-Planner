@@ -134,9 +134,12 @@ tour. Not done: a yaw preference for contact work.
   before trusting a map for cluttered arms.
 - **Joint range assumption.** The reduction needs the first joint to rotate a full turn and the
   last joint to rotate fully (UR family: yes). Check a new arm against brute force.
-- **Not done:** ROS shell (services `GetBaseCandidates` / `IsReachable`, RViz slices), a
-  validation harness against brute-force 6D sampling, base-station selection over several
-  stations, orientation-constrained wall queries.
+- **Done since the first version:** the ROS shell (`reachability_node`, see below: `~/is_reachable`,
+  `~/get_base_candidates`, `~/plan_lift_bands`, `~/plan_stands`) and selection over several stands
+  (`planStands`, `orderStands`).
+- **Not done:** RViz slices of the map, a validation harness against brute-force 6D sampling,
+  orientation-constrained wall queries, a yaw preference for contact work, and any caller:
+  the manipulation manager docks at a fixed offset and never asks this module for a base pose.
 
 ## File format
 
