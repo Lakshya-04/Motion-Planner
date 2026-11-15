@@ -55,15 +55,15 @@
   <test_depend>ament_cmake_gtest</test_depend>
 
   <!-- Live RViz demo (jtac_compliance_demo.launch.py): not build dependencies, only launched.
-       The robot description package for the real robot chain is supplied by the user's own
-       workspace, so it is intentionally not declared here. -->
+       The real-robot branch renders the robot from a profile of mobile_manipulator_description. -->
+  <exec_depend>mobile_manipulator_description</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>rviz2</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>xacro</exec_depend>
 
-  <!-- jtac_controller_test.launch.py: runs JtacController under a real controller_manager, with
-       a mock F/T sensor injected via ft_bridge_hardware. -->
+  <!-- JtacController under a real controller_manager with a mock F/T sensor injected via
+       ft_bridge_hardware (launched from mobile_manipulator_moveit_config's demo.launch.py). -->
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>ft_bridge_hardware</exec_depend>
