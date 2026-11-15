@@ -85,3 +85,13 @@ the covered fraction of the target cells (a mask excludes obstacles), the mean n
 It is a geometric model: no deposition thickness, spray falloff or timing. It is not wired to execution yet: nothing
 converts the executed tool poses from a run into wall (u, v) strokes, which is the next step toward a scorecard.
 
+### Run scorecard
+
+`scoreRun` (`coverage_planner/core/run_scorecard.hpp`, ROS-free) turns a recorded run into a pass/fail card on one
+wall: coverage (through `CoverageVerifier`), contact force RMS error against the target, force peak, the fraction
+of working samples inside the force band, and the duration. A contact tool counts as working while it presses at
+least `engaged_force_n`; a non-contact tool while `tool_active` is set. A new stroke starts after every sample where the
+tool was not working. Obstacles are excluded from the target. The limits are the caller's numbers
+(`ScorecardLimits`); each one that fails adds a line to `failures`. It does not count collisions (the recorder must),
+and the coverage is geometric. It scores recorded samples; recording them from a simulator run is not wired yet.
+
