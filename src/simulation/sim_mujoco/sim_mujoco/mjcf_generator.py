@@ -42,6 +42,13 @@ def quat_from_rpy(r, p, y):
             cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy)
 
 
+def _rpy_matrix(rpy):
+    w, x, y, z = quat_from_rpy(*rpy)
+    return [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+
+
 def _rotated_inertia(inertia, rpy):
     """Inertia (ixx iyy izz ixy ixz iyz) given in a frame rotated by rpy, expressed in the parent."""
     w, x, y, z = quat_from_rpy(*rpy)
@@ -301,8 +308,9 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
                 tcp = robot.joint_by_child.get(tcp_link)
                 if tcp is not None and tcp.type == 'fixed' and tcp.parent == ft_link:
                     t = opt['tool_pad_thickness']
-                    pad_pos = list(tcp.pos)
-                    pad_pos[2] -= t / 2
+                    # half a thickness back along the TCP's own z axis (the TCP may be tilted)
+                    rm = _rpy_matrix(tcp.rpy)
+                    pad_pos = [tcp.pos[i] - rm[i][2] * t / 2 for i in range(3)]
                     ET.SubElement(body, 'geom', name='tool_pad', type='cylinder', pos=_fmt(pad_pos),
                                   size=_fmt([opt['tool_pad_radius'], t / 2]),
                                   quat=_fmt(quat_from_rpy(*tcp.rpy)))

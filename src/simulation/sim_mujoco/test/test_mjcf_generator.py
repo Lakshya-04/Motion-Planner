@@ -91,6 +91,16 @@ def test_generated_structure(mjcf):
     assert float(pad.get('pos').split()[2]) == pytest.approx(0.165 - 0.005)
 
 
+def test_pad_sits_behind_the_tcp_along_the_tcp_own_axis(tmp_path):
+    text = URDF.read_text().replace('<origin xyz="0 0 0.165"/>', '<origin xyz="0 0 0.165" rpy="0 0.5 0"/>')
+    root = ET.parse(urdf_to_mjcf(text, tmp_path, urdf_dir=DATA, commanded=COMMANDED)).getroot()
+    mount = [b for b in root.iter('body') if b.get('name') == 'tool_mount_link'][0]
+    pad = [g for g in mount.findall('geom') if g.get('name') == 'tool_pad'][0]
+    axis = rot('y', 0.5) @ np.array([0, 0, 1.0])
+    expected = np.array([0, 0, 0.165]) - axis * 0.005
+    assert [float(v) for v in pad.get('pos').split()] == pytest.approx(list(expected), abs=1e-6)
+
+
 def test_mesh_formats_are_checked(tmp_path):
     text = URDF.read_text().replace('cube.stl', 'cube.dae')
     with pytest.raises(ValueError, match='STL/OBJ'):
