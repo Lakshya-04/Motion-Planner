@@ -132,6 +132,7 @@ public:
     contact_y_overshoot_ = this->declare_parameter<double>("contact_y_overshoot_m", 0.045);
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
+    press_settle_s_ = this->declare_parameter<double>("press_settle_s", 2.0);
 
     // Base stance check against the reachability planner: "off" (default), "warn" (log and go on)
     // or "enforce" (do not run the plan from a stance the planner says cannot reach it).
@@ -449,6 +450,22 @@ private:
     for (size_t i = 0; i < intent.poses.size(); ++i) {
       core_types::Pose p = wall_dir_.shifted(intent.poses[i], contact_y_overshoot_);
       contact_waypoints.push_back(p);
+    }
+
+    // Press first, then stroke: the admittance needs a couple of seconds at rest to settle on the
+    // target force; stroking straight out of the approach drags the first-contact creep (about
+    // 13 N) along the wall.
+    if (press_settle_s_ > 0.0 && !contact_waypoints.empty()) {
+      MotionSegmentSpec press_seg = contact_seg;
+      press_seg.label = intent.label + "_press";
+      press_seg.waypoint_indices = {0};
+      const auto press_exec = manager_.executeMotionSegments(
+        frame_id_, {press_seg}, {contact_waypoints.front()}, planning_group_);
+      if (press_exec.success) {
+        std::this_thread::sleep_for(std::chrono::duration<double>(press_settle_s_));
+      }
+    }
+    for (size_t i = 0; i < contact_waypoints.size(); ++i) {
       contact_seg.waypoint_indices.push_back(i);
     }
     const auto contact_exec = manager_.executeMotionSegments(
@@ -513,6 +530,7 @@ private:
   double contact_y_overshoot_{0.0};
   double max_wall_penetration_{0.0};
   double target_force_n_{0.0};
+  double press_settle_s_{2.0};
 };
 
 }  // namespace manipulation_manager

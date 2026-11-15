@@ -30,10 +30,12 @@ stop_all() {
 trap stop_all EXIT
 
 # 1. coverage plan for the wall's contact region (the wall scene schema, with walls.pcd beside it)
+rm -f "$COV"
 sleep 3
 timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args \
   -p wall_scene_json:=$SHARE/data/wall_pass_coverage_scene.json -p output_json:=$COV \
-  -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${MANAGER_PASS_TOOL_YAW:--90.0} > "$OUT/coverage_demo.log" 2>&1 &
+  -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${MANAGER_PASS_TOOL_YAW:--90.0} \
+  -p swath_m:=${MANAGER_PASS_SWATH:-0.14} -p overlap_pct:=${MANAGER_PASS_OVERLAP:-15.0} > "$OUT/coverage_demo.log" 2>&1 &
 DEMO=$!
 for _ in $(seq 100); do [ -s "$COV" ] && break; sleep 0.5; done
 kill -INT $DEMO 2>/dev/null
@@ -79,7 +81,7 @@ cat "$OUT/record.log"
 SC=0
 if [ -f "$REC" ]; then
   ros2 run coverage_planner score_run --samples "$REC" --wall "$REC.wall.json" --target-force "${MANAGER_PASS_TARGET:-10}" \
-    --band 1.5 --swath 0.14 --min-coverage "${MANAGER_PASS_MIN_COVERAGE:-0.9}" ${MANAGER_PASS_SCORE_ARGS:-}
+    --band 1.5 --swath ${MANAGER_PASS_SWATH:-0.14} --min-coverage "${MANAGER_PASS_MIN_COVERAGE:-0.9}" ${MANAGER_PASS_SCORE_ARGS:-}
   SC=$?
   echo "score exit code $SC"
 fi
