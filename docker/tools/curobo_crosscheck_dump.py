@@ -9,7 +9,7 @@ so the comparison itself never needs CUDA.
       --q /robots/q.npy --tool-frame tcp_link --out /robots/curobo_dump.npz
 
 `q.npy` is n x dof in the cuRobo joint order (`joint_names` is saved in the npz and checked by the
-cross-check). Outputs: `position` (n,3), `quaternion` (n,4, wxyz order as cuRobo returns), `self_collision` (n,) bool.
+cross-check). Outputs: `q` (the input, so the cross-check can verify the rows match), `position` (n,3), `quaternion` (n,4, wxyz order as cuRobo returns), `self_collision` (n,) bool.
 """
 import argparse
 
@@ -47,7 +47,7 @@ def main():
         selfcol.append((d_self.reshape(len(qt), -1).sum(-1) > 0).cpu().numpy())
         pos.append(poses.position[..., idx, :].reshape(-1, 3).cpu().numpy())
         quat.append(poses.quaternion[..., idx, :].reshape(-1, 4).cpu().numpy())
-    np.savez(args.out, joint_names=np.array(kin.joint_names), position=np.concatenate(pos),
+    np.savez(args.out, joint_names=np.array(kin.joint_names), q=q, position=np.concatenate(pos),
              quaternion=np.concatenate(quat), self_collision=np.concatenate(selfcol))
     print('wrote', args.out, kin.joint_names)
 

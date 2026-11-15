@@ -40,6 +40,18 @@ def error_stats(pos_m, rot_rad):
             'rot_deg_mean': float(rot_deg.mean()), 'rot_deg_max': float(rot_deg.max())}
 
 
+def check_dump(dump, joints, q):
+    """The cuRobo dump must be for these joints and these exact configurations (row by row)."""
+    if list(dump['joint_names']) != joints:
+        sys.exit(f"cuRobo joint order {list(dump['joint_names'])} differs from the URDF's {joints}")
+    if len(dump['position']) < len(q):
+        sys.exit('cuRobo dump has fewer rows than --n')
+    if 'q' not in dump:
+        sys.exit('cuRobo dump has no `q`: rerun curobo_crosscheck_dump.py (it now saves the configurations)')
+    if not np.allclose(np.asarray(dump['q'])[:len(q)], q, atol=1e-5):
+        sys.exit('cuRobo dump was made from other configurations than this run samples (check --n and --seed)')
+
+
 def run(args):
     import mujoco
     kin = mm.UrdfKinematics(args.urdf)
@@ -83,10 +95,7 @@ def run(args):
     dump = None
     if args.curobo_dump:
         dump = np.load(args.curobo_dump)
-        if list(dump['joint_names']) != joints:
-            sys.exit(f"cuRobo joint order {list(dump['joint_names'])} differs from the URDF's {joints}")
-        if len(dump['position']) < len(q):
-            sys.exit('cuRobo dump has fewer rows than --n')
+        check_dump(dump, joints, q)
         cu = []
         for i in range(len(q)):
             t = np.eye(4)

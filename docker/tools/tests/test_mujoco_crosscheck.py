@@ -172,6 +172,17 @@ def test_curobo_sphere_parser(tmp_path):
     assert s['l'][0][1] == 0.04
 
 
+def test_curobo_dump_must_come_from_the_same_configurations():
+    import mujoco_crosscheck as cc
+    q = np.random.default_rng(0).uniform(-1, 1, (5, 2))
+    dump = {'joint_names': np.array(['j1', 'j2']), 'position': np.zeros((6, 3)), 'q': np.vstack([q, q[:1]])}
+    cc.check_dump(dump, ['j1', 'j2'], q)  # a longer dump is fine, only the first rows count
+    with pytest.raises(SystemExit, match='configurations'):
+        cc.check_dump({**dump, 'q': dump['q'] + 1e-3}, ['j1', 'j2'], q)
+    with pytest.raises(SystemExit, match='no `q`'):
+        cc.check_dump({k: v for k, v in dump.items() if k != 'q'}, ['j1', 'j2'], q)
+
+
 def test_hull_vertices_thinning():
     pytest.importorskip('scipy')
     rng = np.random.default_rng(0)
