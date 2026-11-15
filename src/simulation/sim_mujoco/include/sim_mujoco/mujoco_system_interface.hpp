@@ -77,8 +77,6 @@ private:
   std::vector<double> state_effort_;
   std::vector<double> command_position_;
   std::vector<double> command_velocity_;
-  std::vector<bool> has_effort_state_;
-  std::vector<bool> has_velocity_command_;
   std::array<double, 6> ft_{};
 };
 

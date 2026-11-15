@@ -1,5 +1,6 @@
 #include "sim_mujoco/mujoco_system_interface.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
@@ -13,6 +14,7 @@ namespace sim_mujoco
 namespace
 {
 const rclcpp::Logger kLogger = rclcpp::get_logger("MujocoSystemInterface");
+constexpr double kMaxAdvanceS = 0.05;
 
 std::string param(const hardware_interface::HardwareInfo & info, const std::string & key,
   const std::string & fallback)
@@ -49,7 +51,13 @@ CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::Hardware
     double initial = 0.0;
     for (const auto & state : joint.state_interfaces) {
       if (state.name == "position" && !state.initial_value.empty()) {
-        initial = std::stod(state.initial_value);
+        try {
+          initial = std::stod(state.initial_value);
+        } catch (const std::exception &) {
+          RCLCPP_FATAL(kLogger, "Joint %s: initial_value '%s' is not a number", joint.name.c_str(),
+            state.initial_value.c_str());
+          return CallbackReturn::ERROR;
+        }
       }
     }
     initial_position_.push_back(initial);
@@ -167,7 +175,13 @@ hardware_interface::return_type MujocoSystemInterface::write(
   for (size_t i = 0; i < command_position_.size(); ++i) {
     sim_->setCommand(i, command_position_[i], command_velocity_[i]);
   }
-  sim_->advance(period.seconds());
+  // A long stall must not become hundreds of mj_step in one write(): clamp (5 periods at 100 Hz).
+  const double dt = std::min(period.seconds(), kMaxAdvanceS);
+  if (period.seconds() > dt) {
+    RCLCPP_WARN_THROTTLE(kLogger, *node_->get_clock(), 5000, "write() period %.3f s clamped to %.3f s",
+      period.seconds(), dt);
+  }
+  sim_->advance(dt);
   return hardware_interface::return_type::OK;
 }
 
