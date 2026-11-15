@@ -393,3 +393,19 @@ in-band 0.45. The unchanged manager pass (base at the origin, `run_manager_pass.
 18.8 N, RMS 3.60 N. Flaky points: a dock from the turned base needs more OMPL tries (`dock_attempts`, 6 in the script; one
 earlier run with 3 lost the first column, coverage 0.68), and the F/T peak was 34 N in another run (the scorer limit passed).
 Not done: a wall needing several stands.
+
+#### Sensed wall (M4 exit test)
+
+`scripts/run_sensed_pass.sh` is the same pass without any wall file: the sim runs with `depth_sensor:=true`,
+`wall_detector` writes `wall_scene.json` + `walls.pcd` from `/depth_sensor/points`, `crop_wall_scene.py` crops the detected
+scene to the contact region (y 0..0.3, z 1.0..1.3 in `base_footprint`, `SENSED_PASS_CROP_Y/Z`; the whole sensed face is 0.76 x 0.70 m
+and the arm does not reach all of it), the coverage planner plans the crop, `world_model_loader_node` loads the detected
+whole-wall `walls.pcd` (a patch-only octomap lets OMPL swing over the edge), then the manager, recording and scoring are as above.
+The detector is stopped once the scene is written so the arm cannot change it mid-run. The shared steps live in
+`scripts/manager_pass_common.sh`, sourced by both scripts. Output in `SENSED_PASS_OUT` (default `/tmp/sensed_pass`).
+
+Result (3 mm range noise): detected normal (-1.0000, 0.0002, -0.0001), d 0.9801, rms 2.85 mm; crop 0.300 x 0.300 m, 4 columns
+(the crop is centred on the detected centroid, not on the file scene's patch, so the column layout differs from the file pass);
+coverage 1.00 (930 of 930), peak 23.6 N, RMS error 3.4 N, in-band 0.46, scorer exit 0. The detected wall schema needed nothing
+added: the planner reads only the plane, extents and `plane_rms_mm` / `spread_p95_mm` / `spread_p99_mm`, and the observed mask
+comes from `walls.pcd`. Single runs, not repeated.
