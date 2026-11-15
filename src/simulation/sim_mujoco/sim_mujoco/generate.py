@@ -94,9 +94,22 @@ def jtac_overrides(base, joints, robot_description, frames, ft_name, mass, cog, 
     return base
 
 
+def base_motion_options(profile_data):
+    """`base_motion` generator option from the profile's `base` block (skid steers like a diff drive)."""
+    b = profile_data.get('base', {})
+    drive = 'diff' if b.get('drive_type', 'omni') in ('diff', 'skid') else 'omni'
+    return dict(drive=drive, max_linear=float(b.get('max_linear_velocity_mps') or 0.5),
+                max_angular=float(b.get('max_angular_velocity_radps') or 1.0))
+
+
 def generate(profile_data, urdf_text, out_dir, scene=None, scene_offset=(0, 0, 0, 0), thickness=0.1,
-             **options):
-    """Write `out_dir/robot.xml`; returns (path, list of skipped scene objects)."""
+             base_motion=False, **options):
+    """Write `out_dir/robot.xml`; returns (path, list of skipped scene objects).
+
+    base_motion  True adds the planar base joints (x, y, yaw) driven from /cmd_vel; off by default.
+    """
+    if base_motion:
+        options['base_motion'] = base_motion_options(profile_data)
     frames = profile_data.get('frames', {})
     geoms, skipped = [], []
     if scene:
@@ -117,6 +130,7 @@ def main(argv=None):
     ap.add_argument('--scene-offset', type=float, nargs=4, default=[0, 0, 0, 0],
                     metavar=('X', 'Y', 'Z', 'YAW'), help='scene pose in the robot base frame')
     ap.add_argument('--wall-thickness', type=float, default=0.1)
+    ap.add_argument('--base-motion', action='store_true', help='add the planar base joints (/cmd_vel)')
     ap.add_argument('--timestep', type=float, default=0.002)
     args = ap.parse_args(argv)
 
@@ -125,7 +139,8 @@ def main(argv=None):
     text = urdf.read_text() if urdf else render_urdf(profile)
     path, skipped = generate(profile, text, args.out, scene=args.scene,
                              scene_offset=tuple(args.scene_offset), thickness=args.wall_thickness,
-                             urdf_dir=urdf.parent if urdf else '.', timestep=args.timestep)
+                             urdf_dir=urdf.parent if urdf else '.', timestep=args.timestep,
+                             base_motion=args.base_motion)
     for s in skipped:
         print(f'skipped scene object {s}', file=sys.stderr)
     print(path)

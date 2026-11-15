@@ -223,6 +223,40 @@ so the lever-arm torque is small (0.165 m x 0.2 N); a lateral-load test would st
 Tests: `colcon test --packages-select sim_mujoco` (gtests need the SDK; Python tests skip what they
 lack), or `python -m pytest src/simulation/sim_mujoco/test` in the `sim` image.
 
+## Base motion (`base_motion:=true`)
+
+By default the base is welded to the world, as before (the MJCF is byte-identical, `run_wall_pass.sh` and
+`run_manager_pass.sh` are unchanged). `base_motion:=true` adds a planar-velocity base:
+
+```bash
+ros2 launch sim_mujoco sim_mujoco.launch.py base_motion:=true
+ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}}"
+```
+
+- **Model.** The generator puts three joints on the root body (`base_footprint`): slides `base_x_joint`,
+  `base_y_joint` and hinge `base_yaw_joint`, each with a stiff position actuator (kp 2e4 N/m, 2e4 N/m,
+  1e4 N m/rad; force limits 3000 N, 3000 N, 1500 N m), plus `<custom>` numerics `sim_mujoco_base_diff` and
+  `sim_mujoco_base_max_vel`. `--base-motion` on `generate_mjcf` does the same. The wheels stay visual links.
+- **Command.** `geometry_msgs/Twist` on `/cmd_vel`, body frame, read by the plugin (subscription spun in
+  `read()`). The plugin integrates a world-frame set point from it, so a zero command holds the pose
+  (a contact force pushes the base back by `F/kp`, 0.5 mm per 10 N), and the set point never runs more
+  than 5 cm / 0.05 rad ahead of a blocked base. A command older than 0.5 s counts as zero
+  (`cmd_vel_timeout`). Speeds are clamped to the profile's `max_linear_velocity_mps` and
+  `max_angular_velocity_radps`. `drive_type: diff` and `skid` drop `vy`; `omni` and `4ws` are treated as omni
+  (the 4-wheel-steering kinematics are not modelled).
+- **Output.** The plugin publishes the base pose (`sim_mujoco/base_pose`, PoseStamped in `odom`) and body
+  velocity (`sim_mujoco/base_twist`); the `base_odom.py` node (started by the launch file) turns them into
+  `nav_msgs/Odometry` on `/odom` and TF `odom -> base_footprint`, from the simulated base pose (ground
+  truth, no noise or drift); `odom` starts at the base's initial pose. `robot_state_publisher`
+  continues the tree from `base_footprint`, so `odom -> tcp_link` resolves.
+- **Why not `mujoco_ros2_control`.** Its `base_velocity` plugin needs a freejoint base, its own simulation
+  node, and MuJoCo 3.12 through `mujoco_vendor`; ours runs inside our own `SystemInterface` against MuJoCo
+  4.0.1. Adding the three joints in our generator and a velocity command to our plugin was less work than
+  porting that stack, so it was not tried; the roadmap's reuse entry stays as the reference.
+- **Test.** `scripts/run_base_motion.sh` (`base_motion_test.py`) drives 0.3 m forward and checks odom, TF,
+  the held arm and lift joints, F/T, the hold and the command timeout. Generator tests are in
+  `test/test_mjcf_generator.py`.
+
 ## MuJoCo 4 notes
 
 - 4.0 split the Python package into `mujoco-core` and `mujoco-studio` (the viewer lives with the
@@ -242,7 +276,8 @@ lack), or `python -m pytest src/simulation/sim_mujoco/test` in the `sim` image.
 
 ## Not modelled / limits
 
-- Mobile base and its wheels (the base is welded to the world), tool compliance, cable and hose
+- Wheels, wheel-ground contact and slip (`base_motion:=true` moves the base kinematically as a planar velocity
+  base, there is no floor), 4-wheel-steering kinematics, tool compliance, cable and hose
   dynamics, sensor noise, bias drift, temperature and the sensor's own dynamics (the wrench is the
   exact rigid-body value at every step; add a noise and filter stage downstream).
 - Actuator dynamics: ideal torque-limited PD joints, no gearbox backlash, friction beyond a small

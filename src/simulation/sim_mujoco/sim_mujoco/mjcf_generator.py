@@ -18,7 +18,11 @@ What is generated
   * a force and a torque sensor on the site `ft_sensor` (at the wrist, the origin of the tool mount, with
     the tool, its weight and inertia beyond it) and a site `tcp_site`,
     plus a thin contact pad at the TCP so a wall touch happens where coverage poses are defined;
-  * a `home` keyframe from the profile.
+  * a `home` keyframe from the profile;
+  * optionally (`base_motion`, off by default so the MJCF is unchanged) a planar base: three joints
+    `base_x_joint`, `base_y_joint` (slide) and `base_yaw_joint` (hinge) on the root body, each with a
+    stiff position actuator the plugin drives from /cmd_vel, plus `<custom>` numerics carrying the drive
+    type and the velocity limits. The wheels stay visual.
 """
 import math
 import pathlib
@@ -200,7 +204,13 @@ DEFAULTS = dict(
     tool_pad_radius=0.03,
     tool_pad_thickness=0.01,
     friction=(0.8, 0.005, 0.0001),
+    base_motion=None,                # None, or dict(drive='omni'|'diff', max_linear=, max_angular=)
+    base_kp=(2.0e4, 2.0e4, 1.0e4),   # N/m, N/m, N m/rad: stiff hold, so wall contact barely moves it
+    base_kv_over_kp=0.1,             # seconds
+    base_force_limit=(3000.0, 3000.0, 1500.0),
 )
+
+BASE_JOINTS = ('base_x_joint', 'base_y_joint', 'base_yaw_joint')
 
 
 def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_mount_link',
@@ -284,6 +294,10 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
             i = link.inertial
             ET.SubElement(body, 'inertial', pos=_fmt(i['pos']), mass=str(i['mass']),
                           fullinertia=_fmt(_rotated_inertia(i['inertia'], i['rpy'])))
+        if joint is None and opt['base_motion'] is not None:
+            for name, kind, axis in zip(BASE_JOINTS, ('slide', 'slide', 'hinge'),
+                                        ('1 0 0', '0 1 0', '0 0 1')):
+                ET.SubElement(body, 'joint', name=name, type=kind, axis=axis, damping='1')
         if joint is not None and joint.type in ACTUATED:
             attrs = dict(name=joint.name, type='slide' if joint.type == 'prismatic' else 'hinge',
                          axis=_fmt(joint.axis))
@@ -348,12 +362,26 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
         ET.SubElement(actuators, 'position', name=f'act_{name}', joint=name, kp=_fmt([kp]),
                       kv=_fmt([kp * opt['kv_over_kp']]), forcerange=_fmt([-effort, effort]))
 
+    if opt['base_motion'] is not None:
+        bm = opt['base_motion']
+        drive = bm.get('drive', 'omni')
+        if drive not in ('omni', 'diff'):
+            raise ValueError(f"base_motion drive must be 'omni' or 'diff', got {drive!r}")
+        for name, kp, lim in zip(BASE_JOINTS, opt['base_kp'], opt['base_force_limit']):
+            ET.SubElement(actuators, 'position', name=f'act_{name}', joint=name, kp=_fmt([kp]),
+                          kv=_fmt([kp * opt['base_kv_over_kp']]), forcerange=_fmt([-lim, lim]))
+        custom = ET.SubElement(mj, 'custom')
+        ET.SubElement(custom, 'numeric', name='sim_mujoco_base_diff',
+                      data='1' if drive == 'diff' else '0')
+        ET.SubElement(custom, 'numeric', name='sim_mujoco_base_max_vel',
+                      data=_fmt([bm.get('max_linear', 0.5), bm.get('max_angular', 1.0)]))
+
     sensors = ET.SubElement(mj, 'sensor')
     ET.SubElement(sensors, 'force', name='ft_force', site='ft_sensor')
     ET.SubElement(sensors, 'torque', name='ft_torque', site='ft_sensor')
 
     if home:
-        qpos = []
+        qpos = [0.0] * 3 if opt['base_motion'] is not None else []
         for j in tree_joints:
             if j.mimic:
                 base = home.get(j.mimic[0], 0.0)

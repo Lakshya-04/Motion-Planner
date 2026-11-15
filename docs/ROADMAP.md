@@ -134,9 +134,11 @@ without code, when we can implement it.
 
 ## 9. Mobile base execution
 
-- [ ] Base motion in the simulators (wheels are fixed links; both sims hold the base static or welded). *First version: planar-velocity base
-      (`mujoco_ros2_control` `base_velocity` plugin in MuJoCo, which needs the base body to have a freejoint, so our MJCF generator must emit one;
-      a planar/velocity plugin in Gazebo), wheels later*
+- [~] Base motion in the simulators (wheels are fixed links; both sims hold the base static or welded). *MuJoCo done as the first version:
+      `base_motion:=true` adds a planar-velocity base (x, y, yaw joints with stiff position hold) driven by `/cmd_vel`, `omni` or `diff`
+      per profile `drive_type`, with `/odom` and TF `odom -> base_footprint`; arm, lift and F/T unaffected, tested with
+      `scripts/run_base_motion.sh` (`docs/sim_mujoco.md`). Implemented in our own plugin, not `mujoco_ros2_control` (freejoint, MuJoCo 3.12
+      pin). Not done: Gazebo (planar/velocity plugin), wheel physics and floor contact, 4-wheel-steering kinematics, odom noise*
 - [ ] `ros2_control` drive controllers per base profile. *Reuse: `diff_drive_controller`, `mecanum_drive_controller` (Apache-2.0; the mecanum one takes a `TwistStamped` on `<name>/reference` and one velocity command per wheel); the 4-wheel-steering
       Ranger needs a small custom controller or the vendor `ranger_ros2` driver (BSD-3)*
 - [ ] Nav2 integration: costmap from the base footprint, goals from the stands, `odom`. *Reuse: Nav2 (Smac lattice/Hybrid-A*, MPPI omni/diff/Ackermann)*

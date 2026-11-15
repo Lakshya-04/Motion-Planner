@@ -1,6 +1,8 @@
 #include "sim_mujoco/mujoco_sim.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <string>
 #include <stdexcept>
 
 namespace sim_mujoco
@@ -11,6 +13,8 @@ namespace
 // Multiplies MuJoCo's site force / torque to give the load the tool side puts on the sensor
 // (F_env + weight). Measured with a known weight and a known push in test_mujoco_sim.cpp.
 constexpr double kSensorSign = -1.0;
+constexpr double kMaxBaseLagM = 0.05;
+constexpr double kMaxBaseLagRad = 0.05;
 }  // namespace
 
 MujocoSim::MujocoSim(
@@ -92,12 +96,92 @@ MujocoSim::MujocoSim(
     if (force_adr_ < 0 || torque_adr_ < 0) {
       throw std::runtime_error("site '" + ft_site + "' needs a force and a torque sensor");
     }
+    initBase();
   } catch (...) {
     mj_deleteData(data_);
     mj_deleteModel(model_);
     throw;
   }
   mj_forward(model_, data_);
+}
+
+void MujocoSim::initBase()
+{
+  static const char * const names[3] = {"base_x_joint", "base_y_joint", "base_yaw_joint"};
+  int found = 0;
+  for (int k = 0; k < 3; ++k) {
+    found += mj_name2id(model_, mjOBJ_JOINT, names[k]) >= 0 ? 1 : 0;
+  }
+  if (found == 0) {
+    return;
+  }
+  if (found != 3) {
+    throw std::runtime_error("MJCF has some but not all of base_x_joint, base_y_joint, base_yaw_joint");
+  }
+  for (int k = 0; k < 3; ++k) {
+    const int j = mj_name2id(model_, mjOBJ_JOINT, names[k]);
+    int act = -1;
+    for (int a = 0; a < model_->nu; ++a) {
+      if (model_->actuator_trntype[a] == mjTRN_JOINT && model_->actuator_trnid[2 * a] == j) {
+        act = a;
+      }
+    }
+    if (act < 0) {
+      throw std::runtime_error(std::string("joint '") + names[k] + "' has no actuator");
+    }
+    const double kp = model_->actuator_gainprm[act * mjNGAIN];
+    base_.qpos_adr[k] = model_->jnt_qposadr[j];
+    base_.dof_adr[k] = model_->jnt_dofadr[j];
+    base_.actuator[k] = act;
+    base_.kv_over_kp[k] = kp > 0.0 ? -model_->actuator_biasprm[act * mjNBIAS + 2] / kp : 0.0;
+    base_.target[k] = data_->qpos[base_.qpos_adr[k]];
+  }
+  auto numeric = [this](const char * name, int index, double fallback) {
+      const int id = mj_name2id(model_, mjOBJ_NUMERIC, name);
+      return (id >= 0 && index < model_->numeric_size[id]) ?
+             model_->numeric_data[model_->numeric_adr[id] + index] : fallback;
+    };
+  base_.diff = numeric("sim_mujoco_base_diff", 0, 0.0) > 0.5;
+  base_.max_linear = numeric("sim_mujoco_base_max_vel", 0, 0.5);
+  base_.max_angular = numeric("sim_mujoco_base_max_vel", 1, 1.0);
+  base_.present = true;
+}
+
+void MujocoSim::setBaseVelocity(double vx, double vy, double wz)
+{
+  if (!base_.present) {
+    return;
+  }
+  auto fin = [](double v) {return std::isfinite(v) ? v : 0.0;};
+  vx = fin(vx);
+  vy = base_.diff ? 0.0 : fin(vy);
+  wz = fin(wz);
+  const double lin = std::hypot(vx, vy);
+  if (lin > base_.max_linear) {
+    vx *= base_.max_linear / lin;
+    vy *= base_.max_linear / lin;
+  }
+  wz = std::clamp(wz, -base_.max_angular, base_.max_angular);
+  base_.cmd[0] = vx;
+  base_.cmd[1] = vy;
+  base_.cmd[2] = wz;
+}
+
+MujocoSim::BasePose MujocoSim::basePose() const
+{
+  BasePose p{};
+  if (!base_.present) {
+    return p;
+  }
+  p.x = data_->qpos[base_.qpos_adr[0]];
+  p.y = data_->qpos[base_.qpos_adr[1]];
+  p.yaw = data_->qpos[base_.qpos_adr[2]];
+  const double wx = data_->qvel[base_.dof_adr[0]];
+  const double wy = data_->qvel[base_.dof_adr[1]];
+  p.vx = std::cos(p.yaw) * wx + std::sin(p.yaw) * wy;
+  p.vy = -std::sin(p.yaw) * wx + std::cos(p.yaw) * wy;
+  p.wz = data_->qvel[base_.dof_adr[2]];
+  return p;
 }
 
 MujocoSim::~MujocoSim()
@@ -163,6 +247,20 @@ int MujocoSim::advance(double dt)
   for (int s = 0; s < n; ++s) {
     for (size_t i = 0; i < joint_.size(); ++i) {
       data_->ctrl[joint_[i].actuator] = joint_[i].target + joint_[i].kv_over_kp * velocity_command_[i];
+    }
+    if (base_.present) {
+      // Integrate the set point along the commanded body velocity (zero command = hold position),
+      // but never let it run more than kMaxBaseLag ahead of a blocked base (no wind-up).
+      const double c = std::cos(base_.target[2]);
+      const double sn = std::sin(base_.target[2]);
+      const double world[3] = {c * base_.cmd[0] - sn * base_.cmd[1],
+        sn * base_.cmd[0] + c * base_.cmd[1], base_.cmd[2]};
+      for (int k = 0; k < 3; ++k) {
+        const double q = data_->qpos[base_.qpos_adr[k]];
+        const double lag = k < 2 ? kMaxBaseLagM : kMaxBaseLagRad;
+        base_.target[k] = std::clamp(base_.target[k] + world[k] * h, q - lag, q + lag);
+        data_->ctrl[base_.actuator[k]] = base_.target[k] + base_.kv_over_kp[k] * world[k];
+      }
     }
     mj_step(model_, data_);
   }
