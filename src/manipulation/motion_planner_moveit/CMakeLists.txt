@@ -9,6 +9,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# MoveIt's apt binaries are built against the system octomap (liboctomap1.9), while ros-jazzy-octomap
+# ships a newer one that find_package(octomap) would pick first. Two octomap copies in one process
+# free the same statics twice at exit (malloc_consolidate abort). Resolve the one MoveIt links.
+if(NOT octomap_DIR AND EXISTS /usr/share/octomap/octomap-config.cmake)
+  set(octomap_DIR /usr/share/octomap CACHE PATH "octomap package directory (same copy as MoveIt)")
+endif()
 find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(pluginlib REQUIRED)
