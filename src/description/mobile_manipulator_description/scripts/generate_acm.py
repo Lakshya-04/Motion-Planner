@@ -19,8 +19,11 @@ arm's geometry can be added by sampling states against a running move_group (not
   generate_acm.py --arm ur10e --lift none --out srdf/acm_ur_none.xacro
   generate_acm.py --arm ur10e --lift scissor --out srdf/acm_ur_scissor.xacro
 
-`--lift` selects the lift variant (telescopic and fixed share the default files). The SRDF picks the
-file by arm family and lift, see srdf/mobile_manipulator.srdf.xacro. `--set key=value` passes extra
+`--lift` selects the lift variant (telescopic and fixed share the default files). A moving scissor's
+lift-internal pairs follow lift_stages, so the SRDF writes them itself and its file holds only the
+other pairs. The SRDF picks the
+file by arm family and lift (the lift-internal pairs of a moving scissor are written by the SRDF itself
+from lift_stages, so a scissor file holds only the other pairs), see srdf/mobile_manipulator.srdf.xacro. `--set key=value` passes extra
 xacro args (a profile's lift_* values), for matrices of a custom profile.
 """
 import argparse
@@ -73,6 +76,14 @@ def main():
     robot = URDF.from_xml_string(xacro.process_file(args.xacro, mappings=mappings).toxml())
     adjacent = adjacent_pairs(robot)
     lift = lift_pairs(robot) - adjacent
+    if args.lift == 'scissor' and not mappings.get('lift_fixed_height'):
+        # a moving scissor has a pair of links per level: the SRDF writes those pairs from lift_stages
+        lift = set()
+        adjacent = {p for p in adjacent if not all(n.startswith(LIFT_PREFIXES) for n in p)}
+    if args.lift == 'scissor' and 'lift_fixed_height' not in dict(kv.split('=', 1) for kv in args.set):
+        # a moving scissor has one pair of links per level: the SRDF writes those pairs from lift_stages
+        lift = set()
+        adjacent = {p for p in adjacent if not all(n.startswith(LIFT_PREFIXES) for n in p)}
 
     lines = [
         '<?xml version="1.0"?>',

@@ -187,14 +187,43 @@ def test_srdf_matches_the_lift(lift):
     assert ('lift_scissor_0_a_link' in srdf) == (lift == 'scissor')
 
 
-@pytest.mark.parametrize('lift', ['none', 'scissor'])
-def test_lift_specific_acm_is_up_to_date(lift):
+def _scissor_stage_counts():
+    counts = {1, 2, 3}
+    for path in PROFILES:
+        lift = (yaml.safe_load(path.read_text()).get('lift') or {})
+        if lift.get('type') == 'scissor':
+            counts.add(int(lift.get('stages', 3)))
+    return sorted(counts)
+
+
+def _acm_module():
     spec = importlib.util.spec_from_file_location('generate_acm', PKG / 'scripts' / 'generate_acm.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize('stages', _scissor_stage_counts())
+def test_scissor_srdf_disables_every_lift_pair_for_any_stage_count(stages):
+    """Lift links overlap by design; one missing pair puts every state in self-collision."""
+    module = _acm_module()
+    robot = _robot(arm='generic_6dof', lift='scissor', lift_stages=stages)
+    srdf = xacro.process_file(str(PKG / 'srdf' / 'mobile_manipulator.srdf.xacro'),
+                              mappings={'arm': 'generic_6dof', 'lift': 'scissor', 'lift_stages': str(stages)}).toxml()
+    pairs = re.findall(r'link1="([^"]+)" link2="([^"]+)"', srdf)
+    disabled = {tuple(sorted(m)) for m in pairs}
+    assert module.lift_pairs(robot) <= disabled
+    assert len(pairs) == len(disabled), 'duplicate pairs'
+
+
+@pytest.mark.parametrize('lift', ['none', 'scissor'])
+def test_lift_specific_acm_is_up_to_date(lift):
+    module = _acm_module()
     robot = _robot(arm='generic_6dof', lift=lift)
     adjacent = module.adjacent_pairs(robot)
     generated = adjacent | (module.lift_pairs(robot) - adjacent)
+    if lift == 'scissor':  # the SRDF writes the scissor's lift-internal pairs from lift_stages
+        generated = {p for p in generated if not all(n.startswith('lift_') for n in p)}
     text = (PKG / 'srdf' / f'acm_generic_6dof_{lift}.xacro').read_text()
     committed = {tuple(sorted(m)) for m in re.findall(r'link1="([^"]+)" link2="([^"]+)"', text)}
     assert generated == committed, (
