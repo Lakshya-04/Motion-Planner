@@ -95,7 +95,7 @@ inline Profile parseProfile(const YAML::Node & root, const std::string & name)
     p.lift_joint = root["joints"]["lift"].as<std::string>();
   }
   p.arm_joints = root["joints"]["arm"].as<std::vector<std::string>>();
-  if (root["joints"]["mimic"]) {
+  if (root["joints"]["mimic"] && !root["joints"]["mimic"].IsNull()) {
     p.mimic_joints = root["joints"]["mimic"].as<std::vector<std::string>>();
   }
   if (p.arm_joints.empty()) {fail("joints.arm is empty");}

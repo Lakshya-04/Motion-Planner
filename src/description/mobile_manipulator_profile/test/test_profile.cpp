@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <filesystem>
 
 #include "gtest/gtest.h"
 #include "mobile_manipulator_profile/profile.hpp"
@@ -58,4 +59,27 @@ TEST_F(ProfileTest, HomeMustCoverEveryJoint)
   auto root = YAML::LoadFile(std::string(PROFILE_DIR) + "/panda_telescopic.yaml");
   root["home"].remove("arm_joint7");
   EXPECT_THROW(mobile_manipulator_profile::parseProfile(root, "bad"), std::runtime_error);
+}
+
+TEST_F(ProfileTest, NoLiftProfileHasNoLiftJoint)
+{
+  const auto p = loadProfile("ur10e_nolift");
+  EXPECT_TRUE(p.lift_joint.empty());
+  EXPECT_EQ(p.dof(), p.armDof());
+  EXPECT_EQ(p.homePositions().size(), p.dof());
+}
+
+TEST_F(ProfileTest, NullMimicIsEmpty)
+{
+  auto root = YAML::LoadFile(std::string(PROFILE_DIR) + "/panda_telescopic.yaml");
+  root["joints"]["mimic"] = YAML::Node(YAML::NodeType::Null);
+  EXPECT_TRUE(mobile_manipulator_profile::parseProfile(root, "p").mimic_joints.empty());
+}
+
+TEST_F(ProfileTest, EveryShippedProfileLoads)
+{
+  for (const auto & e : std::filesystem::directory_iterator(PROFILE_DIR)) {
+    if (e.path().extension() != ".yaml") {continue;}
+    EXPECT_NO_THROW(loadProfile(e.path().string())) << e.path();
+  }
 }
