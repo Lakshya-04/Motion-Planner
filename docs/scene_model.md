@@ -70,5 +70,11 @@ collision checking:
 - Every approximation is listed in the `ConversionReport` (`approximated`, `coarsened`); an
   `EsdfGrid` has no box / point form and is `skipped` (it goes through the planner's ESDF channel, which a later world update keeps).
 
+- Frames: an object in another frame is moved into the scene frame with `options.frame_to_scene`
+  (frame id -> pose in the scene frame); without an entry it is `skipped` in the report, never placed
+  as if it were in the scene frame. Cube boxes are named `<id>#c<n>` and every box id is unique.
+- Obstacle meshes are sampled no coarser than `obstacle_voxel`, and `max_obstacle_boxes` is at least 8.
+
 `VampPlanner` and `CuroboClientPlanner` implement `ScenePort` as well, so the same scene feeds any
-backend. Geometry is taken as already in the robot base frame.
+backend. They cannot transform: set `Options::base_frame` and an update whose `frame_id` differs is
+rejected (with it unset, the update's frame is trusted to be the base frame).
