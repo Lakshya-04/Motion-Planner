@@ -1,30 +1,52 @@
 # MoveIt configuration (`mobile_manipulator_moveit_config`)
 
 MoveIt 2 setup for [`mobile_manipulator_description`](robot_description.md): planning groups,
-kinematics, OMPL, controllers and a mock-hardware demo, for the UR family and the generic arm
-through one configuration.
+kinematics, OMPL, controllers and a mock-hardware demo, for the UR family, the generic 6-DOF arm
+and the 7-DOF Panda-like arm through one configuration. Everything arm-specific (group names, joint
+lists, DOF) comes from the robot profile, `config/profiles/<profile>.yaml`.
 
 ## Groups and controller
 
-| Group | Joints | Use |
-|---|---|---|
-| `lift_arm` | `lift_joint` + the six arm joints (7-DOF) | whole-body planning, lift and arm on one clock |
-| `arm` | the six arm joints | in-band work with the lift locked |
+The group names are the profile's `groups:` block; the starter profiles use these:
 
-One `FollowJointTrajectory` controller (`lift_arm_controller`) drives all seven joints. Groups
-are chains, so they work for any arm; joint names come from `arm_joint_names.xacro` and the
-per-family controller files (`config/ur/`, `config/generic_6dof/`).
+| Group (profile key) | Joints | Use |
+|---|---|---|
+| `lift_arm` (`groups.whole_body`) | `lift_joint` + the N arm joints (1 + N DOF; 7 for the 6-DOF arms, 8 for the Panda-like arm) | whole-body planning, lift and arm on one clock |
+| `arm` (`groups.arm`) | the N arm joints | in-band work with the lift locked |
+| `tool` (`groups.tool`) | `tool_mount_link`, `tcp_link` | the end effector |
+
+One `FollowJointTrajectory` controller (`lift_arm_controller`) drives the lift and every arm joint.
+Groups are chains, so they work for any arm; joint names, home pose and group names are read from
+the profile by `arm_joint_names.xacro` (SRDF, ros2_control) and the per-family controller files
+(`config/ur/`, `config/generic_6dof/`, `config/panda/`, chosen by the profile's
+`arm.controller_family`; a family may also ship its own `joint_limits.yaml`). The kinematics files
+are written for `arm` / `lift_arm` and renamed to the profile's group names by the builder.
+
+C++ nodes (`manipulation_manager_node`, `coverage_pass_demo_node`, `moveit_pose_finder`, the probes)
+take a `profile` parameter (default `ur10e_telescopic`) and use the profile's whole-body group and
+tcp link unless `planning_group` / `tcp_link` are given explicitly. They read it through the
+header-only `mobile_manipulator_profile` package; Python uses
+`mobile_manipulator_description.load_profile`.
 
 ## Run
 
 ```bash
-ros2 launch mobile_manipulator_moveit_config demo.launch.py arm:=ur10e          # with RViz
+ros2 launch mobile_manipulator_moveit_config demo.launch.py profile:=ur10e_telescopic   # with RViz
 ros2 launch mobile_manipulator_moveit_config demo.launch.py arm:=generic_6dof rviz:=false
+ros2 launch mobile_manipulator_moveit_config demo.launch.py profile:=panda_telescopic
 ```
+
+`arm:=<name>` alone picks the matching profile (`ur*` -> `ur10e_telescopic`, otherwise
+`<arm>_telescopic`); `profile:=` wins when both are given.
 
 Starts robot_state_publisher, ros2_control with mock hardware (home pose), the joint state
 broadcaster, the trajectory controller and `move_group`. Other launch files that need the same
-parameters use `mobile_manipulator_moveit_config.build_moveit_config(arm)`.
+parameters use `mobile_manipulator_moveit_config.build_moveit_config(arm=None, profile=None)`;
+`resolve_profile(arm, profile)` returns the matching loaded profile.
+
+Swap test: `test/test_moveit_swap.py` builds this configuration for every profile, checks groups,
+joint names and DOF against the profile, and runs an FK/IK round trip through MoveIt (KDL) on the
+whole-body and arm groups.
 
 ## Settings worth knowing
 
@@ -91,11 +113,11 @@ config and the wall-pass demo (`controller_name`, the `…/target_force_n` topic
 - Verified on Jazzy for both `ur10e` and `generic_6dof`: the controller goes active, and
   `scripts/smoke_plan.py --execute` plans with `lift_arm` through MoveIt, executes through the
   controller, and checks the joints arrived. The 6-joint `arm` group stays plan-only: the single
-  controller takes all seven joints (no partial goals), same as the plain trajectory controller.
+  controller takes every joint (no partial goals), same as the plain trajectory controller.
 
 ## IK solvers: `ik:=kdl | trac_ik | pick_ik`
 
-`demo.launch.py ik:=...` / `build_moveit_config(arm, ik=...)` choose the kinematics plugin
+`demo.launch.py ik:=...` / `build_moveit_config(profile=..., ik=...)` choose the kinematics plugin
 (`config/kinematics*.yaml`). Measured with `scripts/smoke_plan.py --stress --spread=R` on Jazzy: 20
 poses taken from random configurations within R rad of the current state, IK started from that state;
 "excess" is how much further the solution lands from the seed than the configuration the pose came from,
