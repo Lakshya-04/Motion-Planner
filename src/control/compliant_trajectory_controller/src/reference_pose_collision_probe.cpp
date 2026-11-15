@@ -8,7 +8,7 @@
  *          by the actual planner's own definition of collision-free, not an approximation of it.
  *
  *          pose_conditioning_probe (this package) checks Jacobian conditioning; this checks
- *          collision. A reference pose for a live compliance demo needs both: T4a's own
+ *          collision. A reference pose for a live compliance demo needs both: the admittance-rule integration test's own
  *          all-zero-pose trap and this package's real-robot self-collision incident (a pose
  *          vetted for conditioning alone, at the wrong base_type/attach_rpy, still collided) are
  *          two independent ways a "reasonable-looking" pose turns out to be unusable.

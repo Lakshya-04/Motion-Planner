@@ -1,11 +1,11 @@
 <?xml version="1.0"?>
 <!--
   Canonical URDF for the JTAC compliance demo -- identical in structure to the mixed
-  prismatic+revolute 7-joint chain used in test/test_admittance_rule_integration.cpp (T4a),
+  prismatic+revolute 7-joint chain used in test/test_admittance_rule_integration.cpp (the admittance-rule integration test),
   extracted to a shared file so the C++ demo node and the two robot_state_publisher instances
   (actual + ghost) all render exactly the same robot from one source. Purely synthetic, not the
-  real UF850+lift geometry -- see applications/force_control_backend_admittance_vs_diffik.md
-  section 7 and section 10 (T5) for why the real-URDF re-run is a separate, later gate.
+  real UF850+lift geometry; re-running on the real URDF is a separate, later gate
+  (it needs a proper wall-contact model).
 -->
 <robot name="jtac_demo_robot">
   <link name="base_link">

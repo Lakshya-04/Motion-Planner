@@ -1,16 +1,15 @@
 /**
  * @file test_redundancy_weighting.cpp
- * @brief Gate T11: pins weightedPseudoInverse() (JtacController's per-joint redundancy weighting,
- *        force_control_backend_admittance_vs_diffik.md's T11 section) against the general
+ * @brief Redundancy-weighting test: pins weightedPseudoInverse() (JtacController's per-joint redundancy weighting) against the general
  *        algebraic properties the whole feature rests on.
  * @details Deliberately tests weightedPseudoInverse() in isolation from JtacController::
  *          updateWeighted()'s surrounding frame-rotation/masking logic (K/D rotated control-frame
  *          -> base-frame, selected_axes masked BEFORE that rotation) -- that logic needs a real
  *          kinematics_interface instance and a real pose to exercise meaningfully, and is
- *          verified LIVE instead (see the T11 section for the exact numbers: 55.8% ceiling lift
+ *          verified LIVE instead (see the redundancy weighting section for the exact numbers: 55.8% ceiling lift
  *          share at the [10,1,1,1,1,1,1] default, ~93-96% unweighted, 1.2%/100% at the two
  *          extremes tried). Same tradeoff this codebase already names for CartesianPlanner's own
- *          diagnose_truncation/setFromIK recovery (KNOWN_ISSUES.md #18): live-verified where a
+ *          diagnose_truncation/setFromIK recovery: live-verified where a
  *          real kinematics chain is the point, unit-tested where a general algebraic property is.
  *
  *          Runs fully offline: no hardware, no controller_manager, no kinematics_interface, no
@@ -114,8 +113,8 @@ TEST(RedundancyWeighting, EqualWeightsRecoverTheOriginalCartesianTargetExactly)
 // Property 2: the actual mechanism. A joint given an extreme weight relative to the others must
 // have its own contribution to the solution collapse toward zero -- this is the literal
 // definition of "less compliant" the whole feature exists to provide, and it is what was
-// live-verified against the real robot (1.2%/100% lift share at the two 1000:1 extremes tried,
-// force_control_backend_admittance_vs_diffik.md's T11 section) -- here pinned as a deterministic,
+// live-verified against the real robot (1.2%/100% lift share at the two 1000:1 extremes tried)
+// -- here pinned as a deterministic,
 // offline property of the same function, not dependent on any live URDF/pose.
 //
 // x_ddot is PURE Z here, deliberately -- not a mixed direction. The real controller only ever
@@ -181,7 +180,7 @@ TEST(RedundancyWeighting, LightlyWeightingOneJointMakesItDominateTheSolution)
 TEST(RedundancyWeighting, IntermediateWeightRatioGivesAnIntermediateSplit)
 {
   // The [10,1,1,1,1,1,1] chosen default (the arm kept MORE compliant than the lift, a deliberate
-  // and reversible design choice -- see jtac_controller.hpp's own T11 header doc) should sit
+  // and reversible design choice -- see jtac_controller.hpp's own redundancy weighting header doc) should sit
   // strictly between the unweighted split and the extreme arm-biased split, not collapse to
   // either endpoint -- pins that "10x" is a genuinely intermediate, non-degenerate choice.
   // Pure-Z target -- see this section's own comment above for why.

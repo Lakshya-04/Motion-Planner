@@ -1,13 +1,13 @@
 /**
  * @file moveit_jtac_execution_probe.cpp
- * @brief Gate T10 (Level 2): proves moveit::planning_interface::MoveGroupInterface can plan AND
+ * @brief MoveGroupInterface plan-and-execute test: proves moveit::planning_interface::MoveGroupInterface can plan AND
  *        execute a real joint-space goal through JtacController, exactly as it would through
  *        stock joint_trajectory_controller/JointTrajectoryController -- no MoveItExecutionAdapter
  *        changes needed, since that class only ever calls MoveGroupInterface::execute().
- * @details Run against 7dof_serum_moveit.launch.py with use_jtac_controller:=true. Uses the
+ * @details Run against a MoveIt launch that runs the JTAC controller, with use_jtac_controller:=true. Uses the
  *          SAME validated joint-space target (VALIDATED_POSE) already proven collision-free,
  *          in-bounds, and well-conditioned by reference_pose_collision_probe/
- *          pose_conditioning_probe (this package) and reused across the T7/T8/T9 raw-trajectory
+ *          pose_conditioning_probe (this package) and reused across the raw-trajectory and engage/wall-approach
  *          tests -- reused here rather than re-derived, so a failure here is attributable to the
  *          MoveIt integration itself, not an unvalidated target pose.
  *
@@ -29,7 +29,7 @@
 namespace
 {
 // Default target, in the group's joint order (lift, then 6 arm joints): the validated pose used
-// throughout T7/T8/T9's own raw-trajectory tests. Another DOF needs the `target_joint_pose`
+// throughout the raw-trajectory and engage/wall-approach tests. Another DOF needs the `target_joint_pose`
 // parameter (or the profile's home pose via `use_profile_home`).
 const std::vector<double> kValidatedPose{0.40, 0.0, -0.15, -0.15, 0.0, -0.15, 0.0};
 }  // namespace

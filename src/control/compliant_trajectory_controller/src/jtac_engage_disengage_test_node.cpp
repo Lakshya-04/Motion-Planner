@@ -1,23 +1,23 @@
 /**
  * @file jtac_engage_disengage_test_node.cpp
- * @brief Gate T8: drives the REAL force_core::ForceStageSequencer through a full APPROACH ->
+ * @brief Engage/disengage test: drives the REAL force_core::ForceStageSequencer through a full APPROACH ->
  *        CARTESIAN -> RETRACT group against JtacControllerCompliancePort, talking over ROS to an
  *        ALREADY-RUNNING JtacController instance (jtac_controller_test.launch.py) -- the
- *        production integration T7 named as its own "not yet built" item. Also covers backlog
- *        item 4 (force_control_backend_admittance_vs_diffik.md section 8a): protectiveStop()
+ *        production integration the raw-trajectory test left as a "not yet built" item. Also covers
+ *        protectiveStop()
  *        cancelling an in-flight FollowJointTrajectory goal, not just unloading the target force.
- * @details T6 proved the SAME sequencer against AdmittanceRuleCompliancePort's in-process
+ * @details the sequencer-admittance test proved the SAME sequencer against AdmittanceRuleCompliancePort's in-process
  *          AdmittanceRule (a synthetic chain, no controller_manager). This proves the SAME
  *          sequencing logic against the REAL, deployed controller from a SEPARATE process, using
  *          REAL wall-clock dwell timing (ForceStageSequencer's own default now_ns_fn/sleep_fn --
  *          std::chrono::steady_clock + std::this_thread::sleep_for -- not the virtual/injected
- *          clock T6's test used), and REAL FollowJointTrajectory goals sent over the actual
+ *          clock the sequencer-admittance test used), and REAL FollowJointTrajectory goals sent over the actual
  *          action server for each segment's execute() step.
  *
  *          Contact is scripted, not derived from a real environment model -- same reasoning as
- *          T6's own test doc: publishing directly to ft_bridge_hardware's injection topic
+ *          the sequencer-admittance test's own doc: publishing directly to ft_bridge_hardware's injection topic
  *          simulates "the wall pushed back with this much force" without needing a real contact-
- *          dynamics model, which is exactly what T5 is scoped to build properly later.
+ *          dynamics model, which is exactly what a proper wall-contact model is scoped to build properly later.
  *
  *          Run against jtac_controller_test.launch.py (which already starts the FT bridge in
  *          injection_mode and JtacController with admittance.selected_axes starting all-false --
@@ -51,7 +51,7 @@ using FollowJTrajAction = control_msgs::action::FollowJointTrajectory;
 const std::vector<std::string> kJointNames{
   "lift_prismatic_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"};
 
-// Same validated pose the raw-trajectory T7 test (send_test_trajectory_and_inject_wrench.py)
+// Same validated pose the raw-trajectory test (send_test_trajectory_and_inject_wrench.py)
 // already proved collision-free, in-bounds, and well-conditioned -- reused, not re-derived.
 const std::vector<double> kHomePose{0.40, 0.0, -0.15, -0.15, 0.0, -0.15, 0.0};
 const std::vector<double> kApproachPose{0.40, 0.0, -0.35, -0.15, 0.0, -0.15, 0.0};
@@ -59,7 +59,7 @@ const std::vector<double> kLateralPose{0.40, 0.0, -0.35, -0.05, 0.0, -0.15, 0.0}
 
 constexpr double kTargetForceN = 6.0;
 
-// Diagnostic gains -- see jtac_controller.yaml's own comment on why these are 4x T4a's/T6's
+// Diagnostic gains -- see jtac_controller.yaml's own comment on why these are 4x the admittance integration tests'
 // original values (a moving reference erodes the M > K*(zeta*dt)^2 margin those were derived
 // against). Kept identical here so this test exercises the SAME, already-validated physics.
 constexpr double kMassZ = 8.0;
@@ -154,7 +154,7 @@ bool sendTrajectoryAndWait(
 
 /// Publishes a scripted wrench on ft_bridge_hardware's own injection topic for duration_s,
 /// simulating "the wall pushed back with this much force" -- see this file's own doc for why
-/// this is scripted rather than derived from a real contact model (same reasoning as T6).
+/// this is scripted rather than derived from a real contact model (same reasoning as the sequencer-admittance test).
 ///
 /// Takes its OWN dedicated node/publisher rather than sharing the caller's -- this runs on a
 /// background thread concurrently with the main thread's own spin_until_future_complete() calls
@@ -343,7 +343,7 @@ int main(int argc, char ** argv)
   // --- Backlog item 4: protectiveStop() cancels an in-flight FollowJointTrajectory goal. ---
   // engage() with all axes deselected -- matches disengage()'s own convention (no active spring
   // dynamics on any axis), so this section exercises ONLY the new cancel behavior, not force
-  // physics T8 above already proved. Only needed because protectiveStop() early-returns
+  // physics the engage/disengage test above already proved. Only needed because protectiveStop() early-returns
   // "not engaged" otherwise.
   // admittance.mass/stiffness must be within admittance_controller's own validated bounds
   // ([0.0001, 1e6]) even with every axis deselected -- a zero mass/stiffness is rejected at

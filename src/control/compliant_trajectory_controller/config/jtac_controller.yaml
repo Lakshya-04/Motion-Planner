@@ -17,8 +17,8 @@ controller_manager:
 # controller::ParamListener, which lives on THIS controller's own node, not on /controller_manager
 # -- passing it through this static YAML would require the full xacro render baked in ahead of
 # time. Instead it is injected at spawn time via the spawner's --param-file (see
-# jtac_controller_test.launch.py's own _write_robot_description_param_file()), matching the fix
-# already named in force_control_backend_admittance_vs_diffik.md's Phase 2 step 4.
+# jtac_controller_test.launch.py's own _write_robot_description_param_file()), which avoids
+# hard-coding a description at launch-file parse time.
 combined_arm_lift_controller:
   ros__parameters:
     joints:
@@ -50,7 +50,7 @@ combined_arm_lift_controller:
     ft_sensor:
       name: uf_ft_sensor
       # 1.0 == pass-through -- this test's own injected wrench is already the "measurement" to
-      # exercise, no reason to also smooth it, matching T4a's/T6's own convention.
+      # exercise, no reason to also smooth it, matching the admittance integration tests' own convention.
       filter_coefficient: 1.0
       frame:
         id: link_tcp
@@ -68,8 +68,8 @@ combined_arm_lift_controller:
         id: link_tcp
       CoG:
         pos: [0.0, 0.0, 0.0]
-        # Must stay 0.0: UFACTORY's ft_ext_force already removes payload/gravity -- see
-        # force_control_backend_admittance_vs_diffik.md's tool_profiles.yaml landmine list.
+        # Must stay 0.0: UFACTORY's ft_ext_force already removes payload/gravity, so
+        # a nonzero value here would compensate gravity twice.
         force: 0.0
 
     # Diagnostic gains -- NOT production values. Only Z selected: a push along the
@@ -92,7 +92,7 @@ combined_arm_lift_controller:
     admittance:
       # Starts with every axis deselected -- the same "no force obligation" default
       # ForceStage::kNone and PickNik's own admittance_parameters_no_admittance.yaml preset use
-      # (see force_control_backend_admittance_vs_diffik.md's T7 section). A real per-segment
+      # (see docs/ft_sensing.md). A real per-segment
       # engage()/disengage() (JtacControllerCompliancePort) flips these live -- see the flag below.
       selected_axes: [false, false, false, false, false, false]
       mass: [16.0, 16.0, 8.0, 0.5, 0.5, 0.5]

@@ -3,8 +3,8 @@
  * @brief Reusable CLI tool: reports a kinematic chain's Jacobian condition number at a given pose.
  * @details Standalone from AdmittanceRule -- this only needs a URDF and a KinematicsInterface, so
  *          it is useful any time a reference pose needs vetting for near-singularity before
- *          trusting a compliance experiment against it (T4a's own kReferencePose was chosen this
- *          way by hand after the all-zero pose collapsed the Jacobian pseudo-inverse during R5/R10
+ *          trusting a compliance experiment against it (the admittance-rule integration test's own kReferencePose was chosen this
+ *          way by hand after the all-zero pose collapsed the Jacobian pseudo-inverse during live verification and
  *          mock testing; this tool makes that check repeatable instead of ad hoc).
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */

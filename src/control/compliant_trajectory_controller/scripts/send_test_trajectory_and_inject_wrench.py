@@ -3,7 +3,7 @@
 FollowJointTrajectory execution works, the same action MoveIt would call), then a hold phase
 during which a mock wall-contact wrench is injected on ft_bridge_hardware's injection topic,
 observing the arm deflect and relax -- the same Hooke-equilibrium physics
-test_admittance_rule_integration.cpp (T4a) already proved, now exercised live under a real
+test_admittance_rule_integration.cpp (the admittance-rule integration test) already proved, now exercised live under a real
 controller_manager instead of a gtest.
 
 Usage:

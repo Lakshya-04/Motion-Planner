@@ -114,17 +114,17 @@ controller_interface::CallbackReturn JtacController::on_init()
     return controller_interface::CallbackReturn::ERROR;
   }
 
-  // T11 -- plain params on this controller's own node, NOT routed through admittance_controller's
+  // per-joint redundancy weighting -- plain params on this controller's own node, NOT routed through admittance_controller's
   // own generated schema (ParamListener above) -- see this class's own header doc for why. Read
   // once here, not live-reconfigurable this increment (matching jtac_compliance_demo_node.cpp's
   // own scope).
   //
   // has_parameter() guard: the spawner's own --param-file (jtac_controller_test.launch.py, or
-  // 7dof_serum_moveit.launch.py's own JTAC --param-file) sets these directly in the YAML
+  // a MoveIt launch file's own JTAC --param-file) sets these directly in the YAML
   // handed to this node at construction, which auto-declares them BEFORE on_init() ever runs --
   // an unconditional declare_parameter() here then throws ParameterAlreadyDeclaredException (hit
-  // live: SIGABRT on activation, the exact double-declare bug class already named in
-  // force_control_backend_admittance_vs_diffik.md's T10 section for a different node).
+  // live: SIGABRT on activation, the exact double-declare bug class also seen with
+  // another node in this package).
   if (!get_node()->has_parameter("enable_redundancy_weighting")) {
     get_node()->declare_parameter("enable_redundancy_weighting", false);
   }
@@ -188,7 +188,7 @@ controller_interface::CallbackReturn JtacController::on_configure(
     std::bind(&JtacController::onMaxOffset, this, std::placeholders::_1));
 
   if (enable_redundancy_weighting_) {
-    // See this class's own header doc's T11 section for why this scope limit is asserted here
+    // See this class's own header doc's redundancy weighting section for why this scope limit is asserted here
     // (once, loudly, at configure time) rather than silently assumed.
     if (params_.kinematics.tip != params_.control.frame.id ||
       params_.kinematics.tip != params_.ft_sensor.frame.id)
@@ -250,7 +250,7 @@ controller_interface::CallbackReturn JtacController::on_configure(
 
   // See enforceJointRateLimits()'s own doc comment for why this exists. Read directly via
   // get_parameter() (not admittance_controller::ParamListener's schema, which knows nothing about
-  // joint_limits.*) -- once, here, matching T11's own redundancy_weights_ precedent for a plain
+  // joint_limits.*) -- once, here, matching the redundancy-weighting redundancy_weights_ precedent for a plain
   // param on this controller's own node. A generous-but-finite fallback (not admittance's own
   // max_offset_m_/dt, which would defeat the purpose) if a joint is missing from the loaded
   // joint_limits.yaml, so a caller who forgets to wire it gets safe-but-slow motion, not a crash.
@@ -629,7 +629,7 @@ bool JtacController::updateWeighted(
   // rotate then mask in base frame -- and a deselected control-frame axis would leak through
   // whenever rot_base_control isn't axis-aligned with base, since masking a rotated vector along
   // BASE axes is not the same operation as masking the original vector along CONTROL axes). Same
-  // "deselected axes relax to zero" convention T4a's own
+  // "deselected axes relax to zero" convention the admittance-rule integration test's own
   // ForceOnADeselectedAxisProducesOnlyItsSelectedAxisProjection proves.
   const Eigen::Vector3d f_sensor(biased_wrench.force.x, biased_wrench.force.y, biased_wrench.force.z);
   const Eigen::Vector3d f_base = rot_base_control * f_sensor.cwiseProduct(selected);
