@@ -185,13 +185,27 @@ def load_foam_spheres(urdf):
 
 def load_curobo_spheres(cfg):
     """link -> list of (centre, radius) from a cuRobo robot yml (collision_spheres: link: [{center, radius}])."""
+    import pathlib
+
     import yaml
-    data = yaml.safe_load(open(cfg))
-    node = data
-    while 'collision_spheres' not in node:
-        node = next(v for v in node.values() if isinstance(v, dict))
+
+    def find(node):
+        if isinstance(node, dict):
+            if 'collision_spheres' in node:
+                return node['collision_spheres']
+            for v in node.values():
+                found = find(v)
+                if found is not None:
+                    return found
+        return None
+
+    found = find(yaml.safe_load(open(cfg)))
+    if isinstance(found, str):  # a file next to the config
+        found = yaml.safe_load((pathlib.Path(cfg).parent / found).read_text())
+    if not isinstance(found, dict):
+        raise ValueError(f'no collision_spheres in {cfg}')
     spheres = {}
-    for link, items in node['collision_spheres'].items():
+    for link, items in found.items():
         spheres[link] = [(np.array(i['center'], float), float(i['radius'])) for i in items]
     return spheres
 

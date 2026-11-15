@@ -172,6 +172,20 @@ def test_curobo_sphere_parser(tmp_path):
     assert s['l'][0][1] == 0.04
 
 
+def test_curobo_sphere_parser_finds_the_key_anywhere_and_follows_a_file_reference(tmp_path):
+    pytest.importorskip('yaml')
+    spheres = "l:\n- center: [0.1, 0.2, 0.3]\n  radius: 0.04\n"
+    (tmp_path / 'spheres.yml').write_text(spheres)
+    deep = tmp_path / 'deep.yml'
+    deep.write_text("robot_cfg:\n  note: x\n  kinematics:\n    base_link: a\n    cspace: {max_acceleration: 1}\n"
+                    "    collision_spheres:\n      " + spheres.replace('\n', '\n      ').rstrip() + "\n")
+    ref = tmp_path / 'ref.yml'
+    ref.write_text("kinematics:\n  collision_spheres: spheres.yml\n")
+    for cfg in (deep, ref):
+        s = mm.load_curobo_spheres(cfg)
+        np.testing.assert_allclose(s['l'][0][0], [0.1, 0.2, 0.3])
+
+
 def test_curobo_dump_must_come_from_the_same_configurations():
     import mujoco_crosscheck as cc
     q = np.random.default_rng(0).uniform(-1, 1, (5, 2))
