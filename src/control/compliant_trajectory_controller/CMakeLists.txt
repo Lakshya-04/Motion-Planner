@@ -160,6 +160,7 @@ add_executable(reference_pose_collision_probe
   src/reference_pose_collision_probe.cpp
 )
 target_link_libraries(reference_pose_collision_probe mobile_manipulator_profile::mobile_manipulator_profile)
+target_include_directories(reference_pose_collision_probe PRIVATE include)
 ament_target_dependencies(reference_pose_collision_probe
   moveit_core
   moveit_ros_planning
@@ -397,6 +398,17 @@ if(BUILD_TESTING)
     ament_target_dependencies(test_redundancy_weighting
       Eigen3
     )
+  endif()
+
+  # Input checks of the probe / wall-approach nodes (no-lift profile, failed load, other arm).
+  ament_add_gtest(test_pose_inputs
+    test/test_pose_inputs.cpp
+  )
+  if(TARGET test_pose_inputs)
+    target_link_libraries(test_pose_inputs
+      mobile_manipulator_profile::mobile_manipulator_profile
+    )
+    target_include_directories(test_pose_inputs PRIVATE include)
   endif()
 endif()
 

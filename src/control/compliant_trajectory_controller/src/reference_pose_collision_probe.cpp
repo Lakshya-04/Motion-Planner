@@ -25,6 +25,7 @@
 #include "moveit/planning_scene/planning_scene.h"
 #include "moveit/robot_model_loader/robot_model_loader.h"
 #include "moveit/robot_state/robot_state.h"
+#include "compliant_trajectory_controller/pose_inputs.hpp"
 #include "mobile_manipulator_profile/profile.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -69,26 +70,20 @@ int main(int argc, char ** argv)
   }
   auto joint_names = node->get_parameter("joint_names").as_string_array();
   auto pose = node->get_parameter("joint_pose").as_double_array();
-  if (joint_names.empty() && !profile.lift_joint.empty()) {
-    joint_names = profile.joints();
-    if (pose.empty()) {
-      pose = profile.homePositions();
-    }
-  }
-
   if (urdf_path.empty() || srdf_path.empty()) {
     std::cerr << "Pass -p urdf_file:=<path> -p srdf_file:=<path> (both flat, xacro-rendered)\n";
+    return 1;
+  }
+  if (const auto err = compliant_trajectory_controller::resolveJointInputs(
+      profile, joint_names, pose); !err.empty())
+  {
+    std::cerr << "Cannot judge a pose: " << err << "\n";
     return 1;
   }
   const std::string urdf = readFile(urdf_path);
   const std::string srdf = readFile(srdf_path);
   if (urdf.empty() || srdf.empty()) {
     std::cerr << "Could not read '" << urdf_path << "' or '" << srdf_path << "'\n";
-    return 1;
-  }
-  if (pose.size() != joint_names.size()) {
-    std::cerr << "joint_pose (" << pose.size() << ") and joint_names (" << joint_names.size()
-              << ") must be the same length\n";
     return 1;
   }
 
