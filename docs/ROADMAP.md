@@ -121,8 +121,7 @@ without code, when we can implement it.
 - [x] F/T path: raw sensor -> `ft_conditioner` (sign, bias, payload gravity, lever arm, calibration services) -> `ft_bridge_hardware` -> JTAC
 - [x] Verified in MuJoCo: 10.13 N for a 10 N target (std 0.03); conditioner error vs ground truth under 0.005 N in both simulators
 - [~] JTAC compliance offset accumulates on every axis while blocked and releases over about 3 s after the reference retreats (`docs/sim_mujoco.md`)
-- [ ] **Force-CBF limiter plus offset clamp on JTAC** (arXiv 2405.04859 "Guarding Force": no code; a small QP that clamps the joint-rate output of a compliant controller using an estimated environment stiffness and rest position, tested on a UR3e; 1-2 weeks) and an energy tank around the slow release (about 1 week):
-      fixes the windup/release finding and gives a hard force bound, the top priority for safe contact
+- [~] **Force-CBF limiter on JTAC** (arXiv 2405.04859 idea, no code used): `force_core::ForceLimiter` bounds the velocity into the wall by `alpha (F_max - F) / k` with an online stiffness estimate and a free-space speed cap; closed-loop tests keep the force under the limit on 1-40 kN/m walls (`docs/ft_sensing.md`). Not wired into JTAC's command path yet (needs a simulator run), and there is no energy tank around the slow release; the existing `max_offset_m` clamp stays
 - [ ] **Hardware parameter template**: gains, sensor name, source topic, payload and bias live in yaml comments marked "diagnostic"
 - [ ] Payload identification with safe excitation trajectories and bounds (arXiv 2504.21486, about 1.5 weeks; its code, `roahmlab/OnlineSafeSysID`, has no licence file, so implement from the paper) and bias/temperature drift tracking (3-5 days);
       optionally replace the gravity step with the `control_toolbox` gravity-compensation filter (Apache-2.0; gravity and centre-of-gravity torque only, so sign, bias and the lever arm stay ours)

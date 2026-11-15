@@ -133,3 +133,18 @@ script gates the mean error (1 N, 0.2 Nm); the maxima are printed, not checked.
   be set by hand.
 - Inertial compensation (acceleration terms), a low-pass filter ahead of the controller, temperature drift,
   and checking a real sensor's sign and frame against this convention on hardware.
+
+## Force limiter (library)
+
+`force_core::ForceLimiter` (`force_limiter.hpp`, plain C++) turns a hard force limit into a bound on the tool's velocity
+into the wall. In contact the force grows at `F' = k v`; requiring `F' <= alpha (F_max - F)` keeps `F <= F_max`
+forward invariant (the force closes in on the limit exponentially and cannot cross it; above the limit the velocity is
+forced to retreat). `limit(v_cmd, F)` returns `min(v_cmd, alpha (F_max - F) / k)`. The wall stiffness `k` is estimated while the tool is in
+contact and moving (recursive least squares on `dF = k dx`, forgetting factor, clamped to `[k_min, k_max]`); before an
+estimate exists it assumes `k_max`, the conservative choice. Before contact is felt the approach speed is capped at
+`free_space_speed_mps` (the first contact builds about `k * speed * dt` of force per control step, so choose it from the
+loop rate). Retreat velocities are never held back.
+
+Limits: one axis (the wall normal), a linear spring model, no energy tank; it bounds the force the controller is told
+to build and does not replace the tool's abort threshold or an e-stop. It is not connected to JTAC's command path yet.
+
