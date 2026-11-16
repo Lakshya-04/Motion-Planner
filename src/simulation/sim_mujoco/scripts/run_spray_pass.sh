@@ -10,7 +10,8 @@
 # and mobile_manipulator_moveit_config installed. Extra arguments go to `ros2 launch manipulation_manager`.
 #   SPRAY_PASS_OUT (default /tmp/spray_pass)  SPRAY_PASS_STANDOFF (m, 0.30)  SPRAY_PASS_HALF_ANGLE (deg, 20)
 #   SPRAY_PASS_OVERLAP (percent, 20)  SPRAY_PASS_SPEED (m/s, 0.05)  SPRAY_PASS_MIN_COVERAGE (0.9)  SPRAY_PASS_MAX_PEAK (N, 0 = no force limit)
-#   SPRAY_PASS_SKIP_READY (1: skip ready_pose.py, default; 0 = the contact passes' unplanned move to the ready pose 3 cm from the wall)
+#   SPRAY_PASS_READY (seed: slow move to the first stroke's arm configuration, default; none; free = the contact passes' move 3 cm from the wall)
+#   SPRAY_PASS_SEED_Q / SPRAY_PASS_SEED_SCALE (the seed joints in smoke_test.FREE order, velocity scale 0.3 of the MoveIt plan)
 #   SPRAY_PASS_SCORE_ARGS (extra score_run arguments, e.g. "--max-thickness-cov 0.6")  SPRAY_PASS_LAUNCH_ARGS
 set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
@@ -26,7 +27,20 @@ SWATH=$(python3 -c "import math; print(0.8 * 2 * $STANDOFF * math.tan(math.radia
 MP_COVERAGE_PARAMS="-p tool_name:=spray_gun -p standoff_m:=$STANDOFF -p sweep_direction:=vertical -p overlap_pct:=$OVERLAP"
 MANAGER_PASS_SPEED=${SPRAY_PASS_SPEED:-0.05}
 MP_MANAGER_YAML_EXTRA=$'    contact: false\n    valve_topic: /tool/valve'
-MP_SKIP_READY=${SPRAY_PASS_SKIP_READY:-1}   # 1: no unplanned move to the contact ready pose (3 cm from the wall): the manager plans the first move
+# First move: SPRAY_PASS_READY=seed (default) is a MoveIt-planned (collision-checked) move to the arm configuration of the first stroke (tool 0.3 m from
+# the wall, lift raised); none leaves the first move to the manager from the stowed pose (an elbow-flipped solution with the lift
+# unused: shorter strokes); free is the contact passes' unplanned move to the FREE pose 3 cm from the wall (force spikes).
+# SPRAY_PASS_SKIP_READY=1 / 0 is the older switch for none / free.
+READY=${SPRAY_PASS_READY:-}
+[ -z "$READY" ] && case "${SPRAY_PASS_SKIP_READY:-}" in 1) READY=none;; 0) READY=free;; *) READY=seed;; esac
+MP_SKIP_READY=0
+case "$READY" in
+  none) MP_SKIP_READY=1;;
+  free) ;;
+  seed) # lift pan shoulder_lift elbow wrist_1 wrist_2 wrist_3 (smoke_test.FREE order); override with SPRAY_PASS_SEED_Q
+    MP_READY_ARGS="--joints ${SPRAY_PASS_SEED_Q:-0.6091,0.1811,0.4325,1.348,1.3607,-1.7519,1.5708} --planned --scale ${SPRAY_PASS_SEED_SCALE:-0.3}";;
+  *) echo "SPRAY_PASS_READY must be seed, none or free"; exit 2;;
+esac
 MP_MANAGER_GREP="spray success|valve |Coverage plan complete|dock failed|retract failed"
 mp_score() {
   # the valve column: some samples spraying, not all of them; the tool never presses on the wall

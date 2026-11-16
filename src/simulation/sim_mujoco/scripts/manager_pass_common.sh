@@ -14,6 +14,7 @@
 #   MP_MANAGER_YAML_EXTRA  lines appended to manager.yaml (4-space indented parameters)
 #   MP_MANAGER_GREP        egrep pattern of the manager log lines echoed after the run
 #   MP_SKIP_READY=1        skip ready_pose.py (the manager plans the first move from the stowed pose)
+#   MP_READY_ARGS          extra arguments of ready_pose.py (--joints ... --duration ...: another pose than FREE)
 #   mp_score               a function that scores $REC instead of the contact score_run call; its status is the score
 mp_init() {
   OUT=${1:?output dir}
@@ -98,7 +99,7 @@ mp_record() {
 mp_run_and_score() {
   # ready_pose.py is an unplanned joint-space move to the contact FREE pose 3 cm in front of the wall; a non-contact
   # pass sets MP_SKIP_READY=1 and lets the manager plan the first move from the stowed pose instead
-  if [ "${MP_SKIP_READY:-0}" != 1 ]; then python3 "$PKG/lib/sim_mujoco/ready_pose.py" | tee "$OUT/ready_pose.log"; fi
+  if [ "${MP_SKIP_READY:-0}" != 1 ]; then python3 "$PKG/lib/sim_mujoco/ready_pose.py" ${MP_READY_ARGS:-} | tee "$OUT/ready_pose.log"; fi
   timeout 900 ros2 launch manipulation_manager manipulation_manager.launch.py hardware:=jtac_mock use_sim_time:=false \
     params_file:=$OUT/manager.yaml "$@" > "$OUT/manager.log" 2>&1
   local rc=$?
