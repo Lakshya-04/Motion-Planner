@@ -14,6 +14,24 @@ xacro, next to `mock` and `jtac_mock`. Package: [`src/simulation/sim_mujoco`](..
 | `scripts/smoke_test.py`, `run_smoke.sh` | trajectory-following and wall-contact smoke test. |
 | `scripts/contact_test.py`, `run_contact.sh` | contact-controlled test of the full force path (conditioner, bridge, JTAC). |
 
+## Showcase
+
+![A full manager pass on a plain wall](media/manager_pass.gif)
+
+A full manager pass on a plain wall (`run_manager_pass.sh`), rendered by `render_run.py`. The gif is the run at 9x, the
+[mp4](media/manager_pass.mp4) at 3x with a force trace.
+
+| Robot overview | Arm at the wall, mid-stroke | Tool on the wall |
+|---|---|---|
+| ![overview](media/overview.jpg) | ![arm at the wall](media/arm_at_wall.jpg) | ![tool close-up](media/tool_closeup.jpg) |
+
+![force and coverage of the run](media/force_coverage.png)
+
+Scored result of exactly this run (`score_run`, 10 N target, 1.5 N band): 3 columns done, 0 partial, 0 failed; coverage
+93.3 % (868 of 930 cells); peak force 153.4 N; RMS force error 8.0 N; 44 % of the contact samples in the band; 149 s of
+simulated time, 80 s engaged. The peak is a few short spikes (141 samples above 30 N at 100 Hz); while stroking the force
+ripples between 0 and about 18 N around the 10 N target. Nothing is tuned for the picture. How it is made: [Rendering photos and videos](#rendering-photos-and-videos).
+
 ## Build
 
 The SDK is not vendored. Download the tarball of the release and point `MUJOCO_ROOT` at it:
@@ -282,6 +300,25 @@ Details, the wall detector that consumes it and `scripts/run_depth_wall.sh` are 
   built for older MuJoCo and were not used or installed here; this plugin is a small independent
   design (model and data owned by the plugin, stepped from `write()`, no separate simulation
   thread, no clock publisher).
+
+## Rendering photos and videos
+
+The plugin has no camera, so a run is filmed in two steps with
+[`scripts/render_run.py`](../src/simulation/sim_mujoco/scripts/render_run.py): `record` stores `/joint_states` and the
+ground-truth contact force during the run, then `stills` / `video` replay the joint positions on the generated MJCF with
+`mujoco.Renderer` (headless, `MUJOCO_GL=egl`, Mesa software rendering, no GPU or display; the `sim` image is enough). The
+mimic lift stages come from the MJCF equality constraint. A render-only stem is drawn between the tool mount and the pad disc
+(the model has a gap there), and a sky and floor are added to the otherwise empty scene. `plot_run.py` plots a score_run CSV.
+
+```bash
+# during a pass: MANAGER_PASS_FILM=1 also records OUT/run_film.npz; out_dir:= keeps the generated MJCF
+MANAGER_PASS_FILM=1 MANAGER_PASS_LAUNCH_ARGS="out_dir:=/tmp/mjcf" bash $(ros2 pkg prefix sim_mujoco)/lib/sim_mujoco/run_manager_pass.sh
+# in the sim image (python mujoco 4, Pillow):
+MUJOCO_GL=egl render_run.py stills --mjcf /tmp/mjcf --run /tmp/manager_pass/run_film.npz --out-dir media/
+MUJOCO_GL=egl render_run.py video  --mjcf /tmp/mjcf --run /tmp/manager_pass/run_film.npz --out media/run.mp4 --max-speed 3
+render_run.py encode --frames media/run.mp4.frames --out media/run.mp4 --gif media/run.gif   # host ffmpeg (the image has none)
+plot_run.py --samples /tmp/manager_pass/run.csv --score score.json --out media/force_coverage.png
+```
 
 ## Not modelled / limits
 

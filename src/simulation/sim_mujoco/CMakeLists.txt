@@ -21,7 +21,7 @@ ament_python_install_package(${PROJECT_NAME})
 
 install(PROGRAMS scripts/generate_mjcf scripts/smoke_test.py scripts/contact_test.py scripts/viewer.py scripts/run_smoke.sh
   scripts/run_contact.sh scripts/wall_pass_test.py scripts/run_wall_pass.sh
-  scripts/record_run.py scripts/ready_pose.py scripts/run_manager_pass.sh scripts/manager_pass_common.sh
+  scripts/record_run.py scripts/render_run.py scripts/plot_run.py scripts/ready_pose.py scripts/run_manager_pass.sh scripts/manager_pass_common.sh
   scripts/run_sensed_pass.sh scripts/crop_wall_scene.py scripts/base_motion_test.py scripts/run_base_motion.sh
   scripts/base_odom.py scripts/stand_navigation_test.py scripts/run_stand_navigation.sh
   scripts/run_stand_pass.sh scripts/stand_drive.py scripts/shift_wall_scene.py

@@ -44,6 +44,27 @@ Building outside Docker needs ROS 2, MoveIt 2, `ros2_control` and the packages i
 The last full run recorded in the roadmap: 736 colcon tests in 26 packages, no failures. There is
 deliberately no CI; [CONTRIBUTING.md](CONTRIBUTING.md) lists how to run every check locally.
 
+## Showcase
+
+A full MuJoCo manager pass on a plain wall (`run_manager_pass.sh`: coverage plan, dock, press, three stroke columns, retract),
+rendered headless from the recorded joint states with `render_run.py`. The gif is the run at 9x, the
+[mp4](docs/media/manager_pass.mp4) at 3x with a force trace.
+
+![A full manager pass on a plain wall](docs/media/manager_pass.gif)
+
+| Robot overview | Arm at the wall, mid-stroke | Tool on the wall |
+|---|---|---|
+| ![overview](docs/media/overview.jpg) | ![arm at the wall](docs/media/arm_at_wall.jpg) | ![tool close-up](docs/media/tool_closeup.jpg) |
+
+![force and coverage of the run](docs/media/force_coverage.png)
+
+Scored result of exactly this run (`score_run`, 10 N target, 1.5 N band): 3 columns done, 0 partial, 0 failed; coverage
+93.3 % (868 of 930 cells); peak force 153.4 N; RMS force error 8.0 N; 44 % of the contact samples in the band; 149 s of
+simulated time, 80 s engaged. The peak is a few short spikes (141 samples above 30 N at 100 Hz); while stroking the force
+ripples between 0 and about 18 N around the 10 N target. Nothing is tuned for the picture. How the media is made:
+[docs/sim_mujoco.md](docs/sim_mujoco.md#rendering-photos-and-videos). The Gazebo scene is not shown: its launch has only a
+depth camera and no colour camera to take a picture with.
+
 ## Simulators
 
 Both run headless and sit behind `ros2_control`, so the same controllers run against them as against

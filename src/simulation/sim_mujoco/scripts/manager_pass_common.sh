@@ -7,7 +7,7 @@
 #   mp_coverage json   coverage plan for the wall scene json into $COV (returns 3 if none)
 #   mp_manager_yaml    $OUT/manager.yaml (wall at +x, poses authored for base_footprint at z 1.0..1.3)
 #   mp_world_model pcd start world_model_loader_node for the wall cloud (pid in WM)
-#   mp_record          start the recorder (pid in REC_PID)
+#   mp_record          start the recorder (pid in REC_PID); with MANAGER_PASS_FILM=1 also render_run.py record
 #   mp_run_and_score "$@"  ready pose, manager, stop recording, score; the exit code is left in MP_EXIT
 # Hooks for another tool kind (run_spray_pass.sh), all optional and unset for the contact passes:
 #   MP_COVERAGE_PARAMS     replaces the default `-p swath_m:=.. -p overlap_pct:=..` of mp_coverage
@@ -87,6 +87,11 @@ mp_world_model() {
 mp_record() {
   python3 "$PKG/lib/sim_mujoco/record_run.py" --record "$REC" --timeout 1200 > "$OUT/record.log" 2>&1 &
   REC_PID=$!
+  # MANAGER_PASS_FILM=1: also store the joint states for render_run.py (launch with out_dir:=... to keep the MJCF)
+  if [ -n "${MANAGER_PASS_FILM:-}" ]; then
+    python3 "$PKG/lib/sim_mujoco/render_run.py" record --out "$OUT/run_film.npz" > "$OUT/film.log" 2>&1 &
+    FILM_PID=$!
+  fi
 }
 
 mp_run_and_score() {
@@ -97,6 +102,7 @@ mp_run_and_score() {
   echo "manager exit code $rc (logs in $OUT)"
   grep -E "${MP_MANAGER_GREP:-contact success|Coverage plan complete|dock failed|retract failed}" "$OUT/manager.log" | cut -c1-200
   kill -INT "$REC_PID" 2>/dev/null; wait "$REC_PID" 2>/dev/null; REC_PID=
+  if [ -n "${FILM_PID:-}" ]; then kill -INT "$FILM_PID" 2>/dev/null; wait "$FILM_PID" 2>/dev/null; cat "$OUT/film.log"; fi
   cat "$OUT/record.log"
   local sc=0
   if [ -f "$REC" ] && declare -F mp_score > /dev/null; then
