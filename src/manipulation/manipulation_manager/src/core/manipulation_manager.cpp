@@ -518,6 +518,7 @@ MotionExec ManipulationManager::executeMotionSegments(
         ExecutionRequest execution_request;
         execution_request.planning_group = planning_group;
         execution_request.trajectory = planning_result.trajectory;
+        execution_request.stroke_speed = request.target_eef_speed;
         const ExecutionResult execution_result = execution_port_->execute(execution_request);
         total_execution_time_ms += execution_result.execution_time_ms;
 

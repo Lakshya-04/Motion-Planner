@@ -92,8 +92,8 @@ wall: coverage (through `CoverageVerifier`), contact force RMS error against the
 of working samples inside the force band, and the duration. A contact tool counts as working while it presses at
 least `engaged_force_n`; a non-contact tool while `tool_active` is set. A new stroke starts after every sample where the
 tool was not working. Obstacles are excluded from the target. The limits are the caller's numbers
-(`ScorecardLimits`); each one that fails adds a line to `failures`. It does not count collisions (the recorder must),
-and the coverage is geometric. It scores recorded samples; recording them from a simulator run is not wired yet.
+(`ScorecardLimits`); each one that fails adds a line to `failures`. The coverage is geometric. It counts obstacle contacts (below), not
+other collisions (the recorder must). It scores recorded samples; recording them from a simulator run is not wired yet.
 
 `ros2 run coverage_planner score_run --samples run.csv --wall wall.json [--swath 0.2] [--target-force 10] [--band 1]
 [--no-contact] [--min-coverage 0.95] [--max-rms N] [--max-peak N] [--min-in-band F]` scores a recording and prints the
@@ -101,4 +101,14 @@ card as JSON (exit 0 passed, 1 failed a limit, 2 bad input). The CSV has the hea
 metres, newtons pressing on the wall, 0/1 valve); the wall JSON is `{"origin": [x,y,z], "u": [..], "v": [..],
 "u_range": [min,max], "v_range": [min,max]}` in the same frame as the positions, with `u` and `v` orthonormal and the
 normal `u x v`. It takes any recording, a simulator run or a hardware log.
+
+Obstacles on the wall: the wall JSON may carry `"obstacles": [{"id": 0, "u": [min,max], "v": [min,max], "height_m": 0.04}]`
+(u, v in the wall's coordinates, `height_m` how far the obstacle stands off the wall, against `u x v`; 0 for a window
+hole). `score_run` then (1) leaves the obstacle out of the coverage target, grown by `--keepout-margin M` (use the
+planner's clearance, so the target is the area the planner may reach) and (2) counts obstacle contacts: an episode is a
+run of consecutive samples, any force, whose tool point is inside an obstacle's footprint (grown by `--obstacle-margin`)
+and not above its top (`height_m` + `--obstacle-tol`, default 3 mm). The card has `obstacle.contacts` and
+`obstacle.contact_samples`; `--max-obstacle-contacts N` fails the run above N. Only the tool point is checked, not the
+arm's links, so an elbow hitting the obstacle is not seen. `record_run.py --scene wall_scene.json` writes the list
+from a wall scene (`docs/sim_mujoco.md`, scenario set).
 

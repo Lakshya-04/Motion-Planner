@@ -20,6 +20,7 @@ namespace
 struct RawPoint
 {
   double x, y, z, qx, qy, qz, qw;
+  int segment{-1};   // index into the plan's `segments`, -1 if the plan has none
 };
 
 }  // namespace
@@ -60,10 +61,24 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
   // Group raw points by x (rounded to kill float noise between two points on the same
   // column) -- the boustrophedon path visits each column as a top/bottom pair, sorted here
   // left-to-right (ascending x) so a caller sweeping the wall naturally starts at the left.
+  // The plan's segments say which points belong to one stroke: an obstacle splits a column into several strokes
+  // whose ends are far apart, and the manager must stroke each of them, not the whole column through the obstacle.
+  std::vector<int> segment_of_pose(poses.size(), -1);
+  const auto & plan_node = doc.at("final_lifted_and_expanded");
+  if (plan_node.contains("segments")) {
+    int seg = 0;
+    for (const auto & sj : plan_node.at("segments")) {
+      const size_t a = sj.value("start_index", 0U), b = sj.value("end_index", 0U);
+      for (size_t i = a; i <= b && i < segment_of_pose.size(); ++i) {segment_of_pose[i] = seg;}
+      ++seg;
+    }
+  }
   std::map<long, std::vector<RawPoint>> columns_by_x_key;
   constexpr double kXQuantum = 1e-3;
+  size_t pose_index = 0;
   for (const auto & p : poses) {
     RawPoint pt;
+    pt.segment = segment_of_pose[pose_index++];
     pt.x = p.at("position").at("x").get<double>();
     pt.y = p.at("position").at("y").get<double>();
     pt.z = p.at("position").at("z").get<double>() + z_offset_;
@@ -82,35 +97,60 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
     std::sort(column.begin(), column.end(), [](const RawPoint & a, const RawPoint & b) {
         return a.z < b.z;
       });
-    const double z_min = std::max(z_min_m_, column.front().z);
-    const double z_max = std::min(z_max_m_, column.back().z);
-
-    CoverageSegmentIntent intent;
-    intent.label = "wall_column_" + std::to_string(column_index);
-    intent.mode_hint = "cartesian";
-    intent.requires_contact = true;
-    intent.requires_retraction = true;
-    intent.target_eef_speed = target_eef_speed_;
-
-    if (z_max > z_min) {
-      const auto & rep = column.front();
-      for (double z = z_min; z <= z_max + 1e-9; z += z_step_m_) {
-        core_types::Pose pose;
-        pose.x = rep.x;
-        pose.y = rep.y;
-        pose.z = z;
-        pose.qx = rep.qx;
-        pose.qy = rep.qy;
-        pose.qz = rep.qz;
-        pose.qw = rep.qw;
-        intent.poses.push_back(pose);
+    // z span of every stroke in the column (passes over the same stretch share one span); without segment
+    // information the whole column is one span
+    std::vector<std::pair<double, double>> spans;
+    if (column.front().segment < 0) {
+      spans.push_back({column.front().z, column.back().z});
+    } else {
+      std::map<int, std::pair<double, double>> by_segment;
+      for (const auto & pt : column) {
+        auto it = by_segment.find(pt.segment);
+        if (it == by_segment.end()) {by_segment[pt.segment] = {pt.z, pt.z};} else {
+          it->second.first = std::min(it->second.first, pt.z);
+          it->second.second = std::max(it->second.second, pt.z);
+        }
       }
+      for (const auto & [seg, span] : by_segment) {
+        bool seen = false;
+        for (const auto & e : spans) {
+          if (std::fabs(e.first - span.first) < 1e-3 && std::fabs(e.second - span.second) < 1e-3) {seen = true;}
+        }
+        if (!seen) {spans.push_back(span);}
+      }
+      std::sort(spans.begin(), spans.end());
     }
+    const auto & rep = column.front();
+    for (const auto & span : spans) {
+      const double z_min = std::max(z_min_m_, span.first);
+      const double z_max = std::min(z_max_m_, span.second);
 
-    if (!intent.poses.empty()) {
-      segments.push_back(std::move(intent));
+      CoverageSegmentIntent intent;
+      intent.label = "wall_column_" + std::to_string(column_index);
+      intent.mode_hint = "cartesian";
+      intent.requires_contact = true;
+      intent.requires_retraction = true;
+      intent.target_eef_speed = target_eef_speed_;
+
+      if (z_max > z_min) {
+        for (double z = z_min; z <= z_max + 1e-9; z += z_step_m_) {
+          core_types::Pose pose;
+          pose.x = rep.x;
+          pose.y = rep.y;
+          pose.z = z;
+          pose.qx = rep.qx;
+          pose.qy = rep.qy;
+          pose.qz = rep.qz;
+          pose.qw = rep.qw;
+          intent.poses.push_back(pose);
+        }
+      }
+
+      if (!intent.poses.empty()) {
+        segments.push_back(std::move(intent));
+      }
+      ++column_index;
     }
-    ++column_index;
   }
   return segments;
 }

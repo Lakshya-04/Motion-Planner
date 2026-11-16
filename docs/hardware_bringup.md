@@ -139,6 +139,13 @@ Do this before any contact, in the reverse order from what is tempting: limits f
 | `max_offset_m` | `control.admittance:` | 0.05 m | largest compliance offset |
 | `deadband_n`, `clamp_n` | `control.ft:` | 0.3 N, 100 N | readings below are zeroed, above are clamped |
 
+Opt-in command guard (`command_guard.enabled: true` on the JTAC controller): every command is checked for NaN and
+against `joint_limits.<joint>.min_position` / `max_position` (include the lift) before it is written; a bad cycle holds
+the last good command, `command_guard.debounce_cycles` (3) bad cycles in a row latch a fault, `update()` returns
+ERROR (the controller deactivates) and a non-finite measured position counts as a dead axis, never healthy. A latch
+clears only on re-activation. Core: `core_types/command_guard.hpp`. Not yet: a `fault` state interface, the hardware
+valve forced off from a fault, drive-side watchdog.
+
 All are starting points to tune on the real tool. They live in the software layer; the robot's own safety
 limits and the e-stop have to be the last line, and the link between the two does not exist yet.
 

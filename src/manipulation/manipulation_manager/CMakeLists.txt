@@ -26,6 +26,7 @@ find_package(ros_adapters REQUIRED)
 # doesn't re-run it itself.
 find_package(PCL REQUIRED COMPONENTS common io)
 find_package(motion_planner REQUIRED)
+find_package(moveit_ros_planning REQUIRED)
 find_package(motion_planner_moveit REQUIRED)  # only the tests still link the MoveIt adapter directly
 find_package(mobile_manipulator_profile REQUIRED)
 find_package(nlohmann_json REQUIRED)
@@ -68,6 +69,12 @@ ament_target_dependencies(${PROJECT_NAME}_core
   control_msgs
 )
 
+# Opt-in retiming (retime:=true): the one place the node touches the MoveIt adapter.
+add_library(${PROJECT_NAME}_retiming src/ros/execution/retiming_wiring.cpp)
+target_link_libraries(${PROJECT_NAME}_retiming PUBLIC ${PROJECT_NAME}_core
+  motion_planner_moveit::motion_planner_moveit_lib)
+ament_target_dependencies(${PROJECT_NAME}_retiming PUBLIC rclcpp moveit_ros_planning)
+
 add_executable(manipulation_manager_node src/ros/manipulation_manager_node.cpp)
 target_compile_features(manipulation_manager_node PUBLIC c_std_99 cxx_std_17)
 target_include_directories(manipulation_manager_node PUBLIC
@@ -92,13 +99,25 @@ ament_target_dependencies(manipulation_manager_node
 # only need to be installed.
 target_link_libraries(manipulation_manager_node
   ${PROJECT_NAME}_core
+  ${PROJECT_NAME}_retiming
   ros_adapters::ros_adapters
   motion_planner::motion_planner_ros
   mobile_manipulator_profile::mobile_manipulator_profile
 )
 
+add_executable(tool_actuation_node src/ros/tool_actuation_node.cpp)
+target_compile_features(tool_actuation_node PUBLIC cxx_std_17)
+target_include_directories(tool_actuation_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(tool_actuation_node rclcpp std_msgs)
+
+install(TARGETS tool_actuation_node DESTINATION lib/${PROJECT_NAME})
+
 install(TARGETS
   ${PROJECT_NAME}_core
+  ${PROJECT_NAME}_retiming
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -182,6 +201,26 @@ if(BUILD_TESTING)
     target_link_libraries(planning_config_test motion_planner::motion_planner_ros)
     target_compile_definitions(planning_config_test PRIVATE
       PLANNING_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/planning.yaml")
+  endif()
+
+  ament_add_gtest(recovery_jog_test test/recovery_jog_test.cpp)
+  if(TARGET recovery_jog_test)
+    target_include_directories(recovery_jog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  ament_add_gtest(column_ordering_test test/column_ordering_test.cpp)
+  if(TARGET column_ordering_test)
+    target_include_directories(column_ordering_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  ament_add_gtest(retiming_execution_port_test test/retiming_execution_port_test.cpp)
+  if(TARGET retiming_execution_port_test)
+    target_link_libraries(retiming_execution_port_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(tool_actuation_test test/tool_actuation_test.cpp)
+  if(TARGET tool_actuation_test)
+    target_include_directories(tool_actuation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   endif()
 
   find_package(ament_lint_auto QUIET)
