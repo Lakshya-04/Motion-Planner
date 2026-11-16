@@ -78,6 +78,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <atomic>
 #include <thread>
 
 #include "control_msgs/action/follow_joint_trajectory.hpp"
@@ -149,6 +150,7 @@ private:
 
   std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
   std::thread spin_thread_;
+  std::atomic<bool> stop_spin_{false};
 
   bool engaged_{false};
 };

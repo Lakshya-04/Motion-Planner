@@ -12,6 +12,7 @@ anything verified on hardware.
 
 ### Added
 
+- Calibration procedures in one place (`docs/calibration.md`: F/T sign and bias, tool TCP, payload services, wall plane, base-to-wall) and `core_types/pivot_calibration.hpp` (ROS-free least-squares tool-TCP calibration by pivoting, degenerate-pose and too-few-pose rejection, 5 gtests including simulated noise). No ROS node for it; nothing run on hardware.
 - Backend routing test and cross-backend planner benchmark: `manipulation_manager` `backend_routing_test` (configs with `free_space: vamp` / `curobo` and `segments`, built through `PlanningPipeline` over the pluginlib registry, fakes where a real plugin is unavailable, MoveIt always faked); `motion_planner_moveit` `planner_benchmark` (OMPL RRT-Connect on a MoveIt PlanningScene) and `scripts/planner_benchmark.py` (shared stand / stow / dock-like joint-space problems for MoveIt/OMPL, VAMP and cuRobo, path length and clearance judged by one reference model); results and what could not run in `docs/planner_benchmark.md`.
 - Wall docking servo: `stand_navigator` `wall_docking.py` (ROS-free: plane to standoff and yaw, proportional control with velocity and acceleration limits, tolerances, timeout, omni and diff behaviour, typed status) and `wall_docking_node` serving the new `WallDock` action (`stand_navigator_msgs`), 21 pytest tests; `sim_mujoco/scripts/run_wall_docking.sh` (3 runs from 0.4 m and 15 degrees off: standoff error 4.8-5.2 mm, yaw 0.01 degrees). Docs in `docs/stand_navigation.md` and `docs/perception_live.md`. Sim base is omni; diff drive is gtest-only.
 - Time parameterisation by segment role: `motion_planner/core/time_parameterization.hpp` (`TimeParameterizer` port, `parameterizeSegment`: validation with typed `TimingError`, near-duplicate removal, split at reversals over 150 degrees, constant-speed stamps, limit-violation report), `MoveItTimeParameterizer` in `motion_planner_moveit` (MoveIt TOTG for transitions; constant tool speed through FK plus Ruckig smoothing for seams), and `RetimingExecutionPort` in the manager, opt-in with `retime:=true` (`retime_accel`, `retime_seam_jerk`, `retime_transition_jerk`, `retime_vel_scale`, `retime_tcp_link`); a seam over a limit fails as `time_limit_violation`. `ExecutionRequest::stroke_speed` carries the role. Default behaviour unchanged; gtests only.
@@ -76,6 +77,10 @@ anything verified on hardware.
 - Documentation set under `docs/`, the roadmap with a reuse map, `THIRD_PARTY.md`, `CONTRIBUTING.md`, a
   root README with an overview.
 - Sphere-set planning benchmark (partial: cuRobo on a 110-problem subset) and the FOAM versus cuRobo sphere comparison.
+
+### Fixed
+
+- `JtacControllerCompliancePort`: the destructor could hang in `join()` when it ran before the spin thread entered `spin()` (the executor `cancel()` was lost). The thread now polls a stop flag between short `spin_once()` calls. The 300 ms settle workaround in `test_jtac_compliance_port` is gone and a test constructs and destroys the port 200 times in a row under a watchdog.
 
 ### Since #22 (pull requests #23 to #61)
 
