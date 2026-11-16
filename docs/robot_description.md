@@ -211,6 +211,7 @@ python3 -m pytest src/description/mobile_manipulator_description/test
   [self filter](robot_self_filter.md).
 - The SRDF carries the generated structural allowed-collision matrix (`scripts/generate_acm.py`);
   geometry-specific pairs can be added by sampling, see [moveit_config.md](moveit_config.md).
+- `hardware:=real` selects a vendor ros2_control driver from the arm (`config/hardware_drivers.yaml`, not vendored; `hardware_bringup.md` section 0a).
 - `hardware:=mock` adds a ros2_control block (mock components); add real and sim backends as
   further branches of that one xacro.
 - The Panda-like arm uses cylinders along the real segments, so its collision geometry is an

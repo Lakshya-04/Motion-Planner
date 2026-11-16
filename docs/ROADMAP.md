@@ -185,7 +185,7 @@ without code, when we can implement it.
 
 - [~] UFACTORY path: `ft_bridge` default topic, JTAC yaml for `uf_ft_sensor`, a real-robot branch in the compliance demo; nothing verified on hardware
 - [~] Hardware bring-up guide: `docs/hardware_bringup.md` (procedure, abort thresholds, sim-vs-real differences); written from the code and simulations, no commissioning test exists and nothing was run on hardware
-- [ ] `hardware:=real` description branch and vendor-driver selection
+- [~] `hardware:=real` description branch and vendor-driver selection: `config/hardware_drivers.yaml` (arm -> driver package, plugin, required params, F/T source), the `real` branch of the ros2_control xacro (`real_driver`, `real_params`, `real_lift_plugin`), `hardware_real.launch.py` (fails with a message when the driver package is not installed), `real_driver:=mock` for the wiring; 28 pytest tests; the plugin and parameter names are from vendor documentation, no driver installed, no robot, no vendor controller wrapping, no lift driver
 - [~] Calibration procedures in one place: `docs/calibration.md` (F/T sign and bias, tool TCP, payload services, wall plane, base-to-wall); tool-TCP pivot calibration is a ROS-free core (`core_types/pivot_calibration.hpp`, gtests with simulated noise), no ROS node for it and nothing run on hardware
 
 ## 13. Open source and plug-and-play
