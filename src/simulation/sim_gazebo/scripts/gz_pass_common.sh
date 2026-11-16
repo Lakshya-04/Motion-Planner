@@ -11,9 +11,9 @@
 #   gz_world_model pcd frame  start world_model_loader_node for the cloud (pid in WM)
 #   gz_sim_args        the launch arguments every pass shares (profile, JTAC position only, conditioner, MoveIt)
 #   gz_stills          GZ_PASS_STILLS=N: also start capture_still.py (N PNGs, one every GZ_PASS_STILLS_EVERY s, default 25)
-# GZ_PASS_MESHES=1 adds arm_meshes:=true (the UR meshes, visual and collision; without them the arm is invisible in the stills).
+# The UR meshes (visual and collision) are on by default; GZ_PASS_MESHES=0 turns them off (arm_meshes:=false, the old no-arm-geometry physics).
 # GZ_PASS_STILLS makes gz_sim_args add rgb_camera:=true (the camera pose is GZ_PASS_CAMERA_POSE, "x y z roll pitch yaw"
-# in base_footprint). The Gazebo world is the stock smoke wall at x = 0.915; the plane everything else uses is x = 0.98
+# in base_footprint; GZ_PASS_CAMERA_FRAME=world makes it a static world camera, the pose is then in the world). The Gazebo world is the stock smoke wall at x = 0.915; the plane everything else uses is x = 0.98
 # (the tool tip ends 6.5 cm short of the tcp, see docs/sim_gazebo.md).
 gz_init() {
   OUT=${1:?output dir}
@@ -43,9 +43,9 @@ gz_stop_all() {
 
 gz_sim_args() {
   local a="profile:=${GZ_PROFILE:-ur10e_telescopic} controller:=jtac jtac_position_only:=true ft_conditioner:=true payload_mass_kg:=0.8 move_group:=true gui:=false"
-  [ -n "${GZ_PASS_MESHES:-}" ] && a="$a arm_meshes:=true"
+  [ "${GZ_PASS_MESHES:-1}" = 0 ] && a="$a arm_meshes:=false"
   if [ -n "${GZ_PASS_STILLS:-}" ]; then
-    a="$a rgb_camera:=true rgb_camera_pose:='${GZ_PASS_CAMERA_POSE:-0.0 -2.4 1.6 0 0.11 1.38}'"
+    a="$a rgb_camera:=true rgb_camera_frame:=${GZ_PASS_CAMERA_FRAME:-base} rgb_camera_pose:='${GZ_PASS_CAMERA_POSE:-0.0 -2.4 1.6 0 0.11 1.38}'"
   fi
   echo "$a"
 }

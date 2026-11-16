@@ -59,6 +59,11 @@ def test_gazebo_branch(profile_name):
     assert robot.find("link[@name='tool_mount_link']/collision") is None
     tip = next(j for j in robot.findall('joint') if j.get('name') == 'tool_tip_joint')
     assert tip.get('type') == 'prismatic' and tip.find('parent').get('link') == 'tool_mount_link'
+    # bump stop: a stiff, short second stage in series carries the tip (bounded force beyond the soft travel)
+    stop = next(j for j in robot.findall('joint') if j.get('name') == 'tool_tip_stop_joint')
+    assert stop.get('type') == 'prismatic' and stop.find('child').get('link') == 'tool_tip_link'
+    assert float(robot.find("gazebo[@reference='tool_tip_stop_joint']/springStiffness").text) > \
+        float(robot.find("gazebo[@reference='tool_tip_joint']/springStiffness").text)
     assert float(robot.find("gazebo[@reference='tool_tip_joint']/springStiffness").text) > 0
 
     pinned = [j for j in robot.findall('joint') if j.find('parent').get('link') == 'world']

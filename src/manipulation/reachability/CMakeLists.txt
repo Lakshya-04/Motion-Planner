@@ -83,5 +83,5 @@ endif()
 
 ament_export_targets(export_reachability HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(Eigen3 yaml-cpp)
+ament_export_dependencies(Eigen3 yaml-cpp Threads)
 ament_package()
