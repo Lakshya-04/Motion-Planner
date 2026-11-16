@@ -50,6 +50,7 @@ add_library(motion_planner_moveit_lib
   src/moveit_scene_adapter.cpp
   src/cartesian_planner.cpp
   src/ompl_planner.cpp
+  src/moveit_time_parameterizer.cpp
 )
 target_include_directories(motion_planner_moveit_lib PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -125,6 +126,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(moveit_planning_backend_test test/moveit_planning_backend_test.cpp)
   target_link_libraries(moveit_planning_backend_test motion_planner_moveit_lib)
+
+  ament_add_gtest(moveit_time_parameterizer_test test/moveit_time_parameterizer_test.cpp)
+  target_link_libraries(moveit_time_parameterizer_test motion_planner_moveit_lib)
 endif()
 
 ament_export_targets(export_motion_planner_moveit HAS_LIBRARY_TARGET)

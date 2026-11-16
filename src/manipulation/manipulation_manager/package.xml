@@ -34,6 +34,7 @@
   <depend>ros_adapters</depend>
   <depend>motion_planner</depend>
   <depend>motion_planner_moveit</depend>
+  <depend>moveit_ros_planning</depend>
   <depend>ament_index_cpp</depend>
   <depend>mobile_manipulator_profile</depend>
   <depend>nlohmann-json-dev</depend>

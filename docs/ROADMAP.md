@@ -87,7 +87,7 @@ without code, when we can implement it.
 - [~] VAMP: no pose goal, no IK, robots compiled in, not a contact planner
 - [~] cuRobo: pose-based collision unsupported, no wall-contact equivalent, one planner per process
 - [~] Joint-space goals honoured by OMPL only
-- [ ] Time parameterisation. *Reuse: MoveIt TOTG and its Ruckig filter first (`moveit_core` links Ruckig, MIT); toppra (MIT) for coverage passes; cuRobo v2 has a TimeOpt module*
+- [~] Time parameterisation: `TimeParameterizer` port and role-based `parameterizeSegment` in `motion_planner` core (near-duplicate drop, split at reversals above 150 degrees, limit violations reported), MoveIt adapter `MoveItTimeParameterizer` (TOTG for transitions, constant tool speed plus Ruckig smoothing for seams), opt-in in the manager as `retime:=true` (`RetimingExecutionPort`); gtests only, not run in the sim; the planners' own timing is unchanged and toppra / cuRobo TimeOpt are not wired. *Reuse: MoveIt TOTG and its Ruckig filter first (`moveit_core` links Ruckig, MIT); toppra (MIT) for coverage passes; cuRobo v2 has a TimeOpt module*
 - [~] Segment ordering by a time metric: `column_order: nearest | nearest_2opt` orders the columns of a stand by travel time (`core/column_ordering.hpp`, gtests); default is the input order, not run in the sim. Failure-aware resequencing (replan a failed column from another stand) is not done
 - [ ] cuRobo v2 for moves between stands: v0.8.0 (April 2026, the open-source cuRoboV2) and v0.9.0 (2026-11-05, cuRoboV2-Fast: faster planning, Cartesian waypoint planning with moving starts, C++ motion planner, TimeOpt); pin v0.9.0 or later, not v0.7.8; mobile-base support and VRAM on 4 GB are unverified
 - [ ] Recovery proposer (design only: `docs/learned_recovery.md`) and the policy slot
@@ -284,7 +284,7 @@ here were dropped. Placement is the milestone that should carry it.
 - [ ] Controller switching only at segment boundaries
 
 **Planning (M1, M2)**
-- [ ] Time parameterisation by segment role: constant-speed jerk-limited for contact seams, time-optimal for transitions, split at 180-degree reversals, limit violations on a seam are failures
+- [~] Time parameterisation by segment role: constant-speed jerk-limited for contact seams, time-optimal for transitions, split at reversals (150 degrees, joint-space direction), limit violations on a seam are failures (`time_limit_violation`); done in core and adapter with gtests, opt-in `retime:=true`, not run in the sim; reversal angle is measured in joint space with prismatic and revolute joints unweighted
 - [ ] Lift-aware planning: time metric max|dq|/vmax for ordering, strips by ascending lift height, in-band passes with the lift held, lift-travel KPI
 - [ ] Rate-feasible-by-construction IK; failure-aware resequencing (forbidden arcs, bounded rounds, committed prefix frozen)
 - [ ] Contact strips must plan to at least 98 percent or split (manager default `min_path_fraction` is 0.5 today)
@@ -312,7 +312,7 @@ here were dropped. Placement is the milestone that should carry it.
 - [ ] Mimic and stage joints reach `/joint_states`; every runtime velocity limit equals the profile value
 - [ ] Dead config: a file never loaded, padding at the wrong namespace, `allowed_start_tolerance` handling (not set anywhere in `src` today)
 - [ ] Redundant-group pose goals are random-goal samplers; a failed IK call can leave a partial result
-- [ ] Retimer hazards: reversals, near-duplicate waypoints, mixed joint types, zero acceleration limit give a valid trajectory or a typed error
+- [~] Retimer hazards: reversals, near-duplicate waypoints, mixed joint types (lift plus revolute in the test), zero acceleration limit, non-finite input, joint mismatch give a valid trajectory or a typed `TimingError` (gtests); the planners' own retiming paths in `CartesianPlanner` are not yet routed through it
 - [ ] Force-offset leakage: the tracking-error threshold must budget the admittance offset; offset zero when force is off; settle threshold above the sensor deadband
 - [ ] NaN or out-of-range commands clamped on the real write path; navigation arrival error of 5-9 cm and 3 degrees must not corrupt the work frame
 

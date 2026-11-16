@@ -46,6 +46,7 @@
 #include "mobile_manipulator_profile/profile.hpp"
 #include "ros_adapters/rclcpp_logger.hpp"
 
+#include "manipulation_manager/ros/execution/retiming_wiring.hpp"
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/coverage_task.hpp"
 #include "manipulation_manager/core/column_ordering.hpp"
@@ -326,7 +327,7 @@ public:
     }
     execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
       shared_from_this(), "/" + controller_name_ + "/follow_joint_trajectory");
-    manager_.setExecutionPort(execution_adapter_);
+    manager_.setExecutionPort(wrapWithRetiming(shared_from_this(), execution_adapter_, planning_group_));
     if (!contact_) {
       valve_.update(true);   // force the first command out: the valve is explicitly closed at start
       setValve(false);
