@@ -63,7 +63,8 @@ trap stop_all EXIT
 start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=${STAND_PROFILE:-ur10e_telescopic} controller:=jtac \
   conditioner:=true payload_mass_kg:=0.5 move_group:=true base_motion:=true scene:=$OUT/data/smoke_wall_scene.json \
   ${MULTI_STAND_LAUNCH_ARGS:-}
-start coverage_planner ros2 run coverage_planner coverage_planner_node
+# the demo rasterizes the obstacle clearance into the grid itself; the service node would add its own 0.3 m default
+start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0
 start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
   -p base_profile:=$PROFILE
 start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE

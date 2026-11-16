@@ -19,7 +19,8 @@ trap mp_stop_all EXIT
 
 mp_start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=ur10e_telescopic controller:=jtac conditioner:=true \
   payload_mass_kg:=0.5 move_group:=true scene:=$DATA/smoke_wall_scene.json ${MANAGER_PASS_LAUNCH_ARGS:-}
-mp_start coverage_planner ros2 run coverage_planner coverage_planner_node
+# the demo rasterizes the obstacle clearance into the grid itself; the service node would add its own 0.3 m default
+mp_start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0
 
 # 1. coverage plan for the wall's contact region (the wall scene schema, with walls.pcd beside it)
 sleep 3

@@ -51,7 +51,7 @@ score() {   # score_run on a run; prints "cov peak rms contacts rc" ($1 = run di
   python3 - "$1/score_$2.json" "$rc" <<'PY'
 import json, sys
 try:
-    d = json.load(open(sys.argv[1]))
+    d = json.JSONDecoder().raw_decode(open(sys.argv[1]).read())[0]   # ros2 run appends a line after the JSON
     print(d['coverage']['covered_fraction'], d['force']['peak_n'], d['force']['rms_error_n'], d['obstacle']['contacts'], sys.argv[2])
 except Exception:
     print('nan nan nan nan', sys.argv[2])
