@@ -46,6 +46,34 @@ TEST(RunScorecardIo, WallFromJsonRoundTripsTheBasisAndRanges)
   EXPECT_NEAR(card.coverage.covered_fraction, 0.2 / 1.5, 0.05);   // one 0.2 m band across the 1.5 m height
 }
 
+TEST(RunScorecardIo, ObstaclesFromJson)
+{
+  const auto j = nlohmann::json::parse(
+    R"({"obstacles":[{"id":4,"u":[0.1,0.2],"v":[0.3,0.5],"height_m":0.04},{"u":[1,2],"v":[1,2]}]})");
+  const auto o = obstaclesFromJson(j, 7);
+  ASSERT_EQ(o.size(), 2U);
+  EXPECT_EQ(o[0].id, 4U);
+  EXPECT_EQ(o[0].parent_wall, 7U);
+  EXPECT_DOUBLE_EQ(o[0].height_m, 0.04);
+  EXPECT_EQ(o[1].id, 5U);
+  EXPECT_DOUBLE_EQ(o[1].height_m, 0.0);
+  EXPECT_TRUE(obstaclesFromJson(nlohmann::json::parse("{}"), 1).empty());
+  EXPECT_THROW(
+    obstaclesFromJson(nlohmann::json::parse(R"({"obstacles":[{"u":[2,1],"v":[0,1]}]})"), 1), std::runtime_error);
+  EXPECT_THROW(
+    obstaclesFromJson(nlohmann::json::parse(R"({"obstacles":[{"v":[0,1]}]})"), 1), std::runtime_error);
+}
+
+TEST(RunScorecardIo, CardJsonCarriesObstacleContacts)
+{
+  RunScorecard c;
+  c.obstacle_contacts = 2;
+  c.obstacle_contact_samples = 9;
+  const auto j = scorecardToJson(c);
+  EXPECT_EQ(j["obstacle"]["contacts"], 2);
+  EXPECT_EQ(j["obstacle"]["contact_samples"], 9);
+}
+
 TEST(RunScorecardIo, RejectsABadWall)
 {
   EXPECT_THROW(wallFromJson(nlohmann::json::parse(R"({"origin":[0,0,0]})")), std::runtime_error);
