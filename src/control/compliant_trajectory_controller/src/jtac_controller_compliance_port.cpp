@@ -57,7 +57,15 @@ JtacControllerCompliancePort::JtacControllerCompliancePort(Options options)
   // component's own header doc).
   executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
   executor_->add_node(node_);
-  spin_thread_ = std::thread([this]() {executor_->spin();});
+  // Not executor_->spin() + cancel(): cancel() before the thread reaches spin() is lost (spin()
+  // re-arms its flag on entry) and the destructor's join() then hangs. A stop flag polled between
+  // short spin_once() calls cannot be lost.
+  spin_thread_ = std::thread(
+    [this]() {
+      while (!stop_spin_.load() && rclcpp::ok()) {
+        executor_->spin_once(std::chrono::milliseconds(20));
+      }
+    });
 }
 
 JtacControllerCompliancePort::~JtacControllerCompliancePort()
@@ -67,9 +75,7 @@ JtacControllerCompliancePort::~JtacControllerCompliancePort()
 
 void JtacControllerCompliancePort::stopExecutor()
 {
-  if (executor_) {
-    executor_->cancel();
-  }
+  stop_spin_.store(true);
   if (spin_thread_.joinable()) {
     spin_thread_.join();
   }

@@ -111,11 +111,6 @@ protected:
   static void SetUpTestSuite() { rclcpp::init(0, nullptr); }
   static void TearDownTestSuite() { rclcpp::shutdown(); }
 
-  // The port starts its spin thread in the constructor and cancels the executor in the destructor;
-  // a cancel that lands before the thread entered spin() is lost and the join never returns (a race
-  // in the port itself, noted in the PR). Tests let the thread get going first.
-  static void settle() { std::this_thread::sleep_for(300ms); }
-
   JtacControllerCompliancePort::Options options(double param_timeout = 3.0)
   {
     JtacControllerCompliancePort::Options o;
@@ -131,7 +126,6 @@ protected:
 TEST_F(JtacCompliancePortTest, GuardsBeforeEngage)
 {
   JtacControllerCompliancePort port(options());
-  settle();
   std::string err;
   EXPECT_TRUE(port.tare(err));
   EXPECT_FALSE(port.disengage(err));
@@ -145,7 +139,6 @@ TEST_F(JtacCompliancePortTest, GuardsBeforeEngage)
 TEST_F(JtacCompliancePortTest, EngageFailsWithoutControllerParameterService)
 {
   JtacControllerCompliancePort port(options(0.3));
-  settle();
   std::string err;
   EXPECT_FALSE(port.engage(makeConfig(), err));
   EXPECT_NE(err.find("not available"), std::string::npos);
