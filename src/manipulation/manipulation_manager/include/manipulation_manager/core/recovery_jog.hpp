@@ -15,7 +15,7 @@ struct RecoveryJogParams
   double max_speed{0.15};           ///< fastest joint (rad/s, m/s for the lift) along the jog
   double min_duration_s{1.0};       ///< a jog never takes less than this
   double max_total_rad{2.5};        ///< refuse a jog where some joint has to move further than this
-  double done_tolerance_rad{0.01};  ///< already this close to the target: nothing to do
+  double done_tolerance_rad{0.002}; ///< already this close to the target: nothing to do
   double limit_margin{0.01};        ///< the target is kept this far inside the joint limits
   std::vector<double> lower;        ///< joint limits, same order as the state (empty = not known)
   std::vector<double> upper;

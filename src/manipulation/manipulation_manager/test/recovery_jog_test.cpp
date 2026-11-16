@@ -10,7 +10,7 @@ namespace manipulation_manager
 
 TEST(RecoveryJogTest, AlreadyAtTheGoodStateNeedsNothing)
 {
-  const auto jog = planRecoveryJog({0.1, 0.2}, {0.1, 0.205}, RecoveryJogParams{});
+  const auto jog = planRecoveryJog({0.1, 0.2}, {0.1, 0.201}, RecoveryJogParams{});
   EXPECT_TRUE(jog.ok);
   EXPECT_FALSE(jog.needed);
   EXPECT_TRUE(jog.points.empty());
@@ -65,6 +65,21 @@ TEST(RecoveryJogTest, TargetIsKeptInsideTheLimits)
   ASSERT_TRUE(jog.ok);
   ASSERT_TRUE(jog.needed);
   EXPECT_DOUBLE_EQ(jog.target[0], 0.02);
+}
+
+TEST(RecoveryJogTest, LiftBelowItsStopWithTheGoodStateAlsoThereIsJoggedInside)
+{
+  // the observed jam: the lift sat 1.56 mm below its lower stop at the end of a column, and the last good state
+  // (the dock pose) had the same lift value: the jog still has to move it inside (MoveIt refuses the start state)
+  RecoveryJogParams p;
+  p.lower = {0.0};
+  p.upper = {1.5};
+  p.limit_margin = 0.01;
+  const auto jog = planRecoveryJog({-0.00156, 0.3, -1.2}, {-0.00155, 0.3, -1.2}, p);
+  ASSERT_TRUE(jog.ok);
+  ASSERT_TRUE(jog.needed);
+  EXPECT_DOUBLE_EQ(jog.points.back().positions[0], 0.01);
+  EXPECT_DOUBLE_EQ(jog.points.back().positions[1], 0.3);   // joints beyond the limits' length are not limited
 }
 
 TEST(RecoveryJogTest, TooFarIsRefused)

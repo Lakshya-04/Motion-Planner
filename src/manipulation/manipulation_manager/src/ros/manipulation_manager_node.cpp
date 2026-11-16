@@ -256,6 +256,16 @@ public:
       "recovery_joint_lower", std::vector<double>{});
     jog_params_.upper = this->declare_parameter<std::vector<double>>(
       "recovery_joint_upper", std::vector<double>{});
+    // Empty: only the lift (the group's first joint) is limited, to the base check's travel. A lift that settled
+    // 1.5 mm below its lower stop is what makes MoveIt refuse every start state ("outside bounds"), the jog
+    // moves it back inside by travel_lift_margin_m.
+    if (jog_params_.lower.empty() && jog_params_.upper.empty() &&
+      base_check_lift_max_ > base_check_lift_min_)
+    {
+      jog_params_.lower = {base_check_lift_min_};
+      jog_params_.upper = {base_check_lift_max_};
+    }
+    jog_params_.limit_margin = std::max(0.0, travel_lift_margin_);
     // The order of the columns within a stand: "input" (the plan's order, default), "nearest" (nearest neighbour by
     // travel time between one stroke's end and the next one's start) or "nearest_2opt".
     column_order_ = normalizeColumnOrder(this->declare_parameter<std::string>("column_order", "input"));
@@ -1505,13 +1515,13 @@ private:
         freed = withWallCleared("retract", retract_again);
       }
       if (freed) {
-        markGoodState();
+        arm_stuck_ = false;   // not a new good state: the pose after a retract can sit just inside a self-collision
       } else {
         RCLCPP_ERROR(this->get_logger(), "%s: the retract recovery failed too", intent.label.c_str());
         arm_stuck_ = true;
       }
     } else {
-      markGoodState();
+      arm_stuck_ = false;
     }
 
     if (!contact_exec.success || contact_exec.waypoints_completed == 0) {
@@ -1574,6 +1584,17 @@ private:
       frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
+      // a start state the planners refuse: jog it free, then try the retract again
+      if (!stop() && recoverArm("retract") &&
+        manager_.executeMotionSegments(
+          frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
+      {
+        arm_stuck_ = false;
+      } else {
+        arm_stuck_ = true;
+      }
+    } else {
+      arm_stuck_ = false;
     }
 
     if (!stroke_exec.success || stroke_exec.waypoints_completed == 0) {
