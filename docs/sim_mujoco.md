@@ -27,10 +27,12 @@ A full manager pass on a plain wall (`run_manager_pass.sh`), rendered by `render
 
 ![force and coverage of the run](media/force_coverage.png)
 
-Scored result of exactly this run (`score_run`, 10 N target, 1.5 N band): 3 columns done, 0 partial, 0 failed; coverage
-93.3 % (868 of 930 cells); peak force 153.4 N; RMS force error 8.0 N; 44 % of the contact samples in the band; 149 s of
-simulated time, 80 s engaged. The peak is a few short spikes (141 samples above 30 N at 100 Hz); while stroking the force
-ripples between 0 and about 18 N around the 10 N target. Nothing is tuned for the picture. How it is made: [Rendering photos and videos](#rendering-photos-and-videos).
+Scored result of the run shown (`score_run`, 10 N target, 1.5 N band): 3 columns done, 0 partial, 0 failed; coverage
+93.1 % (866 of 930 cells); peak force 19.2 N; RMS force error 3.6 N; 49 % of the contact samples in the band; 144 s of
+simulated time, 83 s engaged. While stroking, the force ripples between 0 and about 18 N around the 10 N target. Nothing is
+tuned for the picture. The pass was run three times for filming: 93.1 % / 18.5 N / 3.6 N, 93.1 % / 19.2 N / 3.6 N (shown), and
+a first run with 93.3 % / 153.4 N / 8.0 N, which was made while the host was heavily loaded by other simulations and builds
+(load average 10 to 27); the cause was not isolated, but the two reruns on a quieter host agree with each other and with the standard run. How it is made: [Rendering photos and videos](#rendering-photos-and-videos).
 
 ## Build
 
