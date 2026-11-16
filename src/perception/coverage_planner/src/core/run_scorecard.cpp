@@ -27,10 +27,11 @@ RunScorecard scoreRun(
     if (o.parent_wall != wall.id) {continue;}
     for (int r = 0; r < probe.height(); ++r) {
       const double v = wall.v_min + (r + 0.5) * options.resolution_m;
-      if (v < o.v_min || v > o.v_max) {continue;}
+      const double k = options.keepout_margin_m;
+      if (v < o.v_min - k || v > o.v_max + k) {continue;}
       for (int c = 0; c < probe.width(); ++c) {
         const double u = wall.u_min + (c + 0.5) * options.resolution_m;
-        if (u >= o.u_min && u <= o.u_max) {target[static_cast<size_t>(r) * probe.width() + c] = false;}
+        if (u >= o.u_min - k && u <= o.u_max + k) {target[static_cast<size_t>(r) * probe.width() + c] = false;}
       }
     }
   }
@@ -49,9 +50,30 @@ RunScorecard scoreRun(
 
   double sq_err = 0.0;
   size_t engaged_n = 0, in_band = 0;
+  bool in_obstacle = false;
   for (size_t i = 0; i < samples.size(); ++i) {
     const auto & s = samples[i];
     card.force_peak_n = std::max(card.force_peak_n, s.force_n);
+    {
+      // obstacle contact: the tool point inside an obstacle's footprint and not above its top
+      const Eigen::Vector3d q = Eigen::Vector3d(s.x, s.y, s.z) - basis.origin;
+      const double pu = q.dot(basis.basis_u), pv = q.dot(basis.basis_v), height = -q.dot(basis.normal_outward);
+      bool inside = false;
+      for (const auto & o : obstacles) {
+        const double m = options.obstacle_margin_m;
+        if (o.parent_wall == wall.id && pu >= o.u_min - m && pu <= o.u_max + m && pv >= o.v_min - m &&
+          pv <= o.v_max + m && height < o.height_m + options.obstacle_contact_tol_m)
+        {
+          inside = true;
+          break;
+        }
+      }
+      if (inside) {
+        ++card.obstacle_contact_samples;
+        if (!in_obstacle) {++card.obstacle_contacts;}
+      }
+      in_obstacle = inside;
+    }
     const bool engaged = options.contact ? s.force_n >= options.engaged_force_n : s.tool_active;
     if (!engaged) {
       flush();   // a disengaged sample ends the stroke
@@ -100,6 +122,10 @@ RunScorecard scoreRun(
   }
   if (limits.max_force_peak_n > 0.0 && card.force_peak_n > limits.max_force_peak_n) {
     m.str(""); m << "force peak " << card.force_peak_n << " N > " << limits.max_force_peak_n;
+    fail(m.str());
+  }
+  if (limits.max_obstacle_contacts >= 0 && card.obstacle_contacts > static_cast<size_t>(limits.max_obstacle_contacts)) {
+    m.str(""); m << "obstacle contacts " << card.obstacle_contacts << " > " << limits.max_obstacle_contacts;
     fail(m.str());
   }
   card.passed = card.failures.empty();

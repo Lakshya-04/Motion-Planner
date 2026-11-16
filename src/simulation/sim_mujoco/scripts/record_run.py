@@ -16,6 +16,7 @@ import rclpy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from contact_test import ContactTest  # noqa: E402
+from make_scenario_scene import obstacles_from_scene  # noqa: E402
 
 
 def main():
@@ -26,7 +27,9 @@ def main():
     ap.add_argument('--wall-x', type=float, default=0.98)
     ap.add_argument('--wall-y', type=float, nargs=2, default=[0.0, 0.3])
     ap.add_argument('--wall-z', type=float, nargs=2, default=[1.0, 1.3])
+    ap.add_argument('--scene', help='wall_scene.json whose obstacles go into the wall JSON (score_run counts contacts with them)')
     args = ap.parse_args()
+    obstacles = obstacles_from_scene(args.scene) if args.scene else None
     rclpy.init()
     node = ContactTest()
     node.record_frame = args.frame
@@ -38,7 +41,7 @@ def main():
     t0 = time.monotonic()
     while not stop.is_set() and time.monotonic() - t0 < args.timeout:
         time.sleep(0.1)
-    n = node.write_recording(args.record, args.wall_x, tuple(args.wall_y), tuple(args.wall_z))
+    n = node.write_recording(args.record, args.wall_x, tuple(args.wall_y), tuple(args.wall_z), obstacles)
     print(f'recorded {n} samples to {args.record}', flush=True)
     rclpy.shutdown()
 

@@ -492,6 +492,62 @@ in-band 0.45. The unchanged manager pass (base at the origin, `run_manager_pass.
 earlier run with 3 lost the first column, coverage 0.68), and the F/T peak was 34 N in another run (the scorer limit passed).
 A wall needing several stands: see the multi-stand pass below.
 
+### Scenario set (obstacles on the wall)
+
+`scripts/run_scenarios.sh [-n RUNS] [-l] [scenario ...]` runs named walls through the manager pass and prints one row per run;
+`-l` lists the scenarios. `scripts/make_scenario_scene.py` writes each scenario's three data files (the sim wall
+`smoke_wall_scene.json`, the planned wall `wall_pass_coverage_scene.json`, `walls.pcd`) from the stock smoke wall: the same
+`obstacles[]` entries go into both scene files, so the MuJoCo wall and the plan agree. A `box` obstacle is an oriented box in the
+sim (`wall_world.py`), a blocked region for the coverage planner and a surface in the point cloud (MoveIt's octomap); an
+`opening` (window) is a hole cut through the sim wall, no points in the cloud, a blocked region for the planner.
+
+| scenario | wall | obstacle | pass |
+|---|---|---|---|
+| `plain` | 0.3 m, stock | none | one stand |
+| `plain_wide` | 0.5 m | none (control for the next two) | one stand |
+| `window` | 0.5 m | 0.10 x 0.08 m hole in the middle | one stand |
+| `protrusion` | 0.5 m | 0.07 x 0.07 m box, 35 mm proud, socket-like | one stand |
+| `two_panels` | 0.9 m | full-height 40 mm rib, 30 mm proud, between the panels | multi-stand (two stands) |
+| `two_panels_plain` | 0.9 m | none (control) | multi-stand |
+
+Scoring: each recording is scored twice with `score_run` (`docs/coverage_patterns.md`): `cov_wall` is the covered fraction of the wall
+minus the obstacle's own footprint, `cov_reach` the fraction of the wall minus the obstacle grown by the planner's 0.07 m
+clearance (what the planner may reach). Contacts are episodes in which the tool point was inside an obstacle's footprint below its top
+(the tool point only, not the arm's links). A run passes when the manager exits 0, `cov_reach` is at least 0.9 and there is no contact.
+
+Results (MuJoCo, UR10e, 0.01 m/s, swath 0.14 m, 10 N target, one run at a time; every run twice):
+
+| scenario | run | cov wall | cov reachable | peak N | RMS N | obstacle contacts | result |
+|---|---|---|---|---|---|---|---|
+| plain | 1 | 0.931 | 0.931 | 19.2 | 3.59 | 0 | pass |
+| plain | 2 | 0.931 | 0.931 | 19.9 | 3.56 | 0 | pass |
+| plain_wide | 1 | 0.959 | 0.959 | 19.8 | 3.61 | 0 | pass |
+| plain_wide | 2 | 0.959 | 0.959 | 20.5 | 3.60 | 0 | pass |
+| window | 1 | 0.671 | 0.793 | 20.0 | 3.72 | 0 | FAIL (cov_reach < 0.9) |
+| window | 2 | 0.671 | 0.793 | 20.7 | 3.61 | 0 | FAIL (cov_reach < 0.9) |
+| protrusion | 1 | 0.585 | 0.784 | 22.9 | 3.72 | 0 | FAIL (cov_reach < 0.9) |
+| protrusion | 2 | 0.585 | 0.784 | 19.5 | 3.65 | 0 | FAIL (cov_reach < 0.9) |
+| two_panels | 1 | 0.441 | 0.500 | 108.6 | 2.66 | 0 | FAIL (cov_reach < 0.9) |
+| two_panels | 2 | 0.441 | 0.500 | 17.1 | 2.44 | 0 | FAIL (cov_reach < 0.9) |
+
+`two_panels` is a failure of the planner, not of the scorer: the coverage planner returns strokes for the left panel only (columns at
+y 0.31 to 0.61 of a wall y 0.3 to 1.2; the area beyond the rib is a second free component and is not planned), so the stand planner
+sees a 0.3 m span, one stand serves it ("stand 0/1", 4 columns done, none failed) and the right panel is never visited. Peak 108.6 N in
+run 1 is one press transient (17.1 N in run 2). `two_panels_plain` (no rib, two stands) was not run in this pass.
+
+What the runs showed:
+- Two bugs on the way, both fixed here. The demo coverage node rasterizes the obstacle clearance into the grid but the planner
+  service node then added its own `obstacle_inflation_radius` (default 0.3 m) on top, which removed all free space on a 0.5 m
+  wall; the passes now start it with `-p obstacle_inflation_radius:=0.0`. And `CoverageOutputJsonSource` grouped points by column and
+  stroked from the lowest to the highest one, so a column the planner had split around the obstacle became one stroke through it
+  (first window run: 1 contact episode, 806 samples inside the window edge); it now emits one stroke per span of the plan's segments.
+- The planner leaves only end points of the split columns beside a small obstacle (the keep-out is 0.24 x 0.22 m around the
+  window, on a 0.3 m high patch), and a single point is no stroke, so the area next to the obstacle is not wiped: `cov_reach` stays
+  below 0.9 for `window` and `protrusion` (the failure rows are real, not a scorer artefact). Wiping to the edge of the keep-out
+  needs the planner to emit short strokes, or a smaller clearance than half the swath.
+- Obstacle contacts counted only the tool point; an elbow or the wiper body hitting a protrusion is not seen yet (the MuJoCo plugin
+  does not publish contact pairs).
+
 ### Multi-stand pass (the manager's `execute_coverage` action)
 
 `scripts/run_multi_stand_pass.sh` makes the wall 0.9 m wide (`MULTI_STAND_WALL_WIDTH`, from y = `MULTI_STAND_WALL_DY` 0.3;

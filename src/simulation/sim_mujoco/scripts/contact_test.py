@@ -105,9 +105,10 @@ class ContactTest(Smoke):
             if pos is not None:
                 self.run_rows.append((self._stamp(m) * 1e-9, *pos, abs(self._w(m)[2]), self.valve))
 
-    def write_recording(self, path, wall_x, wall_range_y, wall_range_z):
+    def write_recording(self, path, wall_x, wall_range_y, wall_range_z, obstacles=None):
         """The whole run as the score_run CSV (t,x,y,z,force,active) plus a wall JSON beside it. The wall is
-        the plane x = wall_x in base_footprint: u along y, v along z, normal u x v = +x into the wall."""
+        the plane x = wall_x in base_footprint: u along y, v along z, normal u x v = +x into the wall.
+        `obstacles`: [{"id", "u": [y0, y1], "v": [z0, z1], "height_m"}] on the wall, for score_run's contact check."""
         with self.lock:
             rows = list(self.run_rows)
         t0 = rows[0][0] if rows else 0.0
@@ -117,6 +118,8 @@ class ContactTest(Smoke):
                 f.write(f'{t - t0:.4f},{x:.5f},{y:.5f},{z:.5f},{fz:.4f},{valve}\n')
         wall = {'origin': [wall_x, 0.0, 0.0], 'u': [0, 1, 0], 'v': [0, 0, 1],
                 'u_range': list(wall_range_y), 'v_range': list(wall_range_z)}
+        if obstacles:
+            wall['obstacles'] = obstacles
         with open(path + '.wall.json', 'w') as f:
             json.dump(wall, f)
         return len(rows)
