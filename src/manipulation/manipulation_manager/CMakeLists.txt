@@ -184,6 +184,16 @@ if(BUILD_TESTING)
       PLANNING_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/planning.yaml")
   endif()
 
+  ament_add_gtest(recovery_jog_test test/recovery_jog_test.cpp)
+  if(TARGET recovery_jog_test)
+    target_include_directories(recovery_jog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  ament_add_gtest(column_ordering_test test/column_ordering_test.cpp)
+  if(TARGET column_ordering_test)
+    target_include_directories(column_ordering_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)
     set(ament_cmake_copyright_FOUND TRUE)
