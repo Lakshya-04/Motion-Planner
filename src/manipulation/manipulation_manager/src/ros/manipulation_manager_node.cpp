@@ -1225,8 +1225,7 @@ private:
       RCLCPP_WARN(
         this->get_logger(), "column %zu failed, retry %d of %d", column, r + 1, column_retries_);
       if (arm_stuck_ && !recoverArm("column retry")) {
-        RCLCPP_ERROR(this->get_logger(), "column %zu: the arm could not be freed, skipping it", column);
-        break;
+        RCLCPP_WARN(this->get_logger(), "column %zu: the arm is stuck and could not be jogged free", column);
       }
       primeContinuityFromLiveState();
       outcome = runColumn(world_intent, column);
@@ -1345,6 +1344,7 @@ private:
     // retries for exactly this reason (a genuine failure to find any path is worth one more
     // attempt before giving up); dock deserves the same tolerance.
     MotionExec dock_exec;
+    const auto dock_round = [&]() {
     for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
       if (dock_approach_extra_m_ > 0.0) {
         MotionSegmentSpec approach_seg = dock_seg;
@@ -1367,6 +1367,13 @@ private:
       RCLCPP_WARN(
         this->get_logger(), "%s: dock attempt %d failed, retrying...", intent.label.c_str(),
         attempt + 1);
+    }
+    };
+    dock_round();
+    // Every try failed: a start state the planners refuse (self-collision at the end of the last reach) is
+    // moved back toward the last good configuration once, then the tries are repeated.
+    if (!dock_exec.success && !stop() && recoverArm("dock")) {
+      dock_round();
     }
     if (!dock_exec.success) {
       RCLCPP_WARN(
