@@ -85,6 +85,7 @@ without code, when we can implement it.
 - [x] **Runtime backend selection**: pluginlib plugins for planner, IK, collision and scene (MoveIt, cuRobo, VAMP); the manager builds them from a `planning_config` YAML (PR #29)
 - [~] VAMP and cuRobo used by the manager for free-space transitions (the architecture example: IK cuRobo, free-space VAMP): routing from `free_space: vamp|curobo` configs is tested (`manipulation_manager/test/backend_routing_test.cpp`, fakes where the real plugin is not there); not run in the manager on a robot or in the sim, and VAMP still needs an IK step in front of it
 - [~] VAMP: no pose goal, no IK, robots compiled in, not a contact planner
+- [x] VAMP UR10e model accepts the benchmark endpoints (carriage plate spheres refined, `--lift_carriage_link=4` default in `generate_vamp_robot.sh`): 158/158 on the empty / wall / wall_box set, was 10/158 (`docs/planner_benchmark.md`)
 - [~] cuRobo: pose-based collision unsupported, no wall-contact equivalent, one planner per process
 - [~] Joint-space goals honoured by OMPL only
 - [~] Time parameterisation: `TimeParameterizer` port and role-based `parameterizeSegment` in `motion_planner` core (near-duplicate drop, split at reversals above 150 degrees, limit violations reported), MoveIt adapter `MoveItTimeParameterizer` (TOTG for transitions, constant tool speed plus Ruckig smoothing for seams), opt-in in the manager as `retime:=true` (`RetimingExecutionPort`); gtests only, not run in the sim; the planners' own timing is unchanged and toppra / cuRobo TimeOpt are not wired. *Reuse: MoveIt TOTG and its Ruckig filter first (`moveit_core` links Ruckig, MIT); toppra (MIT) for coverage passes; cuRobo v2 has a TimeOpt module*
@@ -184,7 +185,7 @@ without code, when we can implement it.
 
 - [~] UFACTORY path: `ft_bridge` default topic, JTAC yaml for `uf_ft_sensor`, a real-robot branch in the compliance demo; nothing verified on hardware
 - [~] Hardware bring-up guide: `docs/hardware_bringup.md` (procedure, abort thresholds, sim-vs-real differences); written from the code and simulations, no commissioning test exists and nothing was run on hardware
-- [ ] `hardware:=real` description branch and vendor-driver selection
+- [~] `hardware:=real` description branch and vendor-driver selection: `config/hardware_drivers.yaml` (arm -> driver package, plugin, required params, F/T source), the `real` branch of the ros2_control xacro (`real_driver`, `real_params`, `real_lift_plugin`), `hardware_real.launch.py` (fails with a message when the driver package is not installed), `real_driver:=mock` for the wiring; 28 pytest tests; the plugin and parameter names are from vendor documentation, no driver installed, no robot, no vendor controller wrapping, no lift driver
 - [~] Calibration procedures in one place: `docs/calibration.md` (F/T sign and bias, tool TCP, payload services, wall plane, base-to-wall); tool-TCP pivot calibration is a ROS-free core (`core_types/pivot_calibration.hpp`, gtests with simulated noise), no ROS node for it and nothing run on hardware
 
 ## 13. Open source and plug-and-play

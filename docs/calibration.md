@@ -2,7 +2,8 @@
 
 One place for every calibration the force path and the wall work depend on. Nothing here has been run on
 hardware; the steps are derived from the code, and each says what to record and what a bad result means.
-[hardware_bringup.md](hardware_bringup.md) is the ordered commissioning procedure that calls these;
+[hardware_bringup.md](hardware_bringup.md) is the ordered commissioning procedure that calls these (driver selection
+for `hardware:=real` is its section 0a; run the calibrations below after the sensor-alive check and before any contact);
 [ft_sensing.md](ft_sensing.md) has the conditioning maths.
 
 Order matters: sign, then TCP, then payload (payload gravity compensation and the lever arm both use the
