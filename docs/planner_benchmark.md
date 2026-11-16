@@ -46,9 +46,9 @@ RRT-Connect, 5 s limit, validity resolution 0.1 percent of the extent, then path
 
 | backend | scene | success | success, valid endpoints | median ms | p95 ms | path rad (median) | clearance cm (median / min) | hits in reference model |
 |---|---|---|---|---|---|---|---|---|
-| vamp | empty | 6/72 | 6/12 | 0.1 | 0.1 | 4.50 | - | 0 |
-| vamp | wall | 2/56 | 2/6 | 0.1 | 0.1 | 4.50 | 10.6 / 10.6 | 0 |
-| vamp | wall_box | 2/30 | 2/6 | 0.1 | 0.1 | 4.50 | 10.6 / 10.6 | 0 |
+| vamp | empty | 72/72 | 72/72 | <0.1 | 0.1 | 4.55 | - | 0 |
+| vamp | wall | 56/56 | 56/56 | <0.1 | 0.1 | 4.65 | 13.4 / 0.1 | 0 |
+| vamp | wall_box | 30/30 | 30/30 | 0.1 | 0.2 | 4.52 | 12.7 / 0.1 | 0 |
 | moveit_ompl | empty | 72/72 | 72/72 | 9.8 | 16.5 | 4.55 | - | 0 |
 | moveit_ompl | wall | 56/56 | 56/56 | 9.7 | 17.2 | 4.76 | 13.4 / -3.9 | 3 |
 | moveit_ompl | wall_box | 30/30 | 30/30 | 11.2 | 26.0 | 4.52 | 14.4 / -20.3 | 3 |
@@ -58,16 +58,38 @@ RRT-Connect, 5 s limit, validity resolution 0.1 percent of the extent, then path
 
 - **The numbers are not a ranking of the algorithms.** Each backend plans in its own collision model:
   OMPL checks the URDF collision meshes through FCL (the SRDF matrix is the same hops-2 rigid-group one
-  VAMP was generated with), VAMP checks 21-ish FOAM spheres through the Cricket header, and the reference
+  VAMP was generated with), VAMP checks 50 FOAM spheres (33 before the carriage fix below) through the Cricket header, and the reference
   model used for clearance is a third (FOAM spheres, numpy). They disagree.
-- **VAMP rejects most of the endpoints** (60 of 72 starts or goals in the empty scene: `stand_left`,
-  `stand_right`, `dock_1` to `dock_3` are in collision in its model although the reference model
-  and the meshes accept them). Cause not isolated; the likely one is the self-collision pairs that the
-  hops-2 rigid-group SRDF leaves enabled for the generated header against the simple hops rule of the
-  reference model. Of the problems VAMP accepts, every pair with `stow_side` failed (start valid, no path
-  within 100000 iterations, about 65 ms): the stow pose is in a narrow pocket of VAMP's configuration
-  space. The VAMP times are those of the successes, which are the trivial stand-to-stand and
-  stand-to-dock moves (a straight line), hence 0.1 ms.
+- **VAMP and the endpoints (fixed).** The first run of this benchmark had VAMP reject 60 of 72 starts or
+  goals in the empty scene (`stand_left`, `stand_right`, `dock_1` to `dock_3`) and fail every pair with
+  `stow_side`. Cause: one link pair, `arm_upper_arm_link` against `lift_carriage_link`. The carriage is the
+  0.04 m thick plate the arm sits on; FOAM gave it 6 spheres of radius 0.08 (its sphere count is capped by
+  how well one bounding sphere fits the link), which bulge 6 cm above the plate. At those configurations the meshes accept the pose (OMPL does) but the
+  upper-arm and plate spheres overlap by a few mm (-4.6 mm at `stand_left`). `rigid_pairs_srdf.py --hops 2` leaves that pair checked on purpose (a rigid platform must not
+  hide the upper arm from the chassis; `test_rigid_pairs_srdf.py` pins it), and the reference model of this
+  benchmark does not check it only because it counts movable joints for the hops rule. Joint order, joint
+  limits and the other pairs were not the problem: the header's order equals the URDF's, its bounds equal the
+  URDF's (elbow +-pi, the others +-2 pi), and the only other pair that touches in the ten configurations is
+  `arm_upper_arm_link` / `tool_mount_link` at `stow_fold`, which really folds into itself and was already
+  dropped as invalid. The `stow_side` failures were not investigated separately: with the plate spheres fixed they are gone,
+  so the "narrow pocket" was the same bulge (valid start, but the paths into the pose are swept over the plate). Fix: `docker/tools/generate_vamp_robot.sh` now passes
+  `--lift_carriage_link=4` to FOAM by default (23 spheres of radius at most 0.044 m on the plate, 50 spheres in
+  total instead of 33), the ACM is unchanged. Before and after, same 158 problems, same seed:
+
+| VAMP | scene | success | problems with valid endpoints |
+|---|---|---|---|
+| 33 spheres (before) | empty | 6/72 | 12/72 |
+| 50 spheres (after) | empty | 72/72 | 72/72 |
+| 33 spheres (before) | wall | 2/56 | 6/56 |
+| 50 spheres (after) | wall | 56/56 | 56/56 |
+| 33 spheres (before) | wall_box | 2/30 | 6/30 |
+| 50 spheres (after) | wall_box | 30/30 | 30/30 |
+
+  After the fix VAMP succeeds on every problem (0 reference-model hits). The numbers are from the same `problems.json`, the reference model is still the 33-sphere set the problems were chosen with. The moves in this set are free-space
+  joint-space moves between named poses, so almost all of them are a straight line (median under 0.1 ms,
+  p95 0.1 to 0.2 ms): this checks that the VAMP model agrees with the others on the endpoints and on
+  the straight segments, not that VAMP's planner is tested on hard problems. VAMP's paths keep at least 1 mm
+  from the boxes in the reference spheres (OMPL's go up to 20 cm into them).
 - **OMPL solved everything the meshes allow, but 3 of 56 and 3 of 30 paths touch a box in the reference
   sphere model** (up to 20 cm deep). The meshes are tighter than the FOAM spheres, so this is the
   coarser model flagging the finer one, not proof of a collision with the real mesh; it shows that paths

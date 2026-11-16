@@ -136,6 +136,8 @@ public:
   void columnFinished(size_t stand, size_t column, ColumnOutcome outcome);
   /// Columns that were not run for a reason that is not a stand (no stand covers them).
   void columnSkipped(size_t column);
+  /// A column the mission ledger already holds as done (resume): counts as done, ran on no stand this time.
+  void columnResumed(size_t column) {done_.push_back(column);}
 
   const std::vector<size_t> & done() const {return done_;}
   const std::vector<size_t> & partial() const {return partial_;}

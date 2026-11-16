@@ -232,7 +232,7 @@ def cmd_report(a):
                    f"{f(r['path_rad_median'], 2)} | {f(r['clearance_cm_median'])} / {f(r['clearance_cm_min'])} | {r['ref_hits']} |")
     for k, v in notes.items():
         out.append(f'| {k} | not run | - | - | - | - | - | - | {v} |')
-    (work / 'results.md').write_text('\n'.join(out) + '\n')
+    (work / 'results.txt').write_text('\n'.join(out) + '\n')
     print('\n'.join(out))
 
 

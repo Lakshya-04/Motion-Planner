@@ -38,6 +38,21 @@ TEST(AssignColumns, WantedSubsetAndOutOfRangeIndices)
   EXPECT_TRUE(a.unassigned.empty());
 }
 
+TEST(TaskTracker, ResumedColumnsSurviveBeginMulti)
+{
+  TaskTracker t;
+  t.beginSingle();
+  t.columnResumed(0);
+  t.columnResumed(1);
+  t.columnSkipped(2);   // skipped for an overload on the earlier run
+  t.beginMulti(1);
+  t.standReached(0, true, "");
+  t.columnFinished(0, 3, ColumnOutcome::kDone);
+  EXPECT_EQ(t.done(), (std::vector<size_t>{0, 1, 3}));
+  EXPECT_EQ(t.failed(), (std::vector<size_t>{2}));
+  EXPECT_FALSE(t.success());
+}
+
 TEST(AssignColumns, NoStands)
 {
   const auto a = assignColumnsToStands({2}, {});
