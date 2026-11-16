@@ -286,10 +286,11 @@ Seed, 20 degree cone, 0.30 m stand-off, 0.05 m/s, 20 percent overlap, `score_run
 | b | 1.000 | 0.53 | 0.0 N | 98 s |
 | c | 1.000 | 0.55 | 0.0 N | 102 s |
 | camera on, no meshes | 1.000 | 0.92 | 0.0 N | the seed ended at z 0.77 instead of 1.4 (the arm had not settled), the first stroke started from a worse arm configuration |
-| arm meshes + camera | 1.000 | 0.47 | 0.0 N | different physics (arm collision), see above |
+| arm meshes + camera (1) | 1.000 | 0.47 | 0.0 N | different physics (arm collision), see above |
+| arm meshes + camera (2) | 0.581 (540/930) | 1.76 | 0.0 N | scorer fails; 125 s, 3 columns reported done; not investigated (the stills are from this run) |
 | run killed | - | - | - | hung: the manager's first plan went on, JTAC reported "Cartesian offset diverged (0.5 m)" every few seconds and the goal never finished; seen once in 6 runs, the host was running a second simulation |
 
-Pass rate of the scored runs: 5 of 5 pass (min coverage 0.9); 1 further run hung (6 attempts). MuJoCo: coverage 1.0, CoV 0.52. Gazebo
+Pass rate: the 4 runs without meshes pass (3 plain, 1 with the camera on); with the meshes 1 of 2 passes; 1 further run hung (7 attempts). MuJoCo: coverage 1.0, CoV 0.52. Gazebo
 matches in the three plain runs. The CoV is a property of the stroke spacing and the speed, the valve was open 346 to 594 samples.
 
 **Multi-stand** (`scripts/run_multi_stand_pass.sh`, 0.9 m patch from y = 0.3, `stand_max_span_m` 0.5, two stands, 9 columns,

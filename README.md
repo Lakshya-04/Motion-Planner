@@ -71,8 +71,14 @@ simulated time, 83 s engaged. While stroking, the force ripples between 0 and ab
 tuned for the picture. The pass was run three times for filming: 93.1 % / 18.5 N / 3.6 N, 93.1 % / 19.2 N / 3.6 N (shown), and
 a first run with 93.3 % / 153.4 N / 8.0 N, which was made while the host was heavily loaded by other simulations and builds
 (load average 10 to 27); the cause was not isolated, but the two reruns on a quieter host agree with each other and with the standard run. How the media is made:
-[docs/sim_mujoco.md](docs/sim_mujoco.md#rendering-photos-and-videos). The Gazebo scene is not shown: its launch has only a
-depth camera and no colour camera to take a picture with.
+[docs/sim_mujoco.md](docs/sim_mujoco.md#rendering-photos-and-videos). The same non-contact pass in Gazebo (`sim_gazebo/scripts/run_spray_pass.sh`, colour camera `rgb_camera:=true`, UR meshes `arm_meshes:=true`,
+stills from `capture_still.py`): the arm mid-stroke at the wall, and during the seeded first move. These stills come from a run with the arm meshes
+loaded, which also gives the arm collision geometry; that run scored 0.58 coverage (the plain runs without meshes: 1.0). Details and the numbers:
+[docs/sim_gazebo.md](docs/sim_gazebo.md#spray-pass-and-multi-stand-pass-parity-with-mujoco).
+
+| Gazebo: first move to the stroke | Gazebo: mid-stroke |
+|---|---|
+| ![gazebo seed](docs/media/gazebo_spray_seed.png) | ![gazebo stroke](docs/media/gazebo_spray_stroke.png) |
 
 ## Simulators
 
@@ -83,8 +89,8 @@ hardware ([docs/simulation.md](docs/simulation.md)).
 |---|---|---|
 | Docs | [docs/sim_mujoco.md](docs/sim_mujoco.md) | [docs/sim_gazebo.md](docs/sim_gazebo.md) |
 | Environment | `build` image with the MuJoCo SDK mounted (`MUJOCO_ROOT`); Python tools also in the `sim` image | `sim-gazebo` image |
-| Can do today | Position and JTAC control of lift + arm, wall worlds from `wall_scene.json`, raw wrist F/T plus ground-truth contact wrench, conditioned force path, a 10 N contact test that holds (10.13 N for a 10 N target) | Same joint control and wall worlds, raw F/T plus ground truth, conditioned path validated against ground truth |
-| Cannot do today | Move the base, simulate sensors | Hold 10 N in Gazebo (about 108 N was measured, cause not established; MuJoCo holds it), move the base, simulate sensors |
+| Can do today | Position and JTAC control of lift + arm, wall worlds from `wall_scene.json`, raw wrist F/T plus ground-truth contact wrench, conditioned force path, a 10 N contact test that holds (10.13 N for a 10 N target) | Same joint control and wall worlds, raw F/T plus ground truth, conditioned path validated against ground truth, holds 10 N with a compliant tip, free base, depth and colour camera, spray and multi-stand passes |
+| Cannot do today | Move the base, simulate sensors | Wheel physics, odom noise; the contact is compliant only through a 20 mm tool tip spring |
 
 Isaac Sim is a stub.
 
@@ -101,6 +107,9 @@ bash $(ros2 pkg prefix sim_mujoco)/lib/sim_mujoco/run_wall_pass.sh
 bash $(ros2 pkg prefix sim_mujoco)/lib/sim_mujoco/run_manager_pass.sh
 # Gazebo Harmonic: the same manager pass (about 5 minutes)
 bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_manager_pass.sh
+# Gazebo: non-contact spray pass, and the multi-stand pass (free base, two stands)
+bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_spray_pass.sh
+bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_multi_stand_pass.sh
 ```
 
 Sources: `src/simulation/sim_mujoco/scripts/`, `src/simulation/sim_gazebo/scripts/`.
