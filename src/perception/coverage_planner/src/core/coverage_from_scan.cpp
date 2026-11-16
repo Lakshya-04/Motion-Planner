@@ -132,6 +132,9 @@ ScanCoverageResult planCoverageOnWall(
   params.plan_all_components = true;
   params.min_component_cells = 25;
   params.optimize_strip_order = false;
+  params.components_in_sweep_order = true;
+  params.fill_gaps = true;
+  params.min_stroke_length_m = 0.02;
   params.requires_contact = tool.task.contact;
   params.ensure_coverage_within_boundary = tool.coverage.ensure_coverage_within_boundary;
 

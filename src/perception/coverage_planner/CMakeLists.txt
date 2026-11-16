@@ -148,6 +148,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_boustrophedon_planner test/core/boustrophedon_planner_test.cpp)
   target_link_libraries(test_boustrophedon_planner coverage_planner_core)
 
+  ament_add_gtest(test_coverage_components test/core/coverage_components_test.cpp)
+  target_link_libraries(test_coverage_components coverage_planner_core)
+
   ament_add_gtest(test_wall_scene test/core/wall_scene_test.cpp)
   target_link_libraries(test_wall_scene coverage_planner_core)
   target_compile_definitions(test_wall_scene PUBLIC

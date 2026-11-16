@@ -42,7 +42,7 @@ without code, when we can implement it.
 - [~] ROS nodes: `coverage_planner_node` (OccupancyGrid -> path), `wall_coverage_service_node` (from `wall_scene.json` + PCD), demo node;
       no action interface, the `CoveragePlan` topic has no subscriber in the repo, nodes have only a conversions test
 - [~] Spiral is listed in the service but is a stub (the README now says so)
-- [ ] Cellular decomposition (BCD) for large cluttered walls (`docs/coverage_patterns.md`)
+- [x] All free components planned and ordered (rib = two panels; node default `plan_all_components` was false), short gap strokes beside obstacle keep-outs (`fill_gaps`, `min_stroke_length_m`), optional cell decomposition `decomposition: cells` (`docs/coverage_patterns.md`; gtests on synthetic rasters, covered fraction above 0.95; no sim rerun yet; exact cell ordering by a router not done)
 - [ ] Coverage feed over ROS (the manager reads `coverage_output.json`; a ROS `CoverageSource` is planned)
 - [~] **Coverage verification**: `CoverageVerifier` raster (covered fraction, overlap, overspray, missed cells; `docs/coverage_patterns.md`). Scores recorded runs through `score_run` (contact and, with the valve column, spray: section 4)
 

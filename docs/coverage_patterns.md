@@ -28,8 +28,27 @@ a frame mirrored toward `start_corner`, so it begins at that corner; chains are 
 first and reversed when their far end is closer. Design after the sweepline planner of an earlier
 production stack (polygon based there, on a grid here); written from the algorithm, not copied.
 
-Not done yet: a true cellular decomposition (events, cells, exact cell ordering by a routing
-solver) for large cluttered walls, and spiral. Both fit behind the same interface.
+### Obstacles on a wall: components, gap strokes, cells
+
+Three options of the boustrophedon planner (`CoveragePlannerParams`; the node declares them as parameters, `coverage_planner.yaml`):
+
+- **All free components.** A full-height rib splits the free raster into two panels. `plan_all_components` (now the node default;
+  it was `false`, which planned only the largest panel, the `two_panels` MuJoCo failure) plans every component of at least
+  `min_component_cells`. `components_in_sweep_order` orders them along the stepover axis from `start_corner` (left panel first)
+  instead of largest first; with more than one component each segment carries a `component_N` tag.
+- **Short strokes beside obstacles.** `fill_gaps` rasterises the swath band of the strokes a component already has and, for free
+  cells left further than swath/2 from every stroke (next to a keep-out edge, at a far edge), adds strokes along the free span of the
+  best column in reach, tagged `gap_fill`. `min_stroke_length_m` is the shortest such stroke: a span with fewer cells is left alone,
+  a stroke covering less is widened inside its span. Off in the core struct, on in the node and in `planCoverageFromScan`.
+- **Cell decomposition.** `decomposition: "cells"` splits a component where the free span of a sweep line splits or merges (a window
+  gives left, above, below, right = 4 cells), sweeps each cell as one serpentine block (`cell_N` tag) and visits cells nearest first.
+  Default `"columns"`. Not exact BCD ordering (no routing solver), and the sweepline planner ignores all of these options.
+
+Synthetic rasters (1 cm cells, 0.14 m swath, keep-out already grown; `test_coverage_components`, covered fraction of the free cells
+by `CoverageVerifier`): `two_panels` 0.46 (largest only) -> 0.92 (all components) -> 1.00 (+ gap strokes); `window` 0.92 -> 1.00;
+`protrusion` 0.975 -> 1.00. No sim run.
+
+Not done yet: exact cell ordering by a routing solver, and spiral.
 
 ## Wall patterns
 
