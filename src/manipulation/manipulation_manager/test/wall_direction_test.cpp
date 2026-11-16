@@ -64,4 +64,27 @@ TEST(WallDirectionTest, ZeroVectorThrows)
   EXPECT_THROW(WallDirection::from(0, 0, 0), std::invalid_argument);
 }
 
+
+TEST(WallDirectionTest, ApproachPoseBacksOffAlongTheWallNormalAndKeepsTheOrientation)
+{
+  const auto w = WallDirection::from(1.0, 1.0, 0.0);
+  core_types::Pose dock;
+  dock.x = 0.9; dock.y = -0.3; dock.z = 1.1;
+  dock.qx = 0.1; dock.qy = 0.2; dock.qz = 0.3; dock.qw = 0.9;
+  const auto a = w.approachPose(dock, 0.1);
+  const double s = std::sqrt(0.5) * 0.1;
+  EXPECT_NEAR(a.x, 0.9 - s, 1e-12);
+  EXPECT_NEAR(a.y, -0.3 - s, 1e-12);
+  EXPECT_NEAR(a.z, 1.1, 1e-12);
+  EXPECT_DOUBLE_EQ(a.qx, 0.1);
+  EXPECT_DOUBLE_EQ(a.qw, 0.9);
+  // The sign of the distance does not matter: the approach pose is always on the robot's side.
+  const auto b = w.approachPose(dock, -0.1);
+  EXPECT_NEAR(b.x, a.x, 1e-12);
+  EXPECT_NEAR(b.y, a.y, 1e-12);
+  // Zero extra is the dock pose itself.
+  const auto c = w.approachPose(dock, 0.0);
+  EXPECT_NEAR(c.x, dock.x, 1e-12);
+}
+
 }  // namespace manipulation_manager
