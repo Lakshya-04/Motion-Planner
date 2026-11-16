@@ -13,7 +13,7 @@ TCP), then wall plane, then base-to-wall.
 |---|---|---|
 | F/T sign and bias check | by hand + `ros2 topic echo` | `sign`, `bias` of `ft_conditioner` |
 | Tool TCP position | `core_types::pivotCalibration` (ROS-free) | `tcp_xyz` of the tool profile, `tool_in_sensor_xyz` |
-| Payload (mass, centre of gravity, bias) | `ft_conditioner` services | `payload_mass_kg`, `payload_cog_xyz`, `bias` |
+| Payload (mass, centre of gravity, bias) | `ft_conditioner` services; `force_core` excitation planner | `payload_mass_kg`, `payload_cog_xyz`, `bias` |
 | Wall plane | `wall_detector` node | `wall_scene.json` for the coverage planner |
 | Base-to-wall | `wall_detector` in `base_footprint` + a touch check | stand/base pose, `target_frame` |
 
@@ -85,7 +85,50 @@ ros2 service call /wrench_conditioner/clear_samples std_srvs/srv/Trigger  # star
   returns a YAML snippet for `payload_mass_kg`, `payload_cog_xyz` and `bias`. Degenerate pose sets are rejected
   with a reason.
 - Verify: mass close to the weighed tool + plate + adapter; conditioned force near zero in poses not used in
-  the fit. Repeat after warm-up and after any tool change (bias drift is not tracked).
+  the fit. Repeat after warm-up and after any tool change.
+- `identify` also reports the regressor condition number of the pose set and rejects a set above 1000
+  (`identifyPayload(..., max_condition)`). Well-spread sets of 8 to 10 poses give 3 to 6; a planar sweep of
+  0.6 rad gives hundreds. Noise on the readings is amplified by about this number.
+
+### Choosing the poses: safe excitation planner (ROS-free)
+
+`force_core/payload_excitation.hpp` picks the poses and times the moves. You supply forward kinematics (sensor
+orientation from joints), the joint limits and velocity / acceleration bounds, and optionally a safety proxy
+(`std::function<bool(q)>`, true = safe: your self-collision spheres, a workspace box, a keep-out on the wrist).
+
+```cpp
+force_core::ExcitationLimits lim;  // q_min, q_max, v_max, a_max, margin_rad (0.1), velocity_scale (0.5)
+force_core::ExcitationOptions opt; // num_poses (8), num_candidates (400), dwell_s (1.5), seed
+auto plan = force_core::generateExcitationPoses(q_now, lim, fk, is_safe, gravity_world, opt);
+if (plan.ok) {                      // plan.waypoints[k].q, t_arrive_s, t_leave_s; plan.condition_number
+  auto q = force_core::sampleExcitationPlan(plan, t);   // joint reference at time t
+}
+```
+
+Candidates are random joint configurations inside the limits minus the margin that pass the proxy; poses are
+chosen farthest-point first on the gravity direction seen in the sensor frame, and each move from the previous
+pose must pass the proxy along the straight joint-space path (checked every `path_step_rad`). Moves are
+rest-to-rest quintics, slowed until peak velocity and acceleration are within `velocity_scale` of the bounds.
+It returns `ok = false` with a reason if fewer than six reachable, safe, well-spread poses exist, and
+warns (still `ok`) when the condition number is above `max_condition` (20). Send the waypoints to the arm
+through your normal trajectory interface, wait `dwell_s` at each pose and call `capture_pose` there. No ROS
+service runs the plan yet, and the proxy is yours: the planner is only as safe as it is. This is the simple,
+offline form of the idea in arXiv 2504.21486 (bounded excitation); it has no online set-based safety
+guarantee, and its code was not used (no licence).
+
+Simulated numbers (gtest, 2 kg payload, 0.1 N force and 0.01 N m torque noise, 10 poses, 50 trials): see
+the CHANGELOG entry.
+
+## 3b. Bias and temperature drift
+
+`force_core/bias_tracker.hpp` (`BiasTracker`) tracks the six bias values slowly while the tool is free. Feed it
+`raw - payload gravity` (sign applied) at its own rate together with two flags from the caller: tool free of
+contact (force FSM) and arm still (joint velocity). A per-axis Kalman filter (random-walk bias) updates only
+then. It rejects an innovation above 1 N / 0.1 N m (a missed contact or a payload change must not be absorbed),
+caps the total correction at 2 N / 0.2 N m from the starting bias, and sets `needsRecalibration()` after 20
+rejections in a row (re-run section 3). Not wired into the conditioner node: the node's `bias` parameter is
+static until a node uses the tracker. In the gtest 0.1 N of drift over 60 s with 0.1 N noise is followed to
+within 0.05 N.
 
 ## 4. Wall plane
 
