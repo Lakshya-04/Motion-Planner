@@ -10,6 +10,10 @@ The stack as it stands, covering the merged pull requests #5 to #61, summarised 
 #5 to #22 and the documentation on top of it; "Since #22" below it covers #23 to #61). Not included: a launch that runs perception to execution,
 anything verified on hardware.
 
+### Fixed
+
+- VAMP robot model rejected most benchmark endpoints (60 of 72 in the empty scene, every `stow_side` pair): FOAM's 6 spheres on the 0.04 m lift carriage plate bulged into the upper arm. `docker/tools/generate_vamp_robot.sh` now defaults `FOAM_ARGS` to `--lift_carriage_link=4` (23 plate spheres, 50 in total); on the same 158 problems VAMP goes from 10/158 to 158/158. Numbers in `docs/planner_benchmark.md`.
+
 ### Added
 
 - Planar patches: `coverage_planner` `core/surface_patch.hpp` (`SurfacePatch` for wall, floor, ceiling and column faces: `project`, `point`, `contains`, `liftPatchPath` with tool axis along the patch normal, `patchObstacles`, `planPatchCoverage`), and `planCoverageOnWall` split out of `planCoverageFromScan` (wall behaviour unchanged). gtests in `test_surface_patch`. Docs in `docs/coverage_patterns.md` and `docs/architecture.md`. Stand selection for horizontal surfaces not done; no sim run.
