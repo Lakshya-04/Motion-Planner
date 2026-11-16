@@ -13,6 +13,7 @@ libfcl-dev
 # motion planning
 ros-@ROS@-moveit
 ros-@ROS@-ompl
+ros-@ROS@-moveit-ros-perception
 
 # control
 ros-@ROS@-ros2-control
