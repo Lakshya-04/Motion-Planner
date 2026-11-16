@@ -113,8 +113,25 @@ Limits:
 - `theta` and `f` are guesses until measured on the real nozzle (spray a test wall, measure the width of the
   usable band at two standoffs, fit both).
 - Valve timing is coarse: the manager opens the valve once the tool has taken up the first stroke pose and closes it when
-  the stroke segment returns. `tool_off_lead_s` and `tool_on_at_speed_ratio` are in the profile but not used, and no
-  hardware valve driver exists (only the `std_msgs/Bool` topic).
+  the stroke segment returns. The manager does not yet use `tool_off_lead_s` and `tool_on_at_speed_ratio`; the
+  opt-in executor below does. No hardware valve driver exists (only the `std_msgs/Bool` topic).
+
+## Tool actuation executor
+
+`manipulation_manager/core/tool_actuation.hpp` (ROS-free, `tool_actuation_test`) runs a tool window in trajectory
+time: on at `on_s`, off at `end_s - tool_off_lead_s` (never before `on_s`); a pump also waits for
+`tool_on_at_speed_ratio`. A pause drives the tool off (trajectory time stands still, the schedule resumes there;
+`pause_keeps_state` leaves it as is). With an echo wired, an unconfirmed command is resent every `retry_s` and after
+`response_timeout_s` the result is `TOOL_NOT_RESPONSIVE`; a tool whose echo departs from a confirmed command is
+`TOOL_FAULT`. Cancel, fault and the end of the window all drive the tool off, resent until the echo confirms it. On and
+off latency (command to echo) are measured and published, as profile data. Tool I/O is not safety-critical: the
+executor reports and never stops the arm.
+
+`tool_actuation_node` is the thin wrapper (not started by the manager): `~/window` (Float64MultiArray `[on_s, end_s]`),
+`~/trajectory_time`, `~/paused`, `~/speed_ratio`, `~/cancel`, `~/fault`, echo topic (`echo_topic`, default
+`/tool/valve_state`, empty for none) in; `valve_topic` (`/tool/valve`) and `~/status` out. The valve is closed at start
+and on node shutdown. Not yet done: the manager does not publish the window or trajectory time, and nothing has run
+against a real valve.
 
 ## Non-contact column in the manager
 

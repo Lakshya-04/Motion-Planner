@@ -130,6 +130,8 @@
 #include <string>
 #include <vector>
 
+#include "core_types/command_guard.hpp"
+
 #include <Eigen/Dense>
 
 #include "admittance_controller/admittance_rule.hpp"
@@ -248,6 +250,12 @@ private:
   /// acceleration (Δv/dt), which state_desired_.velocities alone doesn't give us since that's
   /// admittance's own unclamped output, not what previously reached the hardware.
   std::vector<double> previous_command_velocity_;
+
+  /// Opt-in command guard (parameter `command_guard.enabled`, default false): NaN / joint position limit
+  /// check with hold and a fault latch (core_types/command_guard.hpp). Limits from
+  /// `joint_limits.<joint>.min_position` / `max_position`; `command_guard.debounce_cycles` (default 3).
+  /// A latched fault holds the last good position and makes update() return ERROR.
+  std::unique_ptr<core_types::CommandGuard> command_guard_;
 
   /// A SEPARATE instance from admittance_rule_'s own internal kinematics_ (private, not exposed)
   /// and from redundancy_kinematics_ (only initialized when enable_redundancy_weighting_ is on) --

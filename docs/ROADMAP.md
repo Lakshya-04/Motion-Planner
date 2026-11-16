@@ -270,10 +270,10 @@ here were dropped. Placement is the milestone that should carry it.
 
 **Safety and execution (M1, M2; hardware wiring M6)**
 - [ ] Fault abort in ros2_control: a `fault` state interface and typed codes; a lift or arm fault makes `read()/write()` return ERROR so every controller claiming the component deactivates; mark devices safety-critical or not (tool I/O is not); debounce about 3 cycles
-- [ ] Never report a dead axis healthy: hold the last position, raise `fault`, return ERROR past a threshold (no "degraded mode")
-- [ ] NaN and limit guard on every command interface; per-joint trajectory tolerance including the lift
-- [ ] Spray valve forced off on any fault and confirmed by polling; drive-side watchdog and bring-up ordering (hardware only)
-- [ ] **Tool actuation executor**: nothing executes `tool_command` or `tool_off_lead_s` today. Typed commands verified against echoed state, scheduled on trajectory time (a pause freezes the tool), tool off on every exit path, `TOOL_FAULT` / `TOOL_NOT_RESPONSIVE` results, on/off latency as profile data
+- [~] Never report a dead axis healthy: hold the last position, raise `fault`, return ERROR past a threshold (no "degraded mode") (`core_types/command_guard.hpp` with gtests, wired opt-in into JTAC `update()`: hold, debounced latch, ERROR; a non-finite measurement is a fault; no `fault` state interface, no hardware run)
+- [~] NaN and limit guard on every command interface; per-joint trajectory tolerance including the lift (guard done for JTAC, opt-in `command_guard.enabled`; not on the sim system interfaces; no per-joint trajectory tolerance)
+- [~] Spray valve forced off on any fault and confirmed by polling; drive-side watchdog and bring-up ordering (hardware only) (forced off and polled until the echo confirms: `ToolActuation`, tested; not wired to the guard fault; watchdog and ordering not done)
+- [~] **Tool actuation executor**: `manipulation_manager/core/tool_actuation.hpp` (ROS-free, 14 gtests) and opt-in `tool_actuation_node`: `tool_command` / `tool_off_lead_s` / `tool_on_at_speed_ratio` on trajectory time (a pause drives the tool off), commands verified against the echo with resend, tool off on cancel, fault and end, `TOOL_FAULT` / `TOOL_NOT_RESPONSIVE`, on/off latency measured. Not done: the manager does not feed it a window or the trajectory time (it still opens the valve itself), no echo in the sim, no hardware valve
 - [ ] Segment-level intent in the motion layer: force stage, target force, standoff, normal, speed, tool command, lift height (unknown stage degrades to NONE)
 
 **Manager and task flow (M1)**

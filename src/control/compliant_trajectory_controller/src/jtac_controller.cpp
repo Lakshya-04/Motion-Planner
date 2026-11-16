@@ -6,6 +6,8 @@
 #include "compliant_trajectory_controller/jtac_controller.hpp"
 
 #include <algorithm>
+#include <limits>
+#include <memory>
 
 #include "controller_interface/helpers.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
@@ -280,6 +282,33 @@ controller_interface::CallbackReturn JtacController::on_configure(
     }
   }
 
+  command_guard_.reset();
+  if (!get_node()->has_parameter("command_guard.enabled")) {
+    get_node()->declare_parameter("command_guard.enabled", false);
+  }
+  if (get_node()->get_parameter("command_guard.enabled").as_bool()) {
+    core_types::CommandGuardConfig guard_cfg;
+    if (!get_node()->has_parameter("command_guard.debounce_cycles")) {
+      get_node()->declare_parameter("command_guard.debounce_cycles", 3);
+    }
+    guard_cfg.debounce_cycles =
+      static_cast<int>(get_node()->get_parameter("command_guard.debounce_cycles").as_int());
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    for (size_t i = 0; i < num_joints_; ++i) {
+      const std::string prefix = "joint_limits." + joint_names_[i];
+      if (!get_node()->has_parameter(prefix + ".min_position")) {
+        get_node()->declare_parameter(prefix + ".min_position", -kInf);
+      }
+      if (!get_node()->has_parameter(prefix + ".max_position")) {
+        get_node()->declare_parameter(prefix + ".max_position", kInf);
+      }
+      guard_cfg.lower.push_back(get_node()->get_parameter(prefix + ".min_position").as_double());
+      guard_cfg.upper.push_back(get_node()->get_parameter(prefix + ".max_position").as_double());
+    }
+    command_guard_ = std::make_unique<core_types::CommandGuard>(guard_cfg);
+    RCLCPP_INFO(get_node()->get_logger(), "command guard enabled");
+  }
+
   action_server_ = rclcpp_action::create_server<FollowJTrajAction>(
     get_node(), std::string(get_node()->get_name()) + "/follow_joint_trajectory",
     std::bind(
@@ -305,6 +334,7 @@ controller_interface::CallbackReturn JtacController::on_configure(
 
 controller_interface::CallbackReturn JtacController::on_activate(const rclcpp_lifecycle::State &)
 {
+  if (command_guard_) {command_guard_->reset();}  // re-activation clears a latched fault
   joint_position_command_interface_.clear();
   joint_velocity_command_interface_.clear();
   joint_position_state_interface_.clear();
@@ -788,6 +818,27 @@ controller_interface::return_type JtacController::update(
   // so a finite-but-real-joint-limit-violating Cartesian clamp result still gets bounded to what
   // the joint can physically do in one period.
   enforceJointRateLimits(period);
+
+  if (command_guard_) {
+    const auto guarded = command_guard_->apply(state_desired_.positions, state_current_.positions);
+    if (guarded.bad && !guarded.positions.empty()) {
+      state_desired_.positions = guarded.positions;
+      std::fill(state_desired_.velocities.begin(), state_desired_.velocities.end(), 0.0);
+    }
+    if (guarded.faulted) {
+      // Hold, report, and fail: never report a dead or out-of-limit axis healthy.
+      if (!guarded.positions.empty()) {
+        writeCommandsToCommandInterfaces(state_desired_);
+      }
+      RCLCPP_ERROR_THROTTLE(
+        get_node()->get_logger(), *get_node()->get_clock(), 1000,
+        "command guard fault latched (%s): holding position", core_types::toString(guarded.code));
+      return controller_interface::return_type::ERROR;
+    }
+    if (guarded.bad && guarded.positions.empty()) {
+      return controller_interface::return_type::OK;  // nothing safe to write this cycle
+    }
+  }
 
   writeCommandsToCommandInterfaces(state_desired_);
 
