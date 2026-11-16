@@ -53,6 +53,22 @@ SCENES = [
 ]
 
 
+class RevoluteArm(bs.Arm):
+    """bs.Arm whose chain depth counts movable joints only: links welded together (base, lift, tool
+    mount) are one body, so the 'links up to HOPS joints apart are not self-checked' rule means the same
+    as the rigid-group SRDF the VAMP header was generated with."""
+
+    def chain_index(self, links):
+        def depth(l):
+            d = 0
+            while l in self.by_child:
+                j = self.by_child[l]
+                d += j.get('type') == 'revolute'
+                l = j.find('parent').get('link')
+            return d
+        return {l: depth(l) for l in links}
+
+
 def _write_vamp_text(path, scenes):
     lines = []
     for sc in scenes:
@@ -68,7 +84,7 @@ def _write_vamp_text(path, scenes):
 def cmd_prepare(a):
     work = pathlib.Path(a.work)
     work.mkdir(parents=True, exist_ok=True)
-    arm = bs.Arm(a.urdf)
+    arm = RevoluteArm(a.urdf)
     assert arm.dof == 6, f'expected a 6-joint arm, got {arm.dof}'
     spheres, buf, hops = bs.parse_sets([f'ref={a.spheres}'])['ref']
     ref = bs.SphereModel(arm, spheres, buf, hops, 'ref')
@@ -165,7 +181,7 @@ def _load_curobo(path):
 def cmd_report(a):
     work = pathlib.Path(a.work)
     doc = json.loads((work / 'problems.json').read_text())
-    arm = bs.Arm(a.urdf)
+    arm = RevoluteArm(a.urdf)
     spheres, buf, hops = bs.parse_sets([f'ref={a.spheres}'])['ref']
     ref = bs.SphereModel(arm, spheres, buf, hops, 'ref')
     runs = []
@@ -209,13 +225,13 @@ def cmd_report(a):
             results.append(r)
     (work / 'results.json').write_text(json.dumps(results, indent=1))
     f = lambda v, d=1: '-' if v != v else f'{v:.{d}f}'  # noqa: E731
-    out = ['| backend | scene | success | median ms | p95 ms | path rad (median) | clearance cm (median / min) | hits in reference model |',
-           '|---|---|---|---|---|---|---|---|']
+    out = ['| backend | scene | success | success, valid endpoints | median ms | p95 ms | path rad (median) | clearance cm (median / min) | hits in reference model |',
+           '|---|---|---|---|---|---|---|---|---|']
     for r in results:
-        out.append(f"| {r['backend']} | {r['scene']} | {r['ok']}/{r['n']} | {f(r['time_ms_median'])} | {f(r['time_ms_p95'])} | "
+        out.append(f"| {r['backend']} | {r['scene']} | {r['ok']}/{r['n']} | {r['ok']}/{r['n'] - r['endpoints_invalid']} | {f(r['time_ms_median'])} | {f(r['time_ms_p95'])} | "
                    f"{f(r['path_rad_median'], 2)} | {f(r['clearance_cm_median'])} / {f(r['clearance_cm_min'])} | {r['ref_hits']} |")
     for k, v in notes.items():
-        out.append(f'| {k} | not run | - | - | - | - | - | {v} |')
+        out.append(f'| {k} | not run | - | - | - | - | - | - | {v} |')
     (work / 'results.md').write_text('\n'.join(out) + '\n')
     print('\n'.join(out))
 

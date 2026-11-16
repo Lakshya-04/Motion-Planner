@@ -5,7 +5,7 @@
 //
 //   planner_benchmark robot.urdf robot.srdf GROUP problems.txt out.jsonl LABEL [timeout_s]
 //
-// This is the planner MoveIt's OMPL pipeline runs (RRT-Connect, state-validity resolution 1 percent of
+// This is the planner MoveIt's OMPL pipeline runs (RRT-Connect, state-validity resolution 0.1 percent of
 // the extent, then path simplification) without the move_group node, request adapters or time
 // parameterisation, so the numbers describe the planning core, not a full move_group round trip.
 // Timing is wall clock around solve + simplify. Not a ROS node: no rclcpp, no sim.
@@ -28,6 +28,7 @@
 #include <ompl/geometric/planners/rrt/RRTConnect.h>
 #include <srdfdom/model.h>
 #include <urdf/model.h>
+#include <urdf_parser/urdf_parser.h>
 
 namespace
 {
@@ -153,7 +154,7 @@ int main(int argc, char ** argv)
           [&](const ompl::base::State * s) {
             return valid(s->as<ompl::base::RealVectorStateSpace::StateType>()->values);
           });
-        ss.getSpaceInformation()->setStateValidityCheckingResolution(0.01);
+        ss.getSpaceInformation()->setStateValidityCheckingResolution(0.001);
         ss.setPlanner(std::make_shared<ompl::geometric::RRTConnect>(ss.getSpaceInformation()));
         const bool sv = valid(start.data()), gv = valid(goal.data());
         bool ok = false;
