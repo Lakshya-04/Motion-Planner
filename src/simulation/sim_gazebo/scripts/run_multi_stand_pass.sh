@@ -8,7 +8,7 @@
 # (shift_wall_scene.py shifts the coverage scene and the cloud; the base starts at the origin). The Gazebo world wall is the
 # stock 3 m x 2 m smoke wall at x = 0.915 centred on y = 0 (the world generator always centres the wall on the robot), with
 # its one 5 cm obstacle moved to y -0.9..-0.6, out of the patch; the plane the coverage, the octomap and the scorer use is
-# where the tcp touches it, x = 0.98 (+ MULTI_STAND_WALL_DX is not supported here, the world wall stays put).
+# where the tcp touches it, x = 0.98 (MULTI_STAND_WALL_DX is not supported: the world wall stays put).
 # Run, record in odom and score like run_manager_pass.sh.
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
@@ -114,6 +114,8 @@ wait $WM
 # 4. the manager as an action server, one goal
 gz_start manager ros2 launch manipulation_manager manipulation_manager.launch.py hardware:=jtac_mock profile:=ur10e_telescopic \
   use_sim_time:=true params_file:=$OUT/manager.yaml "$@"
+# the manager's TF listener needs a few seconds of /tf before the goal (a goal at once aborts: "no TF odom -> arm_base_link")
+sleep 10
 CLIENT_ARGS="--multi-stand --coverage $COV"
 [ "$CANCEL_AFTER" != 0 ] && CLIENT_ARGS="$CLIENT_ARGS --cancel-after $CANCEL_AFTER"
 timeout 3400 python3 -u "$PKG/lib/sim_gazebo/execute_coverage_client.py" $CLIENT_ARGS | tee "$OUT/client.log"
