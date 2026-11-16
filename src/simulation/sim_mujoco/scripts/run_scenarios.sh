@@ -66,15 +66,15 @@ for name in $LIST; do
     eval "$(python3 "$LIB/make_scenario_scene.py" "$SHARE/data" "$O/data" "$name")" || { echo "unknown scenario $name"; exit 2; }
     PARAMS="-p obstacle_inflation_radius_m:=$CLEAR"
     if [ "$MODE" = multi ]; then
-      MULTI_STAND_OUT=$O MULTI_STAND_SCENARIO=$name MULTI_STAND_COVERAGE_EXTRA="$PARAMS" MULTI_STAND_MIN_COVERAGE=$MINCOV \
+      MULTI_STAND_OUT=$O MULTI_STAND_SCENARIO=$name MULTI_STAND_COVERAGE_EXTRA="$PARAMS" MULTI_STAND_MIN_COVERAGE=0 \
         timeout "${SCEN_TIMEOUT:-3300}" bash "$LIB/run_multi_stand_pass.sh" > "$O/pass.log" 2>&1
     else
-      MANAGER_PASS_OUT=$O MANAGER_PASS_DATA=$O/data MANAGER_PASS_MIN_COVERAGE=$MINCOV \
+      MANAGER_PASS_OUT=$O MANAGER_PASS_DATA=$O/data MANAGER_PASS_MIN_COVERAGE=0 \
         MP_COVERAGE_PARAMS="-p swath_m:=$SWATH -p overlap_pct:=${MANAGER_PASS_OVERLAP:-15.0} $PARAMS" \
         MANAGER_PASS_REC_ARGS="--wall-x $WALL_X --wall-y $WALL_Y0 $WALL_Y1 --scene $O/data/wall_pass_coverage_scene.json" \
         timeout "${SCEN_TIMEOUT:-1500}" bash "$LIB/run_manager_pass.sh" > "$O/pass.log" 2>&1
     fi
-    RC=$?
+    RC=$?   # the pass's own exit code is the manager's, or its built-in score's: limits are off (min coverage 0), run_scenarios scores below
     if [ -f "$O/run.csv" ] && [ -f "$O/run.csv.wall.json" ]; then
       read -r CW PEAK RMS CONT RCW <<< "$(score "$O" 0.0)"
       read -r CR _ _ _ RCR <<< "$(score "$O" "$CLEAR")"
