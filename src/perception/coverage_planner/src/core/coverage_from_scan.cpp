@@ -93,37 +93,20 @@ std::vector<bool> observedMaskFromPoints(
   return mask;
 }
 
-ScanCoverageResult planCoverageFromScan(
-  const scene_model::PointCloud & scan, const scene_model::SceneModel & obstacles,
-  const ToolCoverageProfile & tool, const ScanCoverageOptions & options)
+ScanCoverageResult planCoverageOnWall(
+  const WallPlane & wall, const std::vector<ObstacleRegion> & regions,
+  const std::vector<scene_model::Vec3> * observed_points, const ToolCoverageProfile & tool,
+  const ScanCoverageOptions & options)
 {
   ScanCoverageResult out;
+  out.wall = wall;
 
-  // 1. Wall plane from the scan.
-  const auto fit = options.label ?
-    scene_model::fitPlaneForLabel(scan, *options.label, options.plane) :
-    scene_model::fitPlane(scan.points, options.plane);
-  if (!fit) {
-    out.message = "no wall found: the scan has no plane with enough inliers";
-    return out;
-  }
-  if (fit->u_max - fit->u_min <= 0.0 || fit->v_max - fit->v_min <= 0.0) {
-    out.message = "fitted plane has no extent";
-    return out;
-  }
-  out.wall = wallFromPlaneFit(*fit, options.wall_id, options.frame_id);
-
-  // 2. Grid: observed cells from the inlier points, obstacles from the scene.
+  // Grid: observed cells from the points (when given), obstacles from the regions.
   const double res = options.resolution;
   const int width = std::max(1, static_cast<int>(std::ceil((out.wall.u_max - out.wall.u_min) / res)));
   const int height = std::max(1, static_cast<int>(std::ceil((out.wall.v_max - out.wall.v_min) / res)));
-  std::vector<scene_model::Vec3> wall_points;
-  wall_points.reserve(fit->inliers.size());
-  for (size_t i : fit->inliers) {
-    wall_points.push_back(scan.points[i]);
-  }
-  const auto observed = observedMaskFromPoints(wall_points, out.wall, width, height, res);
-  const auto regions = obstacleRegionsFromScene(obstacles, out.wall);
+  const std::vector<bool> observed = observed_points ?
+    observedMaskFromPoints(*observed_points, out.wall, width, height, res) : std::vector<bool>{};
   try {
     out.grid = rasterizeWallCoverageGrid(
       out.wall, regions, tool.coverage, res, options.frame_id, observed);
@@ -132,7 +115,7 @@ ScanCoverageResult planCoverageFromScan(
     return out;
   }
 
-  // 3. Plan on the wall plane (obstacle inflation is already part of the rasterized grid).
+  // Plan on the wall plane (obstacle inflation is already part of the rasterized grid).
   CoveragePlannerParams params;
   params.swath = toolSwath(tool);
   params.step = toolLineSpacing(tool);
@@ -160,7 +143,7 @@ ScanCoverageResult planCoverageFromScan(
     return out;
   }
 
-  // 4. Lift each part onto the wall with its own tool profile (panels use a turned tool),
+  // Lift each part onto the wall with its own tool profile (panels use a turned tool),
   //    orient the tool, expand passes, and concatenate in execution order.
   out.final_plan.path.header.frame_id = options.frame_id;
   for (const auto & part : out.pattern.parts) {
@@ -180,6 +163,36 @@ ScanCoverageResult planCoverageFromScan(
   out.success = true;
   out.message = "ok";
   return out;
+}
+
+ScanCoverageResult planCoverageFromScan(
+  const scene_model::PointCloud & scan, const scene_model::SceneModel & obstacles,
+  const ToolCoverageProfile & tool, const ScanCoverageOptions & options)
+{
+  ScanCoverageResult out;
+
+  // 1. Wall plane from the scan.
+  const auto fit = options.label ?
+    scene_model::fitPlaneForLabel(scan, *options.label, options.plane) :
+    scene_model::fitPlane(scan.points, options.plane);
+  if (!fit) {
+    out.message = "no wall found: the scan has no plane with enough inliers";
+    return out;
+  }
+  if (fit->u_max - fit->u_min <= 0.0 || fit->v_max - fit->v_min <= 0.0) {
+    out.message = "fitted plane has no extent";
+    return out;
+  }
+  const WallPlane wall = wallFromPlaneFit(*fit, options.wall_id, options.frame_id);
+
+  // 2. Obstacles and observed points on that plane, then the shared planning chain.
+  std::vector<scene_model::Vec3> wall_points;
+  wall_points.reserve(fit->inliers.size());
+  for (size_t i : fit->inliers) {
+    wall_points.push_back(scan.points[i]);
+  }
+  return planCoverageOnWall(
+    wall, obstacleRegionsFromScene(obstacles, wall), &wall_points, tool, options);
 }
 
 }  // namespace coverage_planner

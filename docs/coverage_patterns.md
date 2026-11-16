@@ -56,6 +56,29 @@ frame u along the wall, v up), rasterize observed cells and obstacle footprints,
 pattern, lift every part with its own tool profile and concatenate. See
 [scene_model.md](scene_model.md).
 
+## Floors, ceilings and columns: planar patches
+
+`SurfacePatch` (`core/surface_patch.hpp`) is the planar `SurfaceModel`: a plane origin, a right-handed
+(u, v, normal) frame, a rectangular (u, v) extent and a kind (`wall`, `floor`, `ceiling`, classified from
+the normal). The normal points to the side the tool works from: floor +z, ceiling -z, a column face
+horizontally outward. `makeFloorPatch`, `makeCeilingPatch` and `makeSurfacePatch` build one; for a
+wall `u = up x normal` (v up), for a horizontal plane u = world x. The API:
+
+- `project(world) -> (u, v, n)`, `point(u, v, n)`, `contains(u, v)`;
+- `liftPatchPath(patch, uv_waypoints, tool_task)`: 2D waypoints to tool poses, tool z along -normal, standoff
+  along +normal, edge tilt and yaw from the tool profile (it is `liftCoveragePathPose` on the patch plane);
+  `liftPatchPose` for one point without tilt;
+- `patchObstacles(patch, scene)`: obstacle footprints (any orientation, same filter as a wall);
+- `planPatchCoverage(patch, obstacles, tool, options)`: rasterize, plan (boustrophedon or sweepline, any wall
+  pattern), lift, expand passes. This is the tail of `planCoverageFromScan`, now `planCoverageOnWall`, so a wall
+  gives the same poses as before and a floor or ceiling uses the same code. A scanned floor also works through
+  `planCoverageFromScan` with `plane.normal_hint = +z`.
+
+A room is a list of patches, each planned on its own. Not done: reachability and stand selection for a horizontal
+surface (`chooseStation` still rejects a horizontal plane), reach limits for ceilings, ordering patches, and
+`loadWallScene` flatness is still a threshold on the scene file (it does not look at orientation).
+Tests: `test/core/surface_patch_test.cpp` (floor and ceiling with obstacles, orientation, verification raster).
+
 ## Non-planar surfaces (long term)
 
 The grid planners and patterns work in a surface's (u, v) parameter space, and only the final

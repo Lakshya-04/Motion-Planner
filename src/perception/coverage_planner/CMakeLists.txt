@@ -29,6 +29,7 @@ add_library(coverage_planner_core
   src/core/wall_rasterizer.cpp
   src/core/coverage_patterns.cpp
   src/core/coverage_from_scan.cpp
+  src/core/surface_patch.cpp
   src/core/tool_coverage_profile.cpp
   src/core/coverage_verification.cpp
   src/core/run_scorecard.cpp
@@ -163,6 +164,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_coverage_from_scan test/core/coverage_from_scan_test.cpp)
   target_link_libraries(test_coverage_from_scan coverage_planner_core)
+
+  ament_add_gtest(test_surface_patch test/core/surface_patch_test.cpp)
+  target_link_libraries(test_surface_patch coverage_planner_core)
 
   ament_add_gtest(test_coverage_verification test/core/coverage_verification_test.cpp)
   target_link_libraries(test_coverage_verification coverage_planner_core)
