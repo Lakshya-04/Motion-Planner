@@ -48,10 +48,10 @@ without code, when we can implement it.
 
 ## 3. Non-planar surfaces (floors, ceilings, columns, curved walls, meshes)
 
-- [ ] `SurfaceModel` interface (project, lift with normal and tangent frame, contains, obstacles): design only (`docs/architecture.md`)
-- [ ] Piecewise-planar rooms: one planar patch per face (floor, ceiling, columns) reusing today's planners
+- [~] `SurfaceModel` interface (project, lift with normal and tangent frame, contains, obstacles): planar implementation `SurfacePatch` in `coverage_planner` core; no common abstract interface yet, no mesh implementation
+- [~] Piecewise-planar rooms: one planar patch per face (floor, ceiling, columns) reusing today's planners (`SurfacePatch`, `planPatchCoverage`; gtests on floor, ceiling, column face). Not done: stand selection and reach for horizontal surfaces, a room-level ordering of patches, any sim or hardware run
 - [ ] Mesh / freeform surfaces. *Reuse: Noether (Apache-2.0; ROS-free `noether_tpp` core; plane-slice raster planners with `line_spacing`; offset and approach/departure path modifiers; robot-independent output of poses with normals; no swath or standoff awareness: swath maps to line spacing, standoff to the offset modifier); else parameterise-then-sweep (geometry-central or pmp-library, MIT)*
-- [ ] Lift the vertical-wall assumptions: `chooseStation` rejects a horizontal plane; `loadWallScene` enforces wall flatness
+- [~] Lift the vertical-wall assumptions: the coverage chain (`planCoverageOnWall`) and the lift work for any plane orientation; still open: `chooseStation` rejects a horizontal plane; `loadWallScene` enforces wall flatness
 - [ ] Learned / non-grid coverage planners as further implementations of the same port (design only; recent RL work is not ready for a deterministic task)
 
 ## 4. Tools (contact and non-contact)
