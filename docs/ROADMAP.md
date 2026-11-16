@@ -71,7 +71,7 @@ without code, when we can implement it.
       opens the valve (`std_msgs/Bool` on `/tool/valve`) for the stroke only, closes it, retracts; no force engage, no press, no wall-contact
       allowance. Proven in the MuJoCo sim (`run_spray_pass.sh`: 3 columns, valve recorded and scored). Not done: a valve driver on real
       hardware, `tool_off_lead_s` / `tool_on_at_speed_ratio` timing, valve forced off on a fault, the standoff held by feedback (it is open loop)
-- [ ] Contact tools: adaptive line spacing from a contact-area model (a cheap published idea, 2-3 days on top of a planner)
+- [~] Contact tools: adaptive line spacing from a contact-area model. Done: `coverage.contact_area` (width from force, tilt, curvature) drives `toolSwath` / `toolLineSpacing`; `contactStripOffsets` with edge zones; verified on a `CoverageVerifier` raster (`test_contact_spacing`). Not done: the boustrophedon/sweepline planners still use one uniform step, so edge spacing is not applied to a generated path; no hardware fit of the gain (`docs/tools.md`)
 - [x] "How to add a tool" guide (`docs/tools.md`)
 
 ## 5. Motion planning (any backend, contact and non-contact)

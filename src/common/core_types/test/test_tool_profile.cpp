@@ -107,3 +107,49 @@ TEST(LineSpacing, FollowsSwathAndOverlap)
   EXPECT_THROW(core_types::lineSpacingFromSwath(0.2, -1.0), std::invalid_argument);
   EXPECT_THROW(core_types::lineSpacingFromSwath(0.2, 100.0), std::invalid_argument);
 }
+
+TEST(ContactArea, OffByDefaultAndRejectsEvaluation)
+{
+  core_types::ContactAreaModel m;
+  EXPECT_FALSE(m.enabled());
+  EXPECT_THROW(core_types::contactEffectiveWidth(m, 10.0), std::invalid_argument);
+  EXPECT_NO_THROW(core_types::validateContactArea(m));
+}
+
+TEST(ContactArea, WidthGrowsWithForceAndClamps)
+{
+  core_types::ContactAreaModel m;
+  m.pad_width_m = 0.2;
+  m.reference_force_n = 10.0;
+  m.width_gain_per_n = 0.01;
+  EXPECT_NEAR(core_types::contactEffectiveWidth(m, 10.0), 0.2, 1e-12);
+  EXPECT_NEAR(core_types::contactEffectiveWidth(m, 20.0), 0.22, 1e-12);
+  EXPECT_NEAR(core_types::contactEffectiveWidth(m, 1000.0), 0.3, 1e-12);   // max factor 1.5
+  EXPECT_NEAR(core_types::contactEffectiveWidth(m, 0.0), 0.18, 1e-12);
+  m.width_gain_per_n = 0.5;
+  EXPECT_NEAR(core_types::contactEffectiveWidth(m, 0.0), 0.1, 1e-12);     // min factor 0.5
+}
+
+TEST(ContactArea, TiltAndConvexCurvatureNarrowTheContact)
+{
+  core_types::ContactAreaModel m;
+  m.pad_width_m = 0.2;
+  m.pad_stiffness_n_per_m = 5000.0;
+  EXPECT_NEAR(core_types::contactEffectiveWidth(m, 10.0, 60.0, 0.0), 0.1, 1e-12);
+  // R = 0.1 m, d = 10 / 5000 = 2 mm: chord = 2 sqrt(2 * 0.1 * 0.002) = 0.0400
+  EXPECT_NEAR(core_types::contactEffectiveWidth(m, 10.0, 0.0, 10.0), 0.04, 1e-4);
+  EXPECT_NEAR(core_types::contactEffectiveWidth(m, 10.0, 0.0, 0.1), 0.2, 1e-12);  // flat enough
+  EXPECT_THROW(core_types::contactEffectiveWidth(m, -1.0, 0.0, 0.0), std::invalid_argument);
+  EXPECT_THROW(core_types::contactEffectiveWidth(m, 1.0, 90.0, 0.0), std::invalid_argument);
+}
+
+TEST(ContactArea, PressureAndValidation)
+{
+  core_types::ContactAreaModel m;
+  m.pad_width_m = 0.2;
+  EXPECT_DOUBLE_EQ(core_types::contactPressurePa(m, 10.0), 0.0);   // no pad length
+  m.pad_length_m = 0.1;
+  EXPECT_NEAR(core_types::contactPressurePa(m, 10.0), 10.0 / (0.2 * 0.1), 1e-9);
+  m.min_width_factor = 1.2;
+  EXPECT_THROW(core_types::validateContactArea(m), std::invalid_argument);
+}
