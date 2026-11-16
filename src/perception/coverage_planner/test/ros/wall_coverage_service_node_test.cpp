@@ -1,6 +1,6 @@
 // ROS-level tests for wall_coverage_service_node: ~/start and ~/stop, and the full chain
 // (wall scene -> coverage_planner_node service -> lifted plan on ~/coverage_plan).
-// The two node sources are compiled into this test with main() renamed away (see CMakeLists).
+// The two node sources are included here with their main() renamed away.
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -9,8 +9,12 @@
 #include <mutex>
 #include <thread>
 
-#include "coverage_planner/ros/coverage_planner_node.hpp"
-#include "coverage_planner/ros/wall_coverage_service_node.hpp"
+#define main coverage_planner_node_main
+#include "../../src/ros/coverage_planner_node.cpp"
+#undef main
+#define main wall_coverage_service_node_main
+#include "../../src/ros/wall_coverage_service_node.cpp"
+#undef main
 
 using namespace std::chrono_literals;
 using Trigger = std_srvs::srv::Trigger;

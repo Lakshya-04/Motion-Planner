@@ -196,11 +196,7 @@ if(BUILD_TESTING)
   if(PCL_FOUND)
     ament_add_gtest(test_wall_coverage_service_node
       test/ros/wall_coverage_service_node_test.cpp
-      src/ros/wall_coverage_service_node.cpp src/ros/coverage_planner_node.cpp
       TIMEOUT 180)
-    set_source_files_properties(
-      src/ros/wall_coverage_service_node.cpp src/ros/coverage_planner_node.cpp
-      PROPERTIES COMPILE_DEFINITIONS "main=unused_node_main")
     target_link_libraries(test_wall_coverage_service_node
       coverage_planner_pcd ros_adapters::ros_adapters ${coverage_planner_msgs_TARGETS})
     ament_target_dependencies(test_wall_coverage_service_node
