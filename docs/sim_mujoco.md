@@ -670,6 +670,32 @@ over the next second 0.008 rad/s (the unload ramp makes the cancel take 1.65 s f
 was cancelled, the retry arrived (3.9 mm) and the stand ran (that run was stopped early). The flaky first dock and the failed
 stow of those runs are explained in "Why the first dock and the stow failed" above.
 
+#### Mission ledger and resume (`feat/mission-ledger`)
+
+The manager keeps a durable ledger of the mission: per column (and the stand that ran it) one of PENDING, RUNNING, DONE, SKIPPED
+or FAILED, with a typed reason for SKIPPED (`NAV_FAILED`, `DOCK_FAILED`, `PLAN_FAILED`, `CONTACT_OVERLOAD`). It is a JSON file
+written atomically (temp file, then rename) after every state change; `core/mission_ledger.hpp`, ROS-free. Switch it on with
+the manager parameter `ledger_path: /some/dir/mission.json` (empty = off, the old behaviour). The mission id is a hash of the
+plan file's content, so a changed plan never resumes from an old ledger. A column is the unit (the manager runs a wall column as
+one segment); the stand is kept for information only, since stands are planned again after a restart.
+
+- `ExecuteCoverage.Goal.resume: true` keeps the ledger of the same plan and runs only the columns not DONE; RUNNING (the process
+  died in them), PENDING, FAILED (partial) and SKIPPED for a navigation, dock or plan failure are run again. Columns skipped
+  for `CONTACT_OVERLOAD` are not run again by a resume (no blind retry; clear the ledger or send `resume: false` to retry
+  them) and are reported as failed. `resume: false` (default) starts over. A corrupted ledger file is moved to
+  `<path>.corrupt` and the mission starts empty. In multi-stand runs only the unfinished columns are given to `plan_stands`.
+- Contact overload: with `contact_overload_n: 40.0` (0 = off) a column whose tool force passed that limit and did not finish
+  is skipped as `CONTACT_OVERLOAD` and is not retried by `column_retries`.
+- Pause and resume: `ros2 topic pub --once /manipulation_manager/mission_command std_msgs/msg/String "{data: pause}"` (or
+  `resume`). A pause takes effect at the next column boundary (the mission FSM, `core/mission_fsm.hpp`: IDLE, ACTIVE, PAUSED,
+  STOPPED, RECOVERY); the stroke in flight is not interrupted. Cancel is unchanged and works while paused.
+
+Acceptance test (kill mid-wall, restart, only unfinished segments rerun): start `run_multi_stand_pass.sh` with
+`MULTI_STAND_MANAGER_EXTRA` set to `ledger_path: /tmp/mission.json`, kill the manager (`pkill -f manipulation_manager_node`)
+while the second or third column is stroking, restart it with the same parameters and send the same goal with `resume: true` (`execute_coverage_client.py --multi-stand --resume`);
+the log says `resume: N column(s) already settled in the ledger, M to run` and only the columns that were not DONE are docked
+and stroked. The gtest `MissionLedger.KillMidWallRestartRerunsOnlyUnfinished` runs this sequence on the ledger without the sim.
+Not run in the sim yet (the machine was too loaded); not run on hardware.
 
 #### Sensed wall (M4 exit test)
 
