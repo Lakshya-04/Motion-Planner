@@ -81,8 +81,30 @@ class Primitive:
         return f'Primitive({self.name}, {self.kind}, pos={self.pos}, size={self.size}, role={self.role})'
 
 
+def _free_rects(u0, u1, v0, v1, holes):
+    """The rectangle (u0..u1, v0..v1) minus the rectangles `holes` (u_min, u_max, v_min, v_max), as a list of
+    rectangles: cut along every hole's u edges, then keep the v stretches of each slab that no hole covers."""
+    cuts = sorted({u0, u1} | {c for h in holes for c in h[:2] if u0 < c < u1})
+    rects = []
+    for a, b in zip(cuts, cuts[1:]):
+        spans = sorted((max(h[2], v0), min(h[3], v1)) for h in holes if h[0] < b and h[1] > a and h[2] < v1 and h[3] > v0)
+        v = v0
+        for lo, hi in spans:
+            if lo > v:
+                rects.append((a, b, v, lo))
+            v = max(v, hi)
+        if v < v1:
+            rects.append((a, b, v, v1))
+    return rects
+
+
 def walls_from_scan(scene, thickness=0.1, wall_ids=None, with_obstacles=True):
-    """Primitives from a coverage-planner `wall_scene.json` dict."""
+    """Primitives from a coverage-planner `wall_scene.json` dict.
+
+    An obstacle with `"kind": "opening"` (a window or door hole) is not a box: the wall is cut around its
+    `uv_on_wall` rectangle instead (the wall becomes several boxes, `wall_<id>`, `wall_<id>_1`, ...).
+    Every other obstacle is an oriented box (`box_center_xyz`, `box_extents_uvn`, `box_orientation_xyzw`).
+    """
     prims = []
     for wall in scene['walls']:
         if wall_ids is not None and wall['id'] not in wall_ids:
@@ -92,15 +114,24 @@ def walls_from_scan(scene, thickness=0.1, wall_ids=None, with_obstacles=True):
         v = _cross(n, u)  # right-handed (u, v, n); equals basis_v up to scan noise
         u0, u1 = wall['u_range_m']
         v0, v1 = wall['v_range_m']
+        holes = []
+        if with_obstacles:
+            holes = [(ob['uv_on_wall']['u'][0], ob['uv_on_wall']['u'][1], ob['uv_on_wall']['v'][0],
+                      ob['uv_on_wall']['v'][1]) for ob in scene.get('obstacles', [])
+                     if ob.get('kind') == 'opening' and ob.get('parent_wall') == wall['id']]
         # origin_xyz is on the plane at (u, v) = (0, 0)
         o = wall['origin_xyz']
-        cu, cv = (u0 + u1) / 2, (v0 + v1) / 2
-        centre = tuple(o[i] + u[i] * cu + v[i] * cv - n[i] * thickness / 2 for i in range(3))
-        prims.append(Primitive(f'wall_{wall["id"]}', 'box', centre, quat_from_matrix([u, v, n]),
-                               ((u1 - u0) / 2, (v1 - v0) / 2, thickness / 2), 'contact_surface'))
+        for i, (a, b, c, d) in enumerate(_free_rects(u0, u1, v0, v1, holes)):
+            cu, cv = (a + b) / 2, (c + d) / 2
+            centre = tuple(o[k] + u[k] * cu + v[k] * cv - n[k] * thickness / 2 for k in range(3))
+            name = f'wall_{wall["id"]}' + (f'_{i}' if i else '')
+            prims.append(Primitive(name, 'box', centre, quat_from_matrix([u, v, n]),
+                                   ((b - a) / 2, (d - c) / 2, thickness / 2), 'contact_surface'))
     if with_obstacles:
         for ob in scene.get('obstacles', []):
             if wall_ids is not None and ob.get('parent_wall') not in wall_ids:
+                continue
+            if ob.get('kind') == 'opening':
                 continue
             x, y, z, w = ob['box_orientation_xyzw']
             prims.append(Primitive(f'obstacle_{ob["id"]}', 'box', tuple(ob['box_center_xyz']),

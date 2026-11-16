@@ -5,6 +5,8 @@
 #   (navigate_to_stand), run its columns in the world (odom) frame -> next stand.
 # The wall is MULTI_STAND_WALL_WIDTH wide (default 0.9 m, the stock patch is 0.3) starting at y = MULTI_STAND_WALL_DY,
 # at x = 0.98 + MULTI_STAND_WALL_DX (shift_wall_scene.py). Run, record in odom and score like run_stand_pass.sh.
+#   MULTI_STAND_SCENARIO=name      a wall from make_scenario_scene.py (size, position and obstacles) instead of the DX/DY/WIDTH ones
+#   MULTI_STAND_COVERAGE_EXTRA     more ros arguments of the coverage demo (-p obstacle_inflation_radius_m:=0.07)
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented), e.g. `stand_nav_timeout_s: 2.0` to make
@@ -26,7 +28,12 @@ mkdir -p "$OUT"
 COV=$OUT/coverage_output.json
 REC=$OUT/run.csv
 
-python3 "$PKG/lib/sim_mujoco/shift_wall_scene.py" "$SHARE/data" "$OUT/data" "$DX" "$DY" "$WIDTH" || exit 2
+# MULTI_STAND_SCENARIO=name takes the wall and its obstacles from make_scenario_scene.py (it sets DX, DY and WIDTH)
+if [ -n "${MULTI_STAND_SCENARIO:-}" ]; then
+  eval "$(python3 "$PKG/lib/sim_mujoco/make_scenario_scene.py" "$SHARE/data" "$OUT/data" "$MULTI_STAND_SCENARIO")" || exit 2
+else
+  python3 "$PKG/lib/sim_mujoco/shift_wall_scene.py" "$SHARE/data" "$OUT/data" "$DX" "$DY" "$WIDTH" || exit 2
+fi
 WALL_X=$(python3 -c "print(0.98 + $DX)")
 WALL_Y0=$(python3 -c "print($DY)")
 WALL_Y1=$(python3 -c "print($WIDTH + $DY)")
@@ -67,7 +74,7 @@ sleep 3
 timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args \
   -p wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json -p output_json:=$COV \
   -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${MULTI_STAND_TOOL_YAW:--90.0} \
-  -p swath_m:=${MULTI_STAND_SWATH:-0.14} -p overlap_pct:=${MULTI_STAND_OVERLAP:-15.0} > "$OUT/coverage_demo.log" 2>&1 &
+  -p swath_m:=${MULTI_STAND_SWATH:-0.14} -p overlap_pct:=${MULTI_STAND_OVERLAP:-15.0} ${MULTI_STAND_COVERAGE_EXTRA:-} > "$OUT/coverage_demo.log" 2>&1 &
 DEMO=$!
 for _ in $(seq 100); do [ -s "$COV" ] && break; sleep 0.5; done
 kill -INT $DEMO 2>/dev/null
@@ -104,7 +111,7 @@ ${MULTI_STAND_MANAGER_EXTRA:-}
 YAML
 
 python3 "$PKG/lib/sim_mujoco/record_run.py" --record "$REC" --timeout 3000 --frame odom --wall-x "$WALL_X" \
-  --wall-y $WALL_Y0 $WALL_Y1 --wall-z 1.0 1.3 > "$OUT/record.log" 2>&1 &
+  --wall-y $WALL_Y0 $WALL_Y1 --wall-z 1.0 1.3 --scene "$OUT/data/wall_pass_coverage_scene.json" > "$OUT/record.log" 2>&1 &
 REC_PID=$!
 sleep 25   # sim, controllers and move_group up
 

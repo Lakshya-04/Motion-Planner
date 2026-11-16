@@ -124,6 +124,9 @@ struct ObstacleRegion
   double u_max{0.0};
   double v_min{0.0};
   double v_max{0.0};
+  /// How far the obstacle stands off the wall (m, against the wall basis normal u x v, which points into the
+  /// wall); 0 for a flush region (a window opening). Only the run scorecard's collision check reads it.
+  double height_m{0.0};
 };
 
 }  // namespace coverage_planner
