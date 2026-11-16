@@ -5,6 +5,7 @@
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -25,4 +26,13 @@ def generate_launch_description():
     params = {k: ParameterValue(LaunchConfiguration(k), value_type=v[1]) for k, v in args.items()}
     node = Node(package='wall_detector', executable='wall_detector_node', name='wall_detector',
                 output='screen', parameters=[params])
-    return LaunchDescription([*declared, node])
+    # Octomap -> distance field for the planners (needs move_group with live_octomap:=true).
+    esdf = Node(package='wall_detector', executable='octomap_esdf_node', name='octomap_esdf', output='screen',
+                condition=IfCondition(LaunchConfiguration('esdf')),
+                parameters=[{'center': [0.8, 0.0, 1.0], 'dims': [1.6, 1.6, 1.6],
+                             'voxel_size': ParameterValue(LaunchConfiguration('esdf_voxel_size'), value_type=float)}])
+    return LaunchDescription([
+        DeclareLaunchArgument('esdf', default_value='false',
+                              description='also run octomap_esdf_node (planning-scene octomap -> ~/esdf)'),
+        DeclareLaunchArgument('esdf_voxel_size', default_value='0.05', description='ESDF voxel size, m'),
+        *declared, node, esdf])
