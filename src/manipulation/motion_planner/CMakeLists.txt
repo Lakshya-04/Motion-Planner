@@ -90,7 +90,7 @@ if(BUILD_TESTING)
   ament_add_gtest(time_parameterization_test test/core/time_parameterization_test.cpp)
   target_link_libraries(time_parameterization_test motion_planner_core)
 
-  ament_add_gtest(planning_pipeline_testtest/core/planning_pipeline_test.cpp)
+  ament_add_gtest(planning_pipeline_test test/core/planning_pipeline_test.cpp)
   target_link_libraries(planning_pipeline_test motion_planner_ros)
 
   if(PCL_FOUND)
