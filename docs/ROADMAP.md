@@ -217,7 +217,7 @@ without code, when we can implement it.
 ## 15. Tests and quality
 
 - [x] 736 colcon tests in 26 packages, 0 failures; Python tests for description, profiles, sim generators, tools
-- [ ] Tests for the coverage ROS nodes, more for JTAC (3 files) and the manager node
+- [x] Tests for the coverage ROS nodes (`coverage_planner_node`, `wall_coverage_service_node`), the JTAC compliance port and the manager run reporter; `docker/run_all_checks.sh` runs everything that needs no simulator
 - [ ] Sim end-to-end checks as a test target (sections 10 and 11)
 - [ ] Planner-level benchmark on shared scenarios (section 5)
 
