@@ -47,7 +47,7 @@ maintainer and are not changed by anything here: the email address in the `@auth
 
 ## Checks
 
-Run the single command set in [docker.md](docker.md#run-all-checks) from a clean checkout, and the Markdown
+Run `docker/run_all_checks.sh` (the command set in [docker.md](docker.md#run-all-checks)) from a clean checkout, and the Markdown
 link check for what changed. State in the release notes which of those were run and which were not
 (for example GPU, MuJoCo and Gazebo scripts) and that nothing has been verified on hardware.
 

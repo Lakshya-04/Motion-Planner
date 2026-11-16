@@ -28,7 +28,8 @@ install(PROGRAMS scripts/generate_mjcf scripts/smoke_test.py scripts/contact_tes
   scripts/run_multi_stand_pass.sh scripts/execute_coverage_client.py scripts/make_scenario_scene.py scripts/run_scenarios.sh
   DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/run_spray_pass.sh DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/depth_wall_test.py scripts/run_depth_wall.sh DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/depth_wall_test.py scripts/run_depth_wall.sh
+  scripts/wall_docking_test.py scripts/run_wall_docking.sh DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch test/data DESTINATION share/${PROJECT_NAME})
 
 if(MUJOCO_INCLUDE_DIR AND MUJOCO_LIBRARY)

@@ -406,6 +406,23 @@ if(BUILD_TESTING)
     )
   endif()
 
+  # CompliancePort of the JTAC variant against a stand-in controller node (parameters and topics).
+  ament_add_gtest(test_jtac_compliance_port
+    test/test_jtac_compliance_port.cpp
+    TIMEOUT 120
+  )
+  if(TARGET test_jtac_compliance_port)
+    target_link_libraries(test_jtac_compliance_port
+      jtac_controller_compliance_port
+      core_types::core_types
+    )
+    ament_target_dependencies(test_jtac_compliance_port
+      geometry_msgs
+      rclcpp
+      std_msgs
+    )
+  endif()
+
   # Input checks of the probe / wall-approach nodes (no-lift profile, failed load, other arm).
   ament_add_gtest(test_pose_inputs
     test/test_pose_inputs.cpp

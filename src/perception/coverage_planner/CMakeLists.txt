@@ -185,6 +185,25 @@ if(BUILD_TESTING)
   ament_add_gtest(test_conversions test/ros/conversions_test.cpp)
   target_link_libraries(test_conversions coverage_planner_core ${coverage_planner_msgs_TARGETS})
   ament_target_dependencies(test_conversions nav_msgs geometry_msgs)
+
+  # ROS node tests: the node classes run in-process and are driven through their real services.
+  # The node sources are compiled into the tests with main() renamed away.
+  ament_add_gtest(test_coverage_planner_node test/ros/coverage_planner_node_test.cpp TIMEOUT 120)
+  target_link_libraries(test_coverage_planner_node
+    coverage_planner_core ros_adapters::ros_adapters ${coverage_planner_msgs_TARGETS})
+  ament_target_dependencies(test_coverage_planner_node
+    rclcpp nav_msgs geometry_msgs std_msgs visualization_msgs)
+  if(PCL_FOUND)
+    ament_add_gtest(test_wall_coverage_service_node
+      test/ros/wall_coverage_service_node_test.cpp
+      TIMEOUT 180)
+    target_link_libraries(test_wall_coverage_service_node
+      coverage_planner_pcd ros_adapters::ros_adapters ${coverage_planner_msgs_TARGETS})
+    ament_target_dependencies(test_wall_coverage_service_node
+      rclcpp ament_index_cpp nav_msgs geometry_msgs std_srvs std_msgs visualization_msgs)
+    target_compile_definitions(test_wall_coverage_service_node PUBLIC
+      WALL_SCENE_SAMPLE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test/data/wall_scene.json")
+  endif()
 endif()
 
 ament_export_targets(export_coverage_planner_core HAS_LIBRARY_TARGET)

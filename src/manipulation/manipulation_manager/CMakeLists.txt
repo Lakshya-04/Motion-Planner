@@ -149,6 +149,11 @@ if(BUILD_TESTING)
       motion_planner_moveit::motion_planner_moveit_lib)
   endif()
 
+  ament_add_gtest(motion_exec_reporter_test test/motion_exec_reporter_test.cpp)
+  if(TARGET motion_exec_reporter_test)
+    target_link_libraries(motion_exec_reporter_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
   ament_add_gtest(coverage_feasibility_analyzer_test
     test/coverage_feasibility_analyzer_test.cpp
   )
