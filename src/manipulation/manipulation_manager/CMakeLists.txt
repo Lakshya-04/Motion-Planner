@@ -152,6 +152,16 @@ if(BUILD_TESTING)
     target_link_libraries(wall_direction_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
+  ament_add_gtest(travel_pose_test test/travel_pose_test.cpp)
+  if(TARGET travel_pose_test)
+    target_link_libraries(travel_pose_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(joint_names_test test/joint_names_test.cpp)
+  if(TARGET joint_names_test)
+    target_link_libraries(joint_names_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
   ament_add_gtest(coverage_task_test test/coverage_task_test.cpp)
   if(TARGET coverage_task_test)
     target_link_libraries(coverage_task_test ${PROJECT_NAME}_core core_types::core_types)

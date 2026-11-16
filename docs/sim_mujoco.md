@@ -483,12 +483,55 @@ passes (0.45 to 0.49) and was not investigated. `MULTI_STAND_CANCEL_AFTER_S=N` c
 afterwards; `MULTI_STAND_MANAGER_EXTRA` adds manager parameters (for example `stand_nav_timeout_s: 2.0` to watch a stand being
 skipped).
 
-The repeat run on the final build did **not** pass: column 8 (the last of stand 0) pressed with a spike, its contact stroke
-aborted, the retract then failed in 11 ms of planning (the tool was left in collision with the wall) and so did the stow, so
-stand 1 was reported "not reached (could not stow the arm for the drive)" and its three columns failed: 5 done, 4 failed, scorer
-coverage 0.672, peak 97 N, RMS 9.3 N. The failure handling did what it should (recorded, went on, per-stand result) but the pass
-is not reliable yet: roughly one stroke in a long run still ends with the tool jammed in the wall box, and nothing recovers the
-arm from there (a back-off along the wall normal before the retract would be the first thing to try). Two runs, one pass.
+The repeat run on that build did **not** pass: column 8 (the last of stand 0) pressed with a spike, its contact stroke
+aborted, the retract then failed in 11 ms of planning and so did the stow, so stand 1 was reported "not reached (could not stow
+the arm for the drive)" and its three columns failed: 5 done, 4 failed, scorer coverage 0.672, peak 97 N, RMS 9.3 N.
+
+#### Why the first dock and the stow failed
+
+Found by reading `move_group`'s log next to the manager's for the failing runs:
+
+1. **The "live" arm state was the all-zero pose.** The manager reads the arm's live joints from `/joint_states` by name, and the
+   names it had were an earlier arm's (`lift_prismatic_joint`, `joint1` ...), not this robot's (`lift_joint`,
+   `arm_shoulder_pan_joint` ...). A missing name silently became 0.0, so `prime_continuity` ("move to where the arm already is")
+   drove the arm to all zeros: the UR10e fully stretched out (tool at x 1.184 m in `base_footprint`, the reach of the arm) and the
+   lift on its lower end stop. That move took 20 s, and everything after started from that pose: the first dock had to plan out of a
+   pose that touches `arm_upper_arm_link` and `lift_carriage_link` (the "collision truncation at link pair" warnings), so RRTConnect
+   timed out at its 5 s limit two or three times before one random seed found a way (59 ms); and the stow target was the same
+   zero pose. With the lift at 0.0 the measured lift settles 0.1 to 1.5 mm below its lower limit, and then MoveIt's
+   `CheckStartStateBounds` rejects the start state of every plan in 9 ms ("Joint 'lift_joint' from the starting state is outside
+   bounds by -0.00155"): the stow and every dock of the next stand failed that way (seen in 3 of 6 runs; each cost 3 columns).
+   Fix: the names are a parameter (`group_joint_names`, default: this robot's, then the earlier arm's, picked by what
+   `/joint_states` carries), a missing joint is an error instead of 0.0 (no priming, a clear message; `multi_stand` refuses to run
+   without a travel pose), the prime move is now a no-op (101 ms instead of 20 s), the stow pose is the real starting pose, and it
+   is kept 10 mm off the lift's end stops (`travel_lift_margin_m`). `OmplPlanner` also clamps an explicit start state into the
+   joint bounds.
+2. **A free-space plan to a pose 4 cm from the wall ends with the tool mount in the wall voxels.** `ValidateSolution` rejected
+   OMPL plans whose last states hit `<octomap>` with `tool_mount_link`, or the goal sampling timed out. The dock now stops
+   `dock_approach_extra_m` (0.1 m in the script) short of the dock pose in free space and a 10 cm straight move closes the gap.
+3. **A tool left in the wall (or the arm in self-collision at the end of its reach) cannot be planned out of.** Start states in
+   collision are refused by `CheckStartStateCollision`. `wall_clear_command` (set in the script) lets a failed retract or stow be
+   retried with the wall out of the scene (`world_model_loader_node -p clear:=true`), the wall is put back afterwards with the
+   arrival command. This helps for the wall box only; the other jam below is self-collision.
+
+Runs of `run_multi_stand_pass.sh` (UR10e, 9 columns, 0.01 m/s, one at a time on a shared machine; coverage / peak / RMS error):
+
+| build | passed | runs |
+| --- | --- | --- |
+| before (names wrong) | 1 of 2 | 0.977 / 20.9 N / 3.51 N pass; 0.672 / 97 N / 9.3 N fail (stow) |
+| approach + wall-clear + lift margin | 3 of 4 | 0.977 / 249 N / 10.8 N; 0.977 / 18.9 N / 3.08 N; 0.644 / 27.7 N / 2.3 N fail (stand 1 docks, lift out of bounds); 0.909 / 82.5 N / 3.58 N (8 of 9 columns) |
+| + joint names | 3 of 4 | 0.977 / 22.8 N / 2.73 N; 0.977 / 19.5 N / 3.45 N; 0.977 / 18.8 N / 3.21 N; 0.415 / 263 N / 28.6 N fail |
+
+With the joint names fixed the lift never went out of bounds again and the first approach plans in 0.1 to 0.5 s when it works; the
+remaining OMPL timeouts (one or two 5 s tries on the first approach of a stand in 2 of 4 runs) are still there and still covered by
+`dock_attempts: 6`. The one failed run lost stand 1 differently: the contact stroke of its column 2 aborted at the reach limit, and
+the arm ended in self-collision (`arm_upper_arm_link` with `lift_carriage_link`, `arm_forearm_link` with `arm_wrist_3_link`), so
+`CheckStartStateCollision` refused the retract and the stow for the rest of the run. That is not the wall, and the wall-clear retry
+cannot help; a recovery that moves out of a self-collision (a joint-space jog, or allowing those link pairs for the one move) is not
+built. Peaks of 83 to 263 N in three of the eight runs (the failed one and two passing ones) were not investigated beyond that.
+
+`run_manager_pass.sh` (three columns, no stand change) after the same changes: scorer passes, coverage 0.931, peak 19.6 N, RMS 3.57 N,
+in-band 0.48, all three columns done (one run); its prime move is now a no-op as well.
 
 What it took, honestly: without `stand_max_span_m` the planner returns **one** stand "reaching" 54 poses for the 0.9 m wall
 (stand at y 0.11, 0.2 to 1.1 m of wall to its side), and the run from it failed: two of nine columns could not dock, the rest
@@ -501,10 +544,8 @@ Checked in the same script (one run each): **cancel** 100 s in, during the strok
 over the next second 0.008 rad/s (the unload ramp makes the cancel take 1.65 s from request to result); **navigation failure**
 (`stand_nav_timeout_s: 0.5`, `stand_nav_attempts: 1`): both stands skipped, result `0 done, 0 partial, 9 failed` with each stand
 "not reached (navigation timed out)" and its columns listed as failed; with `stand_nav_timeout_s: 2.0` the first attempt timed out,
-was cancelled, the retry arrived (3.9 mm) and the stand ran (that run was stopped early). Dock failures: in that run the first two
-dock attempts of the first column ended in OMPL's 5 s search timeout and the third succeeded in 59 ms; the same pattern as the
-flaky first dock noted for the stand pass. The cause was not found (it looks like a stale start state or scene right after the
-arrival, not the goal: the same dock pose is trivial on a later try); `dock_attempts: 6` covers it.
+was cancelled, the retry arrived (3.9 mm) and the stand ran (that run was stopped early). The flaky first dock and the failed
+stow of those runs are explained in "Why the first dock and the stow failed" above.
 
 
 #### Sensed wall (M4 exit test)

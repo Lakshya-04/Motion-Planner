@@ -51,6 +51,8 @@
 #include "manipulation_manager/core/frame_transform.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
+#include "manipulation_manager/core/joint_names.hpp"
+#include "manipulation_manager/core/travel_pose.hpp"
 #include "manipulation_manager/core/wall_direction.hpp"
 #include "manipulation_manager/ros/coverage/coverage_output_json_source.hpp"
 #include "manipulation_manager/ros/execution/jtac_execution_adapter.hpp"
@@ -68,10 +70,19 @@ namespace
 // instantly-aborted (not a real search-timeout) planning failure regardless of the robot's
 // actual configuration. Reading /joint_states directly and priming continuity with it (see
 // primeContinuityFromLiveState() below) sidesteps the query entirely for the first segment.
-const std::vector<std::string> kGroupJointOrder = {
-  "lift_prismatic_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"};
+// The joint names of the planning group, in the group's order, as /joint_states publishes them: the repo's robot
+// (UR10e on the telescopic lift) first, then the names of an earlier arm. The `group_joint_names` parameter
+// overrides both.
+const std::vector<std::vector<std::string>> kJointNameCandidates = {
+  {"lift_joint", "arm_shoulder_pan_joint", "arm_shoulder_lift_joint", "arm_elbow_joint",
+    "arm_wrist_1_joint", "arm_wrist_2_joint", "arm_wrist_3_joint"},
+  {"lift_prismatic_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"}};
 
-std::vector<double> readCurrentJointState(const rclcpp::Node::SharedPtr & node)
+/// The group's live joint values, or empty when /joint_states does not carry the group's joints (within 2 s).
+/// An earlier version filled a missing joint with 0.0: with names that did not match the robot the "live" state
+/// was the all-zero pose, and moving the arm "back" to it stretched the UR10e out and put the lift on its stop.
+std::vector<double> readCurrentJointState(
+  const rclcpp::Node::SharedPtr & node, const std::vector<std::string> & configured_names)
 {
   std::map<std::string, double> latest;
   auto sub = node->create_subscription<sensor_msgs::msg::JointState>(
@@ -80,16 +91,29 @@ std::vector<double> readCurrentJointState(const rclcpp::Node::SharedPtr & node)
         latest[msg->name[i]] = msg->position[i];
       }
     });
+  std::vector<std::vector<std::string>> candidates;
+  if (!configured_names.empty()) {
+    candidates.push_back(configured_names);
+  } else {
+    candidates = kJointNameCandidates;
+  }
+  std::vector<std::string> names;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-  while (rclcpp::ok() && latest.size() < kGroupJointOrder.size() &&
-    std::chrono::steady_clock::now() < deadline)
-  {
+  while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
     rclcpp::spin_some(node);
+    std::vector<std::string> available;
+    for (const auto & kv : latest) {
+      available.push_back(kv.first);
+    }
+    names = selectJointNames(candidates, available);
+    if (!names.empty()) {
+      break;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
   std::vector<double> result;
-  for (const auto & name : kGroupJointOrder) {
-    result.push_back(latest.count(name) ? latest.at(name) : 0.0);
+  for (const auto & name : names) {
+    result.push_back(latest.at(name));
   }
   return result;
 }
@@ -154,6 +178,10 @@ public:
     dock_standoff_ = this->declare_parameter<double>("dock_standoff_m", 0.12);
     // OMPL is randomised; from a base that turned side-on to the wall a dock sometimes needs more tries.
     dock_attempts_ = this->declare_parameter<int>("dock_attempts", 3);
+    // The free-space move of a dock stops this far short of the dock pose and a short straight move closes the
+    // gap (0 = plan straight to the dock pose). Planning to a pose a few cm from the wall fails or times out
+    // when the tool mount clips the wall voxels on the way in; see docs/sim_mujoco.md.
+    dock_approach_extra_m_ = this->declare_parameter<double>("dock_approach_extra_m", 0.0);
     contact_y_overshoot_ = this->declare_parameter<double>("contact_y_overshoot_m", 0.045);
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
@@ -175,6 +203,9 @@ public:
       "base_check_service", "/reachability/plan_stands");
     base_check_lift_min_ = this->declare_parameter<double>("base_check_lift_min_m", 0.0);
     base_check_lift_max_ = this->declare_parameter<double>("base_check_lift_max_m", 0.0);
+    // The stow pose is kept this far inside the lift's travel (base_check_lift_min_m .. max_m): a lift sent to its
+    // end stop settles beyond it and MoveIt then refuses every plan ("start state out of bounds"). 0 = as is.
+    travel_lift_margin_ = this->declare_parameter<double>("travel_lift_margin_m", 0.01);
     base_check_arm_mount_z_ = this->declare_parameter<double>("base_check_arm_mount_z_m", 0.0);
     base_check_tol_xy_ = this->declare_parameter<double>("base_check_tol_xy_m", 0.15);
     base_check_tol_yaw_ = this->declare_parameter<double>("base_check_tol_yaw_rad", 0.1);
@@ -201,10 +232,18 @@ public:
     stand_max_span_ = this->declare_parameter<double>("stand_max_span_m", 0.0);
     // A shell command run after each arrival at a stand, before its columns (empty = none).
     arrival_command_ = this->declare_parameter<std::string>("stand_arrival_command", "");
+    // A shell command that takes the wall out of the planning scene. With it (and the arrival command, which
+    // puts the wall back) a failed retract or stow is retried once without the wall: a tool left in the
+    // wall box has a start state in collision, and no planner will move it out of one.
+    wall_clear_command_ = this->declare_parameter<std::string>("wall_clear_command", "");
     nav_attempts_ = this->declare_parameter<int>("stand_nav_attempts", 2);
     nav_timeout_s_ = this->declare_parameter<double>("stand_nav_timeout_s", 240.0);
     travel_joint_state_ = this->declare_parameter<std::vector<double>>(
       "travel_joint_state", std::vector<double>{});
+    // The planning group's joints in the group's order as /joint_states names them (empty = the repo's UR10e and
+    // lift names, then the earlier arm's), used to read the live arm state.
+    group_joint_names_ = this->declare_parameter<std::vector<std::string>>(
+      "group_joint_names", std::vector<std::string>{});
     // Where the tool's force is read for the feedback's and result's peak ("" = not read, peak -1).
     const auto force_topic = this->declare_parameter<std::string>(
       "force_topic", "/ft_conditioner/wrench_conditioned");
@@ -576,8 +615,15 @@ private:
     machine.startMulti();
     setState("planning_stands");
     // The arm's pose before it first moves: what it goes back to before every drive.
-    travel_state_ = travel_joint_state_.size() == kGroupJointOrder.size() ?
-      travel_joint_state_ : readCurrentJointState(shared_from_this());
+    travel_state_ = !travel_joint_state_.empty() ?
+      travel_joint_state_ : readCurrentJointState(shared_from_this(), group_joint_names_);
+    if (travel_state_.empty()) {
+      why = "no travel pose: /joint_states does not carry the planning group's joints (set group_joint_names or "
+        "travel_joint_state)";
+      return false;
+    }
+    travel_state_ = keepLiftOffEndStops(
+      travel_state_, base_check_lift_min_, base_check_lift_max_, travel_lift_margin_);
     arm_deployed_ = false;
 
     std::vector<StanceStand> stands;
@@ -866,8 +912,34 @@ private:
     }
   }
 
-  /// The arm to its travel pose (a free-space move), so the base can drive without the tool near the wall.
-  bool stowArm()
+  /// True when a failed motion can be retried with the wall out of the scene (both commands are set).
+  bool canRecoverWithoutWall() const
+  {
+    return !wall_clear_command_.empty() && !arrival_command_.empty();
+  }
+
+  /// Runs `motion` with the wall taken out of the planning scene, then puts the wall back. For a tool that
+  /// ended up inside the wall box: its start state is in collision and every planner refuses it. The move out
+  /// is the same straight one the retract or stow plans anyway; only the wall is not an obstacle for it.
+  template<typename Motion>
+  bool withWallCleared(const char * what, Motion motion)
+  {
+    RCLCPP_WARN(this->get_logger(), "%s failed: retrying with the wall out of the planning scene", what);
+    if (std::system(wall_clear_command_.c_str()) != 0) {
+      RCLCPP_WARN(this->get_logger(), "wall_clear_command failed; the %s recovery is skipped", what);
+      return false;
+    }
+    waitFor(0.5, false);
+    const bool ok = motion();
+    if (std::system(arrival_command_.c_str()) != 0) {
+      RCLCPP_WARN(this->get_logger(), "stand_arrival_command exited with an error after the %s recovery", what);
+    }
+    waitFor(1.0, false);
+    return ok;
+  }
+
+  /// One pass of the stow attempts (a free-space move to the travel pose).
+  bool stowAttempts()
   {
     MotionSegmentSpec seg;
     seg.label = "stow";
@@ -880,6 +952,18 @@ private:
       RCLCPP_WARN(this->get_logger(), "stow attempt %d failed", attempt + 1);
     }
     return false;
+  }
+
+  /// The arm to its travel pose (a free-space move), so the base can drive without the tool near the wall.
+  bool stowArm()
+  {
+    if (stowAttempts()) {
+      return true;
+    }
+    if (stop() || !canRecoverWithoutWall()) {
+      return false;
+    }
+    return withWallCleared("stow", [this]() {return stowAttempts();});
   }
 
   /// The plan_stands request for the targets of `wall`, with the lift range and arm mount of the base check.
@@ -1048,7 +1132,14 @@ private:
   /// before the first real segment, see this file's own readCurrentJointState() comment for why.
   void primeContinuityFromLiveState()
   {
-    const auto live_state = readCurrentJointState(shared_from_this());
+    const auto live_state = readCurrentJointState(shared_from_this(), group_joint_names_);
+    if (live_state.empty()) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "primeContinuityFromLiveState: /joint_states does not carry the planning group's joints "
+        "(group_joint_names) -- no priming, the first segment plans from the planner's own current state");
+      return;
+    }
     MotionSegmentSpec prime_seg;
     prime_seg.label = "prime_continuity";
     prime_seg.mode_hint = "fsp";
@@ -1116,6 +1207,19 @@ private:
     // attempt before giving up); dock deserves the same tolerance.
     MotionExec dock_exec;
     for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
+      if (dock_approach_extra_m_ > 0.0) {
+        MotionSegmentSpec approach_seg = dock_seg;
+        approach_seg.label = intent.label + "_approach";
+        const auto approach_exec = manager_.executeMotionSegments(
+          frame_id_, {approach_seg}, {wall_dir.approachPose(standoff_pose, dock_approach_extra_m_)},
+          planning_group_);
+        if (!approach_exec.success) {
+          RCLCPP_WARN(
+            this->get_logger(), "%s: approach attempt %d failed, retrying...", intent.label.c_str(),
+            attempt + 1);
+          continue;
+        }
+      }
       dock_exec = manager_.executeMotionSegments(
         frame_id_, {dock_seg}, {standoff_pose}, planning_group_);
       if (dock_exec.success) {
@@ -1236,6 +1340,20 @@ private:
       frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
+      if (!stop() && canRecoverWithoutWall() &&
+        !withWallCleared("retract", [&]() {
+            for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
+              if (manager_.executeMotionSegments(
+                  frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
+              {
+                return true;
+              }
+            }
+            return false;
+          }))
+      {
+        RCLCPP_ERROR(this->get_logger(), "%s: the retract recovery failed too", intent.label.c_str());
+      }
     }
 
     if (!contact_exec.success || contact_exec.waypoints_completed == 0) {
@@ -1314,8 +1432,10 @@ private:
   int nav_attempts_{2};
   double stand_max_span_{0.0};
   std::string arrival_command_;
+  std::string wall_clear_command_;
   double nav_timeout_s_{240.0};
   std::vector<double> travel_joint_state_;
+  std::vector<std::string> group_joint_names_;
   std::vector<double> travel_state_;
   bool arm_deployed_{false};
   rclcpp_action::Server<ExecuteCoverage>::SharedPtr action_server_;
@@ -1367,6 +1487,8 @@ private:
   double coverage_eef_speed_{0.02};
   double dock_standoff_{0.0};
   int dock_attempts_{3};
+  double travel_lift_margin_{0.01};
+  double dock_approach_extra_m_{0.0};
   std::string base_check_mode_{"off"};
   std::string base_check_service_;
   double base_check_lift_min_{0.0};
