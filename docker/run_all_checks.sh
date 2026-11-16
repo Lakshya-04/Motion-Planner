@@ -16,9 +16,9 @@
 set -uo pipefail
 
 IMAGE="${CHECK_IMAGE:-motion-planner:build}"
-WORKERS=2
-SKIP_SIMS=0
-NO_BUILD=0
+WORKERS="${WORKERS:-2}"
+SKIP_SIMS="${SKIP_SIMS:-0}"
+NO_BUILD="${NO_BUILD:-0}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --skip-sims) SKIP_SIMS=1 ;;
@@ -58,7 +58,7 @@ if [ "${INSIDE_CHECKS:-0}" != "1" ]; then
 fi
 
 # ---- inside the container ----
-source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
+set +u; source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"; set -u
 export MAKEFLAGS="-j${WORKERS}" CMAKE_BUILD_PARALLEL_LEVEL="${WORKERS}"
 declare -A RESULT
 cd /ws
@@ -89,8 +89,15 @@ RESULT[colcon]=$rc
 
 echo "=== 2/3 pytest (${PYTEST_DIRS[*]}) ==="
 set +u; source install/setup.bash 2>/dev/null; set -u
-python3 -m pytest -q -p no:cacheprovider --import-mode=importlib "${PYTEST_DIRS[@]}" 2>&1 | tail -15
-RESULT[pytest]=${PIPESTATUS[0]}
-
+# One pytest run per directory: a module-level skip or import error in one directory (no torch,
+# no MuJoCo) must not hide the others, and same-named test files in different packages collide.
+py_rc=0
+for d in "${PYTEST_DIRS[@]}"; do
+  out="$(python3 -m pytest -q -p no:cacheprovider --import-mode=importlib "$d" 2>&1)"; r=$?
+  [ $r = 5 ] && r=0   # nothing collected (everything skipped at import): not a failure
+  [ $r != 0 ] && { echo "$out" | tail -25; py_rc=1; }
+  echo "  $d: $(echo "$out" | tail -1)"
+done
+RESULT[pytest]=$py_rc
 echo "RESULT colcon=${RESULT[colcon]}"
 echo "RESULT pytest=${RESULT[pytest]}"
