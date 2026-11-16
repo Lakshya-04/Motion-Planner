@@ -418,4 +418,31 @@ Wrench MujocoSim::groundTruthWrench() const
   return out;
 }
 
+std::string MujocoSim::describeToolContacts() const
+{
+  std::string out;
+  for (int i = 0; i < data_->ncon; ++i) {
+    const mjContact & c = data_->contact[i];
+    if (c.exclude != 0) {
+      continue;
+    }
+    const bool a = tool_body_[model_->geom_bodyid[c.geom1]];
+    const bool b = tool_body_[model_->geom_bodyid[c.geom2]];
+    if (a == b) {
+      continue;
+    }
+    mjtNum local[6];
+    mj_contactForce(model_, data_, i, local);
+    auto nm = [&](int g) {
+        const char * gn = mj_id2name(model_, mjOBJ_GEOM, g);
+        const char * bn = mj_id2name(model_, mjOBJ_BODY, model_->geom_bodyid[g]);
+        return std::string(gn ? gn : "?") + "@" + (bn ? bn : "?");
+      };
+    char buf[64];
+    std::snprintf(buf, sizeof buf, " fn=%.1f dist=%.4f", local[0], c.dist);
+    out += nm(c.geom1) + " <-> " + nm(c.geom2) + buf + "; ";
+  }
+  return out;
+}
+
 }  // namespace sim_mujoco

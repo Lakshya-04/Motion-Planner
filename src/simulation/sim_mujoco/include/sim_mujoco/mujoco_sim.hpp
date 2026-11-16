@@ -80,6 +80,8 @@ public:
 
   /// Ground-truth contact wrench on the tool at tcp_site, in the tcp_site frame (not for control).
   Wrench groundTruthWrench() const;
+  /// One entry per tool/environment contact (geom and body names, normal force), for diagnostics.
+  std::string describeToolContacts() const;
 
   /// Planar base (present when the MJCF has base_x_joint, base_y_joint, base_yaw_joint).
   bool hasBase() const {return base_.present;}
