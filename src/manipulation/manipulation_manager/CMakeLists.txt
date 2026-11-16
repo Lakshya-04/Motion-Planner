@@ -234,6 +234,12 @@ if(BUILD_TESTING)
     target_include_directories(tool_actuation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   endif()
 
+  ament_add_gtest(mission_ledger_test test/mission_ledger_test.cpp)
+  if(TARGET mission_ledger_test)
+    target_include_directories(mission_ledger_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(mission_ledger_test nlohmann_json::nlohmann_json)
+  endif()
+
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)
     set(ament_cmake_copyright_FOUND TRUE)

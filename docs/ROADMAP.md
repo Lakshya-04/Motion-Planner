@@ -278,9 +278,9 @@ here were dropped. Placement is the milestone that should carry it.
 
 **Manager and task flow (M1)**
 - [~] Manager action contract: goal kind plus params, one job at a time, per-app cancel; BehaviorTree.CPP with BehaviorTree.ROS2 action nodes, not hand-rolled clients (the action, one job at a time and cancel are done with a hand-written state machine and plain action clients; the BT.CPP version is not)
-- [ ] Always-report tree convention (`Fallback(work, ForceFailure(ReportStatus))`), halt and skip guards, mission FSM (IDLE/ACTIVE/PAUSED/STOPPED/RECOVERY) with one typed command service
-- [ ] Durable ledger keyed (mission, stand, segment) and resume; acceptance test: kill mid-wall, restart, only unfinished segments rerun
-- [ ] Per-station failure policy: typed SKIPPED reasons, hardware-origin codes, no blind retry on a contact overload; station queue skips a blocked stand with a reason and slides it in small steps
+- [~] Always-report tree convention (`Fallback(work, ForceFailure(ReportStatus))`), halt and skip guards, mission FSM (IDLE/ACTIVE/PAUSED/STOPPED/RECOVERY) with one typed command service (`core/mission_fsm.hpp` with gtests; pause and resume at column boundaries through a `mission_command` String topic, not a typed service; no behaviour tree, the FSM state is not in the feedback)
+- [~] Durable ledger keyed (mission, stand, segment) and resume; acceptance test: kill mid-wall, restart, only unfinished segments rerun (`core/mission_ledger.hpp`, atomic JSON, `ledger_path` parameter, `ExecuteCoverage.resume`, a segment is a wall column, gtests including the kill-and-restart sequence; the sim kill-and-restart run is not done, no hardware)
+- [~] Per-station failure policy: typed SKIPPED reasons, hardware-origin codes, no blind retry on a contact overload; station queue skips a blocked stand with a reason and slides it in small steps (reasons `NAV_FAILED`, `DOCK_FAILED`, `PLAN_FAILED`, `CONTACT_OVERLOAD` in the ledger, overload limit `contact_overload_n` stops the retry; no hardware-origin codes, no sliding of a blocked stand)
 - [ ] Controller switching only at segment boundaries
 
 **Planning (M1, M2)**
