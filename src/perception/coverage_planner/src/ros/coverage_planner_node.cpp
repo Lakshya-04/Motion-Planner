@@ -30,6 +30,10 @@ CoveragePlannerNode::CoveragePlannerNode(const rclcpp::NodeOptions & options)
   plan_all_components_ = this->get_parameter("plan_all_components").as_bool();
   min_component_cells_ = this->get_parameter("min_component_cells").as_int();
   optimize_strip_order_ = this->get_parameter("optimize_strip_order").as_bool();
+  components_in_sweep_order_ = this->get_parameter("components_in_sweep_order").as_bool();
+  fill_gaps_ = this->get_parameter("fill_gaps").as_bool();
+  min_stroke_length_m_ = this->get_parameter("min_stroke_length_m").as_double();
+  decomposition_ = this->get_parameter("decomposition").as_string();
   map_frame_ = this->get_parameter("map_frame").as_string();
   map_topic_ = this->get_parameter("map_topic").as_string();
 
@@ -89,9 +93,14 @@ void CoveragePlannerNode::declareParameters()
   // Obstacle handling
   this->declare_parameter("obstacle_inflation_radius", 0.3);  // 30cm safety margin
   this->declare_parameter("allow_unknown", false);
-  this->declare_parameter("plan_all_components", false);
+  // Every free component is planned (a wall cut by a rib is two panels); false = largest only.
+  this->declare_parameter("plan_all_components", true);
   this->declare_parameter("min_component_cells", 25);
   this->declare_parameter("optimize_strip_order", false);
+  this->declare_parameter("components_in_sweep_order", true);  // panels left to right, not largest first
+  this->declare_parameter("fill_gaps", true);                  // short strokes beside obstacle keep-outs
+  this->declare_parameter("min_stroke_length_m", 0.02);        // shortest gap-fill stroke
+  this->declare_parameter("decomposition", "columns");         // "columns" | "cells"
 
   // Frame and topic
   this->declare_parameter("map_frame", "map");
@@ -153,6 +162,10 @@ CoveragePlannerParams CoveragePlannerNode::buildPlannerParams(
   params.plan_all_components = plan_all_components_;
   params.min_component_cells = min_component_cells_;
   params.optimize_strip_order = optimize_strip_order_;
+  params.components_in_sweep_order = components_in_sweep_order_;
+  params.fill_gaps = fill_gaps_;
+  params.min_stroke_length_m = min_stroke_length_m_;
+  params.decomposition = decomposition_;
 
   return params;
 }

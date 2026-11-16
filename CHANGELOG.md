@@ -12,6 +12,7 @@ anything verified on hardware.
 
 ### Added
 
+- Coverage on walls with obstacles (`coverage_planner`): `components_in_sweep_order`, `fill_gaps` + `min_stroke_length_m` (short strokes up to an obstacle's keep-out edge) and `decomposition: cells` (boustrophedon cell decomposition) in `BoustrophedonPlanner`; `test_coverage_components` (rib, window, protrusion rasters, `CoverageVerifier` above 0.95). Docs in `docs/coverage_patterns.md`. No sim run.
 - Planar patches: `coverage_planner` `core/surface_patch.hpp` (`SurfacePatch` for wall, floor, ceiling and column faces: `project`, `point`, `contains`, `liftPatchPath` with tool axis along the patch normal, `patchObstacles`, `planPatchCoverage`), and `planCoverageOnWall` split out of `planCoverageFromScan` (wall behaviour unchanged). gtests in `test_surface_patch`. Docs in `docs/coverage_patterns.md` and `docs/architecture.md`. Stand selection for horizontal surfaces not done; no sim run.
 - Calibration procedures in one place (`docs/calibration.md`: F/T sign and bias, tool TCP, payload services, wall plane, base-to-wall) and `core_types/pivot_calibration.hpp` (ROS-free least-squares tool-TCP calibration by pivoting, degenerate-pose and too-few-pose rejection, 5 gtests including simulated noise). No ROS node for it; nothing run on hardware.
 - Backend routing test and cross-backend planner benchmark: `manipulation_manager` `backend_routing_test` (configs with `free_space: vamp` / `curobo` and `segments`, built through `PlanningPipeline` over the pluginlib registry, fakes where a real plugin is unavailable, MoveIt always faked); `motion_planner_moveit` `planner_benchmark` (OMPL RRT-Connect on a MoveIt PlanningScene) and `scripts/planner_benchmark.py` (shared stand / stow / dock-like joint-space problems for MoveIt/OMPL, VAMP and cuRobo, path length and clearance judged by one reference model); results and what could not run in `docs/planner_benchmark.md`.
@@ -81,6 +82,7 @@ anything verified on hardware.
 
 ### Fixed
 
+- `coverage_planner_node` defaulted `plan_all_components` to false, so a wall cut by a rib (`two_panels`) was planned only for its largest panel; now true (yaml too), and the node enables gap strokes and sweep-ordered components.
 - `JtacControllerCompliancePort`: the destructor could hang in `join()` when it ran before the spin thread entered `spin()` (the executor `cancel()` was lost). The thread now polls a stop flag between short `spin_once()` calls. The 300 ms settle workaround in `test_jtac_compliance_port` is gone and a test constructs and destroys the port 200 times in a row under a watchdog.
 
 ### Since #22 (pull requests #23 to #61)

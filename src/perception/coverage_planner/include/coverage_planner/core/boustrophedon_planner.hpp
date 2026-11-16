@@ -64,6 +64,26 @@ private:
     Path & path, std::vector<MotionPlanSegment> & segments);
 
   /**
+   * @brief Boustrophedon cell decomposition: split the component where a sweep line's free span splits
+   *        or merges, sweep each cell as one serpentine block, order the cells nearest-first.
+   * @param[out] num_cells Cells planned.
+   */
+  void generateCellSweeps(
+    const OccupancyGrid & map, const std::vector<int8_t> & grid,
+    const CoveragePlannerParams & params, bool vertical, Path & path,
+    std::vector<MotionPlanSegment> & segments, int & num_cells);
+
+  /**
+   * @brief Cover the free cells the strips of this component leave further than swath/2 from every
+   *        stroke (beside an obstacle's keep-out edge, at the far edge) with short strokes.
+   * @return Strokes added.
+   */
+  int fillCoverageGaps(
+    const OccupancyGrid & map, const std::vector<int8_t> & grid,
+    const CoveragePlannerParams & params, bool vertical, Path & path,
+    std::vector<MotionPlanSegment> & segments);
+
+  /**
    * @brief Check if a line segment is mostly free
    */
   bool isLineFree(
