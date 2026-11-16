@@ -17,8 +17,8 @@ MoveItTimeParameterizer::MoveItTimeParameterizer(
 : model_(std::move(model)), group_(std::move(group)), tcp_link_(std::move(tcp_link))
 {
   const auto * jmg = model_ ? model_->getJointModelGroup(group_) : nullptr;
-  if (jmg && tcp_link_.empty() && !jmg->getLinkModelNames().empty()) {
-    tcp_link_ = jmg->getLinkModelNames().back();
+  if (jmg && tcp_link_.empty() && !jmg->getActiveJointModels().empty()) {
+    tcp_link_ = jmg->getActiveJointModels().back()->getChildLinkModel()->getName();
   }
 }
 
@@ -86,7 +86,7 @@ bool MoveItTimeParameterizer::retime(
       }
       return g;
     };
-  auto tcpOf = [&](const std::vector<double> & q) {
+  auto tcpOf = [&](const std::vector<double> & q) -> Eigen::Vector3d {
       moveit::core::RobotState s(model_);
       s.setToDefaultValues();
       s.setJointGroupPositions(jmg, toGroup(q));
@@ -115,7 +115,8 @@ bool MoveItTimeParameterizer::retime(
       auto s = std::make_shared<moveit::core::RobotState>(model_);
       s->setToDefaultValues();
       s->setJointGroupPositions(jmg, toGroup(p.positions));
-      if (role == SegmentRole::kContactSeam && p.velocities.size() == n) {
+      const bool at_end = &p == &piece.points.front() || &p == &piece.points.back();
+      if (role == SegmentRole::kContactSeam && p.velocities.size() == n && !at_end) {   // rest at both ends
         s->setJointGroupVelocities(jmg, toGroup(p.velocities));
       }
       s->update();
