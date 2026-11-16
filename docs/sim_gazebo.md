@@ -151,7 +151,7 @@ Default `false`: nothing is added. With `true` the description gets `rgb_camera_
 default `0.0 -2.4 1.6 0 0.11 1.38`: 2.4 m to the right of the base, looking at the wall in front of the arm), a gz-sim `camera`
 (`rgb_camera_size` default 1280 x 720, 60 degrees, `rgb_camera_rate_hz` 2) and the launch file adds the `Sensors` system (ogre2,
 software rendering, no display) and bridges `/rgb_camera/image` (`sensor_msgs/Image`, rgb8). The camera is fixed to the base, so
-after a base move it moves with it. `scripts/capture_still.py OUT_DIR --every S --count N` writes PNGs (no imaging library).
+after a base move it moves with it (a multi-stand run with stills showed this: the base drives toward the wall and the camera ends up against it, every later frame is a blank wall; a world-fixed camera would be needed to film a multi-stand pass, not done; the multi-stand run with meshes was stopped at stand 0 with a 1512 N peak and not scored). `scripts/capture_still.py OUT_DIR --every S --count N` writes PNGs (no imaging library).
 `GZ_PASS_STILLS=N` in the pass scripts turns the camera on and runs it.
 
 `arm_meshes:=true` (also `GZ_PASS_MESHES=1` in the pass scripts) adds the `ur_description` share to `GZ_SIM_RESOURCE_PATH`.
