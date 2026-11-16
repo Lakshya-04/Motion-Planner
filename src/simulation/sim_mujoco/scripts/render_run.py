@@ -160,9 +160,70 @@ def make_renderer(rp, w, h):
     return rp.mj.Renderer(rp.model, h, w)
 
 
-def shot(rp, renderer, cam):
+def shot(rp, renderer, cam, extra=None):
     renderer.update_scene(rp.data, camera=cam)
+    if extra is not None:
+        extra(renderer.scene)
     return renderer.render()
+
+
+WALL_X = 0.98   # the sim wall face in the odom/base frame (smoke_wall_scene.json)
+
+
+def valve_intervals(log):
+    """(open, close) sim-clock stamps from the manager log's `valve ON` / `valve OFF` lines (a spray pass)."""
+    import re
+    out, t_on = [], None
+    for line in open(log):
+        m = re.search(r'\[(\d+\.\d+)\] \[manipulation_manager\]: valve (ON|OFF)', line)
+        if not m:
+            continue
+        if m.group(2) == 'ON':
+            t_on = float(m.group(1))
+        elif t_on is not None:
+            out.append((t_on, float(m.group(1))))
+            t_on = None
+    return out
+
+
+def spray_geoms(rp, intervals, t, standoff, half_angle_deg):
+    """Scene callback: while the valve is open a translucent cone from the tool to the wall, and the wall spots sprayed so far."""
+    mj, np = rp.mj, rp.np
+    ts = np.arange(rp.t0, t, 0.3)
+    open_ = [any(a <= x <= b for a, b in intervals) for x in ts]
+    spots = []
+    for x, o in zip(ts, open_):
+        if o:
+            rp.pose(x)
+            spots.append(rp.tcp_pos())
+    rp.pose(t)
+    tip = rp.tcp_pos()
+    on = any(a <= t <= b for a, b in intervals)
+    rad = standoff * np.tan(np.radians(half_angle_deg))
+
+    def add(scene):
+        def new(kind):
+            if scene.ngeom >= scene.maxgeom:
+                return None
+            g = scene.geoms[scene.ngeom]
+            mj.mjv_initGeom(g, kind, np.zeros(3), np.zeros(3), np.zeros(9), np.zeros(4, np.float32))
+            scene.ngeom += 1
+            return g
+        for sp in spots:
+            g = new(mj.mjtGeom.mjGEOM_BOX)
+            if g is None:
+                break
+            g.size[:] = [0.002, rad * 0.8, 0.045]
+            g.pos[:] = [WALL_X - 0.004, sp[1], sp[2]]
+            g.mat[:] = np.eye(3)
+            g.rgba[:] = [1.0, 0.4, 0.0, 0.12]
+        if on:
+            g = new(mj.mjtGeom.mjGEOM_CYLINDER)
+            if g is not None:
+                end = np.array([WALL_X - 0.004, tip[1], tip[2]])
+                mj.mjv_connector(g, mj.mjtGeom.mjGEOM_CAPSULE, rad * 0.3, tip, end)
+                g.rgba[:] = [1.0, 0.6, 0.1, 0.4]
+    return add
 
 
 def stroke_time(rp):
@@ -210,20 +271,24 @@ def video(args):
     except OSError:
         font = ImageFont.load_default()
     fmax = max(15.0, float(rp.force.max()) * 1.1)
+    valve = valve_intervals(args.valve_log) if args.valve_log else None
     frames = args.out + '.frames'
     os.makedirs(frames, exist_ok=True)
     for k, t in enumerate(ts):
         rp.pose(t)
         p = rp.tcp_pos()
-        img = Image.fromarray(shot(rp, r_main, rp.camera(np.array([0.5, 0.1, 1.1]), 3.4, 40, -12)))
-        ins = Image.fromarray(shot(rp, r_in, rp.camera(p, 0.5, 80, -8)))
+        extra = spray_geoms(rp, valve, t, args.standoff, args.half_angle) if valve is not None else None
+        img = Image.fromarray(shot(rp, r_main, rp.camera(np.array([0.5, 0.1, 1.1]), 3.4, 40, -12), extra))
+        ins = Image.fromarray(shot(rp, r_in, rp.camera(p, 0.5, 80, -8), extra))
         img.paste(ins, (W - IW - 12, 12))
         d = ImageDraw.Draw(img)
         d.rectangle([W - IW - 13, 11, W - 11, IH + 13], outline=(255, 255, 255))
         f = float(np.interp(t, rp.t, rp.force))
         d.rectangle([12, H - 150, 560, H - 12], fill=(0, 0, 0))
-        d.text((22, H - 146), f't = {t - rp.t0:6.1f} s   x{speed:.0f}   contact force {f:5.1f} N',
-               fill=(255, 255, 255), font=font)
+        label = f't = {t - rp.t0:6.1f} s   x{speed:.0f}   contact force {f:5.1f} N'
+        if valve is not None:
+            label = f't = {t - rp.t0:6.1f} s  x{speed:.0f}  valve {"OPEN" if any(a <= t <= b for a, b in valve) else "closed"}  force {f:4.1f} N'
+        d.text((22, H - 146), label, fill=(255, 255, 255), font=font)
         gx0, gy0, gx1, gy1 = 22, H - 108, 548, H - 20
         d.rectangle([gx0, gy0, gx1, gy1], outline=(110, 110, 110))
         sel = (rp.t >= rp.t0) & (rp.t <= t)
@@ -288,6 +353,9 @@ def main():
             p.add_argument('--gif-fps', type=int, default=10)
             p.add_argument('--gif-speedup', type=float, default=3.0, help='extra speed-up of the gif over the video')
             p.add_argument('--gif-width', type=int, default=480)
+            p.add_argument('--valve-log', help='manager log of a spray pass: draws the spray cone and the sprayed spots')
+            p.add_argument('--standoff', type=float, default=0.30, help='spray stand-off, m (with --valve-log)')
+            p.add_argument('--half-angle', type=float, default=20.0, help='spray cone half-angle, deg (with --valve-log)')
     args = ap.parse_args()
     {'record': record, 'stills': stills, 'video': video, 'encode': encode}[args.cmd](args)
 

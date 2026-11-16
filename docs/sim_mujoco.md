@@ -21,6 +21,12 @@ xacro, next to `mock` and `jtac_mock`. Package: [`src/simulation/sim_mujoco`](..
 A full manager pass on a plain wall (`run_manager_pass.sh`), rendered by `render_run.py`. The gif is the run at 9x, the
 [mp4](media/manager_pass.mp4) at 3x with a force trace.
 
+![A spray pass on a plain wall](media/spray_pass.gif)
+
+A spray pass (`run_spray_pass.sh`, [mp4](media/spray_pass.mp4)), same renderer; the cone and the wall spots are drawn from the valve
+log. Scored run shown: 3 columns done, coverage 1.0 (930 of 930 cells), thickness CoV 0.52, valve open 15.6 s of 94.2 s, whole-run
+peak force 0.0 N ([Spray pass](#spray-pass-non-contact-tool)).
+
 | Robot overview | Arm at the wall, mid-stroke | Tool on the wall |
 |---|---|---|
 | ![overview](media/overview.jpg) | ![arm at the wall](media/arm_at_wall.jpg) | ![tool close-up](media/tool_closeup.jpg) |
@@ -322,6 +328,11 @@ render_run.py encode --frames media/run.mp4.frames --out media/run.mp4 --gif med
 plot_run.py --samples /tmp/manager_pass/run.csv --score score.json --out media/force_coverage.png
 ```
 
+A spray pass is filmed the same way (`MANAGER_PASS_FILM=1 SPRAY_PASS_LAUNCH_ARGS="out_dir:=/tmp/mjcf" run_spray_pass.sh`); add
+`--valve-log /tmp/spray_pass/manager.log` to `video` to draw the spray cone while the valve is open and the sprayed spots on
+the wall (`--standoff`, `--half-angle` set their size; the sim has no spray, this is the scorer's model). The result is in
+[Spray pass](#spray-pass-non-contact-tool).
+
 ## Not modelled / limits
 
 - Wheels, wheel-ground contact and slip (`base_motion:=true` moves the base kinematically as a planar velocity
@@ -433,14 +444,30 @@ same ready-pose move and is most likely a tool-versus-link contact: the truth co
 other body, and a random-configuration scan of the MJCF finds the tool against the forearm, the upper arm and the lift (a replay
 of the recorded joint states shows none, so it needs a folded-arm pose).
 
-Fix: `run_spray_pass.sh` sets `MP_SKIP_READY=1` (new switch in `manager_pass_common.sh`), so the manager plans the first move
-from the stowed pose with the wall in MoveIt's scene; `SPRAY_PASS_SKIP_READY=0` brings the old move back. The tool now stays at
+Seeded first move (replaces skipping it): `run_spray_pass.sh` now runs `ready_pose.py --joints ... --planned` (`SPRAY_PASS_READY=seed`,
+default). move_group plans, with the wall and the robot in its scene, a joint goal at the arm configuration of the first stroke
+(tcp x 0.68 m, z 1.26 m, 0.30 m from the wall face, lift raised to 0.61 m), plan only, and the controller runs it (4 s at velocity
+scale 0.3); that is 27 cm farther from the wall than FREE. The configuration came from a run that started at FREE (what made its
+strokes good: the lift does the vertical travel, the arm is not elbow-flipped; from the stowed pose the manager's first plan ends
+with the wrist at -5 rad and the lift unused). `SPRAY_PASS_SEED_Q` (lift pan shoulder_lift elbow wrist_1 wrist_2 wrist_3, the
+`smoke_test.FREE` order) and `SPRAY_PASS_SEED_SCALE` override it; `SPRAY_PASS_READY=none|free` give the two earlier behaviours.
+Two things tried first: an unplanned joint move to the seed (`ready_pose.py --joints` without `--planned`) from the folded stow
+pose makes the tool hit the arm (37 N at x 0.70 m, z 1.4 m) and leaves the arm in a state MoveIt rejects, and a seed at the
+stroke's first pose (z 1.01 m) puts the arm so close to an `arm_upper_arm_link` / `lift_carriage_link` collision that the manager's
+dock truncates and the column is skipped (1 run in 7). Results: five filmed runs with the final seed: coverage 1.0, 1.0, 1.0, 1.0 and
+0.88 (the 0.88 run lost column 2: its dock plan failed at the same link pair, the scorer exits 1 below 0.9), thickness CoV 0.521,
+0.523, 0.526, 0.520 and 0.83, whole-run peak force 0 N in all five; three more with the same seed gave 1.0 / 0.51, 1.0 / 0.52
+and 1.0 / 0.62. Before: 0.935-0.95 and 0.93-1.01. The tool x over the wall's footprint during the between-column moves
+reaches 0.74-0.88 m (wall face 0.98 m), the closest 10 cm; those moves are the manager's, not the seed's.
+
+Earlier fix, still available (`SPRAY_PASS_READY=none`): `run_spray_pass.sh` set `MP_SKIP_READY=1` (new switch in `manager_pass_common.sh`), so the manager plans the first move
+from the stowed pose with the wall in MoveIt's scene; `SPRAY_PASS_READY=free` (or `SPRAY_PASS_SKIP_READY=0`) brings the old move back. The tool now stays at
 x <= 0.773 m (stroke plane 0.68 m) and eight runs gave a whole-run peak of 0 N every time (before: 0, 237, 10, 0, 0 N, then 0 in
 eleven more runs, none of which touched the wall but all of which came within 1.3 cm). The price: starting from the stowed pose
 the strokes come out shorter (the tool reaches z 1.04-1.23 m of the 1.01-1.26 m stroke while the valve is open), so coverage
 is 0.935-0.95 and the thickness CoV 0.93-1.01 (with the ready pose: coverage 1.0, CoV 0.51 in most runs, about 1.0 in 2 of 11,
-so the stroke quality already depended on the arm configuration the first move ended in). Both pass the 0.9 default; seeding
-the first move with a joint configuration at the first stroke pose would restore it and is the next step. The contact passes keep
+so the stroke quality already depended on the arm configuration the first move ended in). Both pass the 0.9 default;
+the seeded first move above restores it. The contact passes keep
 `ready_pose.py`, they start at that pose by design (`run_manager_pass.sh` on the fixed build: coverage 0.931, peak 35.0 N,
 RMS 3.67 N, exit 0; its peak varies between runs, 19 to 35 N seen). Diagnosis aid: `SIM_DIAG_CONTACTS=1` in the sim's
 environment logs, for every tick with |Fz| above 15 N, the truth and raw wrench and each tool-versus-environment contact pair
