@@ -183,7 +183,8 @@ def _setup(context, *args, **kwargs):
         # MoveIt for planning only (compute_cartesian_path): the same description the sim runs, execution
         # stays with the controller started above.
         from mobile_manipulator_moveit_config import build_moveit_config
-        moveit_config = build_moveit_config(profile=arg('profile'), hardware='jtac_mock')
+        moveit_config = build_moveit_config(profile=arg('profile'), hardware='jtac_mock',
+                                            live_octomap=arg('live_octomap') == 'true')
         nodes.append(Node(package='moveit_ros_move_group', executable='move_group', output='screen',
                           parameters=[moveit_config.to_dict()]))
     return nodes
@@ -208,6 +209,10 @@ def generate_launch_description():
                               description='conditioner payload centre of gravity in the sensor frame'),
         DeclareLaunchArgument('move_group', default_value='false',
                               description='also start move_group (planning only) for scripted cartesian passes'),
+        DeclareLaunchArgument('live_octomap', default_value='false',
+                              description='with move_group:=true: MoveIt octomap from the live depth cloud '
+                                          '(PointCloudOctomapUpdater on /depth_sensor/points, needs '
+                                          'depth_sensor:=true and moveit_ros_perception)'),
         DeclareLaunchArgument('base_motion', default_value='false',
                               description='planar base (x, y, yaw) driven by geometry_msgs/Twist on /cmd_vel '
                                           '(omni or diff per the profile drive_type), odom on /odom and TF '
