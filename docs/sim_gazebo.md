@@ -22,6 +22,8 @@ ros2 launch sim_gazebo sim.launch.py controller:=jtac ft_conditioner:=true    # 
 ros2 run sim_gazebo contact_control_test.py                                   # contact test, about 3 minutes
 ros2 run sim_gazebo wall_world_gen.py scene.json -o wall.sdf --standoff 0.9   # world only
 bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_manager_pass.sh         # coverage planner + manager + MoveIt + JTAC, scored (about 5 minutes)
+bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_spray_pass.sh           # non-contact spray pass (about 3 minutes)
+bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_multi_stand_pass.sh     # base_motion, plan stands, drive, 9 columns (about 9 minutes)
 ```
 
 Launch arguments: `profile` (name in `config/profiles` or a path; its `robot.xacro_args`, joint
@@ -30,7 +32,7 @@ names, frames and home pose drive everything), `world`, `wall_scene`/`wall_id`/`
 the sensor `ft_sensor_tcp`), `payload_mass_kg` (initial payload for the conditioner, 0: calibrate),
 `ft_filter` (JTAC `ft_sensor.filter_coefficient`), `move_group` (also start MoveIt for planning, hardware `jtac_mock`),
 `jtac_position_only` (JTAC claims only the position command interface, see the manager pass),
-`base_motion` and `depth_sensor` (+ `depth_sensor_pose`, `depth_sensor_noise_m`, `depth_sensor_rate_hz`; both off by default, see
+`base_motion`, `rgb_camera` (+ `rgb_camera_pose`, `rgb_camera_size`, `rgb_camera_rate_hz`), `arm_meshes` and `depth_sensor` (+ `depth_sensor_pose`, `depth_sensor_noise_m`, `depth_sensor_rate_hz`; both off by default, see
 below). Several containers on one Docker bridge share DDS
 multicast: give each simulation its own `ROS_DOMAIN_ID` (or `ROS_LOCALHOST_ONLY=1`), otherwise
 another stack's `/robot_description` can reach the gz controller manager.
@@ -119,7 +121,7 @@ origin, frames `odom -> base_footprint`, travel 0.3 m +-0.03, lateral and yaw er
 Result: travelled 0.294 m, lateral and yaw error 0.0000, joint deviation 0.0000, F/T change 0.17 N, drift 0.00 mm.
 Differences from MuJoCo: `VelocityControl` has no command timeout (a stale `/cmd_vel` keeps driving; send zero), no velocity or
 acceleration limits (use `stand_navigator`'s), omni only (the profile `drive_type` is not applied, `vy` is not dropped for
-`diff`), and no odom noise. Not tried: the wall contact and the manager pass with a free base.
+`diff`), and no odom noise. The manager pass with a free base is the multi-stand pass below.
 
 ## Depth sensor (`depth_sensor:=true`)
 
@@ -142,6 +144,21 @@ median sensor-frame x equal to the wall distance), the fitted plane (normal with
 centre, extent), and that the coverage planner accepts the written scene. Result with 3 mm range noise: 6144 points,
 median x 0.8150 m (wall at 0.8150), normal error 0.008 degrees, plane error 0.08 mm, rms 2.99 mm, extent 0.95 x 0.64 m, coverage plan 14 waypoints
 and 1.02 m^2. At the home pose the fit is clean (the robot does not block the view); an arm raised in front of the sensor would appear in the cloud and is not filtered.
+
+## Colour camera (`rgb_camera:=true`)
+
+Default `false`: nothing is added. With `true` the description gets `rgb_camera_link` (on `base_footprint` at `rgb_camera_pose`,
+default `0.0 -2.4 1.6 0 0.11 1.38`: 2.4 m to the right of the base, looking at the wall in front of the arm), a gz-sim `camera`
+(`rgb_camera_size` default 1280 x 720, 60 degrees, `rgb_camera_rate_hz` 2) and the launch file adds the `Sensors` system (ogre2,
+software rendering, no display) and bridges `/rgb_camera/image` (`sensor_msgs/Image`, rgb8). The camera is fixed to the base, so
+after a base move it moves with it (a multi-stand run with stills showed this: the base drives toward the wall and the camera ends up against it, every later frame is a blank wall; a world-fixed camera would be needed to film a multi-stand pass, not done; the multi-stand run with meshes was stopped at stand 0 with a 1512 N peak and not scored). `scripts/capture_still.py OUT_DIR --every S --count N` writes PNGs (no imaging library).
+`GZ_PASS_STILLS=N` in the pass scripts turns the camera on and runs it.
+
+`arm_meshes:=true` (also `GZ_PASS_MESHES=1` in the pass scripts) adds the `ur_description` share to `GZ_SIM_RESOURCE_PATH`.
+**Finding:** without it gz cannot resolve the UR links' `model://ur_description/...` meshes (an error per link in the log), so the
+arm has NO visual and NO collision geometry in Gazebo (only the lift, the sensor link and the tool exist). Every Gazebo number in
+this document except the "with meshes" ones was measured that way; the arm cannot collide with the wall or itself there. The
+stills need the meshes, so they are taken in separate runs, scored on their own.
 
 ## Tests
 
@@ -248,6 +265,60 @@ coverage file, zero force target before disengage):
 - The tool roll is -90 degrees because the UR10e ready pose has the same roll as in MuJoCo; the generic 6-DOF profile
   (smoke test pose, wrist roll -46.4 degrees) also ran end to end but its ACM only has adjacent pairs, and
   OMPL-chosen configurations then collided in the manager's Cartesian planner in some runs, so the pass uses the UR10e.
+
+## Spray pass and multi-stand pass (parity with MuJoCo)
+
+Both reuse the MuJoCo flow with Gazebo helpers (`scripts/gz_pass_common.sh`, the twin of `manager_pass_common.sh`);
+`shift_wall_scene.py` and `execute_coverage_client.py` are copies of the MuJoCo ones (nothing simulator specific in them).
+All runs: headless, UR10e, `jtac_position_only`, one run at a time, `ROS_DOMAIN_ID` 191 to 197, the host loaded by other work
+(load average 8 to 22). The geometry difference to MuJoCo that matters: the world wall is at x = 0.915 but every plane the
+planner, the octomap and the scorer use is x = 0.98 (the spring-loaded tool tip ends 6.5 cm short of the tcp), so a spray nozzle
+"0.30 m from the wall" is 0.365 m from the real wall in Gazebo.
+
+**Spray** (`scripts/run_spray_pass.sh`, about 3 minutes). `ready_pose.py --joints ... --planned` is the MP_READY seed (a MoveIt-planned,
+collision-checked move to the first stroke's arm configuration, velocity scale 0.3, same joints as MuJoCo); `ready_pose.py` got
+`--joints/--planned/--scale/--settle` for it. `record_run.py` records the valve (`/tool/valve`) as the `active` column.
+Seed, 20 degree cone, 0.30 m stand-off, 0.05 m/s, 20 percent overlap, `score_run --no-contact`:
+
+| run | coverage | thickness CoV | peak force | notes |
+|---|---|---|---|---|
+| a | 1.000 (930/930) | 0.56 | 0.0 N | 3 columns done, 89 s |
+| b | 1.000 | 0.53 | 0.0 N | 98 s |
+| c | 1.000 | 0.55 | 0.0 N | 102 s |
+| camera on, no meshes | 1.000 | 0.92 | 0.0 N | the seed ended at z 0.77 instead of 1.4 (the arm had not settled), the first stroke started from a worse arm configuration |
+| arm meshes + camera (1) | 1.000 | 0.47 | 0.0 N | different physics (arm collision), see above |
+| arm meshes + camera (2) | 0.581 (540/930) | 1.76 | 0.0 N | scorer fails; 125 s, 3 columns reported done; not investigated (the stills are from this run) |
+| run killed | - | - | - | hung: the manager's first plan went on, JTAC reported "Cartesian offset diverged (0.5 m)" every few seconds and the goal never finished; seen once in 6 runs, the host was running a second simulation |
+
+Pass rate: the 4 runs without meshes pass (3 plain, 1 with the camera on); with the meshes 1 of 2 passes; 1 further run hung (7 attempts). MuJoCo: coverage 1.0, CoV 0.52. Gazebo
+matches in the three plain runs. The CoV is a property of the stroke spacing and the speed, the valve was open 346 to 594 samples.
+
+**Multi-stand** (`scripts/run_multi_stand_pass.sh`, 0.9 m patch from y = 0.3, `stand_max_span_m` 0.5, two stands, 9 columns,
+about 9 minutes, `base_motion:=true`, contact pass at 10 N). The reachability map is built once (`STAND_MAP`). The Gazebo world wall
+is the stock 3 m wall centred on the robot (the generator always centres the wall), its one obstacle moved out of the patch.
+
+| run | columns | coverage | peak (score) | RMS error | in band | result |
+|---|---|---|---|---|---|---|
+| a | 9 of 9 (stand 0: 6, stand 1: 3) | 0.997 (2782/2790) | 922 N | 13.9 N | 0.82 | scorer passes |
+| b | 4 of 9 (column 3 press `failed_runtime`, then 5 columns failed on stand 0) | 0.716 | 3119 N | 321 N | 0.57 | fails |
+| c | 7 of 9 (stand 1 columns 0 and 1 failed) | 0.763 | 3424 N | 147 N | 0.67 | fails |
+
+Pass rate 1 of 3. Both stands were reached every time (arrival error 4 mm, 0.014 rad). MuJoCo's twin: 9 of 9 once and 5 of 9 once
+(`docs/sim_mujoco.md`). The force numbers are far worse than the MuJoCo ones (20 N peaks) because the compliant tip's 20 mm travel
+is exceeded on a press or a jam and the contact then ends on the hard stop (hundreds to thousands of newtons, see Limits); the
+manager's own `peak_force_n` (conditioned wrench) was 236 to 380 N in runs that finished all columns.
+
+Three things this exposed, all fixed here:
+- **Ground truth under `base_motion`.** `contact_ground_truth.py` looked the tcp up against the TF frame `world`, which does not
+  exist when the world joint is dropped, so the contact force was silently 0 and the first multi-stand run scored coverage 0 although
+  all 9 columns were done. The launch file now passes `world_frame: odom` (odom starts at the spawn pose, the world origin).
+- **Goal before the manager's TF listener is up** aborts with "no TF odom -> arm_base_link"; the script waits 10 s first. (The race
+  is in the manager and is left to its owner.)
+- The recorder takes `--frame odom` and the wall in odom, like the MuJoCo one.
+
+Not done: `run_stand_pass.sh` (single stand, `stand_drive.py`) has no Gazebo twin; the scorer's thin 0.9 limit on peak force is not
+used (`--max-peak` default 0), so a pass with a 922 N spike still passes; a cancel run (`MULTI_STAND_CANCEL_AFTER_S`) was not tried;
+the spray with a different wall x, and a run with a wall that the tool tip really sits 0.30 m from, were not done.
 
 ## Limits
 

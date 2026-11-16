@@ -117,3 +117,13 @@ def test_depth_sensor_is_a_gz_depth_camera_on_depth_sensor_link():
     s = robot.find("gazebo[@reference='depth_sensor_link']/sensor[@type='depth_camera']")
     assert s.find('topic').text == '/depth_sensor' and s.find('gz_frame_id').text == 'depth_sensor_link'
     assert float(s.find('camera/noise/stddev').text) == 0.003
+
+
+def test_rgb_camera_off_by_default_and_a_gz_camera_on_rgb_camera_link():
+    assert _render_with({}).find("link[@name='rgb_camera_link']") is None
+    robot = _render_with({'gz_rgb_camera': 'true', 'gz_rgb_xyz': '0.2 0 1.0', 'gz_rgb_width': '640', 'gz_rgb_height': '480'})
+    j = robot.find("joint[@name='rgb_camera_joint']")
+    assert j.find('parent').get('link') == 'base_footprint' and j.find('origin').get('xyz') == '0.2 0 1.0'
+    s = robot.find("gazebo[@reference='rgb_camera_link']/sensor[@type='camera']")
+    assert s.find('topic').text == '/rgb_camera' and s.find('gz_frame_id').text == 'rgb_camera_link'
+    assert s.find('camera/image/width').text == '640' and s.find('camera/image/height').text == '480'
