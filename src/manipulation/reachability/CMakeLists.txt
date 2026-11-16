@@ -23,6 +23,7 @@ add_library(reachability_core
   src/core/station.cpp
   src/core/base_model.cpp
   src/core/stands.cpp
+  src/core/stand_cover.cpp
   src/core/io.cpp
 )
 target_include_directories(reachability_core PUBLIC

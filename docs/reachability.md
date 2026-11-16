@@ -125,6 +125,42 @@ neighbours reach. A cover chosen for total time instead of count, or a finer sta
 might. Each stand is chosen on its own, so the order is "nearest next", not the best
 tour. Not done: a yaw preference for contact work.
 
+### Set-cover stand selection (`StandStrategy::SetCover`)
+
+Greedy-by-panel takes the busiest window first, which can strand two lone ends 4 m apart and cost a third
+stand. `planStands(map, request, start, max_stands, StandStrategy::SetCover, options)`
+(`core/stand_cover.cpp`) formulates it as a set cover over station-to-target feasibility:
+
+1. Every station of the `chooseStation` search grid (same free-side, footprint and clearance rules) is scored
+   once: `planLiftBands` over all targets gives the set of targets it reaches at some lift height. The RM4D map
+   is the prefilter; a station reaching nothing is dropped. This is one `chooseStation` round of work, then no
+   more map queries per round.
+2. Weighted greedy cover: new targets per `1 + travel_weight * travel_s` from the previous stand
+   (`SetCoverOptions::travel_weight`, 0.05 per second), travel from the drive type through `travelTime`.
+3. Fewer stands: while a cover one stand smaller exists, a depth-first search finds it (branch on the target
+   the fewest stations reach, only stations no other station dominates, `node_budget` 200000 nodes per try; 0
+   skips this step). The result is never more stands than step 2.
+4. Redundant stands are dropped, the rest ordered nearest-next then 2-opt on the whole path cost (with a start
+   pose it is part of the path; without a base model the order is along the wall and the travel stays 0), and each stand is moved to
+   the cheapest station that still reaches the targets only it reaches.
+5. Targets go to the first stand in visiting order that reaches them; the lift bands are rebuilt per stand.
+
+The default stays `Greedy` and its behaviour is unchanged. Select the new one with `rm4d_tool station ...
+--multi 1 --strategy set_cover` or with the `stand_strategy` parameter of `reachability_node`
+(`greedy` default, `set_cover`; anything else logs a warning and uses greedy); the `~/plan_stands`
+request and response are unchanged. `max_stands` truncates the visiting order and reports the rest in
+`not_planned`. Not done: confirming stations with batched IK (the map is a prefilter only, as in `chooseStation`),
+whole-path base refinement, and proof of optimality (the search is bounded).
+
+Gtests (`stands_test`, generic arm, 0.8 x 0.5 m box base, strafing, start 0.5 m before the first target,
+arm reaches about 2.4 m along the wall). A wall of four lone targets at y = -2.2, -0.9, 0.9, 2.2 plus a dense
+column at y = 0 (3 targets): greedy 3 stands, 7.0 s driving; set cover 2 stands, 4.2 s (inner targets at
++-1.1 m: 7.4 s against 4.2 s). Other walls, never worse: 5 columns x 2 rows (10 targets) 3 / 6.8 s greedy,
+3 / 5.8 s set cover; 6 columns 2 / 3.8 s both; 7 columns 3 / 6.4 s against 3 / 5.5 s (differential base:
+8.3 -> 7.5, 5.6 -> 5.6, 8.0 -> 7.1 s). Same stand count where greedy was already minimal, the saving
+there is the ordering and the choice of station among equals. Synthetic walls on one coarse generic-arm map,
+no Gazebo or MuJoCo run.
+
 ## Limits and next steps
 
 - **Sampling density.** Uniform joint sampling leaves cells empty at fine resolution: 3 M samples
@@ -179,7 +215,7 @@ built with `rm4d_tool` and serves it:
 | `~/plan_lift_bands` | wall targets, base station, lift range and step | bands + unreachable targets |
 | `~/plan_stands` | wall targets and plane, lift range, optional start stand | stands in visiting order (arm base x, y, base yaw, targets, lift bands, travel time) + unreachable targets |
 
-Parameters: `map_file` (required), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored; a set `base_profile` that cannot be loaded leaves the node not ready, like a missing `map_file`).
+Parameters: `map_file` (required), `stand_strategy` (`greedy` default, or `set_cover`, see the section above), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored; a set `base_profile` that cannot be loaded leaves the node not ready, like a missing `map_file`).
 
 `~/plan_stands` rejects `grid_step` below 0.02 m, `lift_step` below 0.01 m, `lift_max` (when set) below `lift_min`, and searches whose work (stations x lift heights x targets) exceeds 5e7 per stand, so one request cannot keep the node's callbacks busy for minutes. All positions (targets, wall point, returned stands) are in the same world frame the caller chose; the service does not transform.
 The map does not know which side of a wall is free, so base candidates come back on both sides of
