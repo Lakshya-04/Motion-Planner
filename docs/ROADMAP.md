@@ -304,7 +304,7 @@ here were dropped. Placement is the milestone that should carry it.
 - [ ] Sim environment registry run by `colcon test`; launch readiness chaining instead of sleeps; ground-truth odometry toggle
 - [ ] Local quality tooling without CI: `docker/build.sh check`, pre-commit config, `pyproject.toml`, pinned clang-format
 - [ ] Container lessons: base / cacher / dev stages copying only `package.xml`, BuildKit secrets, large shm for DDS, no `-march=native` in distributed images
-- [ ] Contributor guidance for users and coding agents (`AGENTS.md`, `docs/contributing/`)
+- [ ] Contributor guidance for users and coding agents (an agent guide and a contributing folder)
 
 **Pitfalls to cover with tests**
 - [ ] Frozen lift feedback with a loose tolerance must still abort; a tool-I/O fault must not

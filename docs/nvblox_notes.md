@@ -7,7 +7,7 @@ Evidence marks: [V] checked this session (GitHub API / pages), [M] from memory, 
 - **nvblox** (`nvidia-isaac/nvblox`): "a GPU-accelerated TSDF and ESDF library for robots
   equipped with RGB-D cameras" [V]; C++ core with Python and PyTorch bindings (`python/`,
   `nvblox_torch/`) [V]. **Latest release: v0.0.10 (2026-05-07)** [V]; the `main` branch has
-  moved since (pushed 2026-10-23) [V]. **License: Apache-2.0** (`LICENSE.md`; the GitHub API
+  moved since (pushed 2026-10-23) [V]. **License: Apache-2.0** (its licence file; the GitHub API
   reports "NOASSERTION" only because the file is Markdown) [V].
 - v0.0.10 adds a Vulkan `nvblox_renderer` and a configurable `unobserved_esdf_policy`
   (`kIgnore`, `kFree`, `kOccupied`, plus `add_negative_truncation_band_sites`) [V].
