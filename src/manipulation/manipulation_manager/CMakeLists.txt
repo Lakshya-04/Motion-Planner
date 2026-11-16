@@ -203,6 +203,12 @@ if(BUILD_TESTING)
       PLANNING_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/planning.yaml")
   endif()
 
+  ament_add_gtest(backend_routing_test test/backend_routing_test.cpp)
+  if(TARGET backend_routing_test)
+    target_link_libraries(backend_routing_test motion_planner::motion_planner_ros)
+    ament_target_dependencies(backend_routing_test rclcpp)
+  endif()
+
   ament_add_gtest(recovery_jog_test test/recovery_jog_test.cpp)
   if(TARGET recovery_jog_test)
     target_include_directories(recovery_jog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
