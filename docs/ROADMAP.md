@@ -83,7 +83,7 @@ without code, when we can implement it.
 - [x] IK: KDL, trac_ik (default), pick_ik (opt-in, untuned), `SeedPreferringIk`, cuRobo IK
 - [x] cuRobo v2 backend (plan, IK, scene, ESDF) and VAMP backend (joint-goal plan, collision, scene)
 - [x] **Runtime backend selection**: pluginlib plugins for planner, IK, collision and scene (MoveIt, cuRobo, VAMP); the manager builds them from a `planning_config` YAML (PR #29)
-- [ ] VAMP and cuRobo used by the manager for free-space transitions (the architecture example: IK cuRobo, free-space VAMP)
+- [~] VAMP and cuRobo used by the manager for free-space transitions (the architecture example: IK cuRobo, free-space VAMP): routing from `free_space: vamp|curobo` configs is tested (`manipulation_manager/test/backend_routing_test.cpp`, fakes where the real plugin is not there); not run in the manager on a robot or in the sim, and VAMP still needs an IK step in front of it
 - [~] VAMP: no pose goal, no IK, robots compiled in, not a contact planner
 - [~] cuRobo: pose-based collision unsupported, no wall-contact equivalent, one planner per process
 - [~] Joint-space goals honoured by OMPL only
@@ -91,7 +91,7 @@ without code, when we can implement it.
 - [~] Segment ordering by a time metric: `column_order: nearest | nearest_2opt` orders the columns of a stand by travel time (`core/column_ordering.hpp`, gtests); default is the input order, not run in the sim. Failure-aware resequencing (replan a failed column from another stand) is not done
 - [ ] cuRobo v2 for moves between stands: v0.8.0 (April 2026, the open-source cuRoboV2) and v0.9.0 (2026-11-05, cuRoboV2-Fast: faster planning, Cartesian waypoint planning with moving starts, C++ motion planner, TimeOpt); pin v0.9.0 or later, not v0.7.8; mobile-base support and VRAM on 4 GB are unverified
 - [ ] Recovery proposer (design only: `docs/learned_recovery.md`) and the policy slot
-- [ ] Shared planner benchmark across backends (success, time, path, clearance); only the sphere-set benchmark exists
+- [~] Shared planner benchmark across backends (success, time, path, clearance): `motion_planner_moveit/scripts/planner_benchmark.py`, joint-space transitions between stand, stow and dock-like UR10e configurations, results in `docs/planner_benchmark.md`; cuRobo did not run (see the doc), pose-goal and contact planning are not benchmarked
 
 ## 6. Robot generality (any arm, lift, base)
 
@@ -219,7 +219,7 @@ without code, when we can implement it.
 - [x] 736 colcon tests in 26 packages, 0 failures; Python tests for description, profiles, sim generators, tools
 - [ ] Tests for the coverage ROS nodes, more for JTAC (3 files) and the manager node
 - [ ] Sim end-to-end checks as a test target (sections 10 and 11)
-- [ ] Planner-level benchmark on shared scenarios (section 5)
+- [~] Planner-level benchmark on shared scenarios (section 5): see `docs/planner_benchmark.md`
 
 ## 16. The PR stack
 
