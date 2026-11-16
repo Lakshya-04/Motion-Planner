@@ -97,6 +97,16 @@ target_link_libraries(manipulation_manager_node
   mobile_manipulator_profile::mobile_manipulator_profile
 )
 
+add_executable(tool_actuation_node src/ros/tool_actuation_node.cpp)
+target_compile_features(tool_actuation_node PUBLIC cxx_std_17)
+target_include_directories(tool_actuation_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(tool_actuation_node rclcpp std_msgs)
+
+install(TARGETS tool_actuation_node DESTINATION lib/${PROJECT_NAME})
+
 install(TARGETS
   ${PROJECT_NAME}_core
   ARCHIVE DESTINATION lib
@@ -192,6 +202,11 @@ if(BUILD_TESTING)
   ament_add_gtest(column_ordering_test test/column_ordering_test.cpp)
   if(TARGET column_ordering_test)
     target_include_directories(column_ordering_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  ament_add_gtest(tool_actuation_test test/tool_actuation_test.cpp)
+  if(TARGET tool_actuation_test)
+    target_include_directories(tool_actuation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   endif()
 
   find_package(ament_lint_auto QUIET)
