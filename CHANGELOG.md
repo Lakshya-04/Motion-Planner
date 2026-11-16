@@ -12,6 +12,8 @@ anything verified on hardware.
 
 ### Added
 
+- Calibration procedures in one place (`docs/calibration.md`: F/T sign and bias, tool TCP, payload services, wall plane, base-to-wall) and `core_types/pivot_calibration.hpp` (ROS-free least-squares tool-TCP calibration by pivoting, degenerate-pose and too-few-pose rejection, 5 gtests including simulated noise). No ROS node for it; nothing run on hardware.
+
 - Wall docking servo: `stand_navigator` `wall_docking.py` (ROS-free: plane to standoff and yaw, proportional control with velocity and acceleration limits, tolerances, timeout, omni and diff behaviour, typed status) and `wall_docking_node` serving the new `WallDock` action (`stand_navigator_msgs`), 21 pytest tests; `sim_mujoco/scripts/run_wall_docking.sh` (3 runs from 0.4 m and 15 degrees off: standoff error 4.8-5.2 mm, yaw 0.01 degrees). Docs in `docs/stand_navigation.md` and `docs/perception_live.md`. Sim base is omni; diff drive is gtest-only.
 - Time parameterisation by segment role: `motion_planner/core/time_parameterization.hpp` (`TimeParameterizer` port, `parameterizeSegment`: validation with typed `TimingError`, near-duplicate removal, split at reversals over 150 degrees, constant-speed stamps, limit-violation report), `MoveItTimeParameterizer` in `motion_planner_moveit` (MoveIt TOTG for transitions; constant tool speed through FK plus Ruckig smoothing for seams), and `RetimingExecutionPort` in the manager, opt-in with `retime:=true` (`retime_accel`, `retime_seam_jerk`, `retime_transition_jerk`, `retime_vel_scale`, `retime_tcp_link`); a seam over a limit fails as `time_limit_violation`. `ExecutionRequest::stroke_speed` carries the role. Default behaviour unchanged; gtests only.
 - Set-cover stand selection: `reachability` `StandStrategy::SetCover` (`core/stand_cover.cpp`; `planStands(..., strategy, SetCoverOptions)`): every search-grid station scored once from the RM4D map, weighted greedy cover with a drive-type travel term, bounded exact search for fewer stands, nearest-next + 2-opt order, stands moved to the cheapest station that still covers what only they reach. Opt-in: `stand_strategy` parameter of `reachability_node` (`~/plan_stands` unchanged) and `rm4d_tool --strategy set_cover`; default stays greedy. gtests on synthetic walls: designed wall 2 stands / 4.2 s against greedy 3 / 7.0 s, never worse on the others. Docs in `docs/reachability.md`. Not confirmed with IK, no sim run.
@@ -75,6 +77,10 @@ anything verified on hardware.
 - Documentation set under `docs/`, the roadmap with a reuse map, `THIRD_PARTY.md`, `CONTRIBUTING.md`, a
   root README with an overview.
 - Sphere-set planning benchmark (partial: cuRobo on a 110-problem subset) and the FOAM versus cuRobo sphere comparison.
+
+### Fixed
+
+- `JtacControllerCompliancePort`: the destructor could hang in `join()` when it ran before the spin thread entered `spin()` (the executor `cancel()` was lost). The thread now polls a stop flag between short `spin_once()` calls. The 300 ms settle workaround in `test_jtac_compliance_port` is gone and a test constructs and destroys the port 200 times in a row under a watchdog.
 
 ### Since #22 (pull requests #23 to #61)
 
