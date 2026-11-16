@@ -20,6 +20,11 @@ JtacExecutionAdapter::JtacExecutionAdapter(
 ExecutionResult JtacExecutionAdapter::execute(const ExecutionRequest & request)
 {
   ExecutionResult result;
+  if (cancelled_) {
+    result.message = "cancelled";
+    result.failure_reason_code = "cancelled";
+    return result;
+  }
   if (request.trajectory.points.empty()) {
     result.message = "empty trajectory, nothing to execute";
     result.failure_reason_code = "empty_trajectory";
@@ -59,11 +64,16 @@ ExecutionResult JtacExecutionAdapter::execute(const ExecutionRequest & request)
     return result;
   }
 
+  current_goal_ = goal_handle;
+  if (cancelled_) {
+    cancelGoal(goal_handle);
+  }
   while (rclcpp::ok() &&
     result_future.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready)
   {
     rclcpp::spin_some(node_);
   }
+  current_goal_.reset();
   result.success = result_future.get();
   result.execution_time_ms = static_cast<uint64_t>(
     std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -73,6 +83,29 @@ ExecutionResult JtacExecutionAdapter::execute(const ExecutionRequest & request)
     result.failure_reason_code = "execution_failed";
   }
   return result;
+}
+
+void JtacExecutionAdapter::setCancelled(bool cancelled)
+{
+  cancelled_ = cancelled;
+}
+
+void JtacExecutionAdapter::cancelCurrent()
+{
+  cancelled_ = true;
+  if (current_goal_) {
+    cancelGoal(current_goal_);
+  }
+}
+
+void JtacExecutionAdapter::cancelGoal(
+  const rclcpp_action::ClientGoalHandle<FollowJointTrajectory>::SharedPtr & goal)
+{
+  try {
+    client_->async_cancel_goal(goal);
+  } catch (const rclcpp_action::exceptions::UnknownGoalHandleError &) {
+    // the goal finished (its result was already handled) between the cancel request and now: nothing to cancel
+  }
 }
 
 }  // namespace manipulation_manager

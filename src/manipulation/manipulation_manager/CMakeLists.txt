@@ -15,6 +15,9 @@ find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(reachability_msgs REQUIRED)
+find_package(stand_navigator_msgs REQUIRED)
+find_package(coverage_task_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(core_types REQUIRED)
 find_package(ros_adapters REQUIRED)
 # PCL (and its own Findlibusb.cmake module) must be resolved BEFORE motion_planner --
@@ -40,6 +43,7 @@ add_library(${PROJECT_NAME}_core
   src/core/motion_exec_reporter.cpp
   src/core/coverage_feasibility_analyzer.cpp
   src/core/base_stance_check.cpp
+  src/core/coverage_task.cpp
   src/ros/execution/jtac_execution_adapter.cpp
   src/ros/coverage/coverage_output_json_source.cpp
 )
@@ -73,6 +77,9 @@ target_include_directories(manipulation_manager_node PUBLIC
 ament_target_dependencies(manipulation_manager_node
   rclcpp
   reachability_msgs
+  stand_navigator_msgs
+  coverage_task_msgs
+  geometry_msgs
   std_msgs
   sensor_msgs
   ament_index_cpp
@@ -143,6 +150,11 @@ if(BUILD_TESTING)
   ament_add_gtest(wall_direction_test test/wall_direction_test.cpp)
   if(TARGET wall_direction_test)
     target_link_libraries(wall_direction_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(coverage_task_test test/coverage_task_test.cpp)
+  if(TARGET coverage_task_test)
+    target_link_libraries(coverage_task_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
   ament_add_gtest(tool_mode_test test/tool_mode_test.cpp)
