@@ -76,6 +76,12 @@ error 0.13 mm at the corners and centre, rms 2.8 mm, extent 0.76 x 0.70 m, cover
 (MoveIt variant: `detected_wall` box centre x = 1.005 m, as expected, 0.7 m high). Docker image `motion-planner:build`
 with the MuJoCo SDK mounted, as for the other `run_*.sh` scripts.
 
+## Use for docking
+
+With `target_frame:=odom` the plane is a world plane, and `stand_navigator`'s `wall_docking_node` servos the base to a standoff
+and yaw from it (`WallDock` action, `docs/stand_navigation.md`, `scripts/run_wall_docking.sh`: 0.4 m and 15 degrees off, docked
+within 5.2 mm and 0.01 degrees, three runs). `accumulate_frames:=3` keeps the fits frequent while the base moves.
+
 ## Limits
 
 - One planar wall per scan; no obstacle detection (`obstacles` is empty), no merging of scans from different base

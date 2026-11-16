@@ -78,7 +78,7 @@ def test_converges_to_standoff_and_square(profile, start, normal_angle):
     assert status == DockStatus.SUCCESS, (status, t)
     # truth, independent of the measurement: signed distance of the final base position to the world plane, and the heading
     truth = plane[0] * pose[0] + plane[1] * pose[1] + plane[3]
-    assert truth == pytest.approx(standoff, abs=0.011)
+    assert truth == pytest.approx(standoff, abs=0.006)
     assert abs(wrap(pose[2] - (normal_angle + math.pi))) <= 0.021
 
 
@@ -123,7 +123,7 @@ def test_facing_the_rear_drives_backward_to_the_wall():
     plane = wall_plane(0.0, 1.0)
     pose, status, _, trace, _, _ = run(DIFF, (0.0, 0.0, 0.0), plane, 0.5, facing=math.pi)
     assert status == DockStatus.SUCCESS
-    assert pose[0] == pytest.approx(-0.5, abs=0.011)
+    assert pose[0] == pytest.approx(-0.5, abs=0.006)
     assert all(c[0] <= 1e-9 for _, c, _ in trace)
 
 

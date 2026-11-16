@@ -33,7 +33,7 @@ class DockStatus(Enum):
 
 @dataclass
 class DockTolerance:
-    standoff: float = 0.01      # m
+    standoff: float = 0.005     # m
     yaw: float = 0.02           # rad
     speed: float = 0.02         # m/s and rad/s the base must be below to count as docked
 

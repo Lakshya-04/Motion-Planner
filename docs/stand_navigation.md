@@ -47,6 +47,35 @@ agrees, wall gap 0.803 m, arm deviation 0.0016, F/T change 0.49 N, no drift at t
 - Found on the way and fixed: `manipulation_manager`'s default `base_check_service` was `/reachability_node/plan_stands`, but the
   node is named `reachability` (service `/reachability/plan_stands`); the default now matches. The script still renames the node.
 
+## Wall docking: standoff and yaw from the fitted plane
+
+For the last metres after `NavigateToStand`. `stand_navigator/wall_docking.py` (ROS-free, `test/test_wall_docking.py`, 21 tests)
+and `wall_docking_node` serve the `WallDock` action (`standoff_m`, `timeout_s`; typed result `NONE`, `TIMEOUT`, `NO_ODOM`,
+`NO_WALL`, `CANCELED`, with the final standoff and yaw error; feedback with the two errors).
+
+- Input: the plane `wall_detector` publishes on `~/wall_scene` (`plane_abcd`, `normal_outward`) and `/odom`. Run the detector
+  with `target_frame:=odom`: the plane is then a fixed world plane, so the base moving while the scans accumulate does not
+  smear it, and the node re-expresses it in the base frame from the current odometry every cycle (20 Hz) between scans. A plane
+  in another frame is taken as a base-frame plane of the moment it arrived (stop-and-look quality).
+- Two numbers: the standoff (from a reference point, default the profile's `arm_mount_xy`, `ref_xy`, to the plane, along the
+  horizontal normal) and the yaw error (the base axis `facing_rad`, default +x, against the wall normal). A plane whose normal is
+  more than 0.5 rad from horizontal, or with the reference point behind it, is no measurement.
+- Control: proportional with square-root braking and a small creep floor, speed and acceleration limits from the profile
+  (docking caps `max_linear_mps` 0.15, `max_angular_radps` 0.3). Omni and 4ws: translate along the normal and turn together.
+  Diff and skid: no lateral velocity; turn until the yaw error is under 0.15 rad, then drive along the facing axis (reversing if
+  too close, backward when `facing_rad` is pi). Docked is standoff within 5 mm and yaw within 0.02 rad with the base at rest;
+  `timeout_s`, and `NO_WALL` when no fresh plane (`plane_max_age_s`) arrives for `wall_timeout_s`.
+- Not done: lateral position along the wall (the plane does not fix it), a wall with obstacles in front, non-vertical walls,
+  hardware. The sensor must see the wall from the start pose.
+
+Check: `sim_mujoco/scripts/run_wall_docking.sh` (sim with `base_motion` and `depth_sensor`, `wall_detector` on odom, the node,
+then `wall_docking_test.py`): the base is driven to a start pose 0.4 m too far and 15 degrees yawed, the action is sent for a
+0.55 m standoff (footprint to wall), and the final standoff and yaw are read from `/odom` against the known wall at x = 0.98 m.
+Three runs (UR10e on the omni base, 3 mm range noise): start standoff 0.953 m and yaw 14.4 degrees, docked in 5.3, 5.2, 5.2 s,
+final standoff error 4.9, 4.8, 5.2 mm, yaw error 0.00, 0.01, 0.00 degrees, lateral drift 1.3-1.5 mm. (A first run with a 10 mm
+tolerance stopped 9.7 mm off, which is why the default is 5 mm.) Drive type awareness is covered by gtests only; the sim base is
+omni (`DOCK_PROFILE=` another profile runs the diff logic on it, not run).
+
 ## The pass from the stand
 
 `manipulation_manager` takes `world_frame` (default empty = off: the poses are used as they are in `frame_id`, the base at

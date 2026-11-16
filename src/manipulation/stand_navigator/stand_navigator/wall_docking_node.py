@@ -8,7 +8,7 @@ arrived and is moved into the odom frame with the odometry then (stop-and-look q
 
 Parameters: `base_profile` (required, robot profile YAML with a `base:` section), `ref_xy` (reference point in
 base_footprint; default the profile's `arm_mount_xy`), `facing_rad` (base axis that faces the wall, 0 = +x),
-`tolerance_standoff_m`, `tolerance_yaw_rad`, `timeout_s`, `max_linear_mps`, `max_angular_radps` (docking caps),
+`tolerance_standoff_m` (0.005), `tolerance_yaw_rad`, `timeout_s`, `max_linear_mps`, `max_angular_radps` (docking caps),
 `plane_max_age_s`, `wall_timeout_s`, `odom_timeout_s`, `rate_hz`, `odom_topic`, `cmd_vel_topic`,
 `wall_scene_topic`.
 """
@@ -59,7 +59,7 @@ class WallDocking(Node):
         ref = self.declare_parameter('ref_xy', [math.nan, math.nan]).value
         self.ref_xy = tuple(self.profile.arm_mount) if math.isnan(ref[0]) else (float(ref[0]), float(ref[1]))
         self.facing = self.declare_parameter('facing_rad', 0.0).value
-        self.tol = DockTolerance(self.declare_parameter('tolerance_standoff_m', 0.01).value,
+        self.tol = DockTolerance(self.declare_parameter('tolerance_standoff_m', 0.005).value,
                                  self.declare_parameter('tolerance_yaw_rad', 0.02).value)
         self.timeout = self.declare_parameter('timeout_s', 60.0).value
         self.max_lin = self.declare_parameter('max_linear_mps', 0.15).value
