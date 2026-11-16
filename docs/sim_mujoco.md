@@ -397,7 +397,49 @@ agrees; three columns dock, press, stroke and retract; scorer passes with covera
 in-band 0.45. The unchanged manager pass (base at the origin, `run_manager_pass.sh`) on the same build: coverage 0.931, peak
 18.8 N, RMS 3.60 N. Flaky points: a dock from the turned base needs more OMPL tries (`dock_attempts`, 6 in the script; one
 earlier run with 3 lost the first column, coverage 0.68), and the F/T peak was 34 N in another run (the scorer limit passed).
-Not done: a wall needing several stands.
+A wall needing several stands: see the multi-stand pass below.
+
+### Multi-stand pass (the manager's `execute_coverage` action)
+
+`scripts/run_multi_stand_pass.sh` makes the wall 0.9 m wide (`MULTI_STAND_WALL_WIDTH`, from y = `MULTI_STAND_WALL_DY` 0.3;
+`shift_wall_scene.py` takes a width argument: the coverage scene, the sim wall with its 0.25 m margins and the `walls.pcd`
+octomap grow with it) and starts the manager with `run_on_start: false`. `execute_coverage_client.py` sends one `multi_stand`
+goal; the manager plans stands (`plan_stands`, columns asked for in groups of at most `stand_max_span_m` = 0.5 along the wall),
+and per stand stows the arm, drives there (`navigate_to_stand`), re-injects the wall octomap (`stand_arrival_command`:
+MoveIt keeps obstacles in the robot's root frame, so the wall must be put in again after the base moved) and runs the columns
+in odom. `record_run.py --frame odom` records, `score_run` scores the whole wall. Details: `docs/stand_navigation.md`.
+
+Result (first of two full runs, UR10e generic omni base, 9 columns at swath 0.14, speed 0.01 m/s; the repeat is below): stand 0 at arm base (0.18, 0.01) yaw 1.571
+with columns 3-8, stand 1 at (0.18, 0.51) with columns 0-2 (arrival errors 4.1 and 19.4 mm); all 9 columns done, goal
+`success`, feedback and result peak force 23.8 N (conditioned wrench magnitude, includes the press transient); scorer passes:
+coverage 0.977 (2726 of 2790), peak 20.9 N, RMS error 3.51 N, in-band 0.22, 459 s. In-band is lower than the one-stand
+passes (0.45 to 0.49) and was not investigated. `MULTI_STAND_CANCEL_AFTER_S=N` cancels instead and prints the arm's joint speed
+afterwards; `MULTI_STAND_MANAGER_EXTRA` adds manager parameters (for example `stand_nav_timeout_s: 2.0` to watch a stand being
+skipped).
+
+The repeat run on the final build did **not** pass: column 8 (the last of stand 0) pressed with a spike, its contact stroke
+aborted, the retract then failed in 11 ms of planning (the tool was left in collision with the wall) and so did the stow, so
+stand 1 was reported "not reached (could not stow the arm for the drive)" and its three columns failed: 5 done, 4 failed, scorer
+coverage 0.672, peak 97 N, RMS 9.3 N. The failure handling did what it should (recorded, went on, per-stand result) but the pass
+is not reliable yet: roughly one stroke in a long run still ends with the tool jammed in the wall box, and nothing recovers the
+arm from there (a back-off along the wall normal before the retract would be the first thing to try). Two runs, one pass.
+
+What it took, honestly: without `stand_max_span_m` the planner returns **one** stand "reaching" 54 poses for the 0.9 m wall
+(stand at y 0.11, 0.2 to 1.1 m of wall to its side), and the run from it failed: two of nine columns could not dock, the rest
+pressed with 100 to 296 N spikes, the tool tunnelled into the 10 cm wall box and the scorer coverage was 0.16 (one run, 1090 s).
+The RM4D map does not know the arm's self-collision or how awkward the pose is at the edge of reach, so a span cap is a
+manager parameter. A first two-stand run also failed every column until the wall octomap was re-injected after the drive.
+
+Checked in the same script (one run each): **cancel** 100 s in, during the stroke of the second column: the result is `CANCELED`
+(column 3 done, column 4 failed, stand 1 never reached), the log shows the admittance off and the force target at 0, joint speed
+over the next second 0.008 rad/s (the unload ramp makes the cancel take 1.65 s from request to result); **navigation failure**
+(`stand_nav_timeout_s: 0.5`, `stand_nav_attempts: 1`): both stands skipped, result `0 done, 0 partial, 9 failed` with each stand
+"not reached (navigation timed out)" and its columns listed as failed; with `stand_nav_timeout_s: 2.0` the first attempt timed out,
+was cancelled, the retry arrived (3.9 mm) and the stand ran (that run was stopped early). Dock failures: in that run the first two
+dock attempts of the first column ended in OMPL's 5 s search timeout and the third succeeded in 59 ms; the same pattern as the
+flaky first dock noted for the stand pass. The cause was not found (it looks like a stale start state or scene right after the
+arrival, not the goal: the same dock pose is trivial on a later try); `dock_attempts: 6` covers it.
+
 
 #### Sensed wall (M4 exit test)
 

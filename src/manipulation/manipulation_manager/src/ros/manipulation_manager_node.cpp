@@ -11,7 +11,12 @@
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -20,8 +25,13 @@
 
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "geometry_msgs/msg/pose.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/wrench_stamped.hpp"
+#include "coverage_task_msgs/action/execute_coverage.hpp"
+#include "stand_navigator_msgs/action/navigate_to_stand.hpp"
 #include "reachability_msgs/srv/plan_stands.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float64.hpp"
@@ -37,6 +47,7 @@
 #include "ros_adapters/rclcpp_logger.hpp"
 
 #include "manipulation_manager/core/base_stance_check.hpp"
+#include "manipulation_manager/core/coverage_task.hpp"
 #include "manipulation_manager/core/frame_transform.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
@@ -178,6 +189,54 @@ public:
       "controller_name", "combined_arm_lift_controller");
     force_pub_ = this->create_publisher<std_msgs::msg::Float64>(
       "/" + controller_name_ + "/target_force_n", 10);
+
+    // Task interface (action `execute_coverage`, coverage_task_msgs). true (default): the old behaviour, run the
+    // plan of the parameters once at start and exit. false: serve goals until shut down.
+    run_on_start_ = this->declare_parameter<bool>("run_on_start", true);
+    // Multi-stand goals: tries per stand's navigation before its columns are skipped, the navigation's time limit,
+    // and the arm's travel pose (lift + 6 joints in the group's order; empty = the pose when the task started).
+    // The widest stretch of wall (m, along it) one stand is trusted with: the reachability map does not know the arm's
+    // self-collision or how badly it is conditioned at the edge of its reach, so plan_stands is asked for stands
+    // group by group. 0 = the whole plan at once.
+    stand_max_span_ = this->declare_parameter<double>("stand_max_span_m", 0.0);
+    // A shell command run after each arrival at a stand, before its columns (empty = none).
+    arrival_command_ = this->declare_parameter<std::string>("stand_arrival_command", "");
+    nav_attempts_ = this->declare_parameter<int>("stand_nav_attempts", 2);
+    nav_timeout_s_ = this->declare_parameter<double>("stand_nav_timeout_s", 240.0);
+    travel_joint_state_ = this->declare_parameter<std::vector<double>>(
+      "travel_joint_state", std::vector<double>{});
+    // Where the tool's force is read for the feedback's and result's peak ("" = not read, peak -1).
+    const auto force_topic = this->declare_parameter<std::string>(
+      "force_topic", "/ft_conditioner/wrench_conditioned");
+    if (!force_topic.empty()) {
+      force_sub_ = this->create_subscription<geometry_msgs::msg::WrenchStamped>(
+        force_topic, rclcpp::SensorDataQoS(),
+        [this](const geometry_msgs::msg::WrenchStamped::SharedPtr msg) {
+          if (!tracking_peak_) {
+            return;
+          }
+          const auto & f = msg->wrench.force;
+          peak_force_ = std::max(peak_force_, std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z));
+        });
+    }
+    nav_client_ = rclcpp_action::create_client<NavigateToStand>(this, "navigate_to_stand");
+    action_server_ = rclcpp_action::create_server<ExecuteCoverage>(
+      this, "execute_coverage",
+      [this](const rclcpp_action::GoalUUID &, std::shared_ptr<const ExecuteCoverage::Goal>) {
+        if (busy_ || pending_goal_) {
+          RCLCPP_WARN(this->get_logger(), "execute_coverage goal rejected: a task is already running");
+          return rclcpp_action::GoalResponse::REJECT;
+        }
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+      },
+      [this](const std::shared_ptr<GoalHandle>) {
+        // Runs while the node is spun (inside every wait of the task): flags only, the task cleans up itself.
+        cancel_requested_ = true;
+        execution_adapter_->cancelCurrent();
+        cancelNavigation();
+        return rclcpp_action::CancelResponse::ACCEPT;
+      },
+      [this](const std::shared_ptr<GoalHandle> handle) {pending_goal_ = handle;});
   }
 
   /// Two-phase init: JtacExecutionAdapter needs a live node shared_ptr for its action client,
@@ -220,6 +279,8 @@ public:
     }
   }
 
+  bool runOnStart() const {return run_on_start_;}
+
   /// Opens or closes the spray valve; only a change is published.
   void setValve(bool open)
   {
@@ -238,51 +299,618 @@ public:
     auto future = param_client_->set_parameters({rclcpp::Parameter("admittance.selected_axes",
       axes)});
     rclcpp::spin_until_future_complete(shared_from_this(), future);
+    admittance_engaged_ = enabled;
   }
 
   /**
-   * @brief Run the whole coverage plan from this stance: dock -> contact -> retract per wall
-   *        column, in the column order CoverageOutputJsonSource already sorted left-to-right.
+   * @brief The old one-shot run (run_on_start): the plan of the parameters, once, from this stance:
+   *        dock -> contact -> retract per wall column, in the column order CoverageOutputJsonSource
+   *        already sorted left-to-right.
    */
   void runCoveragePlan()
   {
-    // In a world frame the poses are loaded as they are and moved into frame_id column by column.
-    CoverageOutputJsonSource source(
-      coverage_json_path_, world_frame_.empty() ? frame_id_ : world_frame_, z_offset_, coverage_z_step_, coverage_z_min_, coverage_z_max_,
-      coverage_eef_speed_, wall_dir_);
-    const auto intents = source.getCoveragePlan();
-    RCLCPP_INFO(this->get_logger(), "Loaded %zu wall column(s) from %s",
-      intents.size(), coverage_json_path_.c_str());
-
-    if (!baseStanceAllowsRun(intents)) {
-      return;
+    const TaskResult result = executeTask(TaskRequest{});
+    if (result.loaded) {
+      RCLCPP_INFO(
+        this->get_logger(), "Coverage plan complete: done=%zu partial=%zu failed=%zu",
+        tracker_.done().size(), tracker_.partial().size(), tracker_.failed().size());
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "Coverage plan not run: %s", result.message.c_str());
     }
+  }
 
-    primeContinuityFromLiveState();
-
-    size_t columns_done = 0;
-    size_t columns_partial = 0;
-    size_t columns_failed = 0;
-    for (const auto & intent : intents) {
-      if (intent.poses.empty()) {
-        continue;
+  /// Serves `execute_coverage` goals until shutdown. The node is spun only here and inside the task's waits (the
+  /// manager's blocking calls spin it themselves), so a goal is run from this loop, one at a time.
+  void serve()
+  {
+    RCLCPP_INFO(this->get_logger(), "serving the execute_coverage action");
+    while (rclcpp::ok()) {
+      rclcpp::spin_some(shared_from_this());
+      if (pending_goal_) {
+        const auto handle = pending_goal_;
+        pending_goal_.reset();
+        runGoal(handle);
       }
-      const auto outcome = runColumn(intent);
-      if (outcome == ColumnOutcome::kDone) {
-        ++columns_done;
-      } else if (outcome == ColumnOutcome::kPartial) {
-        ++columns_partial;
-      } else {
-        ++columns_failed;
-      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
-    setValve(false);
-    RCLCPP_INFO(
-      this->get_logger(), "Coverage plan complete: done=%zu partial=%zu failed=%zu",
-      columns_done, columns_partial, columns_failed);
   }
 
 private:
+  using ExecuteCoverage = coverage_task_msgs::action::ExecuteCoverage;
+  using GoalHandle = rclcpp_action::ServerGoalHandle<ExecuteCoverage>;
+  using NavigateToStand = stand_navigator_msgs::action::NavigateToStand;
+
+  /// What a task is asked to do; the defaults are the parameters' (the old one-shot behaviour).
+  struct TaskRequest
+  {
+    std::string json_path;            ///< empty: the parameter
+    bool multi_stand{false};
+    int tool_mode{0};                 ///< ExecuteCoverage::TOOL_*
+    std::vector<size_t> columns;      ///< empty: all
+  };
+
+  struct TaskResult
+  {
+    bool loaded{false};               ///< the plan was loaded and the run started (false: `message` says why)
+    bool canceled{false};
+    std::string message;
+  };
+
+  void runGoal(const std::shared_ptr<GoalHandle> & handle)
+  {
+    busy_ = true;
+    const auto goal = handle->get_goal();
+    auto result = std::make_shared<ExecuteCoverage::Result>();
+    result->peak_force_n = -1.0;
+    if (handle->is_canceling()) {
+      result->message = "canceled";
+      handle->canceled(result);
+      busy_ = false;
+      return;
+    }
+    TaskRequest req;
+    req.json_path = goal->coverage_json_path;
+    req.multi_stand = goal->multi_stand;
+    req.tool_mode = goal->tool_mode;
+    req.columns.assign(goal->columns.begin(), goal->columns.end());
+    feedback_sink_ = [handle](const std::shared_ptr<ExecuteCoverage::Feedback> & fb) {
+        handle->publish_feedback(fb);
+      };
+    const TaskResult run = executeTask(req);
+    feedback_sink_ = nullptr;
+
+    result->columns_done.assign(tracker_.done().begin(), tracker_.done().end());
+    result->columns_partial.assign(tracker_.partial().begin(), tracker_.partial().end());
+    result->columns_failed.assign(tracker_.failed().begin(), tracker_.failed().end());
+    for (const auto & s : tracker_.stands()) {
+      coverage_task_msgs::msg::StandOutcome o;
+      o.stand_index = static_cast<uint32_t>(s.index);
+      o.reached = s.reached;
+      o.message = s.message;
+      o.columns_done.assign(s.done.begin(), s.done.end());
+      o.columns_partial.assign(s.partial.begin(), s.partial.end());
+      o.columns_failed.assign(s.failed.begin(), s.failed.end());
+      result->stands.push_back(o);
+    }
+    result->peak_force_n = peak_force_;
+    result->message = run.message;
+    result->success = run.loaded && !run.canceled && tracker_.success();
+    RCLCPP_INFO(
+      this->get_logger(), "execute_coverage finished: %s (%s)",
+      result->success ? "success" : "not successful", run.message.c_str());
+    if (run.canceled || handle->is_canceling()) {
+      handle->canceled(result);
+    } else if (!run.loaded) {
+      handle->abort(result);
+    } else {
+      handle->succeed(result);   // ran to its end: `success` and the column lists say how it went
+    }
+    busy_ = false;
+  }
+
+  bool stop() const {return cancel_requested_ || !rclcpp::ok();}
+
+  /// Spins the node for `seconds` (so a cancel is heard); false when stopped early.
+  bool waitFor(double seconds, bool honour_cancel = true)
+  {
+    const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+    while (std::chrono::steady_clock::now() < end) {
+      rclcpp::spin_some(shared_from_this());
+      if (honour_cancel && stop()) {
+        return false;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return true;
+  }
+
+  void setState(const std::string & state, int column = -2)
+  {
+    state_ = state;
+    if (column != -2) {
+      column_ = column;
+    }
+    if (!feedback_sink_) {
+      return;
+    }
+    auto fb = std::make_shared<ExecuteCoverage::Feedback>();
+    fb->state = state_;
+    fb->stand_index = static_cast<uint32_t>(stand_index_);
+    fb->stand_count = static_cast<uint32_t>(stand_count_);
+    fb->column = column_;
+    fb->columns_done = static_cast<uint32_t>(tracker_.done().size());
+    fb->columns_failed = static_cast<uint32_t>(tracker_.partial().size() + tracker_.failed().size());
+    fb->peak_force_n = peak_force_;
+    feedback_sink_(fb);
+  }
+
+  /// After a cancel: no force target, the admittance off (after the unload ramp the normal flow also gives it),
+  /// the spray valve closed. The arm stays where it stopped.
+  void abortCleanup()
+  {
+    tracking_peak_ = false;
+    {
+      std_msgs::msg::Float64 zero;
+      zero.data = 0.0;
+      force_pub_->publish(zero);
+    }
+    if (admittance_engaged_) {
+      waitFor(1.5, false);
+      setAdmittanceEngaged(false);
+    }
+    setValve(false);
+    RCLCPP_WARN(this->get_logger(), "task canceled: motion stopped, admittance off, force target 0");
+  }
+
+  /// Runs one task: loads the plan, then either the whole plan from here or, multi-stand, the stands in order.
+  TaskResult executeTask(const TaskRequest & req)
+  {
+    TaskResult out;
+    cancel_requested_ = false;
+    execution_adapter_->setCancelled(false);
+    peak_force_ = -1.0;
+    tracking_peak_ = false;
+    column_ = -1;
+    stand_index_ = 0;
+    stand_count_ = 1;
+    tracker_.beginSingle();
+
+    const bool saved_contact = contact_;
+    if (req.tool_mode == ExecuteCoverage::Goal::TOOL_CONTACT) {
+      contact_ = true;
+    } else if (req.tool_mode == ExecuteCoverage::Goal::TOOL_NON_CONTACT) {
+      contact_ = false;
+    }
+    if (!contact_ && saved_contact) {
+      valve_.update(true);   // force the first command out: the valve is explicitly closed at start
+      setValve(false);
+    }
+    const auto restore = [&]() {contact_ = saved_contact;};
+
+    const std::string path = req.json_path.empty() ? coverage_json_path_ : req.json_path;
+    std::vector<CoverageSegmentIntent> intents;
+    try {
+      // In a world frame the poses are loaded as they are and moved into frame_id column by column.
+      CoverageOutputJsonSource source(
+        path, world_frame_.empty() ? frame_id_ : world_frame_, z_offset_, coverage_z_step_,
+        coverage_z_min_, coverage_z_max_, coverage_eef_speed_, wall_dir_);
+      intents = source.getCoveragePlan();
+    } catch (const std::exception & e) {
+      out.message = std::string("cannot load the coverage plan ") + path + ": " + e.what();
+      restore();
+      return out;
+    }
+    RCLCPP_INFO(
+      this->get_logger(), "Loaded %zu wall column(s) from %s", intents.size(), path.c_str());
+
+    // The columns to run: their index in the plan, and the intents
+    std::vector<size_t> ids;
+    std::vector<CoverageSegmentIntent> sel;
+    for (size_t c = 0; c < intents.size(); ++c) {
+      if (intents[c].poses.empty()) {
+        continue;
+      }
+      if (!req.columns.empty() &&
+        std::find(req.columns.begin(), req.columns.end(), c) == req.columns.end())
+      {
+        continue;
+      }
+      ids.push_back(c);
+      sel.push_back(intents[c]);
+    }
+    if (sel.empty()) {
+      out.message = "no column to run";
+      restore();
+      return out;
+    }
+
+    TaskStateMachine machine(nav_attempts_);
+    if (!req.multi_stand) {
+      machine.startSingle();
+      if (!baseStanceAllowsRun(sel)) {
+        out.message = "base stance check failed (base_check enforce)";
+        restore();
+        return out;
+      }
+      out.loaded = true;
+      setState("priming");
+      primeContinuityFromLiveState();
+      for (size_t i = 0; i < sel.size() && !stop(); ++i) {
+        tracker_.columnFinished(0, ids[i], runColumn(sel[i], ids[i]));
+      }
+      if (!stop()) {
+        machine.singleFinished();
+      }
+    } else {
+      out.loaded = runStands(machine, sel, ids, out.message);
+    }
+
+    if (stop() && rclcpp::ok()) {
+      machine.cancel();
+    }
+    if (machine.state() == TaskState::kCanceled) {
+      abortCleanup();
+      out.canceled = true;
+      out.message = "canceled";
+    } else {
+      setValve(false);
+      if (out.message.empty()) {
+        out.message = tracker_.summary();
+      }
+    }
+    setState(out.canceled ? "canceled" : "done", -1);
+    restore();
+    return out;
+  }
+
+  /// The multi-stand loop: plan the stands, give each column to a stand, and for each stand drive there, run its
+  /// columns, go on. Returns false (with `why`) when no stand could be planned.
+  bool runStands(
+    TaskStateMachine & machine, const std::vector<CoverageSegmentIntent> & sel,
+    const std::vector<size_t> & ids, std::string & why)
+  {
+    if (world_frame_.empty()) {
+      why = "multi_stand needs the world_frame parameter (the stands are poses in it)";
+      return false;
+    }
+    machine.startMulti();
+    setState("planning_stands");
+    // The arm's pose before it first moves: what it goes back to before every drive.
+    travel_state_ = travel_joint_state_.size() == kGroupJointOrder.size() ?
+      travel_joint_state_ : readCurrentJointState(shared_from_this());
+    arm_deployed_ = false;
+
+    std::vector<StanceStand> stands;
+    std::vector<std::vector<size_t>> stand_targets;
+    if (!planStands(sel, stands, stand_targets, why)) {
+      machine.standsFailed();
+      return false;
+    }
+    std::vector<size_t> sizes;
+    for (const auto & c : sel) {
+      sizes.push_back(c.poses.size());
+    }
+    const auto assignment = assignColumnsToStands(sizes, stand_targets);
+    // Stands that run no column are not visited.
+    std::vector<StanceStand> visit;
+    std::vector<std::vector<size_t>> visit_columns;   // indices into sel
+    for (size_t s = 0; s < stands.size(); ++s) {
+      if (!assignment.columns_per_stand[s].empty()) {
+        visit.push_back(stands[s]);
+        visit_columns.push_back(assignment.columns_per_stand[s]);
+      }
+    }
+    stand_count_ = visit.size();
+    tracker_.beginMulti(visit.size());
+    for (const size_t c : assignment.unassigned) {
+      RCLCPP_WARN(
+        this->get_logger(), "column %zu (%s): no stand reaches it, not run", ids[c],
+        sel[c].label.c_str());
+      tracker_.columnSkipped(ids[c]);
+    }
+    if (!machine.standsPlanned(visit.size())) {
+      why = "no stand covers the plan";
+      return false;
+    }
+    RCLCPP_INFO(this->get_logger(), "%zu stand(s) to visit", visit.size());
+
+    while (!machine.terminal()) {
+      if (stop()) {
+        break;
+      }
+      const size_t s = machine.stand();
+      stand_index_ = s;
+      if (machine.state() == TaskState::kNavigating) {
+        std::string msg;
+        bool ok = true;
+        if (arm_deployed_) {
+          setState("stowing", -1);
+          if (stowArm()) {
+            arm_deployed_ = false;
+          } else {
+            ok = false;
+            msg = stop() ? "canceled" : "could not stow the arm for the drive";
+          }
+        }
+        if (ok) {
+          setState("navigating", -1);
+          ok = navigateToStand(visit[s], msg);
+        }
+        if (stop()) {
+          break;
+        }
+        const auto verdict = machine.navigationResult(ok);
+        if (verdict == NavVerdict::kRun) {
+          tracker_.standReached(s, true, "");
+          if (!arrival_command_.empty()) {
+            // MoveIt keeps the obstacles in the robot's root frame, so after the base moved the wall has to be put
+            // into its scene again (the sim does it with world_model_loader_node; a live feed would not need it).
+            setState("scene", -1);
+            const int rc = std::system(arrival_command_.c_str());
+            if (rc != 0) {
+              RCLCPP_WARN(this->get_logger(), "stand_arrival_command exited with %d", rc);
+            }
+            waitFor(1.0);
+          }
+        } else if (verdict == NavVerdict::kRetry) {
+          RCLCPP_WARN(this->get_logger(), "stand %zu: %s, trying again", s, msg.c_str());
+        } else {
+          RCLCPP_ERROR(this->get_logger(), "stand %zu not reached (%s): its columns are not run", s, msg.c_str());
+          tracker_.standReached(s, false, msg);
+          for (const size_t c : visit_columns[s]) {
+            tracker_.columnFinished(s, ids[c], ColumnOutcome::kFailed);
+          }
+        }
+      } else if (machine.state() == TaskState::kRunningColumns) {
+        setState("priming", -1);
+        primeContinuityFromLiveState();
+        for (const size_t c : visit_columns[s]) {
+          if (stop()) {
+            break;
+          }
+          arm_deployed_ = true;
+          tracker_.columnFinished(s, ids[c], runColumn(sel[c], ids[c]));
+        }
+        if (!stop()) {
+          machine.standFinished();
+        }
+      } else {
+        break;
+      }
+    }
+    return true;
+  }
+
+  /// plan_stands for the plan from where the arm base is now (world frame). `targets_per_stand` are indices into
+  /// the concatenated poses of `sel`. With stand_max_span_m > 0 the columns are asked for in groups no wider than
+  /// that along the wall (nearest end first, each group starting from the previous group's last stand), so one stand
+  /// is never trusted with more than the span.
+  bool planStands(
+    const std::vector<CoverageSegmentIntent> & sel, std::vector<StanceStand> & stands,
+    std::vector<std::vector<size_t>> & targets_per_stand, std::string & why)
+  {
+    FrameTransform arm_in_world, base_in_world;
+    if (!lookup(world_frame_, arm_base_frame_, arm_in_world) ||
+      !lookup(world_frame_, frame_id_, base_in_world))
+    {
+      why = "no TF " + world_frame_ + " -> " + arm_base_frame_ + " / " + frame_id_;
+      return false;
+    }
+    auto client = this->create_client<reachability_msgs::srv::PlanStands>(base_check_service_);
+    if (!client->wait_for_service(std::chrono::seconds(5))) {
+      why = "service " + base_check_service_ + " is not available";
+      return false;
+    }
+
+    // position along the wall (the horizontal direction at right angles to wall_direction) of each column
+    const double tx = -wall_dir_.d[1];
+    const double ty = wall_dir_.d[0];
+    std::vector<double> lateral;
+    std::vector<size_t> first_pose;   // index of the column's first pose in the concatenation
+    size_t n_poses = 0;
+    for (const auto & c : sel) {
+      const auto & p = c.poses.front();
+      lateral.push_back(p.x * tx + p.y * ty);
+      first_pose.push_back(n_poses);
+      n_poses += c.poses.size();
+    }
+    auto groups = groupByLateralSpan(lateral, stand_max_span_);
+    const double here = arm_in_world.t[0] * tx + arm_in_world.t[1] * ty;
+    if (groups.size() > 1 &&
+      std::abs(lateral[groups.back().front()] - here) < std::abs(lateral[groups.front().back()] - here))
+    {
+      std::reverse(groups.begin(), groups.end());
+    }
+
+    StanceStand start{arm_in_world.t[0], arm_in_world.t[1], base_in_world.yaw()};
+    for (const auto & group : groups) {
+      std::vector<CoverageSegmentIntent> part;
+      for (const size_t i : group) {
+        part.push_back(sel[i]);
+      }
+      auto req = makeStandRequest(stanceWall(part));
+      req->has_start = true;
+      req->start_x = start.x;
+      req->start_y = start.y;
+      req->start_yaw = start.yaw;
+      auto future = client->async_send_request(req);
+      if (rclcpp::spin_until_future_complete(
+          shared_from_this(), future, std::chrono::seconds(60)) != rclcpp::FutureReturnCode::SUCCESS)
+      {
+        why = "no reply from " + base_check_service_;
+        return false;
+      }
+      const auto res = future.get();
+      // the group's pose index -> the index in the concatenation of `sel`
+      std::vector<size_t> to_global;
+      for (const size_t i : group) {
+        for (size_t k = 0; k < sel[i].poses.size(); ++k) {
+          to_global.push_back(first_pose[i] + k);
+        }
+      }
+      for (const auto & st : res->stands) {
+        stands.push_back({st.x, st.y, st.yaw});
+        std::vector<size_t> targets;
+        for (const auto t : st.target_indices) {
+          if (t < to_global.size()) {
+            targets.push_back(to_global[t]);
+          }
+        }
+        RCLCPP_INFO(
+          this->get_logger(), "stand %zu: arm base (%.3f, %.3f) yaw %.3f reaches %zu pose(s)",
+          stands.size() - 1, st.x, st.y, st.yaw, targets.size());
+        targets_per_stand.push_back(targets);
+        start = stands.back();
+      }
+      if (!res->success) {
+        RCLCPP_WARN(
+          this->get_logger(), "plan_stands: %zu target(s) unreachable, %zu not planned (%s)",
+          res->unreachable.size(), res->not_planned.size(), res->message.c_str());
+      }
+    }
+    if (stands.empty()) {
+      why = "plan_stands returned no stand";
+      return false;
+    }
+    return true;
+  }
+
+  /// Drives the arm base to a stand with the navigate_to_stand action; false (with `message`) on failure.
+  bool navigateToStand(const StanceStand & st, std::string & message)
+  {
+    if (!nav_client_->wait_for_action_server(std::chrono::seconds(5))) {
+      message = "navigate_to_stand is not available";
+      return false;
+    }
+    NavigateToStand::Goal goal;
+    goal.pose.header.frame_id = world_frame_;
+    goal.pose.pose.position.x = st.x;
+    goal.pose.pose.position.y = st.y;
+    goal.pose.pose.orientation.z = std::sin(st.yaw / 2.0);
+    goal.pose.pose.orientation.w = std::cos(st.yaw / 2.0);
+
+    struct Outcome
+    {
+      bool done{false};
+      rclcpp_action::ResultCode code{rclcpp_action::ResultCode::UNKNOWN};
+      NavigateToStand::Result::SharedPtr result;
+    };
+    auto outcome = std::make_shared<Outcome>();
+    rclcpp_action::Client<NavigateToStand>::SendGoalOptions options;
+    options.result_callback =
+      [outcome](const rclcpp_action::ClientGoalHandle<NavigateToStand>::WrappedResult & w) {
+        outcome->done = true;
+        outcome->code = w.code;
+        outcome->result = w.result;
+      };
+    auto sent = nav_client_->async_send_goal(goal, options);
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto elapsed = [&]() {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+      };
+    while (rclcpp::ok() && sent.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+      rclcpp::spin_some(shared_from_this());
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      if (elapsed() > 10.0) {
+        message = "navigate_to_stand did not answer the goal";
+        return false;
+      }
+    }
+    if (!rclcpp::ok()) {
+      message = "shutdown";
+      return false;
+    }
+    nav_goal_ = sent.get();
+    if (!nav_goal_) {
+      message = "navigate_to_stand rejected the goal";
+      return false;
+    }
+    bool cancel_sent = false;
+    double cancel_at = 0.0;
+    while (rclcpp::ok() && !outcome->done) {
+      rclcpp::spin_some(shared_from_this());
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      if (!cancel_sent && (cancel_requested_ || elapsed() > nav_timeout_s_)) {
+        message = cancel_requested_ ? "canceled" : "navigation timed out";
+        cancelNavigation();
+        cancel_sent = true;
+        cancel_at = elapsed();
+      }
+      if (cancel_sent && elapsed() - cancel_at > 10.0) {
+        break;   // the navigator did not confirm the cancel
+      }
+    }
+    nav_goal_.reset();
+    if (cancel_sent || !outcome->done) {
+      return false;
+    }
+    if (outcome->code != rclcpp_action::ResultCode::SUCCEEDED || outcome->result->error_code != 0) {
+      message = outcome->result && !outcome->result->error_msg.empty() ?
+        outcome->result->error_msg : "navigation failed";
+      return false;
+    }
+    RCLCPP_INFO(
+      this->get_logger(), "arrived at the stand (error %.1f mm, %.3f rad)",
+      outcome->result->position_error_m * 1000.0, outcome->result->yaw_error_rad);
+    return true;
+  }
+
+  void cancelNavigation()
+  {
+    if (nav_goal_) {
+      try {
+        nav_client_->async_cancel_goal(nav_goal_);
+      } catch (const rclcpp_action::exceptions::UnknownGoalHandleError &) {
+        // already finished: nothing to cancel
+      }
+    }
+  }
+
+  /// The arm to its travel pose (a free-space move), so the base can drive without the tool near the wall.
+  bool stowArm()
+  {
+    MotionSegmentSpec seg;
+    seg.label = "stow";
+    seg.mode_hint = "fsp";
+    seg.target_joint_state = travel_state_;
+    for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
+      if (manager_.executeMotionSegments(frame_id_, {seg}, {}, planning_group_).success) {
+        return true;
+      }
+      RCLCPP_WARN(this->get_logger(), "stow attempt %d failed", attempt + 1);
+    }
+    return false;
+  }
+
+  /// The plan_stands request for the targets of `wall`, with the lift range and arm mount of the base check.
+  std::shared_ptr<reachability_msgs::srv::PlanStands::Request> makeStandRequest(const StanceWall & wall)
+  {
+    auto req = std::make_shared<reachability_msgs::srv::PlanStands::Request>();
+    for (const auto & p : wall.targets) {
+      geometry_msgs::msg::Pose m;
+      m.position.x = p.x;
+      m.position.y = p.y;
+      m.position.z = p.z;
+      m.orientation.x = p.qx;
+      m.orientation.y = p.qy;
+      m.orientation.z = p.qz;
+      m.orientation.w = p.qw;
+      req->targets_world.push_back(m);
+    }
+    // The wall lies along wall_direction from the base (the same direction the dock pose uses); the
+    // normal points into the free side, back towards the robot.
+    req->wall_point.x = wall.wall_x;
+    req->wall_point.y = wall.wall_y;
+    req->wall_point.z = wall.wall_z;
+    req->wall_normal.x = -wall_dir_.d[0];
+    req->wall_normal.y = -wall_dir_.d[1];
+    req->wall_normal.z = -wall_dir_.d[2];
+    req->lift_min = base_check_lift_min_;
+    req->lift_max = base_check_lift_max_;
+    req->arm_mount_offset_z = base_check_arm_mount_z_;
+    return req;
+  }
+
   /// Asks the reachability planner whether the base, where it stands, reaches the whole plan.
   /// Returns false only in "enforce" mode when the stance fails; an unreachable service counts as
   /// a failed check (the answer is unknown), so enforce never runs blind.
@@ -314,29 +942,7 @@ private:
     if (!client->wait_for_service(std::chrono::seconds(5))) {
       return fail("service " + base_check_service_ + " is not available");
     }
-    auto req = std::make_shared<reachability_msgs::srv::PlanStands::Request>();
-    for (const auto & p : wall.targets) {
-      geometry_msgs::msg::Pose m;
-      m.position.x = p.x;
-      m.position.y = p.y;
-      m.position.z = p.z;
-      m.orientation.x = p.qx;
-      m.orientation.y = p.qy;
-      m.orientation.z = p.qz;
-      m.orientation.w = p.qw;
-      req->targets_world.push_back(m);
-    }
-    // The wall lies along wall_direction from the base (the same direction the dock pose uses); the
-    // normal points into the free side, back towards the robot.
-    req->wall_point.x = wall.wall_x;
-    req->wall_point.y = wall.wall_y;
-    req->wall_point.z = wall.wall_z;
-    req->wall_normal.x = -wall_dir_.d[0];
-    req->wall_normal.y = -wall_dir_.d[1];
-    req->wall_normal.z = -wall_dir_.d[2];
-    req->lift_min = base_check_lift_min_;
-    req->lift_max = base_check_lift_max_;
-    req->arm_mount_offset_z = base_check_arm_mount_z_;
+    auto req = makeStandRequest(wall);
     // In a world frame the stands are world poses: start the planner where the arm base is, and
     // compare the stand with that pose (without a start the planner centres the stand on the wall
     // section, which is not necessarily the stand nearest to the base).
@@ -437,8 +1043,6 @@ private:
     return true;
   }
 
-  enum class ColumnOutcome { kDone, kPartial, kFailed };
-
   /// A trivial joint-space "move to where the arm already is" segment -- its only purpose is
   /// getting a genuinely live joint state into ManipulationManager's own continuity tracking
   /// before the first real segment, see this file's own readCurrentJointState() comment for why.
@@ -460,8 +1064,9 @@ private:
     }
   }
 
-  ColumnOutcome runColumn(const CoverageSegmentIntent & world_intent)
+  ColumnOutcome runColumn(const CoverageSegmentIntent & world_intent, size_t column)
   {
+    setState("docking", static_cast<int>(column));
     // The column as planned in world_frame, expressed in frame_id for where the base is now. The
     // wall direction is rotated with it (the base may have stopped at another yaw).
     CoverageSegmentIntent intent = world_intent;
@@ -510,7 +1115,7 @@ private:
     // retries for exactly this reason (a genuine failure to find any path is worth one more
     // attempt before giving up); dock deserves the same tolerance.
     MotionExec dock_exec;
-    for (int attempt = 0; attempt < dock_attempts_; ++attempt) {
+    for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
       dock_exec = manager_.executeMotionSegments(
         frame_id_, {dock_seg}, {standoff_pose}, planning_group_);
       if (dock_exec.success) {
@@ -521,10 +1126,15 @@ private:
         attempt + 1);
     }
     if (!dock_exec.success) {
-      RCLCPP_WARN(this->get_logger(), "%s: dock failed, skipping column", intent.label.c_str());
+      RCLCPP_WARN(
+        this->get_logger(), "%s: dock %s, skipping column", intent.label.c_str(),
+        stop() ? "stopped" : "failed");
       return ColumnOutcome::kFailed;
     }
 
+    if (stop()) {
+      return ColumnOutcome::kFailed;
+    }
     if (!contact_) {
       return runSprayStroke(intent, wall_dir, standoff_pose);
     }
@@ -535,7 +1145,11 @@ private:
       msg.data = target_force_n_;
       force_pub_->publish(msg);
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    if (!waitFor(0.5)) {
+      return ColumnOutcome::kFailed;   // canceled: the task's cleanup unloads and disengages
+    }
+    tracking_peak_ = true;
+    setState("pressing");
 
     MotionSegmentSpec contact_seg;
     contact_seg.label = intent.label + "_contact";
@@ -571,9 +1185,13 @@ private:
       const auto press_exec = manager_.executeMotionSegments(
         frame_id_, {press_seg}, {contact_waypoints.front()}, planning_group_);
       if (press_exec.success) {
-        std::this_thread::sleep_for(std::chrono::duration<double>(press_settle_s_));
+        waitFor(press_settle_s_);
       }
     }
+    if (stop()) {
+      return ColumnOutcome::kFailed;
+    }
+    setState("stroking");
     for (size_t i = 0; i < contact_waypoints.size(); ++i) {
       contact_seg.waypoint_indices.push_back(i);
     }
@@ -583,6 +1201,10 @@ private:
       this->get_logger(), "%s: contact success=%d completed=%zu", intent.label.c_str(),
       contact_exec.success, contact_exec.waypoints_completed);
 
+    tracking_peak_ = false;
+    if (stop()) {
+      return ColumnOutcome::kFailed;
+    }
     // Back the reference off the wall while the admittance is still engaged: switching it off with the
     // reference 1.5 mm inside the wall snaps the arm onto that reference (27-31 N spikes at every
     // stroke end). The admittance releases its offset against a reference that no longer presses.
@@ -601,9 +1223,10 @@ private:
       zero.data = 0.0;
       force_pub_->publish(zero);
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    waitFor(1.5, false);
     setAdmittanceEngaged(false);
 
+    setState("retracting");
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
     retract_seg.mode_hint = "fsp";
@@ -645,6 +1268,7 @@ private:
 
     // Valve closed: take up the first stroke pose from the dock pose (a straight move).
     setValve(false);
+    setState("stroking");
     MotionSegmentSpec start_seg = stroke_seg;
     start_seg.label = intent.label + "_start";
     start_seg.waypoint_indices = {0};
@@ -660,6 +1284,10 @@ private:
     RCLCPP_INFO(
       this->get_logger(), "%s: spray success=%d completed=%zu", intent.label.c_str(),
       stroke_exec.success, stroke_exec.waypoints_completed);
+    if (stop()) {
+      return ColumnOutcome::kFailed;
+    }
+    setState("retracting");
 
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
@@ -681,6 +1309,32 @@ private:
 
   // Plugin plumbing. Declared before manager_ so the manager (which owns the planners) is
   // destroyed first; the registry's plugin libraries stay loaded for the whole process.
+  // Task state (all touched from the main thread only: the action callbacks run inside the node's spins).
+  bool run_on_start_{true};
+  int nav_attempts_{2};
+  double stand_max_span_{0.0};
+  std::string arrival_command_;
+  double nav_timeout_s_{240.0};
+  std::vector<double> travel_joint_state_;
+  std::vector<double> travel_state_;
+  bool arm_deployed_{false};
+  rclcpp_action::Server<ExecuteCoverage>::SharedPtr action_server_;
+  std::shared_ptr<GoalHandle> pending_goal_;
+  bool busy_{false};
+  bool cancel_requested_{false};
+  bool admittance_engaged_{false};
+  bool tracking_peak_{false};
+  double peak_force_{-1.0};
+  rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr force_sub_;
+  rclcpp_action::Client<NavigateToStand>::SharedPtr nav_client_;
+  rclcpp_action::ClientGoalHandle<NavigateToStand>::SharedPtr nav_goal_;
+  std::function<void(const std::shared_ptr<ExecuteCoverage::Feedback> &)> feedback_sink_;
+  TaskTracker tracker_;
+  std::string state_{"idle"};
+  size_t stand_index_{0};
+  size_t stand_count_{1};
+  int column_{-1};
+
   std::string planning_config_;
   std::unique_ptr<motion_planner::PluginRegistry> plugin_registry_;
   motion_planner::PluginContext plugin_context_;
@@ -756,7 +1410,11 @@ int main(int argc, char ** argv)
   }
 
   if (move_group_ready && rclcpp::ok()) {
-    node->runCoveragePlan();
+    if (node->runOnStart()) {
+      node->runCoveragePlan();
+    } else {
+      node->serve();
+    }
   } else {
     RCLCPP_WARN(node->get_logger(), "Shutdown requested before move_group became ready.");
   }

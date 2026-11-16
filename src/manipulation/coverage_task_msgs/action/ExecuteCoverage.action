@@ -1,0 +1,34 @@
+# Run a coverage plan (coverage_planner's coverage_output.json) with the manipulation manager.
+#
+# Single stand (multi_stand false): the whole plan, column by column, from where the base is now.
+# Multi stand (multi_stand true): the manager asks reachability plan_stands for stands that cover the plan, assigns each
+# column to a stand, and for each stand in visiting order drives there (stand_navigator, NavigateToStand), runs that
+# stand's columns in the world frame, then goes on. Needs the manager's `world_frame` parameter.
+#
+# Cancel: the trajectory in flight is cancelled, the admittance is disengaged, the force target is set to zero and the
+# spray valve is closed; the result then has success false and message "canceled".
+
+uint8 TOOL_PARAMETER=0      # the manager's `contact` parameter
+uint8 TOOL_CONTACT=1
+uint8 TOOL_NON_CONTACT=2
+
+string coverage_json_path   # empty: the `coverage_json_path` parameter
+bool multi_stand
+uint8 tool_mode             # TOOL_*
+uint32[] columns            # only these columns (indices into the plan); empty: all
+---
+bool success                # every column asked for is done (none partial or failed) and every stand reached
+string message
+uint32[] columns_done
+uint32[] columns_partial
+uint32[] columns_failed
+coverage_task_msgs/StandOutcome[] stands   # empty for a single-stand run
+float64 peak_force_n        # largest force magnitude seen on the tool during the run; -1 when no force topic is read
+---
+string state                # planning_stands | navigating | stowing | docking | pressing | stroking | retracting | ...
+uint32 stand_index          # current stand (0 for a single-stand run)
+uint32 stand_count
+int32 column                # current column, -1 between columns
+uint32 columns_done
+uint32 columns_failed       # failed or partial
+float64 peak_force_n        # so far; -1 when no force topic is read
