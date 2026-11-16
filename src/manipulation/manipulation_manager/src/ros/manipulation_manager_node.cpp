@@ -48,8 +48,10 @@
 
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/coverage_task.hpp"
+#include "manipulation_manager/core/column_ordering.hpp"
 #include "manipulation_manager/core/frame_transform.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
+#include "manipulation_manager/core/recovery_jog.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
 #include "manipulation_manager/core/joint_names.hpp"
 #include "manipulation_manager/core/travel_pose.hpp"
@@ -82,7 +84,8 @@ const std::vector<std::vector<std::string>> kJointNameCandidates = {
 /// An earlier version filled a missing joint with 0.0: with names that did not match the robot the "live" state
 /// was the all-zero pose, and moving the arm "back" to it stretched the UR10e out and put the lift on its stop.
 std::vector<double> readCurrentJointState(
-  const rclcpp::Node::SharedPtr & node, const std::vector<std::string> & configured_names)
+  const rclcpp::Node::SharedPtr & node, const std::vector<std::string> & configured_names,
+  std::vector<std::string> * names_out = nullptr)
 {
   std::map<std::string, double> latest;
   auto sub = node->create_subscription<sensor_msgs::msg::JointState>(
@@ -114,6 +117,9 @@ std::vector<double> readCurrentJointState(
   std::vector<double> result;
   for (const auto & name : names) {
     result.push_back(latest.at(name));
+  }
+  if (names_out) {
+    *names_out = names;
   }
   return result;
 }
@@ -236,6 +242,33 @@ public:
     // puts the wall back) a failed retract or stow is retried once without the wall: a tool left in the
     // wall box has a start state in collision, and no planner will move it out of one.
     wall_clear_command_ = this->declare_parameter<std::string>("wall_clear_command", "");
+    // Failure handling. A column that failed (dock or contact stroke did nothing) is retried this many times, then
+    // skipped and the run goes on; the result lists it under columns_failed.
+    column_retries_ = std::max<int>(0, this->declare_parameter<int>("column_retries", 1));
+    // A start state the planners refuse (the arm in self-collision at the end of its reach, a joint on its limit)
+    // is moved a few centimetres of joint space back toward the last configuration known to be good (a stand's
+    // stow pose, a column's dock pose) before the retract or stow is tried again. recovery_jog_max_rad refuses a
+    // jog where a joint would have to move further than that. Joint limits (same order as the group) are optional.
+    recovery_jog_ = this->declare_parameter<bool>("recovery_jog", true);
+    jog_params_.max_total_rad = this->declare_parameter<double>("recovery_jog_max_rad", 2.5);
+    jog_params_.max_speed = this->declare_parameter<double>("recovery_jog_speed", 0.15);
+    jog_params_.lower = this->declare_parameter<std::vector<double>>(
+      "recovery_joint_lower", std::vector<double>{});
+    jog_params_.upper = this->declare_parameter<std::vector<double>>(
+      "recovery_joint_upper", std::vector<double>{});
+    // Empty: only the lift (the group's first joint) is limited, to the base check's travel. A lift that settled
+    // 1.5 mm below its lower stop is what makes MoveIt refuse every start state ("outside bounds"), the jog
+    // moves it back inside by travel_lift_margin_m.
+    if (jog_params_.lower.empty() && jog_params_.upper.empty() &&
+      base_check_lift_max_ > base_check_lift_min_)
+    {
+      jog_params_.lower = {base_check_lift_min_};
+      jog_params_.upper = {base_check_lift_max_};
+    }
+    jog_params_.limit_margin = std::max(0.0, travel_lift_margin_);
+    // The order of the columns within a stand: "input" (the plan's order, default), "nearest" (nearest neighbour by
+    // travel time between one stroke's end and the next one's start) or "nearest_2opt".
+    column_order_ = normalizeColumnOrder(this->declare_parameter<std::string>("column_order", "input"));
     nav_attempts_ = this->declare_parameter<int>("stand_nav_attempts", 2);
     nav_timeout_s_ = this->declare_parameter<double>("stand_nav_timeout_s", 240.0);
     travel_joint_state_ = this->declare_parameter<std::vector<double>>(
@@ -574,8 +607,16 @@ private:
       out.loaded = true;
       setState("priming");
       primeContinuityFromLiveState();
-      for (size_t i = 0; i < sel.size() && !stop(); ++i) {
-        tracker_.columnFinished(0, ids[i], runColumn(sel[i], ids[i]));
+      std::vector<size_t> all(sel.size());
+      for (size_t i = 0; i < all.size(); ++i) {
+        all[i] = i;
+      }
+      last_good_state_ = readCurrentJointState(shared_from_this(), group_joint_names_);
+      for (const size_t i : orderColumns(all, sel)) {
+        if (stop()) {
+          break;
+        }
+        tracker_.columnFinished(0, ids[i], runColumnWithRetry(sel[i], ids[i]));
       }
       if (!stop()) {
         machine.singleFinished();
@@ -710,12 +751,14 @@ private:
       } else if (machine.state() == TaskState::kRunningColumns) {
         setState("priming", -1);
         primeContinuityFromLiveState();
-        for (const size_t c : visit_columns[s]) {
+        last_good_state_ = travel_state_;   // the stowed arm: where a jog goes back to
+        arm_stuck_ = false;
+        for (const size_t c : orderColumns(visit_columns[s], sel)) {
           if (stop()) {
             break;
           }
           arm_deployed_ = true;
-          tracker_.columnFinished(s, ids[c], runColumn(sel[c], ids[c]));
+          tracker_.columnFinished(s, ids[c], runColumnWithRetry(sel[c], ids[c]));
         }
         if (!stop()) {
           machine.standFinished();
@@ -960,6 +1003,12 @@ private:
     if (stowAttempts()) {
       return true;
     }
+    if (stop()) {
+      return false;
+    }
+    if (recoverArm("stow") && stowAttempts()) {
+      return true;
+    }
     if (stop() || !canRecoverWithoutWall()) {
       return false;
     }
@@ -1155,6 +1204,105 @@ private:
     }
   }
 
+  /// `idx` (indices into `sel`) in the order set by column_order. "input" keeps it.
+  std::vector<size_t> orderColumns(const std::vector<size_t> & idx, const std::vector<CoverageSegmentIntent> & sel)
+  {
+    if (column_order_ == "input" || idx.size() < 3) {
+      return idx;
+    }
+    std::vector<ColumnEnds> ends;
+    for (const size_t c : idx) {
+      const auto & a = sel[c].poses.front();
+      const auto & b = sel[c].poses.back();
+      ends.push_back({{a.x, a.y, a.z}, {b.x, b.y, b.z}});
+    }
+    // the first column of the plan stays first (the arm is docked for it); the rest follow by travel time
+    const auto local = orderColumnsByTime(ends, ends.front().start, column_order_ == "nearest_2opt");
+    std::vector<size_t> out;
+    for (const size_t l : local) {
+      out.push_back(idx[l]);
+    }
+    RCLCPP_INFO(this->get_logger(), "column order (%s): %zu column(s) ordered", column_order_.c_str(), out.size());
+    return out;
+  }
+
+  /// runColumn, and when the column failed (not done, not partial) once more per column_retries after the arm
+  /// was freed if it was stuck. A column that still fails is skipped: the loop goes on with the next one.
+  ColumnOutcome runColumnWithRetry(const CoverageSegmentIntent & world_intent, size_t column)
+  {
+    auto outcome = runColumn(world_intent, column);
+    for (int r = 0; r < column_retries_ && outcome == ColumnOutcome::kFailed && !stop(); ++r) {
+      RCLCPP_WARN(
+        this->get_logger(), "column %zu failed, retry %d of %d", column, r + 1, column_retries_);
+      if (arm_stuck_ && !recoverArm("column retry")) {
+        RCLCPP_WARN(this->get_logger(), "column %zu: the arm is stuck and could not be jogged free", column);
+      }
+      primeContinuityFromLiveState();
+      outcome = runColumn(world_intent, column);
+    }
+    if (outcome == ColumnOutcome::kFailed && !stop()) {
+      RCLCPP_ERROR(this->get_logger(), "column %zu failed, skipped", column);
+    }
+    return outcome;
+  }
+
+  /// Remembers where the arm is as the configuration to jog back to.
+  void markGoodState()
+  {
+    const auto live = readCurrentJointState(shared_from_this(), group_joint_names_);
+    if (!live.empty()) {
+      last_good_state_ = live;
+    }
+    arm_stuck_ = false;
+  }
+
+  /// A joint-space jog from the arm's live state toward last_good_state_ (planRecoveryJog), executed straight on
+  /// the controller: the planners refuse a start state in self-collision, so there is no plan to ask for. Returns
+  /// true when the jog ran and succeeded.
+  bool recoverArm(const char * what)
+  {
+    if (!recovery_jog_ || last_good_state_.empty() || stop()) {
+      return false;
+    }
+    std::vector<std::string> names;
+    const auto live = readCurrentJointState(shared_from_this(), group_joint_names_, &names);
+    if (live.empty()) {
+      RCLCPP_WARN(this->get_logger(), "%s: recovery jog skipped, no live joint state", what);
+      return false;
+    }
+    const auto jog = planRecoveryJog(live, last_good_state_, jog_params_);
+    if (!jog.ok) {
+      RCLCPP_WARN(this->get_logger(), "%s: recovery jog refused: %s", what, jog.reason.c_str());
+      return false;
+    }
+    if (!jog.needed) {
+      return false;   // already where it was good: the jog would change nothing
+    }
+    ExecutionRequest req;
+    req.planning_group = planning_group_;
+    req.trajectory.joint_names = names;
+    core_types::TrajectoryPoint first;
+    first.positions = live;
+    req.trajectory.points.push_back(first);
+    for (const auto & p : jog.points) {
+      core_types::TrajectoryPoint tp;
+      tp.positions = p.positions;
+      tp.time_from_start_sec = p.time_from_start_s;
+      req.trajectory.points.push_back(tp);
+    }
+    RCLCPP_WARN(
+      this->get_logger(), "%s: recovery jog toward the last good configuration (%zu steps, %.1f s)", what,
+      jog.points.size(), jog.points.back().time_from_start_s);
+    setState("recovering");
+    const auto res = execution_adapter_->execute(req);
+    if (!res.success) {
+      RCLCPP_ERROR(this->get_logger(), "%s: recovery jog failed: %s", what, res.message.c_str());
+      return false;
+    }
+    primeContinuityFromLiveState();
+    return true;
+  }
+
   ColumnOutcome runColumn(const CoverageSegmentIntent & world_intent, size_t column)
   {
     setState("docking", static_cast<int>(column));
@@ -1206,6 +1354,7 @@ private:
     // retries for exactly this reason (a genuine failure to find any path is worth one more
     // attempt before giving up); dock deserves the same tolerance.
     MotionExec dock_exec;
+    const auto dock_round = [&]() {
     for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
       if (dock_approach_extra_m_ > 0.0) {
         MotionSegmentSpec approach_seg = dock_seg;
@@ -1229,6 +1378,13 @@ private:
         this->get_logger(), "%s: dock attempt %d failed, retrying...", intent.label.c_str(),
         attempt + 1);
     }
+    };
+    dock_round();
+    // Every try failed: a start state the planners refuse (self-collision at the end of the last reach) is
+    // moved back toward the last good configuration once, then the tries are repeated.
+    if (!dock_exec.success && !stop() && recoverArm("dock")) {
+      dock_round();
+    }
     if (!dock_exec.success) {
       RCLCPP_WARN(
         this->get_logger(), "%s: dock %s, skipping column", intent.label.c_str(),
@@ -1239,6 +1395,7 @@ private:
     if (stop()) {
       return ColumnOutcome::kFailed;
     }
+    markGoodState();
     if (!contact_) {
       return runSprayStroke(intent, wall_dir, standoff_pose);
     }
@@ -1340,20 +1497,31 @@ private:
       frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
-      if (!stop() && canRecoverWithoutWall() &&
-        !withWallCleared("retract", [&]() {
-            for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
-              if (manager_.executeMotionSegments(
-                  frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
-              {
-                return true;
-              }
+      const auto retract_again = [&]() {
+          for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
+            if (manager_.executeMotionSegments(
+                frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
+            {
+              return true;
             }
-            return false;
-          }))
-      {
-        RCLCPP_ERROR(this->get_logger(), "%s: the retract recovery failed too", intent.label.c_str());
+          }
+          return false;
+        };
+      bool freed = false;
+      if (!stop() && recoverArm("retract")) {
+        freed = retract_again();
       }
+      if (!freed && !stop() && canRecoverWithoutWall()) {
+        freed = withWallCleared("retract", retract_again);
+      }
+      if (freed) {
+        arm_stuck_ = false;   // not a new good state: the pose after a retract can sit just inside a self-collision
+      } else {
+        RCLCPP_ERROR(this->get_logger(), "%s: the retract recovery failed too", intent.label.c_str());
+        arm_stuck_ = true;
+      }
+    } else {
+      arm_stuck_ = false;
     }
 
     if (!contact_exec.success || contact_exec.waypoints_completed == 0) {
@@ -1416,6 +1584,17 @@ private:
       frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
+      // a start state the planners refuse: jog it free, then try the retract again
+      if (!stop() && recoverArm("retract") &&
+        manager_.executeMotionSegments(
+          frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
+      {
+        arm_stuck_ = false;
+      } else {
+        arm_stuck_ = true;
+      }
+    } else {
+      arm_stuck_ = false;
     }
 
     if (!stroke_exec.success || stroke_exec.waypoints_completed == 0) {
@@ -1437,6 +1616,12 @@ private:
   std::vector<double> travel_joint_state_;
   std::vector<std::string> group_joint_names_;
   std::vector<double> travel_state_;
+  std::vector<double> last_good_state_;   ///< the last arm configuration known to plan from (recovery target)
+  bool arm_stuck_{false};                 ///< a retract or stow failed and no recovery got the arm out yet
+  int column_retries_{1};
+  bool recovery_jog_{true};
+  RecoveryJogParams jog_params_;
+  std::string column_order_{"input"};
   bool arm_deployed_{false};
   rclcpp_action::Server<ExecuteCoverage>::SharedPtr action_server_;
   std::shared_ptr<GoalHandle> pending_goal_;

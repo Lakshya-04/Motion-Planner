@@ -610,10 +610,50 @@ remaining OMPL timeouts (one or two 5 s tries on the first approach of a stand i
 `dock_attempts: 6`. The one failed run lost stand 1 differently: the contact stroke of its column 2 aborted at the reach limit, and
 the arm ended in self-collision (`arm_upper_arm_link` with `lift_carriage_link`, `arm_forearm_link` with `arm_wrist_3_link`), so
 `CheckStartStateCollision` refused the retract and the stow for the rest of the run. That is not the wall, and the wall-clear retry
-cannot help; a recovery that moves out of a self-collision (a joint-space jog, or allowing those link pairs for the one move) is not
-built. Peaks of 83 to 263 N in three of the eight runs (the failed one and two passing ones) were not investigated beyond that.
+cannot help; a recovery that moves out of a self-collision is built in the next section. Peaks of 83 to 263 N in three of the eight runs (the failed one and two passing ones) were not investigated beyond that.
 
-`run_manager_pass.sh` (three columns, no stand change) after the same changes: scorer passes, coverage 0.931, peak 19.6 N, RMS 3.57 N,
+#### Failure handling in the loop (`feat/failure-recovery`)
+
+Cause of the two jams, read from the logs of these runs: after a column the arm can sit with the lift 1.5 mm below its lower stop
+(MoveIt's `CheckStartStateBounds` then refuses every start state: stow and dock fail in 3 to 12 ms) or in a self-collision at
+the end of the reach (`arm_forearm_link` with `arm_wrist_2_link`, `arm_upper_arm_link` with `lift_carriage_link`; the Cartesian
+plan reports a collision truncation and OMPL aborts at once). No planner moves out of such a start state, so what stays is a
+move that does not plan:
+
+- **Recovery jog** (`core/recovery_jog.hpp`, pure logic, gtests). `planRecoveryJog(current, good, params)`: straight line in joint
+  space from the live state to the last configuration known to be good, cut into steps of at most 0.05 rad, smooth timing
+  (fastest joint at most 0.15 rad/s, at least 1 s), target kept `travel_lift_margin_m` inside the joint limits (the lift's travel from the base check by default),
+  refused when a joint would have to move more than `recovery_jog_max_rad` (2.5). The manager runs it straight on the
+  controller (no plan, no collision check: it goes back toward a state the arm came from) when every dock try failed, when a retract
+  failed (contact and spray) and when the stow failed, then repeats the move. "Good" is the stowed arm at the start of a stand and
+  the arm at each column's dock pose (not the pose after a retract, which can be the jammed one). `recovery_jog: false` turns it off.
+- **Column retry, then skip**: a column whose dock or stroke did nothing is run once more (`column_retries`, default 1), after a jog if
+  the retract had failed; if it fails again it is skipped, the loop goes on, and the result lists it under `columns_failed`
+  (per stand too).
+- **Column order**: `column_order: input` (default, the plan's order), `nearest` (nearest neighbour on the travel time from one stroke's
+  end to the next stroke's start, the slowest axis over equal speeds) or `nearest_2opt` (plus a 2-opt pass; strokes keep their
+  direction). The first column of a stand stays first. `core/column_ordering.hpp`, gtests. Not run in the sim (default order kept).
+
+Not done: the allowed-collision-matrix relaxation (the jog was simpler and safe enough); a collision check along the jog.
+
+Runs of `run_multi_stand_pass.sh` with this (this machine, one at a time; in the same session the build before it, without the
+lift limit, passed 4 of 5 with jogs on dock, and the unchanged main failed its first run: columns 5 to 7 of stand 0 did not
+dock, 0.785 / 59.9 N):
+
+| run | passed | columns done | coverage / peak / RMS error |
+| --- | --- | --- | --- |
+| 1 | yes | 9 of 9 (one dock jog) | 0.977 / 53.5 N / 2.83 N |
+| 2 | no | 7 of 9 (columns 5 and 6 failed after their retries; the stow jog got stand 1 reached) | 0.798 / 65.4 N / 2.93 N |
+| 3 | yes | 9 of 9 (one dock jog) | 0.977 / 66.1 N / 2.79 N |
+| 4 | yes | 9 of 9 (jog, one column retry) | 0.977 / 340 N / 14.3 N |
+| 5 | no | 9 of 9 | 0.799 / 330 N / 7.6 N (all columns reported done, coverage low, not investigated) |
+
+Pass rate 3 of 5, against the failure of the same build without recovery (columns 5 to 7 lost every time in the two runs seen).
+Peaks of 330 N and more are the unexplained force spikes noted above; they are not touched by this change.
+
+`run_manager_pass.sh` with this change: scorer passes, coverage 0.931, peak 124 N, RMS 5.35 N, three columns done (one run; the peak is higher than the 19.6 N earlier and was not investigated).
+
+(Earlier note, before the failure handling above:) `run_manager_pass.sh` (three columns, no stand change) after the same changes: scorer passes, coverage 0.931, peak 19.6 N, RMS 3.57 N,
 in-band 0.48, all three columns done (one run); its prime move is now a no-op as well.
 
 What it took, honestly: without `stand_max_span_m` the planner returns **one** stand "reaching" 54 poses for the 0.9 m wall
