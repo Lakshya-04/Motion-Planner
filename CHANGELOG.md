@@ -10,6 +10,10 @@ The stack as it stands, covering the merged pull requests #5 to #61, summarised 
 #5 to #22 and the documentation on top of it; "Since #22" below it covers #23 to #61). Not included: a launch that runs perception to execution,
 anything verified on hardware.
 
+### Fixed
+
+- VAMP robot model rejected most benchmark endpoints (60 of 72 in the empty scene, every `stow_side` pair): FOAM's 6 spheres on the 0.04 m lift carriage plate bulged into the upper arm. `docker/tools/generate_vamp_robot.sh` now defaults `FOAM_ARGS` to `--lift_carriage_link=4` (23 plate spheres, 50 in total); on the same 158 problems VAMP goes from 10/158 to 158/158. Numbers in `docs/planner_benchmark.md`.
+
 ### Added
 
 - Backend routing test and cross-backend planner benchmark: `manipulation_manager` `backend_routing_test` (configs with `free_space: vamp` / `curobo` and `segments`, built through `PlanningPipeline` over the pluginlib registry, fakes where a real plugin is unavailable, MoveIt always faked); `motion_planner_moveit` `planner_benchmark` (OMPL RRT-Connect on a MoveIt PlanningScene) and `scripts/planner_benchmark.py` (shared stand / stow / dock-like joint-space problems for MoveIt/OMPL, VAMP and cuRobo, path length and clearance judged by one reference model); results and what could not run in `docs/planner_benchmark.md`.
