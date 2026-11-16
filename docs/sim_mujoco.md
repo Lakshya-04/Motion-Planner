@@ -375,10 +375,37 @@ and at the ends of the strokes get the tail of the Gaussian only; it is a number
 optimisation (roadmap section 4), not a pass criterion (no limit is set by default). Regression: `run_manager_pass.sh` on
 the same build gives coverage 0.931, peak 19.4 N, RMS error 3.58 N (the contact scorecard has no `thickness` section).
 Over five runs the thickness CoV was 0.52, 0.61, 0.52, 0.53 and 0.52 and coverage 1.0 every time. No force limit is set by
-default (`SPRAY_PASS_MAX_PEAK=0`): the whole-run peak force was 0, 237, 10, 0 and 0 N. The two spikes happened during valve-closed
-free-space moves in the air (z 1.6-1.8 m, x 0.7 m, far from the wall) and never while spraying; they are transients of the fast
-OMPL moves (or an arm-link touch), not wall contact, so a 5 N limit over the whole run would fail some runs for a reason that is
-not the tool. Worth chasing before a force limit is turned on (the script prints the peak while spraying separately).
+default (`SPRAY_PASS_MAX_PEAK=0`): the whole-run peak force was 0, 237, 10, 0 and 0 N (before the fix below).
+
+Force spikes outside the stroke, root cause: `mp_run_and_score` first ran `ready_pose.py`, an unplanned joint-space move
+(8 s, no collision checking) from the stowed pose (tool at z 2.1 m) to the contact tests' FREE pose, which is 3 cm in front
+of the wall (tcp x 0.95 m, wall face at 0.98 m). It is the first move of the pass with the valve closed, and the tool
+descends through z 1.8 to 1.2 m on the way, which is why the spikes looked like transients of fast moves in the air. The move
+overshoots to x 0.967 m, 1.3 cm from the face, in every run (11 of 11 recorded runs, the closest approach), and with a little
+more tracking error the tool body touches the wall. The 237 N run has the tool at x 0.98-1.04 m, z 1.5-1.6 m, y 0.2 m: the
+wall's upper edge (the sim wall spans z 0.8-1.5 m, the MoveIt cloud only z 0.95-1.35 m). So it is the script, not the sensor,
+the conditioner or the scorer: the ground-truth force counts tool contacts only and this contact is real. Reproduced on demand:
+the same pass with the sim wall 3 cm nearer (`scene:=` a copy with the face at x = 0.95), `SPRAY_PASS_SKIP_READY=0` and
+`SIM_DIAG_CONTACTS=1` logs `tool_mount_link_col0 <-> wall_0`, up to 132 N normal force per contact, truth and raw wrench
+agreeing, whole-run peak 328 N. Ruled out: a stale force target (none is sent, `contact: false`), JTAC admittance (not engaged),
+payload or inertial excitation of the sensor (the conditioned wrench stays below 1 N in free air during the stroke moves).
+Not explained: the 10 N event (x 0.72 m, z 1.77 m, 0.1 s, 15 samples, far from the wall) was not reproduced. It is during the
+same ready-pose move and is most likely a tool-versus-link contact: the truth counts any contact between the tool body and any
+other body, and a random-configuration scan of the MJCF finds the tool against the forearm, the upper arm and the lift (a replay
+of the recorded joint states shows none, so it needs a folded-arm pose).
+
+Fix: `run_spray_pass.sh` sets `MP_SKIP_READY=1` (new switch in `manager_pass_common.sh`), so the manager plans the first move
+from the stowed pose with the wall in MoveIt's scene; `SPRAY_PASS_SKIP_READY=0` brings the old move back. The tool now stays at
+x <= 0.773 m (stroke plane 0.68 m) and eight runs gave a whole-run peak of 0 N every time (before: 0, 237, 10, 0, 0 N, then 0 in
+eleven more runs, none of which touched the wall but all of which came within 1.3 cm). The price: starting from the stowed pose
+the strokes come out shorter (the tool reaches z 1.04-1.23 m of the 1.01-1.26 m stroke while the valve is open), so coverage
+is 0.935-0.95 and the thickness CoV 0.93-1.01 (with the ready pose: coverage 1.0, CoV 0.51 in most runs, about 1.0 in 2 of 11,
+so the stroke quality already depended on the arm configuration the first move ended in). Both pass the 0.9 default; seeding
+the first move with a joint configuration at the first stroke pose would restore it and is the next step. The contact passes keep
+`ready_pose.py`, they start at that pose by design (`run_manager_pass.sh` on the fixed build: coverage 0.931, peak 35.0 N,
+RMS 3.67 N, exit 0; its peak varies between runs, 19 to 35 N seen). Diagnosis aid: `SIM_DIAG_CONTACTS=1` in the sim's
+environment logs, for every tick with |Fz| above 15 N, the truth and raw wrench and each tool-versus-environment contact pair
+(geom@body, normal force, penetration depth).
 Limits: the standoff is open loop (no feedback on the wall distance), the valve timing is one open and one close per
 stroke, and the sim has no spray: the deposit is computed by the scorer from the recorded path.
 

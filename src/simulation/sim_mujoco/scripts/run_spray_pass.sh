@@ -10,6 +10,7 @@
 # and mobile_manipulator_moveit_config installed. Extra arguments go to `ros2 launch manipulation_manager`.
 #   SPRAY_PASS_OUT (default /tmp/spray_pass)  SPRAY_PASS_STANDOFF (m, 0.30)  SPRAY_PASS_HALF_ANGLE (deg, 20)
 #   SPRAY_PASS_OVERLAP (percent, 20)  SPRAY_PASS_SPEED (m/s, 0.05)  SPRAY_PASS_MIN_COVERAGE (0.9)  SPRAY_PASS_MAX_PEAK (N, 0 = no force limit)
+#   SPRAY_PASS_SKIP_READY (1: skip ready_pose.py, default; 0 = the contact passes' unplanned move to the ready pose 3 cm from the wall)
 #   SPRAY_PASS_SCORE_ARGS (extra score_run arguments, e.g. "--max-thickness-cov 0.6")  SPRAY_PASS_LAUNCH_ARGS
 set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
@@ -25,6 +26,7 @@ SWATH=$(python3 -c "import math; print(0.8 * 2 * $STANDOFF * math.tan(math.radia
 MP_COVERAGE_PARAMS="-p tool_name:=spray_gun -p standoff_m:=$STANDOFF -p sweep_direction:=vertical -p overlap_pct:=$OVERLAP"
 MANAGER_PASS_SPEED=${SPRAY_PASS_SPEED:-0.05}
 MP_MANAGER_YAML_EXTRA=$'    contact: false\n    valve_topic: /tool/valve'
+MP_SKIP_READY=${SPRAY_PASS_SKIP_READY:-1}   # 1: no unplanned move to the contact ready pose (3 cm from the wall): the manager plans the first move
 MP_MANAGER_GREP="spray success|valve |Coverage plan complete|dock failed|retract failed"
 mp_score() {
   # the valve column: some samples spraying, not all of them; the tool never presses on the wall

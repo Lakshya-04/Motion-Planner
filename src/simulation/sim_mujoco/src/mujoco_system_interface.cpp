@@ -201,7 +201,13 @@ hardware_interface::return_type MujocoSystemInterface::read(
     publishDepth(stamp);
   }
   raw_pub_->publish(fill(ft_frame_id_, ft_));
-  truth_pub_->publish(fill(tcp_frame_id_, sim_->groundTruthWrench()));
+  const Wrench truth = sim_->groundTruthWrench();
+  truth_pub_->publish(fill(tcp_frame_id_, truth));
+  static const bool diag_contacts = std::getenv("SIM_DIAG_CONTACTS") != nullptr;
+  if (diag_contacts && std::abs(truth[2]) > 15.0) {
+    RCLCPP_WARN(kLogger, "DIAG t=%.3f truth=[%.1f %.1f %.1f] raw=[%.1f %.1f %.1f] contacts: %s", sim_->time(),
+      truth[0], truth[1], truth[2], ft_[0], ft_[1], ft_[2], sim_->describeToolContacts().c_str());
+  }
   return hardware_interface::return_type::OK;
 }
 
