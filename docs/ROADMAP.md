@@ -25,9 +25,9 @@ without code, when we can implement it.
 - [x] Scene to planner geometry: `ScenePort` for VAMP, cuRobo, MoveIt (`scene_adapters`, 12 tests)
 - [~] Robot self filter: geometry containment node, 29 tests (`robot_self_filter/src/ros/self_filter_node.cpp`); no live
       sensor wired, not a lifecycle node, no sphere-model / GPU / learned variants
-- [ ] **Live ingest**: PointCloud2 or depth -> `SceneModel` (+ octomap for MoveIt). Only file loaders exist. *Reuse: MoveIt's `pointcloud_octomap_updater` and `point_containment_filter` (always built; BSD-3), `octomap_server` (`ros2` branch); MoveIt's depth updater and mesh-filter shape mask need OpenGL*
-- [ ] Simulated sensors (depth camera, lidar) in MuJoCo and Gazebo. *Reuse: Gazebo `depth_camera` / `rgbd_camera` / `gpu_lidar` through `ros_gz_bridge` (Apache-2.0); MuJoCo: `mujoco_ros2_control` camera and `mujoco_3d_lidar` plugins, or `MuJoCo-LiDAR` (MIT); depth rendering in the headless `mujoco-core` wheel is unconfirmed, test it*
-- [ ] Wall detection from a live scan (`planCoverageFromScan` is a library; no ROS node calls it). *Reuse: PCL multi-plane segmentation behind our plane port*
+- [~] **Live ingest**: PointCloud2 -> wall plane -> `wall_scene.json` + a MoveIt collision box (`wall_detector`, `docs/perception_live.md`), checked in the MuJoCo sim. Not done: PointCloud2 -> `SceneModel` update, octomap for MoveIt, obstacles, scan merging. *Reuse: MoveIt's `pointcloud_octomap_updater` and `point_containment_filter` (always built; BSD-3), `octomap_server` (`ros2` branch); MoveIt's depth updater and mesh-filter shape mask need OpenGL*
+- [~] Simulated sensors (depth camera, lidar) in MuJoCo and Gazebo. MuJoCo: ray-cast depth in the plugin (`depth_sensor:=true`, `mj_multiRay`, PointCloud2 + TF, optional range noise, scene geoms only; `docs/perception_live.md`). Gazebo: `depth_sensor:=true` (gz `depth_camera` through `ros_gz_bridge`, rendered headless in software, `/depth_sensor/points`; `run_depth_wall.sh` fits the wall within 0.01 degrees / 0.1 mm through `wall_detector`; `docs/sim_gazebo.md`). Not done: RGB, lidar model, a Gazebo cloud without the robot's own links filtered. *Reuse: Gazebo `depth_camera` / `rgbd_camera` / `gpu_lidar` through `ros_gz_bridge` (Apache-2.0); MuJoCo: `mujoco_ros2_control` camera and `mujoco_3d_lidar` plugins, or `MuJoCo-LiDAR` (MIT); depth rendering in the headless `mujoco-core` wheel is unconfirmed, test it*
+- [~] Wall detection from a live scan (drives the sensed manager pass, `run_sensed_pass.sh`, `docs/sim_mujoco.md`): `wall_detector_node` (scene_model RANSAC + PCA, TF to the target frame, writes `wall_scene.json` + `walls.pcd`, 7 tests; sim check: normal 0.012 deg, plane 0.13 mm, coverage planner accepts it). One plane per scan, no obstacles, not PCL; `planCoverageFromScan` is still not called by a node. *Reuse: PCL multi-plane segmentation behind our plane port*
 - [ ] External data: prior map / BIM / merging scans (nothing beyond the nvblox design note)
 - [ ] Live mapping (TSDF/ESDF): *reuse cuRobo's Mapper or nvblox (GPU, both Apache-2.0); CPU: VDBFusion (MIT) or a ROS 2 fork of wavemap (upstream stale)*; design only today (`docs/nvblox_notes.md`)
 - [ ] Live ESDF to the planners (cuRobo `set_esdf` exists; nothing produces a field)
@@ -44,7 +44,7 @@ without code, when we can implement it.
 - [~] Spiral is listed in the service but is a stub (the README now says so)
 - [ ] Cellular decomposition (BCD) for large cluttered walls (`docs/coverage_patterns.md`)
 - [ ] Coverage feed over ROS (the manager reads `coverage_output.json`; a ROS `CoverageSource` is planned)
-- [~] **Coverage verification**: `CoverageVerifier` raster (covered fraction, overlap, overspray, missed cells; `docs/coverage_patterns.md`). Not wired to executed poses yet; it is also the evaluator for the spray model (section 4)
+- [~] **Coverage verification**: `CoverageVerifier` raster (covered fraction, overlap, overspray, missed cells; `docs/coverage_patterns.md`). Scores recorded runs through `score_run` (contact and, with the valve column, spray: section 4)
 
 ## 3. Non-planar surfaces (floors, ceilings, columns, curved walls, meshes)
 
@@ -61,10 +61,16 @@ without code, when we can implement it.
 - [x] Tool offset from the arm TCP: kinematics via `tcp_xyz/rpy` in the profile; force via the conditioner's lever arm
 - [x] **Ship tool profiles**: `coverage_planner/config/tool_profiles.yaml` ships `contact_wiper` and `spray_gun` (`docs/tools.md`)
 - [x] The YAML loader is wired into the coverage launch files and the demo node (`tool_profiles_file`, `tool_name`, per-field overrides; the manager pass uses it)
-- [~] Spray model: `sprayerEffectiveSwath` is a placeholder (slope 1, intercept 0); swath is not derived from standoff;
-      no overspray/overlap model, no valve/pump timing along the path. *Implement: parametric swath w(d), Gaussian/beta profile,
-      thickness-accumulation raster, choose spacing and standoff by minimising thickness variance (about 16-18% overlap is a published optimum for an elliptical pattern)*
-- [ ] Non-contact segments end to end: hold standoff, no force engage, trigger the valve along the path (contact approach/retreat exist)
+- [~] Spray model: parametric swath `w(d) = f * 2 d tan(theta)` derived from the standoff (`sprayerEffectiveSwath`, used by `toolSwath`),
+      Gaussian deposition footprint (`spray_deposition.hpp`) and a thickness raster in `CoverageVerifier::addSprayStroke` that counts
+      only valve-open samples and reports thickness mean / CoV / min / max next to the covered fraction (`score_run --no-contact
+      --spray-standoff`). Not done: spacing and standoff chosen by minimising thickness variance (about 16-18% overlap is a published
+      optimum for an elliptical pattern), overspray at strip ends and around obstacles, speed/pressure/wall-angle terms; the width and
+      the Gaussian shape are guesses until fitted to a real nozzle
+- [~] Non-contact segments end to end: `manipulation_manager contact:=false` docks, moves to the first pose at the plan's standoff,
+      opens the valve (`std_msgs/Bool` on `/tool/valve`) for the stroke only, closes it, retracts; no force engage, no press, no wall-contact
+      allowance. Proven in the MuJoCo sim (`run_spray_pass.sh`: 3 columns, valve recorded and scored). Not done: a valve driver on real
+      hardware, `tool_off_lead_s` / `tool_on_at_speed_ratio` timing, valve forced off on a fault, the standoff held by feedback (it is open loop)
 - [ ] Contact tools: adaptive line spacing from a contact-area model (a cheap published idea, 2-3 days on top of a planner)
 - [x] "How to add a tool" guide (`docs/tools.md`)
 
@@ -104,7 +110,7 @@ without code, when we can implement it.
 - [x] RM4D reachability map, builder, CLI; forward and inverse queries; lift bands (`reachability`, 56 tests)
 - [x] `chooseStation` (free side of the wall, footprint clearance, yaw), `planStands`, `orderStands`, drive-type travel time
 - [x] ROS service `~/plan_stands` with a base profile (`reachability_node`)
-- [~] **Reachability -> manager**: verify-only stance check (`base_check:=warn|enforce`, `docs/reachability.md`); the manager still never moves the base or asks for a different stand
+- [~] **Reachability -> manager**: stance check (`base_check:=warn|enforce`, `docs/reachability.md`, also in the world frame); `scripts/run_stand_pass.sh` (MuJoCo) plans stands, drives to stand 0 and runs the manager pass from there with `world_frame: odom` (columns transformed into `base_footprint` from TF; `docs/stand_navigation.md`): scorer passes, coverage 0.931, peak 18.8 N, RMS 3.31 N, stand 0.51 m and 90 degrees from the start, one run. `run_multi_stand_pass.sh` runs a 0.9 m wall from two stands in a loop (below). Not done: the manager asking for a different stand on its own when one fails
 - [~] Stand -> navigation goal with the arm-base vs `base_footprint` frame conversion: `stand_navigator` (`NavigateToStand` action, `NavigateToPose`-shaped; ROS-free core, unit-tested; `docs/stand_navigation.md`).
       Done in MuJoCo: `plan_stands` -> first stand -> arrival within 1 cm. Not done: `NavigateThroughPoses`, obstacle avoidance, a Nav2 bridge. *Reuse: Nav2 (not installed in any image; the node is the stand-in)*
 - [ ] Docking approach to the wall. *Reuse: Nav2 `opennav_docking` (Jazzy branch, v1.3.14) with a custom `NonChargingDock` plugin: `configure` / `cleanup` / `activate` / `deactivate`, `getStagingPose(pose, frame)`, `getRefinedPose(pose, id)` (where the plane detector overwrites the dock pose) and `isDocked()`*
@@ -139,7 +145,9 @@ without code, when we can implement it.
       `base_motion:=true` adds a planar-velocity base (x, y, yaw joints with stiff position hold) driven by `/cmd_vel`, `omni` or `diff`
       per profile `drive_type`, with `/odom` and TF `odom -> base_footprint`; arm, lift and F/T unaffected, tested with
       `scripts/run_base_motion.sh` (`docs/sim_mujoco.md`). Implemented in our own plugin, not `mujoco_ros2_control` (freejoint, MuJoCo 3.12
-      pin). Not done: Gazebo (planar/velocity plugin), wheel physics and floor contact, 4-wheel-steering kinematics, odom noise*
+      pin). Gazebo done the same way with existing gz-sim systems (`base_motion:=true`: `VelocityControl` + `OdometryPublisher` through `ros_gz_bridge`, free base on a low-friction skid,
+      `/cmd_vel`, `/odom`, TF `odom -> base_footprint`; `scripts/run_base_motion.sh`: 0.294 m of 0.3 m, arm and F/T unchanged; `docs/sim_gazebo.md`). Not done: wheel physics and floor contact, 4-wheel-steering kinematics, odom noise, a
+      command timeout and velocity limits in Gazebo, a Gazebo wall contact or manager pass with a free base*
 - [ ] `ros2_control` drive controllers per base profile. *Reuse: `diff_drive_controller`, `mecanum_drive_controller` (Apache-2.0; the mecanum one takes a `TwistStamped` on `<name>/reference` and one velocity command per wheel); the 4-wheel-steering
       Ranger needs a small custom controller or the vendor `ranger_ros2` driver (BSD-3)*
 - [~] Nav2 integration: costmap from the base footprint, goals from the stands, `odom`. Goals from the stands and `odom` are done without Nav2 (`stand_navigator`, a straight-line proportional controller with
@@ -167,9 +175,9 @@ without code, when we can implement it.
 ## 11. The end-to-end gap (the main remaining work)
 
 - [~] **One launch per simulator**: MuJoCo has `run_wall_pass.sh` (scripted strokes planned by MoveIt, recorded and scored) and `run_manager_pass.sh` (coverage planner + manager + MoveIt + JTAC: both columns dock, press, stroke and retract; scorer passes with coverage 0.93, peak 20.5 N, RMS 3.6 N, in-band 0.48; `docs/sim_mujoco.md`). Gazebo has `run_manager_pass.sh` too (UR10e, three columns dock, press, stroke and retract; scorer passes with coverage 0.93, peak 16.8 N, RMS 2.1 N, in-band 0.85; needs `jtac_position_only`, `docs/sim_gazebo.md`); there is no scripted Gazebo wall pass, and force along the manager strokes is still looser than the MuJoCo scripted pass (RMS 1.5 N, 81 percent in band)
-- [~] **A scorecard** for that run: `scoreRun` / `score_run` compute coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); `run_contact.sh --record` feeds it a MuJoCo contact run (`docs/sim_mujoco.md`); `run_manager_pass.sh` records and scores a full manager pass; collisions are not counted
-- [ ] Manager interface: an action or service to start, stop and monitor a coverage task (it runs once from `main` today). *Reuse: BehaviorTree.CPP (MIT) for the
-      task flow, the way Nav2 does; keep the force FSM*
+- [~] **A scorecard** for that run: `scoreRun` / `score_run` compute coverage, force RMS and peak, in-band fraction and time with pass/fail limits (`docs/coverage_patterns.md`); `run_contact.sh --record` feeds it a MuJoCo contact run (`docs/sim_mujoco.md`); `run_manager_pass.sh` records and scores a full manager pass; collisions are not counted; `run_stand_pass.sh` adds the base move (plan stands, drive, pass from the stand, scored in odom)
+- [~] Manager interface: `manipulation_manager` serves the `execute_coverage` action (`coverage_task_msgs/ExecuteCoverage`: goal path / `multi_stand` / tool mode / column subset, feedback state + stand + column + counts + peak force, result per column and per stand) with cancel (trajectory and navigation cancelled, admittance off, force target 0, valve closed); `run_on_start:=true` (default) keeps the old one-shot run (`run_manager_pass.sh` unchanged: coverage 0.931, peak 19.97 N, RMS 3.61 N). Task flow is a small tested state machine (`core/coverage_task.hpp`), not BehaviorTree.CPP (swap path in `docs/stand_navigation.md`). Not done: pause/resume, a service for status outside a goal, cancel while MoveIt is planning is only heard when the planner returns, one goal at a time
+- [~] **Multi-stand loop**: `multi_stand` goals plan stands (`plan_stands`), give each column to a stand, and per stand stow the arm, `navigate_to_stand`, run its columns in the world frame; a stand never reached or a failed column is recorded and the loop goes on; the result lists columns per stand. `scripts/run_multi_stand_pass.sh` (MuJoCo, 0.9 m wall, `stand_max_span_m: 0.5`): two stands: one run 9 of 9 columns, scorer passes (coverage 0.977, peak 20.9 N, RMS 3.51 N); the repeat failed (a jammed tool after column 8, then the stow failed and stand 1 was skipped: 5 of 9, coverage 0.67), so not reliable yet. Not done: recovering the arm after a jammed stroke, replanning a failed column from another stand, a wall that needs the planner's own stand count (see the span note in `docs/stand_navigation.md`), obstacles, the wall octomap is re-injected by a shell command after each arrival (`stand_arrival_command`)
 - [ ] Scenario set: empty wall, wall with obstacles, panels needing several stands, each robot profile
 - [ ] Failure handling in the loop: replan, re-stand, recovery, abort (the FSM aborts; nothing resequences)
 
@@ -269,7 +277,7 @@ here were dropped. Placement is the milestone that should carry it.
 - [ ] Segment-level intent in the motion layer: force stage, target force, standoff, normal, speed, tool command, lift height (unknown stage degrades to NONE)
 
 **Manager and task flow (M1)**
-- [ ] Manager action contract: goal kind plus params, one job at a time, per-app cancel; BehaviorTree.CPP with BehaviorTree.ROS2 action nodes, not hand-rolled clients
+- [~] Manager action contract: goal kind plus params, one job at a time, per-app cancel; BehaviorTree.CPP with BehaviorTree.ROS2 action nodes, not hand-rolled clients (the action, one job at a time and cancel are done with a hand-written state machine and plain action clients; the BT.CPP version is not)
 - [ ] Always-report tree convention (`Fallback(work, ForceFailure(ReportStatus))`), halt and skip guards, mission FSM (IDLE/ACTIVE/PAUSED/STOPPED/RECOVERY) with one typed command service
 - [ ] Durable ledger keyed (mission, stand, segment) and resume; acceptance test: kill mid-wall, restart, only unfinished segments rerun
 - [ ] Per-station failure policy: typed SKIPPED reasons, hardware-origin codes, no blind retry on a contact overload; station queue skips a blocked stand with a reason and slides it in small steps
@@ -296,7 +304,7 @@ here were dropped. Placement is the milestone that should carry it.
 - [ ] Sim environment registry run by `colcon test`; launch readiness chaining instead of sleeps; ground-truth odometry toggle
 - [ ] Local quality tooling without CI: `docker/build.sh check`, pre-commit config, `pyproject.toml`, pinned clang-format
 - [ ] Container lessons: base / cacher / dev stages copying only `package.xml`, BuildKit secrets, large shm for DDS, no `-march=native` in distributed images
-- [ ] Contributor guidance for users and coding agents (`AGENTS.md`, `docs/contributing/`)
+- [ ] Contributor guidance for users and coding agents (an agent guide and a contributing folder)
 
 **Pitfalls to cover with tests**
 - [ ] Frozen lift feedback with a loose tolerance must still abort; a tool-I/O fault must not
@@ -323,9 +331,9 @@ calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
   verification raster**, plus the force-CBF limiter and a compliant tip for Gazebo. MuJoCo first. *Exit:* an automated wall pass in MuJoCo with the scorecard
   recorded on two robot profiles; Gazebo holds 10 N (done with the compliant tip).
 - **M3 Base motion and docking, by reuse**: planar-velocity bases, then ros2_control drive controllers; Nav2 with stands as goals; `opennav_docking` with a
-  wall-dock plugin; global stand selection by set cover + TSP; then local refinement. *Exit:* the base drives to a stand in sim (done, `run_stand_navigation.sh`) and the pass succeeds from where it stopped (not done: the manager still docks at a fixed offset assuming the base at the origin, see `docs/stand_navigation.md`).
+  wall-dock plugin; global stand selection by set cover + TSP; then local refinement. *Exit:* the base drives to a stand in sim (done, `run_stand_navigation.sh`) and the pass succeeds from where it stopped (done for one stand in MuJoCo, `run_stand_pass.sh`: the manager's `world_frame` transforms each column from TF; several stands in a loop in `run_multi_stand_pass.sh`, see `docs/stand_navigation.md`).
 - **M4 Live perception, by reuse**: MoveIt octomap + `octomap_server`, PCL wall detection, our self filter on the live cloud, simulated depth/lidar, then a
-  mapper (cuRobo Mapper or wavemap) and AMCL / KISS-ICP localisation. *Exit:* M2's scenario runs from a sensed wall, not a file.
+  mapper (cuRobo Mapper or wavemap) and AMCL / KISS-ICP localisation. *Exit:* M2's scenario runs from a sensed wall, not a file. **Met in the MuJoCo sim** (`run_sensed_pass.sh`: detected wall -> coverage -> octomap -> manager, coverage 1.00, peak 23.6 N, RMS 3.4 N); not on hardware, one plane, no obstacles, no octomap from the live cloud.
 - **M5 Tools and surfaces**: spray model and the non-contact path; floors and ceilings as planar patches; Noether for meshes. *Exit:* a spray pass over a wall
   and a ceiling in sim with the verification raster showing even coverage.
 - **M6 Hardware and release**: hardware template and bring-up guide, payload identification with safe excitation, BO gain tuning, third-party notices,

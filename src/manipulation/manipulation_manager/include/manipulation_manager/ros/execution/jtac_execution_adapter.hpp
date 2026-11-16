@@ -35,9 +35,20 @@ public:
 
   ExecutionResult execute(const ExecutionRequest & request) override;
 
+  /// Cancels the trajectory in flight, if any (the controller stops and execute() returns a failure). Does not
+  /// block, so it can be called from a callback that runs while execute() spins the node.
+  void cancelCurrent();
+  /// While set, execute() refuses to start a trajectory (and cancels one just sent). Cleared with false.
+  void setCancelled(bool cancelled);
+
 private:
+  void cancelGoal(
+    const rclcpp_action::ClientGoalHandle<FollowJointTrajectory>::SharedPtr & goal);
+
   rclcpp::Node::SharedPtr node_;
   rclcpp_action::Client<FollowJointTrajectory>::SharedPtr client_;
+  bool cancelled_{false};
+  rclcpp_action::ClientGoalHandle<FollowJointTrajectory>::SharedPtr current_goal_;
 };
 
 }  // namespace manipulation_manager

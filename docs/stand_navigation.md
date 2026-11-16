@@ -1,7 +1,7 @@
 # Stand navigation
 
 Gets the base from where it is to a stand returned by reachability `~/plan_stands`. Milestone M3 of
-`ROADMAP.md`, first half (the base reaches the stand; running the pass from there is still open).
+`ROADMAP.md`. The base reaches the stand, and the manager pass runs from there (see "The pass from the stand").
 
 ## What is there
 
@@ -40,14 +40,86 @@ agrees, wall gap 0.803 m, arm deviation 0.0016, F/T change 0.49 N, no drift at t
 - Obstacle avoidance. The controller drives a straight line; there is no costmap and no planning. The wall is
   avoided only because the stand keeps the footprint clear and the approach is parallel to it.
 - Diff drive in the sim (the controller is unit-tested for it; the sim run used the omni profile).
-- The manager pass from the stand. The manager works in `base_footprint` and docks at a fixed standoff, assuming the base
-  where the wall scene was authored; it would need the coverage poses re-expressed for the new base pose (the
-  manager's `base_check` already compares the stand against the origin). Next step: send the poses in the odom frame
-  or shift the plan by the base pose, then run `run_manager_pass.sh` after the drive.
+- Several stands in a loop is done in the manager's `execute_coverage` action (see "Several stands in a loop" below); not
+  done there: replanning a failed column, choosing another stand when navigation fails.
 - `NavigateThroughPoses`, a wall-plane servo for the last centimetres, localisation (odom only; the odom frame is the
   world frame, the base starts at the origin).
 - Found on the way and fixed: `manipulation_manager`'s default `base_check_service` was `/reachability_node/plan_stands`, but the
   node is named `reachability` (service `/reachability/plan_stands`); the default now matches. The script still renames the node.
+
+## The pass from the stand
+
+`manipulation_manager` takes `world_frame` (default empty = off: the poses are used as they are in `frame_id`, the base at
+the origin, byte-identical to before). With `world_frame: odom` the coverage plan stays in the odom frame, where the
+coverage planner and `plan_stands` authored it, and **each column is transformed into `base_footprint` with the TF of the
+moment it starts** (`FrameTransform`, ROS-free, `test/frame_transform_test.cpp`). `wall_direction` is a direction in the
+world frame and is rotated with the column, so a base that stopped at another yaw (the planner picks side-on stands) still
+docks, presses and strokes along the wall's real normal.
+
+Why this and not re-authoring the poses from the arrival pose: the poses are produced once, by the coverage planner, in
+one frame; the base stops within tolerance of the stand (about 1 cm), and a pose set re-authored from the goal would carry
+that error into the contact. With a TF lookup per column the poses are right for where the base actually is, and
+drift between columns (a pushed base) is absorbed. `base_check` also works in the world frame: it starts the planner at the
+arm base's pose from TF and compares the stand with it.
+
+`sim_mujoco/scripts/run_stand_pass.sh` closes the loop in MuJoCo (`base_motion:=true`, JTAC, F/T conditioner, MoveIt):
+the wall is moved to x = 0.58 m and y +0.3 (`shift_wall_scene.py`, `STAND_PASS_WALL_DX/DY`) so the first stand is not
+where the base starts; the coverage planner plans it in odom; `stand_drive.py` calls `plan_stands` (start = the base pose)
+and drives to stand 0 through `navigate_to_stand`; the wall goes into MoveIt's scene as an octomap in the odom frame; the
+manager runs with `world_frame: odom`; the recorder logs the tool point in odom (`record_run.py --frame odom`) and
+`score_run` scores it against the moved wall.
+
+## Several stands in a loop (the manager task)
+
+`manipulation_manager` is also an action server, `execute_coverage` (`coverage_task_msgs/ExecuteCoverage`). Started with
+`run_on_start:=false` it waits for goals; with the default `true` it runs the plan of its parameters once and exits, as before
+(`run_manager_pass.sh` is unchanged: coverage 0.931, peak 19.97 N, RMS 3.61 N on this build).
+
+| Goal | Meaning |
+|---|---|
+| `coverage_json_path` | empty = the `coverage_json_path` parameter |
+| `multi_stand` | false: the whole plan from where the base is; true: the stand loop below |
+| `tool_mode` | `TOOL_PARAMETER` (the `contact` parameter), `TOOL_CONTACT`, `TOOL_NON_CONTACT` |
+| `columns` | only these columns (indices into the plan, file order); empty = all |
+
+Feedback (on each state change): `state` (`planning_stands`, `navigating`, `stowing`, `priming`, `docking`, `pressing`,
+`stroking`, `retracting`, `done`, `canceled`), `stand_index` / `stand_count`, `column`, `columns_done`, `columns_failed`
+(failed + partial), `peak_force_n` (largest magnitude of the conditioned wrench, `force_topic` parameter, counted only while
+the tool is pressing or stroking; -1 when not read). Result: `success`, `message`, `columns_done` / `_partial` / `_failed`,
+`stands[]` (`StandOutcome`: `reached`, message, the columns of that stand by outcome), `peak_force_n`. A run that ran to its end
+is `succeeded` with `success` telling whether every column was done; `aborted` is for a run that could not start (plan not
+loadable, no stand); `canceled` for a cancel. One goal at a time (a second is rejected).
+
+**The loop** (`multi_stand`): `plan_stands` for the plan's poses (world frame, start = the arm base from TF) -> each column
+goes to the stand that reaches most of its poses (`assignColumnsToStands`, ties to the earlier stand; a column no stand reaches
+is reported failed, not run) -> per stand in visiting order: stow the arm to its travel pose (`travel_joint_state`, default the
+pose when the task started) if it had been working, `navigate_to_stand` (`stand_nav_attempts` tries, `stand_nav_timeout_s`; if
+the stand is never reached its columns are reported failed and the loop goes on to the next stand), prime the joint state, run
+the stand's columns in the world frame (the per-column flow of the pass from the stand, a failed column is recorded and the
+next one runs). Stands that run no column are not visited. The task logic that does not touch ROS (column grouping, the state
+machine `idle -> planning -> navigating -> running -> done`, the outcome record) is `core/coverage_task.hpp`, unit-tested
+(`coverage_task_test`).
+
+`stand_max_span_m` (default 0 = off): the widest stretch of wall one stand is trusted with. The RM4D map does not know the
+arm's self-collision or how awkward the pose is at the edge of reach, so asking `plan_stands` for the whole plan returns one
+stand "reaching" 54 poses that the arm cannot press in practice. With a span the columns are asked for in groups of at most
+that width along the wall (nearest end first, each group starting from the previous group's last stand).
+
+**Cancel**: the trajectory in flight is cancelled (`JtacExecutionAdapter::cancelCurrent`), a navigation in flight is
+cancelled, the force target goes to 0, the admittance is disengaged (after the 1.5 s unload ramp the normal flow also gives it,
+only when it was engaged) and the valve is closed; the arm stays where it stopped, and the result is `canceled`. Latency: the
+node is spun in every wait of the task, so a cancel is heard within about 50 ms, except while MoveIt/OMPL is planning (up to
+a few seconds, the planners block).
+
+**Why not BehaviorTree.CPP** (what Nav2 uses for task flow; `ros-jazzy-behaviortree-cpp` is in the image): the flow is a
+fixed sequence with two loops and one failure rule, which is 200 lines of state machine with the unit tests above; a tree
+would add a node library, XML and ROS action nodes for no behaviour this task has (no parallel branches, no runtime-edited
+flow). It is the swap if the task grows retries with different recoveries, conditions on sensor state or several tools: the
+`TaskStateMachine` states map to a `Sequence` of `NavigateToStand`, `RunColumns` and `Stow` actions with a `RetryUntilSuccessful`
+around the navigation, and the `TaskTracker` is the blackboard.
+
+Not done: replanning a failed column from another stand, a different stand chosen on the fly when navigation fails, pause and
+resume, a durable ledger (a restart reruns everything), `columns` given as a wall region instead of indices.
 
 ## Nav2 swap path
 

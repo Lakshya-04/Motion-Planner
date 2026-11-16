@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
@@ -81,6 +82,14 @@ CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::Hardware
     "sim_mujoco/ft_raw", rclcpp::SensorDataQoS());
   truth_pub_ = node_->create_publisher<geometry_msgs::msg::WrenchStamped>(
     "sim_mujoco/ft_ground_truth", rclcpp::SensorDataQoS());
+  if (sim_->hasDepth()) {
+    depth_frame_id_ = param(info_, "depth_frame_id", "depth_sensor_link");
+    depth_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
+      "depth_sensor/points", rclcpp::SensorDataQoS());
+    RCLCPP_INFO(kLogger, "Depth sensor %dx%d, %.0f x %.0f deg, %.1f Hz -> depth_sensor/points (frame %s)",
+      sim_->depthConfig().width, sim_->depthConfig().height, sim_->depthConfig().hfov * 57.29578,
+      sim_->depthConfig().vfov * 57.29578, sim_->depthConfig().rate_hz, depth_frame_id_.c_str());
+  }
   if (sim_->hasBase()) {
     odom_frame_id_ = param(info_, "odom_frame_id", "odom");
     cmd_vel_timeout_ = std::stod(param(info_, "cmd_vel_timeout", "0.5"));
@@ -187,9 +196,47 @@ hardware_interface::return_type MujocoSystemInterface::read(
     executor_->spin_some(std::chrono::nanoseconds(0));
     publishBase(stamp);
   }
+  if (sim_->hasDepth() && sim_->time() >= next_depth_time_) {
+    next_depth_time_ = sim_->time() + 1.0 / sim_->depthConfig().rate_hz;
+    publishDepth(stamp);
+  }
   raw_pub_->publish(fill(ft_frame_id_, ft_));
-  truth_pub_->publish(fill(tcp_frame_id_, sim_->groundTruthWrench()));
+  const Wrench truth = sim_->groundTruthWrench();
+  truth_pub_->publish(fill(tcp_frame_id_, truth));
+  static const bool diag_contacts = std::getenv("SIM_DIAG_CONTACTS") != nullptr;
+  if (diag_contacts && std::abs(truth[2]) > 15.0) {
+    RCLCPP_WARN(kLogger, "DIAG t=%.3f truth=[%.1f %.1f %.1f] raw=[%.1f %.1f %.1f] contacts: %s", sim_->time(),
+      truth[0], truth[1], truth[2], ft_[0], ft_[1], ft_[2], sim_->describeToolContacts().c_str());
+  }
   return hardware_interface::return_type::OK;
+}
+
+void MujocoSystemInterface::publishDepth(const rclcpp::Time & stamp)
+{
+  const auto points = sim_->depthScan();
+  sensor_msgs::msg::PointCloud2 cloud;
+  cloud.header.stamp = stamp;
+  cloud.header.frame_id = depth_frame_id_;
+  cloud.height = 1;
+  cloud.width = static_cast<uint32_t>(points.size());
+  cloud.is_bigendian = false;
+  cloud.is_dense = true;
+  cloud.point_step = 12;
+  cloud.row_step = cloud.point_step * cloud.width;
+  const char * const names[3] = {"x", "y", "z"};
+  for (uint32_t k = 0; k < 3; ++k) {
+    sensor_msgs::msg::PointField f;
+    f.name = names[k];
+    f.offset = 4 * k;
+    f.datatype = sensor_msgs::msg::PointField::FLOAT32;
+    f.count = 1;
+    cloud.fields.push_back(f);
+  }
+  cloud.data.resize(points.size() * 12);
+  if (!points.empty()) {
+    std::memcpy(cloud.data.data(), points.data(), points.size() * 12);
+  }
+  depth_pub_->publish(cloud);
 }
 
 void MujocoSystemInterface::publishBase(const rclcpp::Time & stamp)

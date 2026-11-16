@@ -12,6 +12,13 @@ anything verified on hardware.
 
 ### Added
 
+- Dock and stow reliability in the multi-stand pass: `manipulation_manager` `group_joint_names` (the live arm state was the all-zero pose because the joint names did not match the robot; a missing joint is now an error), `travel_lift_margin_m`, `dock_approach_extra_m`, `wall_clear_command` (retract and stow retried with the wall out of the scene), `world_model_loader_node -p clear:=true`, `WallDirection::approachPose`, `core/joint_names.hpp`, `core/travel_pose.hpp` with tests; `OmplPlanner` clamps an explicit start state into the joint bounds. Cause and numbers in `docs/sim_mujoco.md`.
+- Non-contact tool end to end: `coverage_planner` `spray_deposition.hpp` (Gaussian footprint over the cone swath), `CoverageVerifier::addSprayStroke` (thickness raster from valve-open samples; mean, CoV, min, max), `score_run --no-contact --spray-standoff`; `manipulation_manager` `contact:=false` (no force engage or press, stroke at the plan's standoff, `std_msgs/Bool` valve on `/tool/valve` for the stroke only); `record_run.py` records the valve as the `active` column; `sim_mujoco/scripts/run_spray_pass.sh`.
+- Manager task interface: `coverage_task_msgs` (`ExecuteCoverage` action), `manipulation_manager` serves `execute_coverage` (`run_on_start:=false`; the default keeps the one-shot run) with feedback, cancel and, with `multi_stand`, the stand loop (plan stands, stow, `navigate_to_stand`, columns in the world frame, per-stand result; `stand_max_span_m`, `stand_nav_attempts`, `stand_arrival_command`); `core/coverage_task.hpp` with tests; `sim_mujoco/scripts/run_multi_stand_pass.sh`, `execute_coverage_client.py`, `shift_wall_scene.py` width argument.
+- `manipulation_manager` `world_frame` (default off): coverage poses in a fixed frame, transformed into `base_footprint` per column from TF; `dock_attempts`; `base_check` in the world frame. `sim_mujoco/scripts/run_stand_pass.sh`: plan stands, drive to stand 0, manager pass from there, scored.
+
+- `sim_mujoco/scripts/run_sensed_pass.sh`: the manager pass on a wall sensed by the simulated depth camera (wall_detector -> cropped scene -> coverage -> whole-wall octomap -> manager); `manager_pass_common.sh` shared with `run_manager_pass.sh`, `crop_wall_scene.py`.
+
 **Perception and scene**
 - `scene_model`: backend-neutral scene (primitives, meshes, point clouds, voxel grids, ESDF), loaders for
   PCD, PLY, OBJ, STL and native / cuRobo-style YAML scenes, CPU voxelisation and exact ESDF, RANSAC plane

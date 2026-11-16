@@ -12,7 +12,12 @@ find_package(sensor_msgs REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(reachability_msgs REQUIRED)
+find_package(stand_navigator_msgs REQUIRED)
+find_package(coverage_task_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(core_types REQUIRED)
 find_package(ros_adapters REQUIRED)
 # PCL (and its own Findlibusb.cmake module) must be resolved BEFORE motion_planner --
@@ -38,6 +43,7 @@ add_library(${PROJECT_NAME}_core
   src/core/motion_exec_reporter.cpp
   src/core/coverage_feasibility_analyzer.cpp
   src/core/base_stance_check.cpp
+  src/core/coverage_task.cpp
   src/ros/execution/jtac_execution_adapter.cpp
   src/ros/coverage/coverage_output_json_source.cpp
 )
@@ -71,9 +77,14 @@ target_include_directories(manipulation_manager_node PUBLIC
 ament_target_dependencies(manipulation_manager_node
   rclcpp
   reachability_msgs
+  stand_navigator_msgs
+  coverage_task_msgs
+  geometry_msgs
   std_msgs
   sensor_msgs
   ament_index_cpp
+  tf2
+  tf2_ros
 )
 # The node is the composition root, but it no longer links a backend: the planners are built
 # from the planning_config YAML through pluginlib (motion_planner_ros), so switching backends
@@ -139,6 +150,31 @@ if(BUILD_TESTING)
   ament_add_gtest(wall_direction_test test/wall_direction_test.cpp)
   if(TARGET wall_direction_test)
     target_link_libraries(wall_direction_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(travel_pose_test test/travel_pose_test.cpp)
+  if(TARGET travel_pose_test)
+    target_link_libraries(travel_pose_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(joint_names_test test/joint_names_test.cpp)
+  if(TARGET joint_names_test)
+    target_link_libraries(joint_names_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(coverage_task_test test/coverage_task_test.cpp)
+  if(TARGET coverage_task_test)
+    target_link_libraries(coverage_task_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(tool_mode_test test/tool_mode_test.cpp)
+  if(TARGET tool_mode_test)
+    target_include_directories(tool_mode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  ament_add_gtest(frame_transform_test test/frame_transform_test.cpp)
+  if(TARGET frame_transform_test)
+    target_link_libraries(frame_transform_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
   ament_add_gtest(planning_config_test test/planning_config_test.cpp)

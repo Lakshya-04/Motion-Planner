@@ -258,3 +258,56 @@ def test_base_moves_when_commanded_and_holds_otherwise(tmp_path):
         mujoco.mj_step(m, d)
     assert d.qpos[qx] == pytest.approx(0.4, abs=0.03)
     assert abs(d.qpos[qy]) < 1e-3
+
+
+# ------------------------------------------------------------------ depth sensor (depth_sensor)
+def test_depth_sensor_off_leaves_the_model_unchanged(tmp_path, mjcf):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME, commanded=COMMANDED,
+                        depth_sensor=None)
+    assert path.read_text() == mjcf.read_text()
+    root = ET.parse(path).getroot()
+    assert not [s for s in root.iter('site') if s.get('name') == 'depth_sensor']
+
+
+def test_depth_sensor_adds_site_numeric_and_scene_group(tmp_path):
+    scene_geom = ET.Element('geom', name='wall', type='box', size='0.5 0.5 0.05')
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME, commanded=COMMANDED,
+                        world_geoms=[scene_geom],
+                        depth_sensor=dict(pos=(0.1, 0.0, 1.2), rpy=(0.0, 0.0, math.pi / 2), noise_std=0.004))
+    root = ET.parse(path).getroot()
+    root_body = root.find('worldbody').find('body')
+    site = [s for s in root_body.findall('site') if s.get('name') == 'depth_sensor'][0]
+    assert site.get('pos').split() == ['0.1', '0', '1.2']
+    q = [float(v) for v in site.get('quat').split()]
+    assert q == pytest.approx([math.sqrt(0.5), 0, 0, math.sqrt(0.5)])
+    nums = {n.get('name'): [float(v) for v in n.get('data').split()] for n in root.find('custom')}
+    assert nums['sim_mujoco_depth'] == pytest.approx(
+        [96, 64, math.radians(60), math.radians(45), 0.1, 5.0, 5.0, 0.004])
+    # the scene is in group 1 (the one the sensor scans); the robot's own geoms are not
+    assert [g.get('group') for g in root.find('worldbody').findall('geom')] == ['1']
+    assert all(g.get('group') is None for g in root_body.iter('geom'))
+
+
+def test_depth_sensor_with_base_motion_shares_one_custom_block(tmp_path):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, base_motion=BASE,
+                        depth_sensor=dict(pos=(0, 0, 1)))
+    root = ET.parse(path).getroot()
+    assert len(root.findall('custom')) == 1
+    assert [n.get('name') for n in root.find('custom')] == [
+        'sim_mujoco_base_diff', 'sim_mujoco_base_max_vel', 'sim_mujoco_depth']
+
+
+@needs_mujoco
+def test_depth_sensor_model_compiles_and_a_ray_hits_only_the_scene(tmp_path):
+    scene_geom = ET.Element('geom', name='wall', type='box', size='0.05 1 1', pos='1.05 0 1')
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME, commanded=COMMANDED,
+                        world_geoms=[scene_geom], depth_sensor=dict(pos=(0, 0, 1)))
+    m = load(path)
+    d = mujoco.MjData(m)
+    mujoco.mj_forward(m, d)
+    site = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, 'depth_sensor')
+    groups = np.array([0, 1, 0, 0, 0, 0], dtype=np.uint8)
+    geomid = np.zeros(1, dtype=np.int32)
+    dist = mujoco.mj_ray(m, d, d.site_xpos[site], d.site_xmat[site].reshape(3, 3)[:, 0], groups, 1, -1, geomid)
+    assert dist == pytest.approx(1.0, abs=1e-6)
+    assert m.geom(geomid[0]).name == 'wall'

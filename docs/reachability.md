@@ -197,7 +197,7 @@ direction of `wall_direction` (a vector in the planning frame, default `[0, 1, 0
 have the wall at `[1, 0, 0]`; the dock standoff, the contact overshoot and the wall reference orientation use the
 same direction) and accepts the stance only when exactly one stand covers
 every target and that stand is within `base_check_tol_xy_m` (0.15) and `base_check_tol_yaw_rad` (0.1) of the
-origin. Otherwise it reports where the base would have to be, or that several stands are needed. `warn` logs and
+origin (or, with `world_frame` set, of the arm base's pose in that frame, from TF). Otherwise it reports where the base would have to be, or that several stands are needed. `warn` logs and
 runs the plan; `enforce` does not run it, and also refuses when the service is unreachable. Set
 `base_check_lift_min_m`, `base_check_lift_max_m` and `base_check_arm_mount_z_m` to match the robot (0 selects the
 service defaults). This only verifies; it never moves the base (that waits for base motion in the simulators).

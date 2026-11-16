@@ -35,6 +35,14 @@ struct WallDirection
     return p;
   }
 
+  /// The pose `extra_m` short of `dock_pose` (further from the wall, same orientation): where a free-space
+  /// move can stop clear of the wall before a short straight move takes the tool to `dock_pose`. A free-space
+  /// plan to a pose a few cm from the wall tends to end with the tool mount clipping the wall voxels.
+  core_types::Pose approachPose(const core_types::Pose & dock_pose, double extra_m) const
+  {
+    return shifted(dock_pose, -std::fabs(extra_m));
+  }
+
   /// Unit quaternion (x, y, z, w) whose local Z axis is the wall's outward normal (-d): the shortest
   /// rotation from +Z to -d. For d = +y this is (sqrt(.5), 0, 0, sqrt(.5)), the constant the manager
   /// used before the direction was configurable.

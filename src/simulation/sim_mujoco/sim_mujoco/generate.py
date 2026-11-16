@@ -131,6 +131,8 @@ def main(argv=None):
                     metavar=('X', 'Y', 'Z', 'YAW'), help='scene pose in the robot base frame')
     ap.add_argument('--wall-thickness', type=float, default=0.1)
     ap.add_argument('--base-motion', action='store_true', help='add the planar base joints (/cmd_vel)')
+    ap.add_argument('--depth-sensor', type=float, nargs=6, metavar=('X', 'Y', 'Z', 'ROLL', 'PITCH', 'YAW'),
+                    help='add a ray-cast depth sensor at this pose in the root link frame (x forward)')
     ap.add_argument('--timestep', type=float, default=0.002)
     args = ap.parse_args(argv)
 
@@ -140,7 +142,9 @@ def main(argv=None):
     path, skipped = generate(profile, text, args.out, scene=args.scene,
                              scene_offset=tuple(args.scene_offset), thickness=args.wall_thickness,
                              urdf_dir=urdf.parent if urdf else '.', timestep=args.timestep,
-                             base_motion=args.base_motion)
+                             base_motion=args.base_motion,
+                             depth_sensor=(dict(pos=args.depth_sensor[:3], rpy=args.depth_sensor[3:])
+                                           if args.depth_sensor else None))
     for s in skipped:
         print(f'skipped scene object {s}', file=sys.stderr)
     print(path)

@@ -54,6 +54,16 @@ TEST(StanceVerdictTest, WrongYawFailsEvenWhenInPlace)
   EXPECT_TRUE(evaluateStance({{0.0, 0.0, 2.0 * M_PI + 0.01}}, 0, 0).ok);  // wraps around
 }
 
+TEST(StanceVerdictTest, TheBaseCanBeAnywhereInAWorldFrame)
+{
+  const StanceTolerance tol;
+  const StanceStand here{-0.12, -0.25, 1.57};
+  EXPECT_TRUE(evaluateStance({{-0.1, -0.24, 1.55}}, 0, 0, tol, here).ok);
+  EXPECT_FALSE(evaluateStance({{-0.1, -0.24, 1.55}}, 0, 0, tol).ok);  // the origin is the default
+  EXPECT_FALSE(evaluateStance({{-0.12, 0.3, 1.57}}, 0, 0, tol, here).ok);
+  EXPECT_FALSE(evaluateStance({{-0.12, -0.25, 0.0}}, 0, 0, tol, here).ok);
+}
+
 TEST(StanceVerdictTest, SeveralStandsMeanOneStanceIsNotEnough)
 {
   const auto v = evaluateStance({{0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}}, 0, 0);

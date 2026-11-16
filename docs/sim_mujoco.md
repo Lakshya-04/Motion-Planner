@@ -14,6 +14,32 @@ xacro, next to `mock` and `jtac_mock`. Package: [`src/simulation/sim_mujoco`](..
 | `scripts/smoke_test.py`, `run_smoke.sh` | trajectory-following and wall-contact smoke test. |
 | `scripts/contact_test.py`, `run_contact.sh` | contact-controlled test of the full force path (conditioner, bridge, JTAC). |
 
+## Showcase
+
+![A full manager pass on a plain wall](media/manager_pass.gif)
+
+A full manager pass on a plain wall (`run_manager_pass.sh`), rendered by `render_run.py`. The gif is the run at 9x, the
+[mp4](media/manager_pass.mp4) at 3x with a force trace.
+
+![A spray pass on a plain wall](media/spray_pass.gif)
+
+A spray pass (`run_spray_pass.sh`, [mp4](media/spray_pass.mp4)), same renderer; the cone and the wall spots are drawn from the valve
+log. Scored run shown: 3 columns done, coverage 1.0 (930 of 930 cells), thickness CoV 0.52, valve open 15.6 s of 94.2 s, whole-run
+peak force 0.0 N ([Spray pass](#spray-pass-non-contact-tool)).
+
+| Robot overview | Arm at the wall, mid-stroke | Tool on the wall |
+|---|---|---|
+| ![overview](media/overview.jpg) | ![arm at the wall](media/arm_at_wall.jpg) | ![tool close-up](media/tool_closeup.jpg) |
+
+![force and coverage of the run](media/force_coverage.png)
+
+Scored result of the run shown (`score_run`, 10 N target, 1.5 N band): 3 columns done, 0 partial, 0 failed; coverage
+93.1 % (866 of 930 cells); peak force 19.2 N; RMS force error 3.6 N; 49 % of the contact samples in the band; 144 s of
+simulated time, 83 s engaged. While stroking, the force ripples between 0 and about 18 N around the 10 N target. Nothing is
+tuned for the picture. The pass was run three times for filming: 93.1 % / 18.5 N / 3.6 N, 93.1 % / 19.2 N / 3.6 N (shown), and
+a first run with 93.3 % / 153.4 N / 8.0 N, which was made while the host was heavily loaded by other simulations and builds
+(load average 10 to 27); the cause was not isolated, but the two reruns on a quieter host agree with each other and with the standard run. How it is made: [Rendering photos and videos](#rendering-photos-and-videos).
+
 ## Build
 
 The SDK is not vendored. Download the tarball of the release and point `MUJOCO_ROOT` at it:
@@ -259,6 +285,13 @@ ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}}"
 - **Stand navigation.** `scripts/run_stand_navigation.sh` adds the reachability node and `stand_navigator`: plan stands for
   the smoke wall, drive the arm base to the first one, check arrival, arm, F/T (`docs/stand_navigation.md`).
 
+## Depth sensor (`depth_sensor:=true`)
+
+A ray-cast depth sensor (`mj_multiRay` against the scene geoms) on the root link publishes
+`sensor_msgs/PointCloud2` on `/depth_sensor/points` (frame `depth_sensor_link`, TF from the launch file); arguments
+`depth_sensor_pose`, `depth_sensor_noise_m`, `depth_sensor_rate_hz`. Off by default and then the MJCF is unchanged.
+Details, the wall detector that consumes it and `scripts/run_depth_wall.sh` are in [perception_live.md](perception_live.md).
+
 ## MuJoCo 4 notes
 
 - 4.0 split the Python package into `mujoco-core` and `mujoco-studio` (the viewer lives with the
@@ -275,6 +308,30 @@ ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}}"
   built for older MuJoCo and were not used or installed here; this plugin is a small independent
   design (model and data owned by the plugin, stepped from `write()`, no separate simulation
   thread, no clock publisher).
+
+## Rendering photos and videos
+
+The plugin has no camera, so a run is filmed in two steps with
+[`scripts/render_run.py`](../src/simulation/sim_mujoco/scripts/render_run.py): `record` stores `/joint_states` and the
+ground-truth contact force during the run, then `stills` / `video` replay the joint positions on the generated MJCF with
+`mujoco.Renderer` (headless, `MUJOCO_GL=egl`, Mesa software rendering, no GPU or display; the `sim` image is enough). The
+mimic lift stages come from the MJCF equality constraint. A render-only stem is drawn between the tool mount and the pad disc
+(the model has a gap there), and a sky and floor are added to the otherwise empty scene. `plot_run.py` plots a score_run CSV.
+
+```bash
+# during a pass: MANAGER_PASS_FILM=1 also records OUT/run_film.npz; out_dir:= keeps the generated MJCF
+MANAGER_PASS_FILM=1 MANAGER_PASS_LAUNCH_ARGS="out_dir:=/tmp/mjcf" bash $(ros2 pkg prefix sim_mujoco)/lib/sim_mujoco/run_manager_pass.sh
+# in the sim image (python mujoco 4, Pillow):
+MUJOCO_GL=egl render_run.py stills --mjcf /tmp/mjcf --run /tmp/manager_pass/run_film.npz --out-dir media/
+MUJOCO_GL=egl render_run.py video  --mjcf /tmp/mjcf --run /tmp/manager_pass/run_film.npz --out media/run.mp4 --max-speed 3
+render_run.py encode --frames media/run.mp4.frames --out media/run.mp4 --gif media/run.gif   # host ffmpeg (the image has none)
+plot_run.py --samples /tmp/manager_pass/run.csv --score score.json --out media/force_coverage.png
+```
+
+A spray pass is filmed the same way (`MANAGER_PASS_FILM=1 SPRAY_PASS_LAUNCH_ARGS="out_dir:=/tmp/mjcf" run_spray_pass.sh`); add
+`--valve-log /tmp/spray_pass/manager.log` to `video` to draw the spray cone while the valve is open and the sprayed spots on
+the wall (`--standoff`, `--half-angle` set their size; the sim has no spray, this is the scorer's model). The result is in
+[Spray pass](#spray-pass-non-contact-tool).
 
 ## Not modelled / limits
 
@@ -346,3 +403,190 @@ the lift on every contact path), docking at the first pose of the stroke, the al
 the lift, `generate_acm.py`), a press-then-stroke sequence with a 2 s settle (`press_settle_s`), and planning for the sim
 tool's swath (0.14 m, `MANAGER_PASS_SWATH`) instead of the profile's 0.20 m. Next: the contact force (slower stroke,
 F/T filtering, JTAC gains).
+
+### Spray pass (non-contact tool)
+
+`scripts/run_spray_pass.sh` is the manager pass for a non-contact tool (the contact script is unchanged). The coverage
+planner plans with `tool_name:=spray_gun` (standoff `SPRAY_PASS_STANDOFF`, default 0.30 m, cone half-angle 20 deg,
+vertical strokes, 20 % overlap: swath 0.175 m, spacing 0.140 m), so the poses already sit 0.30 m in front of the wall; the
+manager runs with `contact: false` (no admittance engage, no force target, no press, no wall contact; `docs/tools.md`). It
+docks, takes up the first stroke pose with the valve closed, opens the valve (`std_msgs/Bool` on `/tool/valve`) for the
+stroke only, closes it and retracts. `record_run.py` subscribes to `/tool/valve` and writes the state as the `active`
+column; `score_run --no-contact --spray-standoff 0.30 --spray-half-angle 20` counts only the valve-open samples and
+reports the thickness uniformity next to the covered fraction. Outputs go to `SPRAY_PASS_OUT` (default `/tmp/spray_pass`);
+other knobs: `SPRAY_PASS_SPEED` (0.05 m/s), `SPRAY_PASS_MIN_COVERAGE`, `SPRAY_PASS_SCORE_ARGS` (for example
+`--max-thickness-cov 0.6`).
+
+Result (one run, UR10e, smoke wall, standoff 0.30 m): three columns, all `done` (valve ON/OFF once per stroke, six
+waypoints each); 9087 samples, the valve open in 1561 (15.6 s of 90.9 s); peak force 0.00 N while spraying (the tool never touched the
+wall); coverage 1.0 (930 of 930 cells, mean overlap 1.39); thickness mean 0.0185 (relative), CoV 0.52, min 0, max 0.059;
+the scorer exits 0. The CoV is high because the wall is only 0.30 m wide: three strokes, and the cells at the wall edges
+and at the ends of the strokes get the tail of the Gaussian only; it is a number to improve with spacing and standoff
+optimisation (roadmap section 4), not a pass criterion (no limit is set by default). Regression: `run_manager_pass.sh` on
+the same build gives coverage 0.931, peak 19.4 N, RMS error 3.58 N (the contact scorecard has no `thickness` section).
+Over five runs the thickness CoV was 0.52, 0.61, 0.52, 0.53 and 0.52 and coverage 1.0 every time. No force limit is set by
+default (`SPRAY_PASS_MAX_PEAK=0`): the whole-run peak force was 0, 237, 10, 0 and 0 N (before the fix below).
+
+Force spikes outside the stroke, root cause: `mp_run_and_score` first ran `ready_pose.py`, an unplanned joint-space move
+(8 s, no collision checking) from the stowed pose (tool at z 2.1 m) to the contact tests' FREE pose, which is 3 cm in front
+of the wall (tcp x 0.95 m, wall face at 0.98 m). It is the first move of the pass with the valve closed, and the tool
+descends through z 1.8 to 1.2 m on the way, which is why the spikes looked like transients of fast moves in the air. The move
+overshoots to x 0.967 m, 1.3 cm from the face, in every run (11 of 11 recorded runs, the closest approach), and with a little
+more tracking error the tool body touches the wall. The 237 N run has the tool at x 0.98-1.04 m, z 1.5-1.6 m, y 0.2 m: the
+wall's upper edge (the sim wall spans z 0.8-1.5 m, the MoveIt cloud only z 0.95-1.35 m). So it is the script, not the sensor,
+the conditioner or the scorer: the ground-truth force counts tool contacts only and this contact is real. Reproduced on demand:
+the same pass with the sim wall 3 cm nearer (`scene:=` a copy with the face at x = 0.95), `SPRAY_PASS_SKIP_READY=0` and
+`SIM_DIAG_CONTACTS=1` logs `tool_mount_link_col0 <-> wall_0`, up to 132 N normal force per contact, truth and raw wrench
+agreeing, whole-run peak 328 N. Ruled out: a stale force target (none is sent, `contact: false`), JTAC admittance (not engaged),
+payload or inertial excitation of the sensor (the conditioned wrench stays below 1 N in free air during the stroke moves).
+Not explained: the 10 N event (x 0.72 m, z 1.77 m, 0.1 s, 15 samples, far from the wall) was not reproduced. It is during the
+same ready-pose move and is most likely a tool-versus-link contact: the truth counts any contact between the tool body and any
+other body, and a random-configuration scan of the MJCF finds the tool against the forearm, the upper arm and the lift (a replay
+of the recorded joint states shows none, so it needs a folded-arm pose).
+
+Seeded first move (replaces skipping it): `run_spray_pass.sh` now runs `ready_pose.py --joints ... --planned` (`SPRAY_PASS_READY=seed`,
+default). move_group plans, with the wall and the robot in its scene, a joint goal at the arm configuration of the first stroke
+(tcp x 0.68 m, z 1.26 m, 0.30 m from the wall face, lift raised to 0.61 m), plan only, and the controller runs it (4 s at velocity
+scale 0.3); that is 27 cm farther from the wall than FREE. The configuration came from a run that started at FREE (what made its
+strokes good: the lift does the vertical travel, the arm is not elbow-flipped; from the stowed pose the manager's first plan ends
+with the wrist at -5 rad and the lift unused). `SPRAY_PASS_SEED_Q` (lift pan shoulder_lift elbow wrist_1 wrist_2 wrist_3, the
+`smoke_test.FREE` order) and `SPRAY_PASS_SEED_SCALE` override it; `SPRAY_PASS_READY=none|free` give the two earlier behaviours.
+Two things tried first: an unplanned joint move to the seed (`ready_pose.py --joints` without `--planned`) from the folded stow
+pose makes the tool hit the arm (37 N at x 0.70 m, z 1.4 m) and leaves the arm in a state MoveIt rejects, and a seed at the
+stroke's first pose (z 1.01 m) puts the arm so close to an `arm_upper_arm_link` / `lift_carriage_link` collision that the manager's
+dock truncates and the column is skipped (1 run in 7). Results: five filmed runs with the final seed: coverage 1.0, 1.0, 1.0, 1.0 and
+0.88 (the 0.88 run lost column 2: its dock plan failed at the same link pair, the scorer exits 1 below 0.9), thickness CoV 0.521,
+0.523, 0.526, 0.520 and 0.83, whole-run peak force 0 N in all five; three more with the same seed gave 1.0 / 0.51, 1.0 / 0.52
+and 1.0 / 0.62. Before: 0.935-0.95 and 0.93-1.01. The tool x over the wall's footprint during the between-column moves
+reaches 0.74-0.88 m (wall face 0.98 m), the closest 10 cm; those moves are the manager's, not the seed's.
+
+Earlier fix, still available (`SPRAY_PASS_READY=none`): `run_spray_pass.sh` set `MP_SKIP_READY=1` (new switch in `manager_pass_common.sh`), so the manager plans the first move
+from the stowed pose with the wall in MoveIt's scene; `SPRAY_PASS_READY=free` (or `SPRAY_PASS_SKIP_READY=0`) brings the old move back. The tool now stays at
+x <= 0.773 m (stroke plane 0.68 m) and eight runs gave a whole-run peak of 0 N every time (before: 0, 237, 10, 0, 0 N, then 0 in
+eleven more runs, none of which touched the wall but all of which came within 1.3 cm). The price: starting from the stowed pose
+the strokes come out shorter (the tool reaches z 1.04-1.23 m of the 1.01-1.26 m stroke while the valve is open), so coverage
+is 0.935-0.95 and the thickness CoV 0.93-1.01 (with the ready pose: coverage 1.0, CoV 0.51 in most runs, about 1.0 in 2 of 11,
+so the stroke quality already depended on the arm configuration the first move ended in). Both pass the 0.9 default;
+the seeded first move above restores it. The contact passes keep
+`ready_pose.py`, they start at that pose by design (`run_manager_pass.sh` on the fixed build: coverage 0.931, peak 35.0 N,
+RMS 3.67 N, exit 0; its peak varies between runs, 19 to 35 N seen). Diagnosis aid: `SIM_DIAG_CONTACTS=1` in the sim's
+environment logs, for every tick with |Fz| above 15 N, the truth and raw wrench and each tool-versus-environment contact pair
+(geom@body, normal force, penetration depth).
+Limits: the standoff is open loop (no feedback on the wall distance), the valve timing is one open and one close per
+stroke, and the sim has no spray: the deposit is computed by the scorer from the recorded path.
+
+### Stand pass (plan stands, drive, then the manager pass)
+
+`scripts/run_stand_pass.sh` closes the loop with `base_motion:=true`: the wall is moved (`STAND_PASS_WALL_DX/DY`, default
+0 and +0.9 m, `shift_wall_scene.py`) so the first planned stand is not where the base starts; the coverage planner plans it
+in odom; `stand_drive.py` asks reachability `plan_stands` (start = the base pose) and drives to stand 0 through
+`navigate_to_stand`; the wall goes into MoveIt's scene (odom frame); the manager runs with `world_frame: odom`, which
+transforms each column into `base_footprint` from TF (`docs/stand_navigation.md`); `record_run.py --frame odom` records the
+tool point in odom. Outputs go to `STAND_PASS_OUT` (default `/tmp/stand_pass`); `STAND_MAP` reuses a reachability map.
+
+Result (one run each, UR10e generic omni base): stand 0 at arm base (-0.02, 0.51), yaw 1.571 (side-on to the wall: the
+planner prefers footprint clearance), 0.51 m from the start; arrival error 15 mm, 0.013 rad; the manager's stance check
+agrees; three columns dock, press, stroke and retract; scorer passes with coverage 0.931, peak 18.8 N, RMS error 3.31 N,
+in-band 0.45. The unchanged manager pass (base at the origin, `run_manager_pass.sh`) on the same build: coverage 0.931, peak
+18.8 N, RMS 3.60 N. Flaky points: a dock from the turned base needs more OMPL tries (`dock_attempts`, 6 in the script; one
+earlier run with 3 lost the first column, coverage 0.68), and the F/T peak was 34 N in another run (the scorer limit passed).
+A wall needing several stands: see the multi-stand pass below.
+
+### Multi-stand pass (the manager's `execute_coverage` action)
+
+`scripts/run_multi_stand_pass.sh` makes the wall 0.9 m wide (`MULTI_STAND_WALL_WIDTH`, from y = `MULTI_STAND_WALL_DY` 0.3;
+`shift_wall_scene.py` takes a width argument: the coverage scene, the sim wall with its 0.25 m margins and the `walls.pcd`
+octomap grow with it) and starts the manager with `run_on_start: false`. `execute_coverage_client.py` sends one `multi_stand`
+goal; the manager plans stands (`plan_stands`, columns asked for in groups of at most `stand_max_span_m` = 0.5 along the wall),
+and per stand stows the arm, drives there (`navigate_to_stand`), re-injects the wall octomap (`stand_arrival_command`:
+MoveIt keeps obstacles in the robot's root frame, so the wall must be put in again after the base moved) and runs the columns
+in odom. `record_run.py --frame odom` records, `score_run` scores the whole wall. Details: `docs/stand_navigation.md`.
+
+Result (first of two full runs, UR10e generic omni base, 9 columns at swath 0.14, speed 0.01 m/s; the repeat is below): stand 0 at arm base (0.18, 0.01) yaw 1.571
+with columns 3-8, stand 1 at (0.18, 0.51) with columns 0-2 (arrival errors 4.1 and 19.4 mm); all 9 columns done, goal
+`success`, feedback and result peak force 23.8 N (conditioned wrench magnitude, includes the press transient); scorer passes:
+coverage 0.977 (2726 of 2790), peak 20.9 N, RMS error 3.51 N, in-band 0.22, 459 s. In-band is lower than the one-stand
+passes (0.45 to 0.49) and was not investigated. `MULTI_STAND_CANCEL_AFTER_S=N` cancels instead and prints the arm's joint speed
+afterwards; `MULTI_STAND_MANAGER_EXTRA` adds manager parameters (for example `stand_nav_timeout_s: 2.0` to watch a stand being
+skipped).
+
+The repeat run on that build did **not** pass: column 8 (the last of stand 0) pressed with a spike, its contact stroke
+aborted, the retract then failed in 11 ms of planning and so did the stow, so stand 1 was reported "not reached (could not stow
+the arm for the drive)" and its three columns failed: 5 done, 4 failed, scorer coverage 0.672, peak 97 N, RMS 9.3 N.
+
+#### Why the first dock and the stow failed
+
+Found by reading `move_group`'s log next to the manager's for the failing runs:
+
+1. **The "live" arm state was the all-zero pose.** The manager reads the arm's live joints from `/joint_states` by name, and the
+   names it had were an earlier arm's (`lift_prismatic_joint`, `joint1` ...), not this robot's (`lift_joint`,
+   `arm_shoulder_pan_joint` ...). A missing name silently became 0.0, so `prime_continuity` ("move to where the arm already is")
+   drove the arm to all zeros: the UR10e fully stretched out (tool at x 1.184 m in `base_footprint`, the reach of the arm) and the
+   lift on its lower end stop. That move took 20 s, and everything after started from that pose: the first dock had to plan out of a
+   pose that touches `arm_upper_arm_link` and `lift_carriage_link` (the "collision truncation at link pair" warnings), so RRTConnect
+   timed out at its 5 s limit two or three times before one random seed found a way (59 ms); and the stow target was the same
+   zero pose. With the lift at 0.0 the measured lift settles 0.1 to 1.5 mm below its lower limit, and then MoveIt's
+   `CheckStartStateBounds` rejects the start state of every plan in 9 ms ("Joint 'lift_joint' from the starting state is outside
+   bounds by -0.00155"): the stow and every dock of the next stand failed that way (seen in 3 of 6 runs; each cost 3 columns).
+   Fix: the names are a parameter (`group_joint_names`, default: this robot's, then the earlier arm's, picked by what
+   `/joint_states` carries), a missing joint is an error instead of 0.0 (no priming, a clear message; `multi_stand` refuses to run
+   without a travel pose), the prime move is now a no-op (101 ms instead of 20 s), the stow pose is the real starting pose, and it
+   is kept 10 mm off the lift's end stops (`travel_lift_margin_m`). `OmplPlanner` also clamps an explicit start state into the
+   joint bounds.
+2. **A free-space plan to a pose 4 cm from the wall ends with the tool mount in the wall voxels.** `ValidateSolution` rejected
+   OMPL plans whose last states hit `<octomap>` with `tool_mount_link`, or the goal sampling timed out. The dock now stops
+   `dock_approach_extra_m` (0.1 m in the script) short of the dock pose in free space and a 10 cm straight move closes the gap.
+3. **A tool left in the wall (or the arm in self-collision at the end of its reach) cannot be planned out of.** Start states in
+   collision are refused by `CheckStartStateCollision`. `wall_clear_command` (set in the script) lets a failed retract or stow be
+   retried with the wall out of the scene (`world_model_loader_node -p clear:=true`), the wall is put back afterwards with the
+   arrival command. This helps for the wall box only; the other jam below is self-collision.
+
+Runs of `run_multi_stand_pass.sh` (UR10e, 9 columns, 0.01 m/s, one at a time on a shared machine; coverage / peak / RMS error):
+
+| build | passed | runs |
+| --- | --- | --- |
+| before (names wrong) | 1 of 2 | 0.977 / 20.9 N / 3.51 N pass; 0.672 / 97 N / 9.3 N fail (stow) |
+| approach + wall-clear + lift margin | 3 of 4 | 0.977 / 249 N / 10.8 N; 0.977 / 18.9 N / 3.08 N; 0.644 / 27.7 N / 2.3 N fail (stand 1 docks, lift out of bounds); 0.909 / 82.5 N / 3.58 N (8 of 9 columns) |
+| + joint names | 3 of 4 | 0.977 / 22.8 N / 2.73 N; 0.977 / 19.5 N / 3.45 N; 0.977 / 18.8 N / 3.21 N; 0.415 / 263 N / 28.6 N fail |
+
+With the joint names fixed the lift never went out of bounds again and the first approach plans in 0.1 to 0.5 s when it works; the
+remaining OMPL timeouts (one or two 5 s tries on the first approach of a stand in 2 of 4 runs) are still there and still covered by
+`dock_attempts: 6`. The one failed run lost stand 1 differently: the contact stroke of its column 2 aborted at the reach limit, and
+the arm ended in self-collision (`arm_upper_arm_link` with `lift_carriage_link`, `arm_forearm_link` with `arm_wrist_3_link`), so
+`CheckStartStateCollision` refused the retract and the stow for the rest of the run. That is not the wall, and the wall-clear retry
+cannot help; a recovery that moves out of a self-collision (a joint-space jog, or allowing those link pairs for the one move) is not
+built. Peaks of 83 to 263 N in three of the eight runs (the failed one and two passing ones) were not investigated beyond that.
+
+`run_manager_pass.sh` (three columns, no stand change) after the same changes: scorer passes, coverage 0.931, peak 19.6 N, RMS 3.57 N,
+in-band 0.48, all three columns done (one run); its prime move is now a no-op as well.
+
+What it took, honestly: without `stand_max_span_m` the planner returns **one** stand "reaching" 54 poses for the 0.9 m wall
+(stand at y 0.11, 0.2 to 1.1 m of wall to its side), and the run from it failed: two of nine columns could not dock, the rest
+pressed with 100 to 296 N spikes, the tool tunnelled into the 10 cm wall box and the scorer coverage was 0.16 (one run, 1090 s).
+The RM4D map does not know the arm's self-collision or how awkward the pose is at the edge of reach, so a span cap is a
+manager parameter. A first two-stand run also failed every column until the wall octomap was re-injected after the drive.
+
+Checked in the same script (one run each): **cancel** 100 s in, during the stroke of the second column: the result is `CANCELED`
+(column 3 done, column 4 failed, stand 1 never reached), the log shows the admittance off and the force target at 0, joint speed
+over the next second 0.008 rad/s (the unload ramp makes the cancel take 1.65 s from request to result); **navigation failure**
+(`stand_nav_timeout_s: 0.5`, `stand_nav_attempts: 1`): both stands skipped, result `0 done, 0 partial, 9 failed` with each stand
+"not reached (navigation timed out)" and its columns listed as failed; with `stand_nav_timeout_s: 2.0` the first attempt timed out,
+was cancelled, the retry arrived (3.9 mm) and the stand ran (that run was stopped early). The flaky first dock and the failed
+stow of those runs are explained in "Why the first dock and the stow failed" above.
+
+
+#### Sensed wall (M4 exit test)
+
+`scripts/run_sensed_pass.sh` is the same pass without any wall file: the sim runs with `depth_sensor:=true`,
+`wall_detector` writes `wall_scene.json` + `walls.pcd` from `/depth_sensor/points`, `crop_wall_scene.py` crops the detected
+scene to the contact region (y 0..0.3, z 1.0..1.3 in `base_footprint`, `SENSED_PASS_CROP_Y/Z`; the whole sensed face is 0.76 x 0.70 m
+and the arm does not reach all of it), the coverage planner plans the crop, `world_model_loader_node` loads the detected
+whole-wall `walls.pcd` (a patch-only octomap lets OMPL swing over the edge), then the manager, recording and scoring are as above.
+The detector is stopped once the scene is written so the arm cannot change it mid-run. The shared steps live in
+`scripts/manager_pass_common.sh`, sourced by both scripts. Output in `SENSED_PASS_OUT` (default `/tmp/sensed_pass`).
+
+Result (3 mm range noise): detected normal (-1.0000, 0.0002, -0.0001), d 0.9801, rms 2.85 mm; crop 0.300 x 0.300 m, 4 columns
+(the crop is centred on the detected centroid, not on the file scene's patch, so the column layout differs from the file pass);
+coverage 1.00 (930 of 930), peak 23.6 N, RMS error 3.4 N, in-band 0.46, scorer exit 0. The detected wall schema needed nothing
+added: the planner reads only the plane, extents and `plane_rms_mm` / `spread_p95_mm` / `spread_p99_mm`, and the observed mask
+comes from `walls.pcd`. Single runs, not repeated.

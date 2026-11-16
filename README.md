@@ -23,8 +23,8 @@ Under `src/`, by area (layout rules: [docs/package_layout.md](docs/package_layou
 |---|---|---|
 | Common | `core_types`, `ros_adapters`, `force_core` | ROS-free types and ports, conversions to ROS messages, the force-control core (contact state machine, wrench conditioning) |
 | Description | `mobile_manipulator_description`, `mobile_manipulator_moveit_config`, `mobile_manipulator_profile` | Generic robot model (base + lift + N-DOF arm + tool, all swappable) with 13 profiles, MoveIt 2 config generated from a profile, header-only profile loader |
-| Perception | `scene_model`, `scene_adapters`, `robot_self_filter`, `coverage_planner`, `coverage_planner_msgs` | Scene model (clouds, meshes, voxels, ESDF, loaders), scene to planner geometry, robot self filter (library and node), wall coverage planning (boustrophedon, sweepline, wall patterns, scan to plan) |
-| Manipulation | `motion_planner`, `motion_planner_moveit`, `vamp_planner`, `curobo_bridge`, `curobo_bridge_msgs`, `curobo_planner`, `reachability`, `reachability_msgs`, `manipulation_manager` | Planner, IK, collision and scene ports; MoveIt/OMPL, VAMP and cuRobo v2 backends; RM4D reachability map and multi-stand planning; the manager that runs coverage, planning and execution |
+| Perception | `scene_model`, `scene_adapters`, `robot_self_filter`, `wall_detector`, `coverage_planner`, `coverage_planner_msgs` | Scene model (clouds, meshes, voxels, ESDF, loaders), scene to planner geometry, robot self filter (library and node), wall detection from a live point cloud, wall coverage planning (boustrophedon, sweepline, wall patterns, scan to plan) |
+| Manipulation | `motion_planner`, `motion_planner_moveit`, `vamp_planner`, `curobo_bridge`, `curobo_bridge_msgs`, `curobo_planner`, `reachability`, `reachability_msgs`, `manipulation_manager`, `coverage_task_msgs` | Planner, IK, collision and scene ports; MoveIt/OMPL, VAMP and cuRobo v2 backends; RM4D reachability map and multi-stand planning; the manager that runs coverage, planning and execution |
 | Control | `compliant_trajectory_controller`, `ft_bridge_hardware`, `ft_conditioner` | JTAC (admittance joint trajectory controller for `ros2_control`), F/T sensor bridge, wrench conditioning node |
 | Simulation | `sim_mujoco`, `sim_gazebo`, `sim_isaac` | MuJoCo 4 and Gazebo Harmonic backends behind `hardware:=mujoco` / `hardware:=gazebo`; `sim_isaac` is a stub |
 
@@ -43,6 +43,36 @@ Inside a shell: `docker/build.sh test` builds the workspace and prints the test 
 Building outside Docker needs ROS 2, MoveIt 2, `ros2_control` and the packages in `docker/apt-extra.txt`.
 The last full run recorded in the roadmap: 736 colcon tests in 26 packages, no failures. There is
 deliberately no CI; [CONTRIBUTING.md](CONTRIBUTING.md) lists how to run every check locally.
+
+## Showcase
+
+A full MuJoCo manager pass on a plain wall (`run_manager_pass.sh`: coverage plan, dock, press, three stroke columns, retract),
+rendered headless from the recorded joint states with `render_run.py`. The gif is the run at 9x, the
+[mp4](docs/media/manager_pass.mp4) at 3x with a force trace.
+
+![A full manager pass on a plain wall](docs/media/manager_pass.gif)
+
+| Robot overview | Arm at the wall, mid-stroke | Tool on the wall |
+|---|---|---|
+| ![overview](docs/media/overview.jpg) | ![arm at the wall](docs/media/arm_at_wall.jpg) | ![tool close-up](docs/media/tool_closeup.jpg) |
+
+![force and coverage of the run](docs/media/force_coverage.png)
+
+A non-contact pass, filmed the same way (`run_spray_pass.sh`: a spray gun held 0.30 m from the wall, valve open only during the strokes;
+the orange cone and the spots on the wall are drawn by `render_run.py --valve-log`, the sim itself has no spray). The gif is at 9x, the
+[mp4](docs/media/spray_pass.mp4) at 3x. Scored (`score_run --no-contact`, spray cone half-angle 20 deg): 3 columns done, coverage 100 %
+(930 of 930 cells), thickness CoV 0.52, valve open 15.6 s of 94.2 s, whole-run peak force 0.0 N.
+
+![A spray pass on a plain wall](docs/media/spray_pass.gif)
+
+Scored result of the contact run above (`score_run`, 10 N target, 1.5 N band): 3 columns done, 0 partial, 0 failed; coverage
+93.1 % (866 of 930 cells); peak force 19.2 N; RMS force error 3.6 N; 49 % of the contact samples in the band; 144 s of
+simulated time, 83 s engaged. While stroking, the force ripples between 0 and about 18 N around the 10 N target. Nothing is
+tuned for the picture. The pass was run three times for filming: 93.1 % / 18.5 N / 3.6 N, 93.1 % / 19.2 N / 3.6 N (shown), and
+a first run with 93.3 % / 153.4 N / 8.0 N, which was made while the host was heavily loaded by other simulations and builds
+(load average 10 to 27); the cause was not isolated, but the two reruns on a quieter host agree with each other and with the standard run. How the media is made:
+[docs/sim_mujoco.md](docs/sim_mujoco.md#rendering-photos-and-videos). The Gazebo scene is not shown: its launch has only a
+depth camera and no colour camera to take a picture with.
 
 ## Simulators
 
