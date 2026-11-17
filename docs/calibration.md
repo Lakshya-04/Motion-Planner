@@ -154,7 +154,7 @@ Outputs:
 
 Filter tuning parameters: `bias_tracking.process_noise_force` / `_torque`, `measurement_noise_force` / `_torque`,
 `reject_threshold_force` / `_torque`, `max_total_correction_force` / `_torque`. The defaults assume a 0.1 N noise
-sigma and very slow drift; raise the process noise if the bias moves faster (the node test uses 1e-6).
+sigma and very slow drift; raise the process noise if the bias moves faster (the node test uses 1e-4).
 
 Tests (`ft_conditioner`, fake wrench stream, no simulator): a bias ramp of 0.1 to 0.5 N over 3 s of stream is
 tracked to within 0.06 N when free and still; applying it zeroes the conditioned output (below 0.12 N summed);
