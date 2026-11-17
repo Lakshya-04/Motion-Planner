@@ -10,7 +10,7 @@ LOG=${CONTACT_LOG:-/tmp/sim_mujoco_contact_launch.log}
 # The launch runs in its own session so that the whole tree (ros2_control_node, conditioner, ...) can be
 # stopped, not just the `ros2 launch` process.
 setsid ros2 launch sim_mujoco sim_mujoco.launch.py profile:=ur10e_telescopic controller:=jtac conditioner:=true \
-  scene:=$SHARE/data/smoke_wall_scene.json > "$LOG" 2>&1 &
+  scene:=$SHARE/data/smoke_wall_scene.json ${CONTACT_LAUNCH_ARGS:-} > "$LOG" 2>&1 &
 PID=$!
 STOP_WAIT=${CONTACT_STOP_WAIT:-20}      # seconds the tree gets to exit on SIGINT before SIGKILL
 stop_launch() {

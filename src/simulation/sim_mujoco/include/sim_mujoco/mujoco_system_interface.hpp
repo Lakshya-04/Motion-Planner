@@ -34,6 +34,12 @@
  *          ray-cast scan as sensor_msgs/PointCloud2 (xyz float32, dense, sensor frame x forward) on
  *          `depth_sensor/points`; the TF to the sensor frame is the launch file's static transform.
  *
+ *          Non-idealities (default off, nothing changes unless set): environment variables
+ *          SIM_MUJOCO_FT_{NOISE_DENSITY,BIAS_WALK,LOWPASS_HZ,DELAY_MS,QUANTUM} (the raw F/T, force and
+ *          torque channels alike), SIM_MUJOCO_JOINT_{POS_NOISE,VEL_NOISE} (std, rad and rad/s),
+ *          SIM_MUJOCO_CONTROL_DELAY_MS (command latency) and SIM_MUJOCO_NOISE_SEED; the model is in
+ *          signal_model.hpp and docs/sim_vs_real.md. The ground-truth topic is never touched.
+ *
  *          Threading: read() and write() run on the controller manager thread; the model is stepped
  *          in write() by the controller period, so simulated time follows the update rate.
  */
@@ -58,6 +64,7 @@
 #include <rclcpp_lifecycle/state.hpp>
 
 #include "sim_mujoco/mujoco_sim.hpp"
+#include "sim_mujoco/signal_model.hpp"
 
 namespace sim_mujoco
 {
@@ -105,6 +112,16 @@ private:
   std::string depth_frame_id_;
   double next_depth_time_{0.0};
   void publishDepth(const rclcpp::Time & stamp);
+
+  // Opt-in non-idealities (signal_model.hpp), built on the first read() when the period is known.
+  struct Noise
+  {
+    SignalConfig ft, pos, vel, cmd;
+    bool any{false};
+    std::vector<SignalModel> ft_m, pos_m, vel_m, cmd_pos_m, cmd_vel_m;
+  } noise_;
+  bool noise_built_{false};
+  void buildNoise(double dt);
 
   std::vector<double> initial_position_;
   std::vector<double> state_position_;

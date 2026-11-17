@@ -199,6 +199,7 @@ limits and the e-stop have to be the last line, and the link between the two doe
 
 The results in [sim_mujoco.md](sim_mujoco.md), [sim_gazebo.md](sim_gazebo.md) and [ft_sensing.md](ft_sensing.md)
 (10.13 N held for a 10 N target, conditioner error below 0.005 N) hold for the models below, not for a robot.
+The longer table, with what to do about each row and the opt-in `sim_noise` models, is [sim_vs_real.md](sim_vs_real.md).
 
 | Real hardware has | The simulations |
 |---|---|

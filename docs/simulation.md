@@ -54,6 +54,8 @@ src/simulation/
 Only `sim_isaac` exists on this branch. The `sim_gazebo` and `sim_mujoco` packages and their pages
 (`docs/sim_gazebo.md`, `docs/sim_mujoco.md`) arrive with their own PRs.
 
+What the sims do and do not model, and the opt-in noise, bias and delay models of the MuJoCo plugin: [sim_vs_real.md](sim_vs_real.md).
+
 Docker: the `sim` target holds MuJoCo 4 (`mujoco-core`, MJX, JAX) for Python work
 ([docker.md](docker.md)); a thin Gazebo target arrives with the Gazebo PRs. Isaac Sim is large and ships as its own NVIDIA
 image: it will run as a separate compose service, not inside ours.

@@ -24,7 +24,50 @@ std::string param(const hardware_interface::HardwareInfo & info, const std::stri
   const auto it = info.hardware_parameters.find(key);
   return (it == info.hardware_parameters.end() || it->second.empty()) ? fallback : it->second;
 }
+
+double envd(const char * name, double fallback = 0.0)
+{
+  const char * v = std::getenv(name);
+  return (v && *v) ? std::atof(v) : fallback;
+}
 }  // namespace
+
+void MujocoSystemInterface::buildNoise(double dt)
+{
+  noise_.ft = {envd("SIM_MUJOCO_FT_NOISE_DENSITY"), envd("SIM_MUJOCO_FT_BIAS_WALK"),
+    envd("SIM_MUJOCO_FT_LOWPASS_HZ"), envd("SIM_MUJOCO_FT_DELAY_MS") * 1e-3,
+    envd("SIM_MUJOCO_FT_QUANTUM"), static_cast<uint64_t>(envd("SIM_MUJOCO_NOISE_SEED", 1.0))};
+  noise_.pos.noise_density = envd("SIM_MUJOCO_JOINT_POS_NOISE") * std::sqrt(2.0 * dt);  // std per sample
+  noise_.vel.noise_density = envd("SIM_MUJOCO_JOINT_VEL_NOISE") * std::sqrt(2.0 * dt);
+  noise_.cmd.delay_s = envd("SIM_MUJOCO_CONTROL_DELAY_MS") * 1e-3;
+  noise_.pos.seed = noise_.ft.seed + 1;
+  noise_.vel.seed = noise_.ft.seed + 2;
+  const size_t n = state_position_.size();
+  for (size_t k = 0; k < 6; ++k) {
+    auto c = noise_.ft;
+    c.seed += 100 + k;
+    noise_.ft_m.emplace_back(c, dt);
+  }
+  for (size_t i = 0; i < n; ++i) {
+    auto p = noise_.pos, v = noise_.vel;
+    p.seed += 1000 + i;
+    v.seed += 2000 + i;
+    noise_.pos_m.emplace_back(p, dt);
+    noise_.vel_m.emplace_back(v, dt);
+    noise_.cmd_pos_m.emplace_back(noise_.cmd, dt);
+    noise_.cmd_vel_m.emplace_back(noise_.cmd, dt);
+  }
+  noise_.any = noise_.ft.enabled() || noise_.pos.enabled() || noise_.vel.enabled() || noise_.cmd.enabled();
+  if (noise_.any) {
+    RCLCPP_WARN(kLogger,
+      "Sensor non-idealities ON: ft density %.3g bias walk %.3g lowpass %.3g Hz delay %.1f ms quantum %.3g; "
+      "joint noise pos %.3g vel %.3g; control delay %.1f ms (period %.4f s)",
+      noise_.ft.noise_density, noise_.ft.bias_walk, noise_.ft.lowpass_hz, noise_.ft.delay_s * 1e3,
+      noise_.ft.quantum, envd("SIM_MUJOCO_JOINT_POS_NOISE"), envd("SIM_MUJOCO_JOINT_VEL_NOISE"),
+      noise_.cmd.delay_s * 1e3, dt);
+  }
+  noise_built_ = true;
+}
 
 CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::HardwareInfo & info)
 {
@@ -171,14 +214,26 @@ CallbackReturn MujocoSystemInterface::on_deactivate(const rclcpp_lifecycle::Stat
 }
 
 hardware_interface::return_type MujocoSystemInterface::read(
-  const rclcpp::Time &, const rclcpp::Duration &)
+  const rclcpp::Time &, const rclcpp::Duration & period)
 {
+  if (!noise_built_ && period.seconds() > 0.0) {
+    buildNoise(period.seconds());
+  }
   for (size_t i = 0; i < state_position_.size(); ++i) {
     state_position_[i] = sim_->position(i);
     state_velocity_[i] = sim_->velocity(i);
     state_effort_[i] = sim_->effort(i);
+    if (noise_.any) {
+      state_position_[i] = noise_.pos_m[i].step(state_position_[i]);
+      state_velocity_[i] = noise_.vel_m[i].step(state_velocity_[i]);
+    }
   }
   ft_ = sim_->wrench();
+  if (noise_.any) {
+    for (size_t k = 0; k < 6; ++k) {
+      ft_[k] = noise_.ft_m[k].step(ft_[k]);
+    }
+  }
   const auto stamp = node_->now();
   auto fill = [&stamp](const std::string & frame, const Wrench & w) {
       geometry_msgs::msg::WrenchStamped m;
@@ -262,7 +317,12 @@ hardware_interface::return_type MujocoSystemInterface::write(
   const rclcpp::Time &, const rclcpp::Duration & period)
 {
   for (size_t i = 0; i < command_position_.size(); ++i) {
-    sim_->setCommand(i, command_position_[i], command_velocity_[i]);
+    if (noise_.any) {
+      sim_->setCommand(i, noise_.cmd_pos_m[i].step(command_position_[i]),
+        noise_.cmd_vel_m[i].step(command_velocity_[i]));
+    } else {
+      sim_->setCommand(i, command_position_[i], command_velocity_[i]);
+    }
   }
   if (sim_->hasBase()) {
     const bool fresh = (node_->now() - last_cmd_time_).seconds() <= cmd_vel_timeout_;

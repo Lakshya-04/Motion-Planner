@@ -164,11 +164,11 @@ without code, when we can implement it.
       `external_wrench`, `fts_grav_comp`, `free_joint_state_publisher`) against our own plugin. Its `mujoco_vendor` pins MuJoCo 3.12.0 and no MuJoCo 4 work was
       found, while ours builds against 4.0.1: try building it against 4.0.1, otherwise borrow its plugin designs
 - [ ] MuJoCo SDK pinned in Docker (today a mounted tarball; the plugin is skipped without `MUJOCO_ROOT`)
-- [ ] Calibrated soft contact and noise / bias / delay models in the sims (the near-zero conditioner error is the noise-free best case). MuJoCo direct
+- [~] Calibrated soft contact and noise / bias / delay models in the sims (the near-zero conditioner error is the noise-free best case). Done: MuJoCo `sim_noise` (opt-in F/T white noise, bias random walk, low-pass, delay, quantisation, joint-state noise, command latency; `signal_model.hpp`, gtests, noisy contact run in `docs/sim_vs_real.md`: 10.18 N held for a 10 N target with density 0.02). Not done: calibration of any parameter against a real sensor, Gazebo equivalent, soft contact calibration. MuJoCo direct
       `solref` (-stiffness, -damping): 10 N at 0.5 mm penetration is 20 kN/m (arithmetic from the docs, not yet run)
 - [ ] MuJoCo Warp (Apache-2.0, active) for parallel gain sweeps (released with MuJoCo 3.5; small batches on a 4 GB GPU, not verified with MuJoCo 4); avoid Isaac Lab / Genesis on this machine
 - [ ] Contact and smoke scripts run by `colcon test` or one documented command (today: scripts the author ran)
-- [ ] Sim-vs-real differences document
+- [x] Sim-vs-real differences document (`docs/sim_vs_real.md`; a table, not a measurement against hardware)
 - [ ] `sim_isaac`: stub only; deferred (Isaac Sim does not run on this machine)
 
 ## 11. The end-to-end gap (the main remaining work)
