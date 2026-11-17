@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -41,6 +42,42 @@ Vec3 vec(const char * name, const std::vector<double> & v)
       std::string("parameter '") + name + "' needs 3 values, got " + std::to_string(v.size()));
   }
   return Vec3{v[0], v[1], v[2]};
+}
+
+Mat3 mul3(const Mat3 & a, const Mat3 & b)
+{
+  Mat3 r;
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      double sum = 0.0;
+      for (int k = 0; k < 3; ++k) {sum += a.at(i, k) * b.at(k, j);}
+      r.m[3 * i + j] = sum;
+    }
+  }
+  return r;
+}
+
+Mat3 axisAngle(const Vec3 & axis, double angle)     // Rodrigues, axis need not be normalised
+{
+  const double n = std::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+  const double x = axis.x / n, y = axis.y / n, z = axis.z / n;
+  const double c = std::cos(angle), s = std::sin(angle), t = 1.0 - c;
+  Mat3 r;
+  r.m = {t * x * x + c, t * x * y - s * z, t * x * z + s * y,
+    t * x * y + s * z, t * y * y + c, t * y * z - s * x,
+    t * x * z - s * y, t * y * z + s * x, t * z * z + c};
+  return r;
+}
+
+geometry_msgs::msg::WrenchStamped toMsg(const core_types::Wrench & w, const rclcpp::Time & stamp,
+  const std::string & frame)
+{
+  geometry_msgs::msg::WrenchStamped out;
+  out.header.stamp = stamp;
+  out.header.frame_id = frame;
+  out.wrench.force.x = w.force_x; out.wrench.force.y = w.force_y; out.wrench.force.z = w.force_z;
+  out.wrench.torque.x = w.torque_x; out.wrench.torque.y = w.torque_y; out.wrench.torque.z = w.torque_z;
+  return out;
 }
 
 Mat3 toMat(const geometry_msgs::msg::Quaternion & q)
@@ -85,6 +122,42 @@ WrenchConditionerNode::WrenchConditionerNode(const rclcpp::NodeOptions & options
   offset_param_.p = vec("tool_in_sensor_xyz", off_xyz);
   offset_param_.R = off_rpy.size() >= 3 ? fromRpy(off_rpy[0], off_rpy[1], off_rpy[2]) : Mat3{};
 
+  reference_bias_ = config_.bias;
+  bias_tracking_ = declare_parameter<bool>("bias_tracking.enabled", false);
+  bias_apply_ = declare_parameter<bool>("bias_tracking.apply", false);
+  const auto cf_topic = declare_parameter<std::string>("bias_tracking.contact_free_topic", "contact_free");
+  const auto js_topic = declare_parameter<std::string>("bias_tracking.joint_states_topic", "joint_states");
+  still_velocity_rad_s_ = declare_parameter<double>("bias_tracking.still_velocity_rad_s", 0.01);
+  contact_free_timeout_s_ = declare_parameter<double>("bias_tracking.contact_free_timeout_s", 1.0);
+  joint_state_timeout_s_ = declare_parameter<double>("bias_tracking.joint_state_timeout_s", 0.5);
+  bias_cfg_.process_noise_force = declare_parameter<double>("bias_tracking.process_noise_force", bias_cfg_.process_noise_force);
+  bias_cfg_.process_noise_torque = declare_parameter<double>("bias_tracking.process_noise_torque", bias_cfg_.process_noise_torque);
+  bias_cfg_.measurement_noise_force = declare_parameter<double>("bias_tracking.measurement_noise_force", bias_cfg_.measurement_noise_force);
+  bias_cfg_.measurement_noise_torque = declare_parameter<double>("bias_tracking.measurement_noise_torque", bias_cfg_.measurement_noise_torque);
+  bias_cfg_.reject_threshold_force = declare_parameter<double>("bias_tracking.reject_threshold_force", bias_cfg_.reject_threshold_force);
+  bias_cfg_.reject_threshold_torque = declare_parameter<double>("bias_tracking.reject_threshold_torque", bias_cfg_.reject_threshold_torque);
+  bias_cfg_.max_total_correction_force = declare_parameter<double>("bias_tracking.max_total_correction_force", bias_cfg_.max_total_correction_force);
+  bias_cfg_.max_total_correction_torque = declare_parameter<double>("bias_tracking.max_total_correction_torque", bias_cfg_.max_total_correction_torque);
+  bias_cfg_.max_consecutive_rejects = static_cast<std::size_t>(std::max<int64_t>(
+      1, declare_parameter<int64_t>("bias_tracking.max_consecutive_rejects",
+      static_cast<int64_t>(bias_cfg_.max_consecutive_rejects))));
+  // Joint-space inputs of ~/plan_excitation (read when the service is called).
+  declare_parameter<std::vector<double>>("excitation.q_start", std::vector<double>{});
+  declare_parameter<std::vector<double>>("excitation.q_min", std::vector<double>{});
+  declare_parameter<std::vector<double>>("excitation.q_max", std::vector<double>{});
+  declare_parameter<std::vector<double>>("excitation.v_max", std::vector<double>{});
+  declare_parameter<std::vector<double>>("excitation.a_max", std::vector<double>{});
+  declare_parameter<std::vector<double>>("excitation.joint_axes", std::vector<double>{});
+  declare_parameter<std::vector<double>>("excitation.home_rpy", std::vector<double>{0.0, 0.0, 0.0});
+  declare_parameter<double>("excitation.margin_rad", 0.1);
+  declare_parameter<double>("excitation.velocity_scale", 0.5);
+  declare_parameter<int64_t>("excitation.num_poses", 8);
+  declare_parameter<int64_t>("excitation.num_candidates", 400);
+  declare_parameter<int64_t>("excitation.seed", 1);
+  declare_parameter<double>("excitation.dwell_s", 1.5);
+  declare_parameter<double>("excitation.max_condition", 20.0);
+  if (bias_tracking_) {tracker_ = std::make_unique<force_core::BiasTracker>(reference_bias_, bias_cfg_);}
+
   param_cb_ = add_on_set_parameters_callback(
     [this](const std::vector<rclcpp::Parameter> & p) {return onParameters(p);});
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
@@ -93,12 +166,40 @@ WrenchConditionerNode::WrenchConditionerNode(const rclcpp::NodeOptions & options
   sub_ = create_subscription<geometry_msgs::msg::WrenchStamped>(
     in_topic, rclcpp::SensorDataQoS(),
     [this](const geometry_msgs::msg::WrenchStamped::SharedPtr m) {onRaw(m);});
+  bias_pub_ = create_publisher<geometry_msgs::msg::WrenchStamped>("~/tracked_bias", rclcpp::QoS(1).transient_local());
+  recal_pub_ = create_publisher<std_msgs::msg::Bool>("~/recalibrate_needed", rclcpp::QoS(1).transient_local());
+  contact_free_sub_ = create_subscription<std_msgs::msg::Bool>(
+    cf_topic, rclcpp::QoS(10), [this](const std_msgs::msg::Bool::SharedPtr m) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      contact_free_ = m->data;
+      have_contact_free_ = true;
+      contact_free_stamp_ = get_clock()->now();
+    });
+  joint_state_sub_ = create_subscription<sensor_msgs::msg::JointState>(
+    js_topic, rclcpp::SensorDataQoS(), [this](const sensor_msgs::msg::JointState::SharedPtr m) {
+      double peak = 0.0;
+      for (const double v : m->velocity) {peak = std::max(peak, std::abs(v));}
+      std::lock_guard<std::mutex> lock(mutex_);
+      // A joint state without velocities cannot show the arm is still: treat as moving.
+      max_joint_speed_ = m->velocity.empty() ? std::numeric_limits<double>::infinity() : peak;
+      have_joint_state_ = true;
+      joint_state_stamp_ = get_clock()->now();
+    });
   using Trigger = std_srvs::srv::Trigger;
   using Req = std::shared_ptr<Trigger::Request>;
   using Res = std::shared_ptr<Trigger::Response>;
   capture_srv_ = create_service<Trigger>("~/capture_pose", [this](const Req q, Res r) {captureSample(q, r);});
   identify_srv_ = create_service<Trigger>("~/identify", [this](const Req q, Res r) {identify(q, r);});
   clear_srv_ = create_service<Trigger>("~/clear_samples", [this](const Req q, Res r) {clearSamples(q, r);});
+  reset_bias_srv_ = create_service<Trigger>("~/reset_bias_tracker", [this](const Req q, Res r) {resetBiasTracker(q, r);});
+  plan_srv_ = create_service<Trigger>("~/plan_excitation", [this](const Req q, Res r) {planExcitation(q, r);});
+  if (bias_tracking_) {
+    std_msgs::msg::Bool f;
+    recal_pub_->publish(f);
+    RCLCPP_INFO(get_logger(), "bias tracking on (%s): contact_free '%s', joint states '%s', still below %.3f rad/s",
+      bias_apply_ ? "applied to the conditioner" : "published only", cf_topic.c_str(), js_topic.c_str(),
+      still_velocity_rad_s_);
+  }
   RCLCPP_INFO(get_logger(), "conditioning %s -> %s in frame '%s' (world '%s')", in_topic.c_str(),
     out_topic.c_str(), tool_frame_.c_str(), world_frame_.c_str());
 }
@@ -114,8 +215,30 @@ rcl_interfaces::msg::SetParametersResult WrenchConditionerNode::onParameters(
     std::lock_guard<std::mutex> lock(mutex_);
     next = config_;
   }
+  bool reset_tracker = false;
+  core_types::Wrench ref;
+  bool apply = false, enabled = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ref = reference_bias_;
+    apply = bias_apply_;
+    enabled = bias_tracking_;
+  }
   for (const auto & p : params) {
     const auto & n = p.get_name();
+    if (n == "bias_tracking.enabled") {
+      if (p.as_bool() != enabled) {reset_tracker = true;}
+      enabled = p.as_bool();
+      continue;
+    }
+    if (n == "bias_tracking.apply") {
+      apply = p.as_bool();
+      reset_tracker = true;
+      continue;
+    }
+    if (n == "payload_mass_kg" || n == "payload_cog_xyz" || n == "gravity_world" || n == "sign" || n == "bias") {
+      reset_tracker = true;       // the tracked residual depends on all of them
+    }
     if (n == "payload_mass_kg") {
       next.payload.mass_kg = p.as_double();
     } else if (n == "sign") {
@@ -130,12 +253,22 @@ rcl_interfaces::msg::SetParametersResult WrenchConditionerNode::onParameters(
       if (v.size() != 6) {fail("bias needs 6 values"); return result;}
       next.bias.force_x = v[0]; next.bias.force_y = v[1]; next.bias.force_z = v[2];
       next.bias.torque_x = v[3]; next.bias.torque_y = v[4]; next.bias.torque_z = v[5];
+      ref = next.bias;
     }
   }
   std::lock_guard<std::mutex> lock(mutex_);
   const auto offset = config_.tool_in_sensor;
   config_ = next;
   config_.tool_in_sensor = offset;
+  reference_bias_ = ref;
+  bias_apply_ = apply;
+  bias_tracking_ = enabled;
+  if (reset_tracker) {
+    tracker_.reset();
+    if (enabled) {tracker_ = std::make_unique<force_core::BiasTracker>(ref, bias_cfg_);}
+    config_.bias = ref;      // restart from the reference bias (also when apply was just turned off)
+    recal_state_ = false;
+  }
   return result;
 }
 
@@ -230,13 +363,164 @@ void WrenchConditionerNode::onRaw(const geometry_msgs::msg::WrenchStamped::Share
     }
   }
   const core_types::Wrench w = force_core::WrenchConditioner(cfg).condition(toCore(msg->wrench), r);
-  geometry_msgs::msg::WrenchStamped out;
-  out.header.stamp = msg->header.stamp;
-  out.header.frame_id = tool_frame_;
-  out.wrench.force.x = w.force_x; out.wrench.force.y = w.force_y; out.wrench.force.z = w.force_z;
-  out.wrench.torque.x = w.torque_x; out.wrench.torque.y = w.torque_y; out.wrench.torque.z = w.torque_z;
-  pub_->publish(out);
+  pub_->publish(toMsg(w, msg->header.stamp, tool_frame_));
+  trackBias(toCore(msg->wrench), r, msg->header.stamp, sensor);
   ++published_;
+}
+
+void WrenchConditionerNode::trackBias(
+  const core_types::Wrench & raw, const Mat3 & r, const rclcpp::Time & stamp, const std::string & sensor_frame)
+{
+  core_types::Wrench bias;
+  bool recal = false, send_recal = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!bias_tracking_ || !tracker_) {return;}
+    const rclcpp::Time now = get_clock()->now();
+    const bool free = have_contact_free_ && contact_free_ &&
+      (now - contact_free_stamp_).seconds() <= contact_free_timeout_s_;
+    const bool still = have_joint_state_ && max_joint_speed_ < still_velocity_rad_s_ &&
+      (now - joint_state_stamp_).seconds() <= joint_state_timeout_s_;
+    // What the bias should equal at rest: the sign-applied reading minus the payload's weight.
+    const core_types::Wrench g = force_core::gravityWrench(config_.payload, r, config_.gravity_world);
+    core_types::Wrench residual;
+    residual.force_x = config_.sign * raw.force_x - g.force_x;
+    residual.force_y = config_.sign * raw.force_y - g.force_y;
+    residual.force_z = config_.sign * raw.force_z - g.force_z;
+    residual.torque_x = config_.sign * raw.torque_x - g.torque_x;
+    residual.torque_y = config_.sign * raw.torque_y - g.torque_y;
+    residual.torque_z = config_.sign * raw.torque_z - g.torque_z;
+    tracker_->update(residual, free, still);
+    bias = tracker_->bias();
+    if (bias_apply_) {config_.bias = bias;}
+    recal = tracker_->needsRecalibration();
+    if (recal != recal_state_) {recal_state_ = recal; send_recal = true;}
+  }
+  bias_pub_->publish(toMsg(bias, stamp, sensor_frame));
+  if (send_recal) {
+    std_msgs::msg::Bool m;
+    m.data = recal;
+    recal_pub_->publish(m);
+    if (recal) {
+      RCLCPP_WARN(get_logger(), "bias tracker keeps rejecting samples: payload or sensor changed, re-run ~/identify");
+    }
+  }
+}
+
+core_types::Wrench WrenchConditionerNode::trackedBias() const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return tracker_ ? tracker_->bias() : config_.bias;
+}
+
+std::size_t WrenchConditionerNode::biasAccepted() const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return tracker_ ? tracker_->accepted() : 0;
+}
+
+std::size_t WrenchConditionerNode::biasRejected() const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return tracker_ ? tracker_->rejected() : 0;
+}
+
+bool WrenchConditionerNode::recalibrationNeeded() const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return tracker_ && tracker_->needsRecalibration();
+}
+
+void WrenchConditionerNode::resetBiasTracker(
+  const std::shared_ptr<std_srvs::srv::Trigger::Request>, std::shared_ptr<std_srvs::srv::Trigger::Response> res)
+{
+  bool was_recal = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!bias_tracking_) {
+      res->message = "bias tracking is off (bias_tracking.enabled:=true)";
+      return;
+    }
+    tracker_ = std::make_unique<force_core::BiasTracker>(reference_bias_, bias_cfg_);
+    config_.bias = reference_bias_;
+    was_recal = recal_state_;
+    recal_state_ = false;
+  }
+  if (was_recal) {
+    std_msgs::msg::Bool m;
+    recal_pub_->publish(m);
+  }
+  res->success = true;
+  res->message = "tracker reset to the `bias` parameter";
+}
+
+void WrenchConditionerNode::planExcitation(
+  const std::shared_ptr<std_srvs::srv::Trigger::Request>, std::shared_ptr<std_srvs::srv::Trigger::Response> res)
+{
+  const auto vecp = [this](const char * n) {return get_parameter(n).as_double_array();};
+  force_core::ExcitationLimits lim;
+  lim.q_min = vecp("excitation.q_min");
+  lim.q_max = vecp("excitation.q_max");
+  lim.v_max = vecp("excitation.v_max");
+  lim.a_max = vecp("excitation.a_max");
+  lim.margin_rad = get_parameter("excitation.margin_rad").as_double();
+  lim.velocity_scale = get_parameter("excitation.velocity_scale").as_double();
+  const auto q0 = vecp("excitation.q_start");
+  const auto axes = vecp("excitation.joint_axes");
+  const auto rpy = vecp("excitation.home_rpy");
+  const std::size_t n = q0.size();
+  if (n == 0 || lim.q_min.size() != n || lim.q_max.size() != n || lim.v_max.size() != n ||
+    lim.a_max.size() != n || axes.size() != 3 * n || rpy.size() != 3)
+  {
+    res->message = "set excitation.q_start, q_min, q_max, v_max, a_max (n values each), joint_axes (3 n values, "
+      "unit axes of the joints at q = 0 in the base frame) and home_rpy (3 values); got n=" + std::to_string(n);
+    return;
+  }
+  std::vector<Vec3> ax;
+  for (std::size_t i = 0; i < n; ++i) {
+    const Vec3 a{axes[3 * i], axes[3 * i + 1], axes[3 * i + 2]};
+    if (a.x * a.x + a.y * a.y + a.z * a.z < 1e-12) {res->message = "a zero joint axis in excitation.joint_axes"; return;}
+    ax.push_back(a);
+  }
+  const Mat3 home = fromRpy(rpy[0], rpy[1], rpy[2]);
+  // Rotation-only forward kinematics of a serial revolute chain (product of exponentials):
+  // R_base_sensor(q) = exp(a1 q1) ... exp(an qn) R_home. Positions do not matter for gravity directions.
+  const force_core::ForwardKinematics fk = [ax, home](const std::vector<double> & q) {
+      Mat3 r;      // identity
+      for (std::size_t i = 0; i < ax.size(); ++i) {r = mul3(r, axisAngle(ax[i], q[i]));}
+      return mul3(r, home);
+    };
+  force_core::ExcitationOptions opt;
+  opt.num_poses = static_cast<std::size_t>(std::max<int64_t>(1, get_parameter("excitation.num_poses").as_int()));
+  opt.num_candidates = static_cast<std::size_t>(std::max<int64_t>(1, get_parameter("excitation.num_candidates").as_int()));
+  opt.seed = static_cast<std::uint32_t>(get_parameter("excitation.seed").as_int());
+  opt.dwell_s = get_parameter("excitation.dwell_s").as_double();
+  opt.max_condition = get_parameter("excitation.max_condition").as_double();
+  Vec3 g;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    g = config_.gravity_world;
+  }
+  // No self-collision proxy here (empty = always safe): the poses are inside the joint limits only.
+  const auto plan = force_core::generateExcitationPoses(q0, lim, fk, force_core::SafetyProxy{}, g, opt);
+  if (!plan.ok) {
+    res->message = "plan failed: " + plan.message;
+    return;
+  }
+  std::ostringstream o;
+  o.precision(4);
+  o << plan.waypoints.size() << " waypoints, " << plan.duration_s << " s, regressor condition number "
+    << plan.condition_number << (plan.condition_number > opt.max_condition ? " (ABOVE max_condition, poses poorly spread)" : "")
+    << ", smallest angle between gravity directions " << plan.min_pair_angle_rad << " rad. Joint limits only: no "
+    << "self-collision or workspace check, review every pose before moving the arm. Nothing was moved.\n"
+    << "waypoints:\n";
+  for (const auto & wp : plan.waypoints) {
+    o << "- {t_arrive_s: " << wp.t_arrive_s << ", t_leave_s: " << wp.t_leave_s << ", q: [";
+    for (std::size_t i = 0; i < wp.q.size(); ++i) {o << (i ? ", " : "") << wp.q[i];}
+    o << "]}\n";
+  }
+  res->success = true;
+  res->message = o.str();
 }
 
 void WrenchConditionerNode::captureSample(
