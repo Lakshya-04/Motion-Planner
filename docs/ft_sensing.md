@@ -146,5 +146,57 @@ estimate exists it assumes `k_max`, the conservative choice. Before contact is f
 loop rate). Retreat velocities are never held back.
 
 Limits: one axis (the wall normal), a linear spring model, no energy tank; it bounds the force the controller is told
-to build and does not replace the tool's abort threshold or an e-stop. It is not connected to JTAC's command path yet.
+to build and does not replace the tool's abort threshold or an e-stop.
+
+### Force limiter on JTAC (opt-in)
+
+`force_limiter.enabled` (default false, needs `ft_sensor.name`) runs `force_core::NormalAxisLimiter` in
+`JtacController::update()` after the Cartesian offset clamp, along the tool +Z (into the wall). Parameters
+`force_limiter.{f_max_n, alpha_per_s, k_min_n_per_m, k_max_n_per_m, contact_force_n, free_space_speed_mps,
+max_offset_m, windup_gain_n_per_m, retreat_speed_mps, reference_speed_cap_mps (0.1), reading_offset_n}`. Per cycle, with
+`F = -force.z + reading_offset_n` (the conditioned wrench JTAC already reads):
+
+1. offset cap: the commanded position is at most `reference + max_offset_m` into the wall;
+2. force barrier: the command advances at most `alpha (F_max - F) / k` per second once in contact (before contact:
+   the planned reference advance up to 0.1 m/s passes through, the compliance offset's own advance is held to
+   `free_space_speed_mps`); the stiffness `k` is identified from the *commanded* position to the force, which is what
+   the barrier acts through (for a soft position-controlled arm it is far below the wall's stiffness);
+3. anti-windup: the offset beyond `max_offset_m` becomes a force `windup_gain_n_per_m * excess` subtracted from the
+   pressing force the admittance rule sees, so its integrator stops growing while the output is clamped;
+4. retreat: a reference leaving the wall faster than `retreat_speed_mps` while the offset points into the wall caps
+   the offset at zero and resets the admittance state, so the release is immediate instead of the 2 s relaxation
+   (`docs/sim_mujoco.md`, "Retreat").
+
+The correction is mapped to joints by damped least squares on the translational Jacobian. The F/T bridge's
+`target_wrench` removes the target from the reading upstream: then `F` is the excess over the target, so set `f_max_n`
+relative to the target (limit above target) and leave `reading_offset_n` at 0. A fixed `reading_offset_n` is wrong
+while the bridge target is not yet published (it adds that offset in free space: the first MuJoCo attempt below).
+
+Spring-wall tests at 100 Hz (`force_limiter_test.cpp`, `NormalAxisLimiter.*`; a position-controlled arm of 50 kN/m or
+320 N/m servo stiffness, the ros2_controllers admittance rule, F_max 15 N, offset cap 5 cm against a 10 cm clamp
+without the limiter; sensors: noise as stated), true peak force:
+
+| case | without | with |
+|---|---|---|
+| step reference 15 cm into the wall, stiff arm | 488 N | 15.0 N |
+| same, soft arm | 31 N | 15.0 N |
+| ramp 5 cm/s through the wall, stiff / soft arm | 56 / 30 N | 15.2 / 15.0 N |
+| ramp 5 cm/s, 0.6 N noise, 20 kN/m wall, stiff / soft arm | 58 / 31 N | 26.3 / 14.5 N |
+| ramp 2 cm/s, same noise and wall, stiff arm | 23 N | 15.0 N |
+| 10 N hold, steady force (stiff / soft arm) | 9.64 / 9.47 N | 9.64 / 9.52 N |
+| retreat from 5 cm past (soft arm, 32 N target): peak, time to below 0.5 N | 40 N, not within 5 s | 15 N, 0.0 s |
+
+What it does not solve: the first contact. A planned approach speed is passed through before contact, so the first
+contact still adds about `k_eff * v * dt` on top of the limit (the 26.3 N row: 14 kN/m, 5 cm/s, 100 Hz is 7 N a
+step, plus the arm's lag); only an approach at the limiter's own `free_space_speed_mps` stays within about 2.5 N of
+`f_max_n` on a 20 kN/m wall. The loop rate sets the bound, as in #41. The simulated plant is a model: the sim arm and
+the admittance rule differ from it in detail, and the windup release time without the limiter (not within 5 s here,
+about 3 s measured) is not reproduced exactly.
+
+MuJoCo contact check (`run_contact.sh`, 10 N target): not completed. Two attempts failed before reaching the wall
+and no force numbers exist. (1) The first stage throttled the planned approach to 2 cm/s, so the command fell metres
+behind the trajectory and the offset runaway guard fired; fixed by passing the planned reference advance through.
+(2) With `reading_offset_n: 10` the limiter saw 10 N of force in free space during calibration (the bridge target is
+not published yet) and stalled the arm; the documented configuration is now the excess over the target. A third run
+with that configuration was not made (the run budget was one).
 

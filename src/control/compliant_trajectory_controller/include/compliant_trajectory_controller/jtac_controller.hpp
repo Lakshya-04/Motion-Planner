@@ -270,6 +270,9 @@ private:
   /// cycle's back-calculation force, subtracted from the pressing force the admittance rule sees.
   std::unique_ptr<force_core::NormalAxisLimiter> force_limiter_;
   double force_limiter_windup_n_{0.0};
+  /// `force_limiter.reading_offset_n`: bias already removed from the wrench upstream (e.g. the F/T bridge's
+  /// target_wrench), added back so the limiter sees the absolute pressing force. 0 when the wrench is absolute.
+  double force_limiter_reading_offset_n_{0.0};
 
   /// A SEPARATE instance from admittance_rule_'s own internal kinematics_ (private, not exposed)
   /// and from redundancy_kinematics_ (only initialized when enable_redundancy_weighting_ is on) --

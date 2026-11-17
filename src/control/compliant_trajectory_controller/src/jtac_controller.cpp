@@ -305,6 +305,8 @@ controller_interface::CallbackReturn JtacController::on_configure(
     lp.max_offset_m = number("max_offset_m", lp.max_offset_m);
     lp.windup_gain_n_per_m = number("windup_gain_n_per_m", lp.windup_gain_n_per_m);
     lp.retreat_speed_mps = number("retreat_speed_mps", lp.retreat_speed_mps);
+    lp.reference_speed_cap_mps = number("reference_speed_cap_mps", lp.reference_speed_cap_mps);
+    force_limiter_reading_offset_n_ = number("reading_offset_n", 0.0);
     if (!has_ft_sensor_) {
       RCLCPP_ERROR(get_node()->get_logger(), "force_limiter.enabled needs an F/T sensor (ft_sensor.name)");
       return controller_interface::CallbackReturn::ERROR;
@@ -589,7 +591,7 @@ void JtacController::applyForceLimiter(const geometry_msgs::msg::Wrench & measur
   const double p_desired = desired_tf.translation().dot(axis);
   const double p_reference = reference_tf.translation().dot(axis);
   const double p_measured = current_tf.translation().dot(axis);
-  const double force_n = -measured.force.z;
+  const double force_n = -measured.force.z + force_limiter_reading_offset_n_;
 
   const double p_cmd = force_limiter_->step(dt, p_desired, p_reference, p_measured, force_n);
   force_limiter_windup_n_ = force_limiter_->windupForce();

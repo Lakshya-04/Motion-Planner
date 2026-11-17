@@ -120,3 +120,4 @@ combined_arm_lift_controller:
     #   max_offset_m: 0.05
     #   windup_gain_n_per_m: 1000.0
     #   retreat_speed_mps: 0.005
+    #   reading_offset_n: 0.0   # set to the bridge target_wrench force when the F/T bridge removes it upstream

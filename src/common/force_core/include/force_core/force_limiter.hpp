@@ -85,6 +85,11 @@ struct NormalAxisLimiterParams
   /// is a retreat: the offset cap drops to zero and `resetRequested()` asks the controller to clear
   /// its admittance state, so the release is immediate instead of the integrator's slow relaxation.
   double retreat_speed_mps{0.005};
+  /// Before contact is felt, a planned reference advance up to this speed (m/s) is passed through; only
+  /// the compliance offset's own advance is held to `limiter.free_space_speed_mps`. Throttling the
+  /// planned approach itself makes the command lag the trajectory by metres (found in the MuJoCo run).
+  /// Above this speed the approach is capped to it.
+  double reference_speed_cap_mps{0.1};
   /// Back-calculation gain, N per m of offset beyond `max_offset_m`: the controller subtracts
   /// `windupForce()` from the pressing force it feeds the admittance rule so its own offset state
   /// stops growing while the output is clamped.
@@ -94,7 +99,8 @@ struct NormalAxisLimiterParams
 /// Anti-windup and force barrier on the tool's position along the wall normal, for a controller that
 /// outputs `desired = reference + compliance offset`. Per cycle:
 ///   target = min(desired, reference + max_offset)               (offset clamp, 0 on a retreat)
-///   cmd    = min(target, previous cmd + v_max(F) dt)            (force barrier on the velocity)
+///   cmd    = min(target, previous cmd + v_max(F) dt)            (force barrier on the velocity;
+///            before contact v_max is the larger of the offset speed cap and the planned reference advance)
 /// The command follows a retreat at once (nothing is integrated below the target) and a detected
 /// retreat also asks for the admittance state to be reset; the barrier only ever lags the approach. Plain C++, no ROS, no clock.
 class NormalAxisLimiter

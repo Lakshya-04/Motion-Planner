@@ -76,7 +76,7 @@ NormalAxisLimiter::NormalAxisLimiter(const NormalAxisLimiterParams & params)
 : p_(params), limiter_(params.limiter)
 {
   if (!(p_.max_offset_m > 0.0) || !(p_.windup_gain_n_per_m >= 0.0) ||
-    !(p_.retreat_speed_mps > 0.0))
+    !(p_.retreat_speed_mps > 0.0) || !(p_.reference_speed_cap_mps > 0.0))
   {
     throw std::invalid_argument("normal axis limiter: parameter out of range");
   }
@@ -116,7 +116,12 @@ double NormalAxisLimiter::step(
     prev_cmd_ = std::min(target, p_measured);
     have_prev_ = true;
   }
-  const double cmd = std::min(target, prev_cmd_ + limiter_.maxApproachVelocity(force_n) * dt);
+  double v_max = limiter_.maxApproachVelocity(force_n);
+  if (force_n < p_.limiter.contact_force_n) {
+    // Free space: let the planned reference advance through (up to a cap), hold the offset's advance.
+    v_max = std::max(v_max, std::min(std::max(ref_velocity, 0.0), p_.reference_speed_cap_mps));
+  }
+  const double cmd = std::min(target, prev_cmd_ + v_max * dt);
   prev_cmd_ = cmd;
   return cmd;
 }
