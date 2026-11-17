@@ -12,7 +12,7 @@ anything verified on hardware.
 
 ### Verified
 
-- 2026-11-17, main at 56712bb: `docker/run_all_checks.sh --skip-sims` (fresh build volumes, image `motion-planner:build-live`): 54 packages built, `colcon test` 1259 tests, 0 errors, 0 failures, 229 skipped (lint and optional-dependency tests); pytest per directory 325 passed, 6 skipped (MuJoCo, cuRobo and torch absent); public-readiness scan 0 problems. Not run: sim_gazebo, sim_mujoco, sim_isaac, the simulator scripts, GPU planners, hardware.
+- 2026-11-17, main at 56712bb: `docker/run_all_checks.sh --skip-sims` (fresh build volumes, image `motion-planner:build-live`): 54 packages built, `colcon test` 1259 tests, 0 errors, 0 failures, 229 skipped (lint and optional-dependency tests); pytest per directory 324 passed, 6 skipped (MuJoCo, cuRobo and torch absent); public-readiness scan 0 problems. Not run: sim_gazebo, sim_mujoco, sim_isaac, the simulator scripts, GPU planners, hardware.
 - `moveit_ros_perception` (needed at run time by the live octomap) is an `exec_depend` of `mobile_manipulator_moveit_config`, not a build dependency. The older `motion-planner:build` image lacks it, so build and test pass there but `live_octomap:=true` fails until the image is rebuilt (it is in `docker/apt-extra.txt`). The feature stays opt-in.
 
 ### Fixed
