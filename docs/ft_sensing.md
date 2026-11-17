@@ -167,6 +167,8 @@ max_offset_m, windup_gain_n_per_m, retreat_speed_mps, reference_speed_cap_mps (0
    the offset at zero and resets the admittance state, so the release is immediate instead of the 2 s relaxation
    (`docs/sim_mujoco.md`, "Retreat").
 
+The limiter acts only while the Z force axis is engaged (`admittance.selected_axes[2]`); otherwise it is reset and passes everything through, because an uncalibrated payload reads as a force in free space.
+
 The correction is mapped to joints by damped least squares on the translational Jacobian. The F/T bridge's
 `target_wrench` removes the target from the reading upstream: then `F` is the excess over the target, so set `f_max_n`
 relative to the target (limit above target) and leave `reading_offset_n` at 0. A fixed `reading_offset_n` is wrong
@@ -193,10 +195,25 @@ step, plus the arm's lag); only an approach at the limiter's own `free_space_spe
 the admittance rule differ from it in detail, and the windup release time without the limiter (not within 5 s here,
 about 3 s measured) is not reproduced exactly.
 
-MuJoCo contact check (`run_contact.sh`, 10 N target): not completed. Two attempts failed before reaching the wall
-and no force numbers exist. (1) The first stage throttled the planned approach to 2 cm/s, so the command fell metres
-behind the trajectory and the offset runaway guard fired; fixed by passing the planned reference advance through.
-(2) With `reading_offset_n: 10` the limiter saw 10 N of force in free space during calibration (the bridge target is
-not published yet) and stalled the arm; the documented configuration is now the excess over the target. A third run
-with that configuration was not made (the run budget was one).
+MuJoCo contact check (`run_contact.sh`, 10 N target, 100 Hz, `f_max_n` 1.0 N relative to the bridge target so the absolute
+limit is 11 N, `reading_offset_n` 0, limiter defaults otherwise). Three runs, the first two earlier failures of the
+design that are fixed (the planned approach was throttled; a fixed reading offset stalled the arm in free space), and
+one more that exposed the engaged-axis rule (the limiter acted on the uncompensated payload during calibration and
+stalled the arm; it now acts only while `selected_axes[2]` is engaged). Final pair, from the recordings:
 
+| | limiter off | limiter on |
+|---|---|---|
+| test verdict | passed | passed |
+| steady force (middle half of the contact) | 10.11 N, sd 0.05 | 10.11 N, sd 0.05 |
+| ground-truth peak | 12.27 N | 12.27 N |
+| last sample above 0.5 N after the retreat | 0.3 s after the last above 5 N | 0.3 s after the last above 5 N |
+
+The hold and the release are not harmed, and the limiter does nothing for the peak here: 12.27 N is 1.27 N above
+the 11 N limit in both runs. Reason: the stiffness estimate is learned from the commanded position, which barely moves
+in contact on this soft arm (about 300 N/m), so the estimate stays at the prior `k_max_n_per_m` (50 kN/m) and the
+barrier's retreat speed `alpha (F_max - F) / k` is 0.5 mm/s, about 0.14 N/s. A run with `k_min_n_per_m` 200 and
+`k_max_n_per_m` 1000 was planned and not made (run budget). The 100 Hz peak bound of #41 is therefore not solved in
+the simulator by this stage with default stiffness bounds; the model tests above show the bound when the stiffness is
+identified. In the recordings the release after retreat is the same with and without it, because the slow compliance
+release is reset only when the reference moves back faster than `retreat_speed_mps`, and the test's retreat is a
+joint-space trajectory (the end-of-trajectory release was already 0.3 s here with the force target off).

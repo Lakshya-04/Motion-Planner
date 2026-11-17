@@ -915,7 +915,14 @@ controller_interface::return_type JtacController::update(
   clampCartesianOffset();
 
   if (force_limiter_) {
-    applyForceLimiter(measured_wrench, period.seconds());
+    if (params_.admittance.selected_axes[2]) {
+      applyForceLimiter(measured_wrench, period.seconds());
+    } else {
+      // The force axis is not engaged (free-space moves, calibration: the wrench may still carry an
+      // uncompensated payload): the limiter must not act on it. Start clean when it engages.
+      force_limiter_->reset();
+      force_limiter_windup_n_ = 0.0;
+    }
   }
 
   // See enforceJointRateLimits()'s own doc comment -- must run last, after clampCartesianOffset(),
