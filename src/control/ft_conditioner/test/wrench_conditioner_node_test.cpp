@@ -11,6 +11,8 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/wrench_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
@@ -337,6 +339,185 @@ TEST(WrenchConditionerNode, IdentifiesPayloadAndBiasFromCapturedPoses)
   EXPECT_TRUE(rig.settle(r, true, raw, w(0, 0, 0, 0, 0, 0), 1e-5));
   ASSERT_TRUE(rig.call("/wrench_conditioner/clear_samples", msg));
   EXPECT_EQ(rig.node->samples(), 0U);
+}
+
+// ---- Bias tracking: a fake wrench stream with a drifting bias, contact-free flags and joint velocities.
+namespace
+{
+struct TrackRig
+{
+  explicit TrackRig(bool apply, std::vector<rclcpp::Parameter> extra = {})
+  : rig([&] {
+        std::vector<rclcpp::Parameter> p = {
+          {"bias_tracking.enabled", true}, {"bias_tracking.apply", apply},
+          {"bias_tracking.process_noise_force", 1e-6}, {"bias_tracking.process_noise_torque", 1e-8}};
+        for (auto & e : extra) {p.push_back(e);}
+        return p;
+      }())
+  {
+    free_pub = rig.driver->create_publisher<std_msgs::msg::Bool>("contact_free", 10);
+    js_pub = rig.driver->create_publisher<sensor_msgs::msg::JointState>("joint_states", rclcpp::SensorDataQoS());
+    bias_sub = rig.driver->create_subscription<WrenchStamped>(
+      "/wrench_conditioner/tracked_bias", rclcpp::QoS(1).transient_local(),
+      [this](const WrenchStamped::SharedPtr m) {published_bias = *m; ++bias_msgs;});
+    recal_sub = rig.driver->create_subscription<std_msgs::msg::Bool>(
+      "/wrench_conditioner/recalibrate_needed", rclcpp::QoS(1).transient_local(),
+      [this](const std_msgs::msg::Bool::SharedPtr m) {recal = m->data;});
+  }
+
+  // `n` samples at about 100 Hz. truth_bias is the sensor's true no-load offset, `contact_fz` an extra force
+  // on the sensor z (a contact), `free` the contact-free flag, `joint_speed` the arm's joint velocity.
+  void stream(int n, const core_types::Wrench & truth_bias, double contact_fz, bool free, double joint_speed,
+    double drift_to_fz = std::nan(""))
+  {
+    const Mat3 r = mul(rotX(0.7), rotY(-0.4));
+    const auto g = force_core::gravityWrench(kPayload, r, kGravity);
+    const double fz0 = truth_bias.force_z;
+    for (int i = 0; i < n; ++i) {
+      core_types::Wrench b = truth_bias;
+      if (!std::isnan(drift_to_fz)) {b.force_z = fz0 + (drift_to_fz - fz0) * (i + 1) / n;}
+      rig.publishTf(r, true);
+      std_msgs::msg::Bool f;
+      f.data = free;
+      free_pub->publish(f);
+      sensor_msgs::msg::JointState js;
+      js.header.stamp = rig.driver->now();
+      js.name = {"j1", "j2"};
+      js.position = {0.0, 0.0};
+      js.velocity = {joint_speed, 0.0};
+      js_pub->publish(js);
+      rig.publishRaw(w(g.force_x + b.force_x, g.force_y + b.force_y, g.force_z + b.force_z + contact_fz,
+        g.torque_x + b.torque_x, g.torque_y + b.torque_y, g.torque_z + b.torque_z));
+      rig.spinFor(10ms);
+    }
+    rig.spinFor(30ms);
+  }
+
+  Rig rig;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr free_pub;
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr js_pub;
+  rclcpp::Subscription<WrenchStamped>::SharedPtr bias_sub;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr recal_sub;
+  WrenchStamped published_bias;
+  std::size_t bias_msgs{0};
+  bool recal{false};
+};
+}  // namespace
+
+TEST(BiasTrackingNode, IsOffByDefault)
+{
+  Rig rig;
+  rig.spinFor(100ms);
+  EXPECT_EQ(rig.node->biasAccepted(), 0U);
+  EXPECT_FALSE(rig.node->recalibrationNeeded());
+}
+
+TEST(BiasTrackingNode, FollowsDriftWhileFreeAndStillButOnlyAppliesWhenAsked)
+{
+  TrackRig t(/*apply=*/false);
+  t.stream(300, w(0, 0, 0.1, 0, 0, 0), 0.0, true, 0.0, /*drift_to_fz=*/0.5);
+  std::printf("[ bias node ] true 0.500 N, tracked %.3f N, accepted %zu\n", t.rig.node->trackedBias().force_z,
+    t.rig.node->biasAccepted());
+  EXPECT_GT(t.rig.node->biasAccepted(), 250U);
+  EXPECT_NEAR(t.rig.node->trackedBias().force_z, 0.5, 0.06);
+  EXPECT_NEAR(t.published_bias.wrench.force.z, 0.5, 0.06);       // published on ~/tracked_bias
+  EXPECT_EQ(t.published_bias.header.frame_id, "sensor");
+  EXPECT_NEAR(t.rig.node->config().bias.force_z, 0.0, 1e-12);   // not applied: the static bias stays
+  // so the output still shows the drift (0.5 N on the sensor z)
+  const double out = std::abs(t.rig.last.wrench.force.x) + std::abs(t.rig.last.wrench.force.y) +
+    std::abs(t.rig.last.wrench.force.z);
+  EXPECT_GT(out, 0.4);
+  EXPECT_FALSE(t.recal);
+}
+
+TEST(BiasTrackingNode, AppliedBiasCancelsTheDriftInTheOutput)
+{
+  TrackRig t(/*apply=*/true);
+  t.stream(300, w(0, 0, 0.1, 0, 0, 0), 0.0, true, 0.0, 0.5);
+  EXPECT_NEAR(t.rig.node->config().bias.force_z, 0.5, 0.06);
+  const double out = std::abs(t.rig.last.wrench.force.x) + std::abs(t.rig.last.wrench.force.y) +
+    std::abs(t.rig.last.wrench.force.z);
+  EXPECT_LT(out, 0.12);
+}
+
+TEST(BiasTrackingNode, IgnoresContactMovementAndStaleFlags)
+{
+  TrackRig t(/*apply=*/true, {{"bias_tracking.contact_free_timeout_s", 0.25}});
+  // 1. told "in contact": nothing is learned, whatever the reading (here a 3 N push)
+  t.stream(60, w(), 3.0, false, 0.0);
+  EXPECT_EQ(t.rig.node->biasAccepted(), 0U);
+  EXPECT_NEAR(t.rig.node->config().bias.force_z, 0.0, 1e-12);
+  // 2. contact-free but the arm moves: nothing is learned
+  t.stream(60, w(), 0.0, true, 0.3);
+  EXPECT_EQ(t.rig.node->biasAccepted(), 0U);
+  // 3. free and still: learning starts
+  t.stream(60, w(0, 0, 0.2, 0, 0, 0), 0.0, true, 0.0);
+  const auto accepted = t.rig.node->biasAccepted();
+  EXPECT_GT(accepted, 40U);
+  EXPECT_NEAR(t.rig.node->trackedBias().force_z, 0.2, 0.05);
+  // 4. the flag goes stale (no more messages): fail safe, no further updates after the 0.25 s timeout
+  for (int i = 0; i < 60; ++i) {
+    t.rig.publishTf(mul(rotX(0.7), rotY(-0.4)), true);
+    t.rig.publishRaw(w(0, 0, 5.0, 0, 0, 0));
+    t.rig.spinFor(10ms);
+  }
+  EXPECT_LE(t.rig.node->biasAccepted() + t.rig.node->biasRejected(), accepted + 40U);
+  EXPECT_NEAR(t.rig.node->trackedBias().force_z, 0.2, 0.05);
+}
+
+TEST(BiasTrackingNode, ContactTheFlagMissedIsRejectedAndRaisesRecalibrationUntilReset)
+{
+  TrackRig t(/*apply=*/true);
+  t.stream(30, w(), 0.0, true, 0.0);
+  const double before = t.rig.node->trackedBias().force_z;
+  t.stream(40, w(), 4.0, true, 0.0);            // flag says free, the reading says 4 N: do not absorb it
+  EXPECT_GT(t.rig.node->biasRejected(), 30U);
+  EXPECT_NEAR(t.rig.node->trackedBias().force_z, before, 1e-9);
+  EXPECT_TRUE(t.rig.node->recalibrationNeeded());
+  EXPECT_TRUE(t.recal);                           // ~/recalibrate_needed
+  std::string msg;
+  ASSERT_TRUE(t.rig.call("/wrench_conditioner/reset_bias_tracker", msg)) << msg;
+  t.rig.spinFor(100ms);
+  EXPECT_FALSE(t.rig.node->recalibrationNeeded());
+  EXPECT_FALSE(t.recal);
+  EXPECT_NEAR(t.rig.node->config().bias.force_z, 0.0, 1e-12);     // back to the `bias` parameter
+}
+
+TEST(BiasTrackingNode, ResetServiceRefusesWhenTrackingIsOff)
+{
+  Rig rig;
+  std::string msg;
+  EXPECT_FALSE(rig.call("/wrench_conditioner/reset_bias_tracker", msg));
+  EXPECT_NE(msg.find("off"), std::string::npos);
+}
+
+// ---- ~/plan_excitation from joint-space parameters.
+TEST(PlanExcitationService, PlansWellSpreadPosesFromJointParameters)
+{
+  const std::vector<double> big(6, 3.0), neg(6, -3.0);
+  Rig rig({{"excitation.q_start", std::vector<double>{0.0, -1.0, 1.5, -1.0, 1.0, 0.0}},
+      {"excitation.q_min", neg}, {"excitation.q_max", big},
+      {"excitation.v_max", std::vector<double>(6, 2.0)}, {"excitation.a_max", std::vector<double>(6, 8.0)},
+      {"excitation.joint_axes", std::vector<double>{0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0}},
+      {"excitation.home_rpy", std::vector<double>{0.0, 0.0, 0.0}}, {"excitation.num_poses", int64_t(8)}});
+  std::string msg;
+  ASSERT_TRUE(rig.call("/wrench_conditioner/plan_excitation", msg)) << msg;
+  const auto pos = msg.find("condition number ");
+  ASSERT_NE(pos, std::string::npos) << msg;
+  const double cond = std::atof(msg.c_str() + pos + 17);
+  std::printf("[ plan ] %s\n", msg.substr(0, msg.find('\n')).c_str());
+  EXPECT_GT(cond, 1.0);
+  EXPECT_LT(cond, 20.0);
+  EXPECT_NE(msg.find("Nothing was moved"), std::string::npos);
+  EXPECT_NE(msg.find("- {t_arrive_s: 0"), std::string::npos);
+}
+
+TEST(PlanExcitationService, SaysWhatIsMissingInsteadOfGuessing)
+{
+  Rig rig;
+  std::string msg;
+  EXPECT_FALSE(rig.call("/wrench_conditioner/plan_excitation", msg));
+  EXPECT_NE(msg.find("excitation.q_start"), std::string::npos);
 }
 
 int main(int argc, char ** argv)
