@@ -42,7 +42,7 @@
   <xacro:arg name="gz_rgb_width" default="1280"/>
   <xacro:arg name="gz_rgb_height" default="720"/>
   <xacro:arg name="gz_rgb_rate" default="2.0"/>
-  <xacro:macro name="sim_gazebo_tags" params="sensor_mass:=0.3 sensor_com_z:=0.02 sensor_radius:=0.04 sensor_length:=0.04 tool_mu:=0.8 tip_stiffness:=5000.0 tip_damping:=100.0 tip_travel:=0.02 tip_length:=0.1 tip_radius:=0.04">
+  <xacro:macro name="sim_gazebo_tags" params="sensor_mass:=0.3 sensor_com_z:=0.02 sensor_radius:=0.04 sensor_length:=0.04 tool_mu:=0.8 tip_stiffness:=5000.0 tip_damping:=100.0 tip_travel:=0.02 tip_length:=0.1 tip_radius:=0.04 stop_stiffness:=50000.0 stop_damping:=500.0 stop_travel:=0.005">
     <xacro:unless value="${'$(arg gz_base_motion)' == 'true'}">
       <link name="world"/>
       <joint name="sim_world_joint" type="fixed">
@@ -213,9 +213,22 @@
         <inertia ixx="0.00005" ixy="0" ixz="0" iyy="0.00005" iyz="0" izz="0.00003"/>
       </inertial>
     </link>
+    <!-- Bump stop: tool_tip_link hangs off a second, stiff and short prismatic stage in series behind the soft
+         tip stage. Series springs add, so below the 20 mm travel the soft stage moves (the stiff one gives 0.1 mm
+         at 5 N); once the soft stage sits on its joint limit (100 N) the stiff stage (stop_stiffness 50 N/mm,
+         stop_damping, stop_travel 5 mm) takes over, so the force beyond the travel rises 50 N per mm of
+         extra push and ends in a bounded ~350 N before the final rigid limit, not at the instant rigid wall
+         the soft stage's joint limit alone is. -->
+    <link name="tool_tip_stop_link">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.01"/>
+        <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+      </inertial>
+    </link>
     <joint name="tool_tip_joint" type="prismatic">
       <parent link="tool_mount_link"/>
-      <child link="tool_tip_link"/>
+      <child link="tool_tip_stop_link"/>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <axis xyz="0 0 1"/>
       <limit lower="${-tip_travel}" upper="0.0" effort="1000" velocity="1.0"/>
@@ -224,6 +237,19 @@
     <gazebo reference="tool_tip_joint">
       <implicitSpringDamper>true</implicitSpringDamper>
       <springStiffness>${tip_stiffness}</springStiffness>
+      <springReference>0.0</springReference>
+    </gazebo>
+    <joint name="tool_tip_stop_joint" type="prismatic">
+      <parent link="tool_tip_stop_link"/>
+      <child link="tool_tip_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="${-stop_travel}" upper="0.0" effort="2000" velocity="1.0"/>
+      <dynamics damping="${stop_damping}" friction="0.0"/>
+    </joint>
+    <gazebo reference="tool_tip_stop_joint">
+      <implicitSpringDamper>true</implicitSpringDamper>
+      <springStiffness>${stop_stiffness}</springStiffness>
       <springReference>0.0</springReference>
     </gazebo>
     <gazebo reference="tool_tip_link">
