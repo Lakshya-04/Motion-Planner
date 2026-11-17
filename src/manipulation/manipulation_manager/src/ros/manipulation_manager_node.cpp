@@ -16,6 +16,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <functional>
 #include <map>
 #include <memory>
@@ -35,6 +37,7 @@
 #include "reachability_msgs/srv/plan_stands.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float64.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "tf2/time.h"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
@@ -52,6 +55,8 @@
 #include "manipulation_manager/core/column_ordering.hpp"
 #include "manipulation_manager/core/frame_transform.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
+#include "manipulation_manager/core/mission_fsm.hpp"
+#include "manipulation_manager/core/mission_ledger.hpp"
 #include "manipulation_manager/core/recovery_jog.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
 #include "manipulation_manager/core/joint_names.hpp"
@@ -289,9 +294,22 @@ public:
             return;
           }
           const auto & f = msg->wrench.force;
-          peak_force_ = std::max(peak_force_, std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z));
+          const double mag = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
+          peak_force_ = std::max(peak_force_, mag);
+          column_peak_ = std::max(column_peak_, mag);
         });
     }
+    // Mission ledger ("" = off) and the contact-overload limit (0 = off; above it a column is skipped, not retried).
+    ledger_ = MissionLedger(this->declare_parameter<std::string>("ledger_path", ""));
+    contact_overload_n_ = this->declare_parameter<double>("contact_overload_n", 0.0);
+    mission_command_sub_ = this->create_subscription<std_msgs::msg::String>(
+      "mission_command", 10, [this](const std_msgs::msg::String::SharedPtr msg) {
+        if (msg->data == "pause") {
+          RCLCPP_INFO(this->get_logger(), "mission: pause %s", mission_fsm_.requestPause() ? "requested" : "ignored");
+        } else if (msg->data == "resume") {
+          RCLCPP_INFO(this->get_logger(), "mission: resume %s", mission_fsm_.resume() ? "accepted" : "ignored");
+        }
+      });
     nav_client_ = rclcpp_action::create_client<NavigateToStand>(this, "navigate_to_stand");
     action_server_ = rclcpp_action::create_server<ExecuteCoverage>(
       this, "execute_coverage",
@@ -420,6 +438,7 @@ private:
     bool multi_stand{false};
     int tool_mode{0};                 ///< ExecuteCoverage::TOOL_*
     std::vector<size_t> columns;      ///< empty: all
+    bool resume{false};               ///< keep the ledger of the same plan and skip its DONE columns
   };
 
   struct TaskResult
@@ -446,6 +465,7 @@ private:
     req.multi_stand = goal->multi_stand;
     req.tool_mode = goal->tool_mode;
     req.columns.assign(goal->columns.begin(), goal->columns.end());
+    req.resume = goal->resume;
     feedback_sink_ = [handle](const std::shared_ptr<ExecuteCoverage::Feedback> & fb) {
         handle->publish_feedback(fb);
       };
@@ -597,6 +617,49 @@ private:
       return out;
     }
 
+    // Ledger: a resume of the same plan drops the columns it holds as done; the rest run as usual.
+    mission_fsm_.reset();
+    mission_fsm_.start();
+    if (ledger_.persistent()) {
+      std::ifstream plan_in(path);
+      std::stringstream plan_bytes;
+      plan_bytes << plan_in.rdbuf();
+      if (!ledger_.load()) {
+        RCLCPP_WARN(
+          this->get_logger(), "mission ledger %s was corrupted, moved aside, starting empty",
+          ledger_.path().c_str());
+      }
+      ledger_.begin(missionIdFromBytes(plan_bytes.str()), intents.size(), req.resume);
+      if (req.resume) {
+        std::vector<size_t> keep_ids;
+        std::vector<CoverageSegmentIntent> keep_sel;
+        for (size_t i = 0; i < ids.size(); ++i) {
+          if (ledger_.resumeSkips(ids[i])) {
+            if (ledger_.isDone(ids[i])) {
+              tracker_.columnResumed(ids[i]);
+            } else {
+              tracker_.columnSkipped(ids[i]);   // skipped for an overload: not retried blindly
+            }
+          } else {
+            keep_ids.push_back(ids[i]);
+            keep_sel.push_back(sel[i]);
+          }
+        }
+        RCLCPP_INFO(
+          this->get_logger(), "resume: %zu column(s) already settled in the ledger, %zu to run",
+          ids.size() - keep_ids.size(), keep_ids.size());
+        ids = keep_ids;
+        sel = keep_sel;
+        if (sel.empty()) {
+          out.loaded = true;
+          out.message = "resume: nothing left to run (" + tracker_.summary() + ")";
+          mission_fsm_.stop();
+          restore();
+          return out;
+        }
+      }
+    }
+
     TaskStateMachine machine(nav_attempts_);
     if (!req.multi_stand) {
       machine.startSingle();
@@ -640,6 +703,7 @@ private:
       }
     }
     setState(out.canceled ? "canceled" : "done", -1);
+    mission_fsm_.stop();
     restore();
     return out;
   }
@@ -747,6 +811,7 @@ private:
           tracker_.standReached(s, false, msg);
           for (const size_t c : visit_columns[s]) {
             tracker_.columnFinished(s, ids[c], ColumnOutcome::kFailed);
+            ledger_.markSkipped(ids[c], static_cast<int>(s), SkipReason::kNavFailed);
           }
         }
       } else if (machine.state() == TaskState::kRunningColumns) {
@@ -1231,18 +1296,53 @@ private:
   /// was freed if it was stuck. A column that still fails is skipped: the loop goes on with the next one.
   ColumnOutcome runColumnWithRetry(const CoverageSegmentIntent & world_intent, size_t column)
   {
+    // Segment boundary: a requested pause takes effect here (cancel still ends the wait).
+    while (mission_fsm_.atBoundary() && !stop()) {
+      waitFor(0.2);
+    }
+    if (stop()) {
+      return ColumnOutcome::kFailed;
+    }
+    const int stand = static_cast<int>(stand_index_);
+    ledger_.markRunning(column, stand);
+    column_peak_ = 0.0;
+    column_reason_ = SkipReason::kPlanFailed;
     auto outcome = runColumn(world_intent, column);
-    for (int r = 0; r < column_retries_ && outcome == ColumnOutcome::kFailed && !stop(); ++r) {
+    // A contact overload is not retried: the cause is on the wall, not in the plan.
+    const auto overloaded = [&]() {
+        return contact_overload_n_ > 0.0 && column_peak_ > contact_overload_n_ && outcome != ColumnOutcome::kDone;
+      };
+    for (int r = 0; r < column_retries_ && outcome == ColumnOutcome::kFailed && !stop() && !overloaded(); ++r) {
       RCLCPP_WARN(
         this->get_logger(), "column %zu failed, retry %d of %d", column, r + 1, column_retries_);
-      if (arm_stuck_ && !recoverArm("column retry")) {
-        RCLCPP_WARN(this->get_logger(), "column %zu: the arm is stuck and could not be jogged free", column);
+      if (arm_stuck_) {
+        mission_fsm_.enterRecovery();
+        if (!recoverArm("column retry")) {
+          RCLCPP_WARN(this->get_logger(), "column %zu: the arm is stuck and could not be jogged free", column);
+        }
+        mission_fsm_.leaveRecovery();
       }
       primeContinuityFromLiveState();
+      column_peak_ = 0.0;
+      column_reason_ = SkipReason::kPlanFailed;
       outcome = runColumn(world_intent, column);
     }
     if (outcome == ColumnOutcome::kFailed && !stop()) {
       RCLCPP_ERROR(this->get_logger(), "column %zu failed, skipped", column);
+    }
+    if (!stop()) {   // a stopped column stays RUNNING in the ledger: a resume reruns it
+      if (outcome == ColumnOutcome::kDone) {
+        ledger_.markDone(column, stand);
+      } else if (overloaded()) {
+        RCLCPP_ERROR(
+          this->get_logger(), "column %zu: contact overload (%.1f N > %.1f N), skipped without retry", column,
+          column_peak_, contact_overload_n_);
+        ledger_.markSkipped(column, stand, SkipReason::kContactOverload);
+      } else if (outcome == ColumnOutcome::kFailed) {
+        ledger_.markSkipped(column, stand, column_reason_);
+      } else {
+        ledger_.markFailed(column, stand);   // partial: rerun on a resume
+      }
     }
     return outcome;
   }
@@ -1390,6 +1490,7 @@ private:
       RCLCPP_WARN(
         this->get_logger(), "%s: dock %s, skipping column", intent.label.c_str(),
         stop() ? "stopped" : "failed");
+      column_reason_ = SkipReason::kDockFailed;
       return ColumnOutcome::kFailed;
     }
 
@@ -1636,6 +1737,12 @@ private:
   rclcpp_action::ClientGoalHandle<NavigateToStand>::SharedPtr nav_goal_;
   std::function<void(const std::shared_ptr<ExecuteCoverage::Feedback> &)> feedback_sink_;
   TaskTracker tracker_;
+  MissionLedger ledger_;
+  MissionFsm mission_fsm_;
+  double contact_overload_n_{0.0};
+  double column_peak_{0.0};
+  SkipReason column_reason_{SkipReason::kPlanFailed};
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mission_command_sub_;
   std::string state_{"idle"};
   size_t stand_index_{0};
   size_t stand_count_{1};

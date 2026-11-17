@@ -53,6 +53,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
+from sim_mujoco.sim_noise import parse_sim_noise
 from sim_mujoco.generate import (command_joints, generate, jtac_overrides, load_profile, render_urdf,
                                  tool_payload)
 
@@ -116,6 +117,8 @@ def _setup(context, *args, **kwargs):
     print(f'[sim_mujoco] MJCF: {mjcf}')
 
     os.environ['SIM_MUJOCO_MJCF'] = str(mjcf)
+    for key, value in parse_sim_noise(arg('sim_noise')).items():
+        os.environ[key] = value
     xacro_file = os.path.join(get_package_share_directory('mobile_manipulator_description'),
                               'urdf', 'mobile_manipulator.urdf.xacro')
     mappings = {k: str(v) for k, v in profile['robot'].get('xacro_args', {}).items()}
@@ -183,7 +186,8 @@ def _setup(context, *args, **kwargs):
         # MoveIt for planning only (compute_cartesian_path): the same description the sim runs, execution
         # stays with the controller started above.
         from mobile_manipulator_moveit_config import build_moveit_config
-        moveit_config = build_moveit_config(profile=arg('profile'), hardware='jtac_mock')
+        moveit_config = build_moveit_config(profile=arg('profile'), hardware='jtac_mock',
+                                            live_octomap=arg('live_octomap') == 'true')
         nodes.append(Node(package='moveit_ros_move_group', executable='move_group', output='screen',
                           parameters=[moveit_config.to_dict()]))
     return nodes
@@ -206,8 +210,17 @@ def generate_launch_description():
                                           'capture_pose / identify services'),
         DeclareLaunchArgument('payload_cog', default_value='0 0 0',
                               description='conditioner payload centre of gravity in the sensor frame'),
+        DeclareLaunchArgument('sim_noise', default_value='',
+                              description='opt-in sensor non-idealities of the plugin, "key=value ..." with keys '
+                                          'ft_noise_density (N/sqrt(Hz)), ft_bias_walk (N/sqrt(s)), ft_lowpass_hz, '
+                                          'ft_delay_ms, ft_quantum, joint_pos_noise (rad), joint_vel_noise (rad/s), '
+                                          'control_delay_ms, seed; empty = ideal (docs/sim_vs_real.md)'),
         DeclareLaunchArgument('move_group', default_value='false',
                               description='also start move_group (planning only) for scripted cartesian passes'),
+        DeclareLaunchArgument('live_octomap', default_value='false',
+                              description='with move_group:=true: MoveIt octomap from the live depth cloud '
+                                          '(PointCloudOctomapUpdater on /depth_sensor/points, needs '
+                                          'depth_sensor:=true and moveit_ros_perception)'),
         DeclareLaunchArgument('base_motion', default_value='false',
                               description='planar base (x, y, yaw) driven by geometry_msgs/Twist on /cmd_vel '
                                           '(omni or diff per the profile drive_type), odom on /odom and TF '

@@ -13,6 +13,9 @@ double toolSwath(const ToolCoverageProfile & tool)
     model.effective_width_fraction = tool.coverage.effective_width_fraction;
     return core_types::sprayerEffectiveSwath(tool.task.standoff_m, model);
   }
+  if (tool.task.contact && tool.coverage.contact_area.enabled()) {
+    return core_types::contactEffectiveWidth(tool.coverage.contact_area, tool.task.target_force_n);
+  }
   return tool.coverage.swath_m;
 }
 

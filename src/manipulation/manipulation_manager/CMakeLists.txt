@@ -149,6 +149,11 @@ if(BUILD_TESTING)
       motion_planner_moveit::motion_planner_moveit_lib)
   endif()
 
+  ament_add_gtest(motion_exec_reporter_test test/motion_exec_reporter_test.cpp)
+  if(TARGET motion_exec_reporter_test)
+    target_link_libraries(motion_exec_reporter_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
   ament_add_gtest(coverage_feasibility_analyzer_test
     test/coverage_feasibility_analyzer_test.cpp
   )
@@ -203,6 +208,12 @@ if(BUILD_TESTING)
       PLANNING_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/planning.yaml")
   endif()
 
+  ament_add_gtest(backend_routing_test test/backend_routing_test.cpp)
+  if(TARGET backend_routing_test)
+    target_link_libraries(backend_routing_test motion_planner::motion_planner_ros)
+    ament_target_dependencies(backend_routing_test rclcpp)
+  endif()
+
   ament_add_gtest(recovery_jog_test test/recovery_jog_test.cpp)
   if(TARGET recovery_jog_test)
     target_include_directories(recovery_jog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -221,6 +232,12 @@ if(BUILD_TESTING)
   ament_add_gtest(tool_actuation_test test/tool_actuation_test.cpp)
   if(TARGET tool_actuation_test)
     target_include_directories(tool_actuation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  ament_add_gtest(mission_ledger_test test/mission_ledger_test.cpp)
+  if(TARGET mission_ledger_test)
+    target_include_directories(mission_ledger_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(mission_ledger_test nlohmann_json::nlohmann_json)
   endif()
 
   find_package(ament_lint_auto QUIET)

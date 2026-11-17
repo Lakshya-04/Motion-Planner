@@ -28,8 +28,27 @@ a frame mirrored toward `start_corner`, so it begins at that corner; chains are 
 first and reversed when their far end is closer. Design after the sweepline planner of an earlier
 production stack (polygon based there, on a grid here); written from the algorithm, not copied.
 
-Not done yet: a true cellular decomposition (events, cells, exact cell ordering by a routing
-solver) for large cluttered walls, and spiral. Both fit behind the same interface.
+### Obstacles on a wall: components, gap strokes, cells
+
+Three options of the boustrophedon planner (`CoveragePlannerParams`; the node declares them as parameters, `coverage_planner.yaml`):
+
+- **All free components.** A full-height rib splits the free raster into two panels. `plan_all_components` (now the node default;
+  it was `false`, which planned only the largest panel, the `two_panels` MuJoCo failure) plans every component of at least
+  `min_component_cells`. `components_in_sweep_order` orders them along the stepover axis from `start_corner` (left panel first)
+  instead of largest first; with more than one component each segment carries a `component_N` tag.
+- **Short strokes beside obstacles.** `fill_gaps` rasterises the swath band of the strokes a component already has and, for free
+  cells left further than swath/2 from every stroke (next to a keep-out edge, at a far edge), adds strokes along the free span of the
+  best column in reach, tagged `gap_fill`. `min_stroke_length_m` is the shortest such stroke: a span with fewer cells is left alone,
+  a stroke covering less is widened inside its span. Off in the core struct, on in the node and in `planCoverageFromScan`.
+- **Cell decomposition.** `decomposition: "cells"` splits a component where the free span of a sweep line splits or merges (a window
+  gives left, above, below, right = 4 cells), sweeps each cell as one serpentine block (`cell_N` tag) and visits cells nearest first.
+  Default `"columns"`. Not exact BCD ordering (no routing solver), and the sweepline planner ignores all of these options.
+
+Synthetic rasters (1 cm cells, 0.14 m swath, keep-out already grown; `test_coverage_components`, covered fraction of the free cells
+by `CoverageVerifier`): `two_panels` 0.46 (largest only) -> 0.92 (all components) -> 1.00 (+ gap strokes); `window` 0.92 -> 1.00;
+`protrusion` 0.975 -> 1.00. No sim run.
+
+Not done yet: exact cell ordering by a routing solver, and spiral.
 
 ## Wall patterns
 
@@ -55,6 +74,29 @@ cannot stand nearer the wall ends), `floor_clearance_m` (lowest row's edge above
 frame u along the wall, v up), rasterize observed cells and obstacle footprints, plan the chosen
 pattern, lift every part with its own tool profile and concatenate. See
 [scene_model.md](scene_model.md).
+
+## Floors, ceilings and columns: planar patches
+
+`SurfacePatch` (`core/surface_patch.hpp`) is the planar `SurfaceModel`: a plane origin, a right-handed
+(u, v, normal) frame, a rectangular (u, v) extent and a kind (`wall`, `floor`, `ceiling`, classified from
+the normal). The normal points to the side the tool works from: floor +z, ceiling -z, a column face
+horizontally outward. `makeFloorPatch`, `makeCeilingPatch` and `makeSurfacePatch` build one; for a
+wall `u = up x normal` (v up), for a horizontal plane u = world x. The API:
+
+- `project(world) -> (u, v, n)`, `point(u, v, n)`, `contains(u, v)`;
+- `liftPatchPath(patch, uv_waypoints, tool_task)`: 2D waypoints to tool poses, tool z along -normal, standoff
+  along +normal, edge tilt and yaw from the tool profile (it is `liftCoveragePathPose` on the patch plane);
+  `liftPatchPose` for one point without tilt;
+- `patchObstacles(patch, scene)`: obstacle footprints (any orientation, same filter as a wall);
+- `planPatchCoverage(patch, obstacles, tool, options)`: rasterize, plan (boustrophedon or sweepline, any wall
+  pattern), lift, expand passes. This is the tail of `planCoverageFromScan`, now `planCoverageOnWall`, so a wall
+  gives the same poses as before and a floor or ceiling uses the same code. A scanned floor also works through
+  `planCoverageFromScan` with `plane.normal_hint = +z`.
+
+A room is a list of patches, each planned on its own. Not done: reachability and stand selection for a horizontal
+surface (`chooseStation` still rejects a horizontal plane), reach limits for ceilings, ordering patches, and
+`loadWallScene` flatness is still a threshold on the scene file (it does not look at orientation).
+Tests: `test/core/surface_patch_test.cpp` (floor and ceiling with obstacles, orientation, verification raster).
 
 ## Non-planar surfaces (long term)
 

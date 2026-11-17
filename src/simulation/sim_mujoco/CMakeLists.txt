@@ -28,7 +28,8 @@ install(PROGRAMS scripts/generate_mjcf scripts/smoke_test.py scripts/contact_tes
   scripts/run_multi_stand_pass.sh scripts/execute_coverage_client.py scripts/make_scenario_scene.py scripts/run_scenarios.sh
   DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/run_spray_pass.sh DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/depth_wall_test.py scripts/run_depth_wall.sh DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/depth_wall_test.py scripts/run_depth_wall.sh scripts/live_octomap_test.py scripts/run_live_octomap.sh
+  scripts/wall_docking_test.py scripts/run_wall_docking.sh DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch test/data DESTINATION share/${PROJECT_NAME})
 
 if(MUJOCO_INCLUDE_DIR AND MUJOCO_LIBRARY)
@@ -85,6 +86,9 @@ else()
 endif()
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_signal_model test/test_signal_model.cpp)
+  target_include_directories(test_signal_model PRIVATE include)
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(sim_mujoco_python test/ TIMEOUT 300)
 endif()

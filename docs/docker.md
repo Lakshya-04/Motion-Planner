@@ -84,8 +84,18 @@ Set a different distro with `ROS_DISTRO=humble` (the packages build as C++17 on 
 
 ## Run all checks
 
-There is no CI by decision ([CONTRIBUTING.md](../CONTRIBUTING.md)); this is the one set of commands to run
-before a pull request. Each line is independent; the sim lines need their image and skip what they lack.
+There is no CI by decision ([CONTRIBUTING.md](../CONTRIBUTING.md)). One script runs lines 1 to 3 below:
+
+```bash
+docker/run_all_checks.sh                 # colcon build + test, pytest, public-readiness scan
+docker/run_all_checks.sh --skip-sims     # without sim_gazebo, sim_mujoco, sim_isaac and their Python tests
+docker/run_all_checks.sh --no-build --workers 2
+```
+
+It builds in the `motion-planner:build` image (override with `--image`), keeps build products in the Docker
+volumes `mp_build`, `mp_install` and `mp_log`, prints a summary and exits non-zero on any failure. The lines
+below are what it does, one by one, plus the simulator scripts it does not run. Each line is independent;
+the sim lines need their image and skip what they lack. Each line is independent; the sim lines need their image and skip what they lack.
 
 ```bash
 # 1. Everything colcon builds and tests (C++ and Python packages, no GPU)

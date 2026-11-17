@@ -202,7 +202,11 @@ void TaskTracker::beginSingle()
 
 void TaskTracker::beginMulti(size_t n)
 {
+  const auto resumed = done_;     // columns settled before the stands were planned (a resume) stay counted
+  const auto skipped = failed_;
   beginSingle();
+  done_ = resumed;
+  failed_ = skipped;
   multi_ = true;
   stands_.resize(n);
   for (size_t i = 0; i < n; ++i) {

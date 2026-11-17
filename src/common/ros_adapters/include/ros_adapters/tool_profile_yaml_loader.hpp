@@ -158,6 +158,27 @@ inline core_types::ToolCoverage loadCoverage(const YAML::Node & node)
   if (node["uniform_direction"]) {
     coverage.uniform_direction = node["uniform_direction"].as<bool>();
   }
+  if (node["contact_area"]) {
+    const YAML::Node a = node["contact_area"];
+    core_types::ContactAreaModel & m = coverage.contact_area;
+    if (a["pad_width_m"]) {m.pad_width_m = a["pad_width_m"].as<double>();}
+    if (a["pad_length_m"]) {m.pad_length_m = a["pad_length_m"].as<double>();}
+    if (a["reference_force_n"]) {m.reference_force_n = a["reference_force_n"].as<double>();}
+    if (a["width_gain_per_n"]) {m.width_gain_per_n = a["width_gain_per_n"].as<double>();}
+    if (a["min_width_factor"]) {m.min_width_factor = a["min_width_factor"].as<double>();}
+    if (a["max_width_factor"]) {m.max_width_factor = a["max_width_factor"].as<double>();}
+    if (a["pad_stiffness_n_per_m"]) {
+      m.pad_stiffness_n_per_m = a["pad_stiffness_n_per_m"].as<double>();
+    }
+    if (a["nominal_tilt_deg"]) {m.nominal_tilt_deg = a["nominal_tilt_deg"].as<double>();}
+    if (a["surface_curvature_per_m"]) {
+      m.surface_curvature_per_m = a["surface_curvature_per_m"].as<double>();
+    }
+  }
+  if (node["edge_zone_m"]) {coverage.edge_zone_m = node["edge_zone_m"].as<double>();}
+  if (node["edge_spacing_scale"]) {
+    coverage.edge_spacing_scale = node["edge_spacing_scale"].as<double>();
+  }
   return coverage;
 }
 
@@ -255,6 +276,26 @@ inline void validateToolProfile(const core_types::ToolProfile & profile)
     {
       fail("coverage.effective_width_fraction must be in (0, 1]");
     }
+  }
+  if (profile.coverage.contact_area.enabled()) {
+    if (!profile.task.contact) {
+      fail("coverage.contact_area is for contact tools (task.contact == true)");
+    }
+    try {
+      core_types::validateContactArea(profile.coverage.contact_area);
+    } catch (const std::invalid_argument & e) {
+      fail(e.what());
+    }
+  }
+  if (!(profile.coverage.edge_zone_m >= 0.0 && profile.coverage.edge_spacing_scale > 0.0 &&
+    profile.coverage.edge_spacing_scale <= 1.0))
+  {
+    fail("coverage.edge_zone_m must be >= 0 and edge_spacing_scale in (0, 1]");
+  }
+  if ((profile.coverage.edge_zone_m > 0.0 || profile.coverage.edge_spacing_scale < 1.0) &&
+    !profile.task.contact)
+  {
+    fail("coverage.edge_zone_m / edge_spacing_scale are for contact tools");
   }
   // This project's own addition, not in doc 13: a reachability tilt fallback changes the tool's
   // final orientation, which is unsafe for a tool meant to be in contact with the wall -- gate

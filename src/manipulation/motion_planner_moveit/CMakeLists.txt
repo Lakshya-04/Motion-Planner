@@ -90,6 +90,14 @@ target_link_libraries(coverage_pass_demo_node motion_planner_moveit_lib nlohmann
 ament_target_dependencies(coverage_pass_demo_node
   rclcpp rclcpp_action control_msgs std_msgs geometry_msgs)
 
+# Benchmark helper (OMPL RRT-Connect on a MoveIt PlanningScene), driven by scripts/planner_benchmark.py.
+find_package(ompl REQUIRED)
+add_executable(planner_benchmark src/planner_benchmark.cpp)
+target_include_directories(planner_benchmark PRIVATE ${OMPL_INCLUDE_DIRS})
+target_link_libraries(planner_benchmark motion_planner_moveit_lib ${OMPL_LIBRARIES})
+install(TARGETS planner_benchmark RUNTIME DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/planner_benchmark.py DESTINATION lib/${PROJECT_NAME})
+
 install(TARGETS motion_planner_moveit_lib
   EXPORT export_motion_planner_moveit
   ARCHIVE DESTINATION lib

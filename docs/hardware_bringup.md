@@ -16,7 +16,7 @@ Related: [ft_sensing.md](ft_sensing.md) (the conditioning maths and services),
 
 ## 0. Before powering anything
 
-1. Fill in the template: copy `hardware_template.yaml`, replace every `MUST SET` entry, leave `MEASURED`
+1. Select the driver for your arm (section 0a) and fill in the template: copy `hardware_template.yaml`, replace every `MUST SET` entry, leave `MEASURED`
    entries at zero until their step below. No launch file loads the template yet; pass the sections to the
    nodes with `--params-file` or merge them into your own yaml.
 2. The chain and its names must agree: sensor driver topic = conditioner `input_topic`; conditioner
@@ -29,6 +29,52 @@ Related: [ft_sensing.md](ft_sensing.md) (the conditioning maths and services),
    payload identification is only valid for that assembly.
 5. Start with JTAC's axes all deselected (`selected_axes` all false: the shipped default), so the arm
    follows trajectories with no force obligation.
+
+## 0a. Vendor drivers: `hardware:=real`
+
+`hardware:=real` is the real-robot counterpart of `hardware:=mujoco|gazebo` ([simulation.md](simulation.md)):
+the same description and controllers, with the ros2_control plugin of the arm vendor. The vendor drivers are
+**not vendored and not a dependency** of this repository; install the one you need and source its workspace.
+[`hardware_drivers.yaml`](../src/description/mobile_manipulator_description/config/hardware_drivers.yaml) maps
+the profile's `arm` to the driver:
+
+| Arm (`arm:`) | Driver key | Package to install | ros2_control plugin | Required `real_params` | Wrench source |
+|---|---|---|---|---|---|
+| `xarm5/6/7`, `lite6`, `uf850` | `ufactory` | `xarm_controller` (xarm_ros2) | `xarm_control/UFRobotSystemHardware` | `robot_ip` | wrist sensor topic `/xarm/uf_ftsensor_ext_states` through `ft_bridge_hardware`, sensor `uf_ft_sensor` |
+| `ur3` ... `ur30` | `ur` | `ur_robot_driver` | `ur_robot_driver/URPositionHardwareInterface` | `robot_ip`, `script_filename`, `output_recipe_filename`, `input_recipe_filename` | the driver's own `tcp_fts_sensor` (controller's TCP wrench) |
+| `panda`, `fr3` | `franka` | `franka_hardware` (franka_ros2) | `franka_hardware/FrankaHardwareInterface` | `robot_ip` | none declared: only an estimated external wrench exists |
+| any (explicit `real_driver:=mock`) | `mock` | none | `mock_components/GenericSystem` | none | scripted (`injection_mode`) |
+
+```bash
+ros2 launch mobile_manipulator_description hardware_real.launch.py profile:=ur10e_telescopic \
+    real_params:="robot_ip=192.168.1.10,script_filename=...,output_recipe_filename=...,input_recipe_filename=..." \
+    real_lift_plugin:=my_lift/LiftSystem controllers_file:=my_controllers.yaml controller:=combined_arm_lift_controller
+ros2 launch mobile_manipulator_description hardware_real.launch.py profile:=generic_6dof_telescopic real_driver:=mock
+xacro urdf/mobile_manipulator.urdf.xacro arm:=generic_6dof lift:=none hardware:=real real_driver:=mock
+```
+
+- The launch checks the choice before starting anything and, on a problem, prints one message and shuts down:
+  no driver listed for the arm, a missing required parameter (named, with the `real_params` to pass), a moving
+  lift without `real_lift_plugin`, or a driver package that is not installed (it names the package).
+  `real_driver:=mock` needs no package and no robot: it is the wiring test used by
+  `test/test_hardware_real.py` (profile to driver table, argument validation, xacro expansion).
+- The lift is not driven by an arm vendor driver. A profile with a moving lift needs `real_lift_plugin` (your
+  lift's ros2_control plugin; this repository has none), so a real lift is never silently mocked.
+- The description emits four blocks: `lift_system`, `arm_system` (driver plugin, arm joints from the profile,
+  position and velocity command for JTAC), `ft_sensor_bridge` (only for a wrist-sensor topic) and
+  `ft_conditioned_bridge` (sensor `ft_sensor_tcp`, as for `hardware:=mujoco`; all zero until the
+  `ft_conditioner` runs). Which sensor JTAC reads (`ft_sensor.name`) must match the table's sensor name
+  (section 0, step 2).
+- **Unverified.** The plugin names, parameters, sensor names and command interfaces in the table come from
+  the vendors' public documentation, not from an installed driver and not from a robot. Before the first
+  power-up check, with the driver installed: the plugin class and parameter names against its version
+  (`ros2 pkg prefix`, its README), that the joint order of the profile (`joints.arm`) is the driver's, that
+  the driver exports the velocity command interface JTAC needs, and the frame of the wrench it reports.
+- Not done: the vendor controller's own limits, safety and e-stop wiring (ROADMAP section 8); the UR and
+  xArm driver launch files and controller yaml are not wrapped, only the ros2_control side.
+
+Commissioning continues with the sensor and calibration steps below; every calibration is in
+[calibration.md](calibration.md) and the order to run them is the table at the top of that page.
 
 ## 1. Sensor alive, nothing moving
 
@@ -153,6 +199,7 @@ limits and the e-stop have to be the last line, and the link between the two doe
 
 The results in [sim_mujoco.md](sim_mujoco.md), [sim_gazebo.md](sim_gazebo.md) and [ft_sensing.md](ft_sensing.md)
 (10.13 N held for a 10 N target, conditioner error below 0.005 N) hold for the models below, not for a robot.
+The longer table, with what to do about each row and the opt-in `sim_noise` models, is [sim_vs_real.md](sim_vs_real.md).
 
 | Real hardware has | The simulations |
 |---|---|

@@ -5,6 +5,8 @@
 # column to a stand, and for each stand in visiting order drives there (stand_navigator, NavigateToStand), runs that
 # stand's columns in the world frame, then goes on. Needs the manager's `world_frame` parameter.
 #
+# Pause and resume, at column boundaries: publish "pause" / "resume" (std_msgs/String) on the manager's `mission_command`.
+#
 # Cancel: the trajectory in flight is cancelled, the admittance is disengaged, the force target is set to zero and the
 # spray valve is closed; the result then has success false and message "canceled".
 
@@ -16,6 +18,8 @@ string coverage_json_path   # empty: the `coverage_json_path` parameter
 bool multi_stand
 uint8 tool_mode             # TOOL_*
 uint32[] columns            # only these columns (indices into the plan); empty: all
+bool resume                 # true: keep the mission ledger (manager parameter `ledger_path`) of the same plan and run only
+                            # the columns it does not hold as DONE (or skipped for a contact overload); false: start over
 ---
 bool success                # every column asked for is done (none partial or failed) and every stand reached
 string message

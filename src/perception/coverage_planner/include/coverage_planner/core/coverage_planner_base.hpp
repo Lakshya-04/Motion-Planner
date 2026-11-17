@@ -59,6 +59,24 @@ struct CoveragePlannerParams
   /// Force a final pass flush with the far boundary so the last strip never leaves a gap
   /// (may overlap the previous strip). Used by the sweepline planner.
   bool ensure_coverage_within_boundary{false};
+
+  /// Plan the free components in sweep order (by their position along the stepover axis, starting at
+  /// start_corner) instead of largest first, so the stands of a multi-panel wall come out left to right.
+  /// Only matters with plan_all_components. Boustrophedon planner.
+  bool components_in_sweep_order{false};
+
+  /// Add short strokes where the regular columns leave free cells beside an obstacle's keep-out edge or at
+  /// the far edge of a component (cells further than swath/2 from every stroke). Boustrophedon planner.
+  bool fill_gaps{false};
+
+  /// Shortest stroke the gap fill emits (m). A free span shorter than this is left alone; a longer one
+  /// holding a few uncovered cells is widened to this length. 0 = any span of two or more cells.
+  double min_stroke_length_m{0.0};
+
+  /// "columns" (default): every sweep line of the component is cut by the obstacles independently.
+  /// "cells": boustrophedon cell decomposition -- the component is split where the free span of a sweep
+  /// line splits or merges, and each cell is swept as one serpentine block before the next cell.
+  std::string decomposition{"columns"};
 };
 
 /**
@@ -85,6 +103,8 @@ struct CoveragePlannerResult
   int num_obstacle_splits;
   double effective_step_used;
   int free_component_count;
+  int num_gap_strokes{0};  ///< Strokes added by params.fill_gaps.
+  int num_cells{0};        ///< Cells planned with decomposition == "cells" (0 otherwise).
 };
 
 /**
