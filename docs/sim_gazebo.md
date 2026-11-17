@@ -313,10 +313,39 @@ matches in the three plain runs. The CoV is a property of the stroke spacing and
 | 3 | 0.000 | - | fails | same refused plan, 24 JTAC divergences, 73 s |
 | (stray run, log lost) | 0.484 | 1.73 | fails | |
 
-1 of 3 (1 of 4 counting the stray run) against 4 of 4 without meshes, so the earlier "plain" numbers were not representative of
-the real arm: with the UR meshes the ready pose seed ends with the wrist (tcp z 2.28) near the wall octomap and the first plan is
-refused. Cause not fixed here (arm seed / MoveIt scene margin, controller side).
-matches in the three plain runs. The CoV is a property of the stroke spacing and the speed, the valve was open 346 to 594 samples.
+1 of 3 (1 of 4 counting the stray run) against 4 of 4 without meshes.
+
+**Root cause and fix (this branch).** Not the manager, not the SRDF and not the wall octomap margin. Traced with the joint states and
+link poses of a seed move in the sim: the seed is a MoveIt plan of 4.1 s (velocity scale 0.3), but gz_ros2_control's position loop
+under `jtac_position_only` has a 10 s time constant (gain 0.1 /s). The joints therefore do not follow the planned path: all of them
+converge exponentially on the goal, i.e. the arm goes along a joint-space straight line from the stowed pose, which MoveIt never
+checked. That line takes the wrist (`arm_wrist_1/2_link`) over the wall at z 2.06 to 2.1 m, the wall is 2.0 m tall with its front at
+x = 0.915; with the meshes the arm has real collision, so the wrist comes to rest on the wall top (wrist 1 at x 1.10, z 2.09) and
+elbow / shoulder_lift / lift stay 0.5 to 1.2 rad off the seed (tcp (0.79, 0.27, 2.28) instead of (0.68, 0.25, 1.26)). The manager's
+first plan (`prime_continuity`, a joint goal to the live state) then starts in collision with the wall octomap (plane x = 0.98,
+z up to 2.0) and `CheckStartStateCollision` refuses it; whether the arm slides off the wall top or not decides pass or fail (hence
+0.92 / 0.57 / 0.0 and the random JTAC "Cartesian offset diverged": the controller is told to hold a reference the arm cannot reach).
+Without the meshes the arm passes through the wall top, which is why it never showed. The geometry mismatch (octomap at 0.98 against
+the wall at 0.915) is not the cause: the converged arm is clear of both. The seed plan is now 27 s (`SPRAY_PASS_SEED_SCALE`, default
+0.04, 270 points): the arm follows it, the seed is reached to 1 mrad (tcp 0.68, 0.25, 1.26) and the first plan is accepted.
+Collision checking, the ACM and the scene are unchanged. Baseline with the old scale on the same build (3 more runs): coverage
+0.988 (passes, 83 JTAC divergences), 0.805 (fails), and one failed diagnostic run, all with the refused first plan.
+
+**Re-measured, meshes on, 27 s seed, idle host (4 runs, 4 containers in a row, `ROS_DOMAIN_ID` 71 to 74):**
+
+| run | coverage | thickness CoV | result | notes |
+|---|---|---|---|---|
+| 1 | 0.919 (855/930) | 0.55 | passes | 202 s, 38 JTAC divergence warnings |
+| 2 | 1.000 | 0.57 | passes | 147 s, 3 warnings |
+| 3 | 1.000 | 0.62 | passes | 198 s, 54 warnings; 884 N ground-truth peak while the valve was closed (a retract touched the wall) |
+| 4 | 0.963 | 0.65 | passes | 159 s, 26 warnings |
+
+4 of 4 pass (the scorer's limit is coverage 0.9), against 1 of 3 before, no refused plan in any run (the old seed on the same build:
+0.988 / 0.805 / failed). Run 1 and run 4 sit near the 0.9 limit, so the margin is thin. What is left: the JTAC "Cartesian
+offset diverged" warnings still appear (they start during the seed move itself, the arm lags the reference by far more than the
+controller's offset clamp, and none of the 4 runs failed on them), and the 0.9 coverage floor is hit with only 6 percent to spare once.
+The MuJoCo twin is coverage 1.0.
+
 
 **Multi-stand** (`scripts/run_multi_stand_pass.sh`, 0.9 m patch from y = 0.3, `stand_max_span_m` 0.5, two stands, 9 columns,
 about 9 minutes, `base_motion:=true`, contact pass at 10 N). The reachability map is built once (`STAND_MAP`). The Gazebo world wall
@@ -349,6 +378,23 @@ few above 1000 N) at the start of a press or on a jam, which the constraint solv
 force-limiting guard in the controller path (the `force_core` `ForceLimiter` is not wired into JTAC) would be the real bound; not
 done here, the controller belongs to another change.
 
+**Re-measured again on this branch (27 s spray seed; the multi-stand pass has no seed move, so the fix does not touch it), 2 runs, same script,
+reachability map reused, `ROS_DOMAIN_ID` 81, 82:**
+
+| run | columns done | coverage | peak (score) | RMS error | in band | result |
+|---|---|---|---|---|---|---|
+| 1 | 8 of 10 (stand 1 columns 2 and 3: dock failed, 6 attempts each, plus a retry) | 0.746 | 2560 N | 63.8 N | 0.58 | fails (1095 s) |
+| 2 | 9 of 10 (column 0: dock failed on stand 1) | 0.990 | 1476 N | 96.1 N | 0.62 | scorer passes (1149 s) |
+
+1 of 2 (with the two earlier sets, 3 of 8 over the meshed physics). Both stands are reached every time (arrival error 4 mm and 20 mm).
+The columns lost are always on stand 1 (the second stand, after the base drove): the dock plan is refused (`wall_column_N_dock`
+`planning_failed`, 12 to 24 times per failed column), and the manager logs `CartesianPlanner: collision truncation` for
+`<octomap>` against `tool_mount_link` (138 times in run 1) and `arm_upper_arm_link` against `lift_carriage_link` (22). That is the tool
+mount, in front of the wrist, meeting the wall octomap plane (x = 0.98) at the dock standoff of 0.04 m with a 0.1 m approach, not the
+wrist-over-the-wall mechanism of the spray seed. Not root-caused here (the pass was only re-measured); the likely levers are the
+`dock_approach_extra_m` / `dock_standoff_m` margins and the stand's arm base y, not the collision checking. Peaks are the same single-sample
+impacts as before.
+
 Three things this exposed, all fixed here:
 - **Ground truth under `base_motion`.** `contact_ground_truth.py` looked the tcp up against the TF frame `world`, which does not
   exist when the world joint is dropped, so the contact force was silently 0 and the first multi-stand run scored coverage 0 although
@@ -357,7 +403,7 @@ Three things this exposed, all fixed here:
   is in the manager and is left to its owner.)
 - The recorder takes `--frame odom` and the wall in odom, like the MuJoCo one.
 
-Not done: a controller-side peak-force guard; `run_stand_pass.sh` (single stand, `stand_drive.py`) has no Gazebo twin; the scorer's thin 0.9 limit on peak force is not
+Not done: the stand 1 dock failures with the meshes; a controller-side peak-force guard; `run_stand_pass.sh` (single stand, `stand_drive.py`) has no Gazebo twin; the scorer's thin 0.9 limit on peak force is not
 used (`--max-peak` default 0), so a pass with a 922 N spike still passes; a cancel run (`MULTI_STAND_CANCEL_AFTER_S`) was not tried;
 the spray with a different wall x, and a run with a wall that the tool tip really sits 0.30 m from, were not done.
 

@@ -14,7 +14,7 @@
 #   SPRAY_PASS_OUT (default /tmp/spray_pass)  SPRAY_PASS_STANDOFF (m, 0.30)  SPRAY_PASS_HALF_ANGLE (deg, 20)
 #   SPRAY_PASS_OVERLAP (percent, 20)  SPRAY_PASS_SPEED (m/s, 0.05)  SPRAY_PASS_MIN_COVERAGE (0.9)  SPRAY_PASS_MAX_PEAK (N, 0 = none)
 #   SPRAY_PASS_READY (seed: planned move to the first stroke's arm configuration, default; none; free = the contact pass's pose)
-#   SPRAY_PASS_SEED_Q / SPRAY_PASS_SEED_SCALE (the seed joints in ready_pose.FREE order, velocity scale 0.3 of the MoveIt plan)
+#   SPRAY_PASS_SEED_Q / SPRAY_PASS_SEED_SCALE (the seed joints in ready_pose.FREE order, velocity scale of the MoveIt plan, default 0.04 = a 27 s plan: it has to be slower than gz's 10 s joint loop, see docs/sim_gazebo.md)
 #   SPRAY_PASS_SCORE_ARGS (extra score_run arguments)  SPRAY_PASS_LAUNCH_ARGS
 #   GZ_PASS_STILLS=N (colour camera on, N PNG stills into OUT/stills, one every GZ_PASS_STILLS_EVERY s)
 set -u
@@ -34,7 +34,7 @@ READY_ARGS=()
 case "$READY" in
   none|free) ;;
   seed) # lift pan shoulder_lift elbow wrist_1 wrist_2 wrist_3 (ready_pose.FREE order); override with SPRAY_PASS_SEED_Q
-    READY_ARGS=(--joints "${SPRAY_PASS_SEED_Q:-0.6091,0.1811,0.4325,1.348,1.3607,-1.7519,1.5708}" --planned --scale "${SPRAY_PASS_SEED_SCALE:-0.3}");;
+    READY_ARGS=(--joints "${SPRAY_PASS_SEED_Q:-0.6091,0.1811,0.4325,1.348,1.3607,-1.7519,1.5708}" --planned --scale "${SPRAY_PASS_SEED_SCALE:-0.04}");;
   *) echo "SPRAY_PASS_READY must be seed, none or free"; exit 2;;
 esac
 
