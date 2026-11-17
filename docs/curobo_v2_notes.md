@@ -270,3 +270,142 @@ module for this reason).
   `esdf_voxel_size`, `esdf_center`); a mismatch is answered with a message, not applied.
 - Checked on the GPU: a voxel blob at the robot's tool turned into an EsdfGrid (`computeEsdf`) blocks
   the plan; an all-free field of the same grid unblocks it.
+
+## cuRobo `Mapper` standalone: evaluation on the 4 GB GPU (measured 2026-11-18)
+
+Question from the roadmap: does `curobo.perception.Mapper` run standalone, and what does it cost in VRAM on the RTX 3050 Laptop (4 GB)?
+Answer: it runs standalone (no ROS, no dataset) in the `motion-planner:gpu` image, needs about 0.2-0.3 GB at the sizes we need and about 1.4 GB
+at 6x6x2 m / 1 cm, and its ESDF feeds `CuroboPlanner.set_esdf` with a conversion of a few lines. Accuracy has two caveats (below).
+
+Script: `docker/tools/eval_curobo_mapper.py` (synthetic scene: wall plane at x = 1 m plus a 0.3 m box, numpy ray cast into a pinhole depth image,
+50 frames on a small arc, clean depth unless `--noise`). Reproduce (about 10 minutes for the whole sweep, one subprocess per configuration):
+
+```bash
+docker run --rm --gpus all -v "$PWD":/ws:ro motion-planner:gpu \
+    /opt/venv/bin/python /ws/docker/tools/eval_curobo_mapper.py --stress            # table below
+docker run --rm --gpus all -v "$PWD":/ws:ro motion-planner:gpu \
+    /opt/venv/bin/python /ws/docker/tools/eval_curobo_mapper.py --extent 4 --voxel 0.04 --res 640x480   # one configuration
+docker run --rm --gpus all -v "$PWD":/ws:ro motion-planner:gpu \
+    /opt/venv/bin/python /ws/docker/tools/eval_curobo_mapper.py --bridge --n-states 6000                # ESDF -> set_esdf
+```
+
+### API as used (cuRobo v2 at 78fd485)
+
+```python
+cfg = MapperCfg(extent_meters_xyz=(2, 2, 2), voxel_size=0.04, esdf_voxel_size=0.04, extent_esdf_meters_xyz=(2, 2, 2),
+                grid_center=torch.tensor([0.5, 0, 0]), truncation_distance=4 * 0.04, depth_maximum_distance=4.0,
+                minimum_tsdf_weight=1.0, image_height=240, image_width=320)        # image size is required
+mapper = Mapper(cfg)
+mapper.integrate(CameraObservation(depth_image=(1,H,W) float32 m, rgb_image=(1,H,W,3) uint8 zeros, pose=Pose.from_matrix(T_world_cam),
+                                   intrinsics=(1,3,3)))
+grid = mapper.compute_esdf()          # VoxelGrid: feature_tensor (nx,ny,nz) float16 on the GPU, voxel_size, pose = grid centre
+```
+
+- Gotchas found: `image_height` / `image_width` are mandatory (scratch buffers are pre-allocated, error text "MapperCfg requires image_height and
+  image_width ..."); the ESDF grid is **128^3 at `esdf_voxel_size` (default 0.05 m) unless `extent_esdf_meters_xyz` is set** (it does not follow
+  `extent_meters_xyz`); a geometry-only mapper still needs an (all zero, uint8) `rgb_image`; the camera frame is OpenCV (x right, y down, z forward;
+  the synthetic frames reconstruct the scene correctly that way); the first `integrate` and the first `compute_esdf` compile Warp kernels
+  (about 2.4-4.9 s and 3.9 s, cached under `~/.cache/warp`; a new grid shape recompiles, so a fixed size per process is the practical rule).
+- Memory is block sparse: `Mapper.memory_usage_mb()` is the pre-allocated pool, sized from the extent by a surface heuristic
+  (`max_blocks` 10000 for 2x2x2 and 4x4x2, 60000 for 4x4x2 at 1 cm). Our scene never came near it (at most 1230 blocks, 0 allocation failures).
+- Integration time does not depend on the extent or the voxel size here (1.0-1.7 ms per 320x240 or 640x480 frame, CUDA events, the scene is small
+  and static); ESDF time grows with the ESDF cell count (0.2 ms at 25^3, 6 ms at 200x200x100, 36 ms at 400x400x200, 89 ms at 600x600x200).
+
+### Results (RTX 3050 Laptop 4 GB, 50 frames, truncation 4 voxels)
+
+VRAM is the whole device's used memory (`torch.cuda.mem_get_info`, same counter as nvidia-smi, polled every 20 ms) including the CUDA context and
+Warp; torch's own `max_memory_allocated` is only about 50 MiB because Warp allocates outside torch. The GPU was otherwise idle (15 MiB used before
+the run). "near" = cells 0-0.25 m in front of a surface, "far" = 0.25-1 m, inside the central 1 x 0.8 m window of the wall, excluding the box's shadow;
+error = |Mapper ESDF - analytic signed distance|.
+
+| extent m | voxel m | image | seeding | VRAM peak MiB (device total) | integrate ms/frame | ESDF ms | ESDF grid | near error mean/max m | far error mean/max m |
+|---|---|---|---|---|---|---|---|---|---|
+| 2x2x2 | 0.08 | 320x240 | gather | 192 | 1.04 | 0.18 | 25x25x25 | 0.054 / 0.150 | 0.281 / 0.972 |
+| 2x2x2 | 0.08 | 640x480 | gather | 274 | 1.1 | 0.17 | 25x25x25 | 0.079 / 0.243 | 0.508 / 0.978 |
+| 2x2x2 | 0.04 | 320x240 | gather | 196 | 1.07 | 0.36 | 50x50x50 | 0.031 / 0.117 | 0.037 / 0.050 |
+| 2x2x2 | 0.04 | 640x480 | gather | 278 | 1.19 | 0.36 | 50x50x50 | 0.030 / 0.117 | 0.029 / 0.050 |
+| 2x2x2 | 0.02 | 320x240 | gather | 194 | 1.03 | 1.79 | 100x100x100 | 0.028 / 0.211 | 0.014 / 0.049 |
+| 2x2x2 | 0.02 | 640x480 | gather | 296 | 1.39 | 1.78 | 100x100x100 | 0.026 / 0.211 | 0.013 / 0.049 |
+| 4x4x2 | 0.08 | 320x240 | gather | 192 | 0.99 | 0.26 | 50x50x25 | 0.069 / 0.244 | 0.371 / 0.862 |
+| 4x4x2 | 0.08 | 640x480 | gather | 274 | 1.31 | 0.26 | 50x50x25 | 0.131 / 0.246 | 0.471 / 0.851 |
+| 4x4x2 | 0.04 | 320x240 | gather | 194 | 1.03 | 0.99 | 100x100x50 | 0.039 / 0.155 | 0.043 / 0.070 |
+| 4x4x2 | 0.04 | 640x480 | gather | 276 | 1.43 | 0.99 | 100x100x50 | 0.047 / 0.250 | 0.155 / 0.266 |
+| 4x4x2 | 0.02 | 320x240 | gather | 256 | 1.12 | 5.98 | 200x200x100 | 0.022 / 0.191 | 0.014 / 0.039 |
+| 4x4x2 | 0.02 | 640x480 | gather | 334 | 1.48 | 5.98 | 200x200x100 | 0.021 / 0.191 | 0.014 / 0.039 |
+| 2x2x2 | 0.08 | 320x240 | scatter | 172 | 0.98 | 0.71 | 25x25x25 | 0.034 / 0.102 | 0.252 / 0.947 |
+| 2x2x2 | 0.08 | 640x480 | scatter | 254 | 1.16 | 0.79 | 25x25x25 | 0.064 / 0.243 | 0.484 / 0.978 |
+| 2x2x2 | 0.04 | 320x240 | scatter | 174 | 1.0 | 0.74 | 50x50x50 | 0.011 / 0.117 | 0.007 / 0.046 |
+| 2x2x2 | 0.04 | 640x480 | scatter | 256 | 1.15 | 0.85 | 50x50x50 | 0.012 / 0.117 | 0.011 / 0.046 |
+| 2x2x2 | 0.02 | 320x240 | scatter | 172 | 1.05 | 1.46 | 100x100x100 | 0.022 / 0.214 | 0.007 / 0.068 |
+| 2x2x2 | 0.02 | 640x480 | scatter | 274 | 1.43 | 1.5 | 100x100x100 | 0.020 / 0.230 | 0.007 / 0.069 |
+| 4x4x2 | 0.08 | 320x240 | scatter | 172 | 1.01 | 0.73 | 50x50x25 | 0.049 / 0.244 | 0.325 / 0.783 |
+| 4x4x2 | 0.08 | 640x480 | scatter | 254 | 1.36 | 0.81 | 50x50x25 | 0.120 / 0.246 | 0.439 / 0.771 |
+| 4x4x2 | 0.04 | 320x240 | scatter | 172 | 1.02 | 1.03 | 100x100x50 | 0.021 / 0.155 | 0.015 / 0.043 |
+| 4x4x2 | 0.04 | 640x480 | scatter | 254 | 1.44 | 1.07 | 100x100x50 | 0.029 / 0.237 | 0.123 / 0.237 |
+| 4x4x2 | 0.02 | 320x240 | scatter | 234 | 1.16 | 3.87 | 200x200x100 | 0.014 / 0.191 | 0.006 / 0.044 |
+| 4x4x2 | 0.02 | 640x480 | scatter | 312 | 1.5 | 3.61 | 200x200x100 | 0.013 / 0.191 | 0.006 / 0.044 |
+| 4x4x2 | 0.01 | 640x480 | gather | 812 | 1.39 | 36.49 | 400x400x200 | 0.019 / 0.245 | 0.011 / 0.063 |
+| 6x6x2 | 0.02 | 640x480 | gather | 440 | 1.59 | 12.62 | 300x300x100 | 0.021 / 0.191 | 0.014 / 0.039 |
+| 8x8x2 | 0.02 | 640x480 | gather | 564 | 1.41 | 21.98 | 400x400x100 | 0.021 / 0.191 | 0.014 / 0.039 |
+| 8x8x2 | 0.01 | 640x480 | gather | killed (exit -9, no traceback) | - | - | - | - | - |
+
+Beyond the requested set (stress, 640x480, gather): 4x4x2 at 0.01 m 812 MiB total (ESDF 36 ms); 6x6x2 at 0.01 m 1448 MiB (89 ms); 8x8x2 at 0.015 m
+930 MiB (46 ms); 8x8x2 at 0.02 m 564 MiB. 8x8x2 at 0.01 m (800x800x200 ESDF, 128 M cells, about 19 bytes per cell by extrapolation, so roughly
+2.5 GB) was **killed**: the container exited with 137 / SIGKILL and no Python or CUDA error text, so this is not a clean `OutOfMemoryError`. The
+cause (VRAM, host RAM or the driver) was not established; treat that size as the ceiling.
+
+### What fits in 4 GB with room for a planner
+
+The planner needs 1-2 GB (our `CuroboPlanner` ESDF grid is small), leaving about 2 GB for the map. Every requested configuration (2x2x2 and 4x4x2
+at 0.02 / 0.04 / 0.08 m, both image sizes) uses 0.17-0.34 GB, so all of them fit with the planner. The practical limit is the ESDF cell count, about
+19 bytes per cell: up to about 70 M cells (for example 6x6x2 at 1 cm, 1.45 GB) still leaves about 2.5 GB. Not measured: the Mapper and a planner in
+the same process (the planner's 1-2 GB is the working assumption, not measured here), several cameras,
+colour, lidar, `enable_static`, or a moving window (`esdf_origin`).
+
+### Correctness against the analytic distance
+
+- **Sign convention: positive outside obstacles, negative inside**, the same as our `EsdfGrid` and cuRobo's `VoxelGrid` for the planner (min over the
+  grid was -0.10 m, max +1.41 m on the 2 m grid). Inside is only meaningful in a thin band (about the truncation distance) behind a seen surface: depth
+  cannot see the interior of the wall or box, so deeper cells are not negative (sign agreement inside the 0.25 m band was 0.07-0.67, i.e. do not rely on
+  depth-only maps for penetration depth). An empty mapper returns +10000 everywhere (so does a grid with no surface), clamp before use.
+- **Voxel size**: from 0.04 m down, the far-field error is 0.4-1.4 cm with `seeding_method="scatter"` and about one voxel (4 cm at 0.04, 1.4 cm at 0.02)
+  too small with the default `"gather"`. Gather is the dilated seed band the docstring describes (it is on the conservative side: the surface appears
+  about one voxel in front of the truth, wall zero crossing at x = 0.96 for 0.04 m instead of 1.00; scatter gave 1.00). Near-surface mean errors are
+  1-3 cm at 0.02-0.04 m, with maxima of 0.12-0.25 m at box edges (silhouette cells).
+- **0.08 m is too coarse** with 4 voxel truncation and 8^3 blocks: far-field error 0.25-0.5 m (mean). Spurious near-zero cells at the truncation edge
+  pull the ESDF down; use 0.04 m or finer.
+- **Under-estimates in the far field at 640x480 for 4x4x2 at 0.04 m** (mean 0.12-0.16 m against 0.015-0.043 m at 320x240 or at 2x2x2): about 60 isolated
+  cells about one truncation distance in front of the box edge read as surface (a depth-discontinuity artefact). It errs towards "closer than real", so
+  it is conservative for planning, not a miss. `FilterDepth` (default bilateral 3 + flying pixel 0.5) made this configuration worse, not better
+  (far error 0.44 m clean, 0.41 m with 5 mm noise and `scatter`; 0.30 m with noise and no filter); the cause was not pinned down.
+- The wall appears as a slab about one truncation distance thick (the back side of the band is also zero), which is fine for collision.
+- Not tested: depth noise beyond 5 mm, moving objects (`decay_factor`), real sensor frames, rolling shutter or pose error.
+
+### Feeding the Mapper's ESDF to `CuroboPlanner.set_esdf`
+
+Compatible, with conversion (checked: `set_esdf` accepted it, the arm then sees the wall and box):
+
+| | Mapper `compute_esdf()` | `CuroboPlanner.set_esdf` |
+|---|---|---|
+| layout | `(nx, ny, nz)`, X slowest, Z fastest, cell centre `centre + (i + 0.5 - n/2) * voxel` | the same (`EsdfSpec`) |
+| sign | positive outside, negative inside | the same |
+| origin | `VoxelGrid.pose[:3]` is the grid centre (= `MapperCfg.grid_center` or `esdf_origin`) | `center=` argument |
+| dtype / device | float16, CUDA | float32 numpy |
+| unobserved / empty | +10000 | clamp to the planner's range |
+| voxel counts | `ceil(extent / voxel)`, can be odd (2 m at 0.08 m gives 25) | must be even, else `ValueError` |
+
+Conversion: `field = np.minimum(grid.feature_tensor.float().cpu().numpy(), 1.0)`, build `EsdfSpec(dims, voxel_size, center=tuple(grid.pose[:3]))`
+with an even count per axis (choose `extent_esdf_meters_xyz` so `extent / voxel` is even), then `planner.set_esdf(field, center=spec.center)`.
+The GPU to CPU copy is a round trip (the planner re-uploads); `_voxel_scene` takes a CUDA tensor internally, so a direct GPU path would be a
+small follow-up, not done here. No change to `curobo_bridge` was needed.
+
+Functional check (Franka at the origin, 2 m grid at 0.05 m centred at (0.5, 0, 0), 20 frames): of 6000 random joint states 5572 are valid in an
+empty world, 5542 with the analytic ESDF of the scene and 5521 with the Mapper's ESDF. The two ESDFs disagree on 27 states: 24 invalid only with the
+Mapper (conservative: the dilated band), 3 valid with the Mapper but invalid with the analytic one (parts of the box the camera never saw). Only
+30 states touch the obstacles, so this is a smoke test of the layout and sign, not a statistic of planning success; no motion was planned.
+
+### Not verified
+
+Mapper plus planner running together in one process and their combined VRAM; real depth (noise, holes, specular surfaces) and sensor/robot pose
+error; the robot self-filter (`RobotSegmenter`); more than one camera; colour, lidar, static obstacles, `clear_region`, a sliding ESDF window; the
+SIGKILL at 8x8x2 / 1 cm; the cause of the `FilterDepth` result; ROS integration (a node that subscribes to depth and publishes `SetEsdf`).
