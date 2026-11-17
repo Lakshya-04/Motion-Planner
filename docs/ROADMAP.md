@@ -9,7 +9,7 @@ sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware
         -> navigation / docking -> motion planning -> execution (JTAC + F/T) -> monitoring
 ```
 
-Last verified: 2026-11-15, after merging the stack #5 to #29. Legend: `[x]` done, `[~]` partial (what is
+Last verified: 2026-11-17 on main at 56712bb (PRs up to #94): simulator-free checks green (`docker/run_all_checks.sh --skip-sims`: 54 packages built, 1259 colcon tests, 0 failures, 229 skipped; 5 pytest directories passed; public-readiness scan clean). Simulator, GPU and hardware items below were not re-run for that date; their evidence is the earlier run each line cites. Legend: `[x]` done, `[~]` partial (what is
 missing is stated), `[ ]` not done (some are design-only). Each item names its evidence. Tick items as they land
 and update the date. **Policy:** reuse maintained open source before writing our own (section 17); ROS 2 distro
 support is not a reason to reject a candidate (we port); prefer the newest method that fits, including papers

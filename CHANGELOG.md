@@ -10,6 +10,11 @@ The stack as it stands, covering the merged pull requests #5 to #61, summarised 
 #5 to #22 and the documentation on top of it; "Since #22" below it covers #23 to #61). Not included: a launch that runs perception to execution,
 anything verified on hardware.
 
+### Verified
+
+- 2026-11-17, main at 56712bb: `docker/run_all_checks.sh --skip-sims` (fresh build volumes, image `motion-planner:build-live`): 54 packages built, `colcon test` 1259 tests, 0 errors, 0 failures, 229 skipped (lint and optional-dependency tests); pytest per directory 324 passed, 6 skipped (MuJoCo, cuRobo and torch absent); public-readiness scan 0 problems. Not run: sim_gazebo, sim_mujoco, sim_isaac, the simulator scripts, GPU planners, hardware.
+- `moveit_ros_perception` (needed at run time by the live octomap) is an `exec_depend` of `mobile_manipulator_moveit_config`, not a build dependency. The older `motion-planner:build` image lacks it, so build and test pass there but `live_octomap:=true` fails until the image is rebuilt (it is in `docker/apt-extra.txt`). The feature stays opt-in.
+
 ### Fixed
 
 - VAMP robot model rejected most benchmark endpoints (60 of 72 in the empty scene, every `stow_side` pair): FOAM's 6 spheres on the 0.04 m lift carriage plate bulged into the upper arm. `docker/tools/generate_vamp_robot.sh` now defaults `FOAM_ARGS` to `--lift_carriage_link=4` (23 plate spheres, 50 in total); on the same 158 problems VAMP goes from 10/158 to 158/158. Numbers in `docs/planner_benchmark.md`.
