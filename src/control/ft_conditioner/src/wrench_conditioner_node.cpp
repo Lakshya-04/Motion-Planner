@@ -324,12 +324,12 @@ void WrenchConditionerNode::identify(
   for (const auto & s : set) {
     if (!s.successful) {res->message = "fit ok but could not apply it: " + s.reason; return;}
   }
-  char buf[720];
+  char buf[820];
   std::snprintf(buf, sizeof(buf),
-    "fit from %zu poses, residual %.4f N / %.5f N m. Parameters now in use; to keep them:\n"
+    "fit from %zu poses, residual %.4f N / %.5f N m, regressor condition number %.1f (below about 20 is well spread). Parameters now in use; to keep them:\n"
     "payload_mass_kg: %.5f\npayload_cog_xyz: [%.5f, %.5f, %.5f]\nbias: [%.5f, %.5f, %.5f, %.5f, %.5f, %.5f]\n"
     "The captured poses are kept: call ~/clear_samples before calibrating another tool.",
-    r.samples, r.rms_force_n, r.rms_torque_nm, r.payload.mass_kg, r.payload.cog.x, r.payload.cog.y,
+    r.samples, r.rms_force_n, r.rms_torque_nm, r.condition_number, r.payload.mass_kg, r.payload.cog.x, r.payload.cog.y,
     r.payload.cog.z, r.bias.force_x, r.bias.force_y, r.bias.force_z, r.bias.torque_x, r.bias.torque_y,
     r.bias.torque_z);
   res->success = true;
