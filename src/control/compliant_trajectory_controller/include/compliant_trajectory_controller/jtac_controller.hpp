@@ -131,6 +131,7 @@
 #include <vector>
 
 #include "core_types/command_guard.hpp"
+#include "force_core/force_limiter.hpp"
 
 #include <Eigen/Dense>
 
@@ -224,6 +225,13 @@ private:
   /// desired_ left untouched) if the FK call fails or the offset is already within bound.
   void clampCartesianOffset();
 
+  /// Opt-in force limiter stage (`force_limiter.enabled`): runs after clampCartesianOffset(). Takes the
+  /// tool-axis (+Z of the control frame, into the wall) component of the commanded position, applies
+  /// force_core::NormalAxisLimiter (offset cap, force barrier on the approach velocity, retreat reset)
+  /// with the pressing force -measured.force.z, and maps the correction back to joints through the
+  /// translational Jacobian (damped least squares). A kinematics failure leaves state_desired_ as is.
+  void applyForceLimiter(const geometry_msgs::msg::Wrench & measured, double dt);
+
   /// Real-actuator rate limiting -- a defense-in-depth safety net, not the primary fix for the
   /// instability below (that fix is tool_profiles.yaml's own admittance.damping values -- see its
   /// own comment there for the actual root cause). Clamps state_desired_ to what the joint's own
@@ -256,6 +264,12 @@ private:
   /// `joint_limits.<joint>.min_position` / `max_position`; `command_guard.debounce_cycles` (default 3).
   /// A latched fault holds the last good position and makes update() return ERROR.
   std::unique_ptr<core_types::CommandGuard> command_guard_;
+
+  /// Opt-in force limiter (parameter `force_limiter.enabled`, default false; needs an F/T sensor).
+  /// See applyForceLimiter() and force_core/force_limiter.hpp. `force_limiter_windup_n_` is last
+  /// cycle's back-calculation force, subtracted from the pressing force the admittance rule sees.
+  std::unique_ptr<force_core::NormalAxisLimiter> force_limiter_;
+  double force_limiter_windup_n_{0.0};
 
   /// A SEPARATE instance from admittance_rule_'s own internal kinematics_ (private, not exposed)
   /// and from redundancy_kinematics_ (only initialized when enable_redundancy_weighting_ is on) --

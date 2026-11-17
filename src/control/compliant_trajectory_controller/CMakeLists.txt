@@ -81,6 +81,7 @@ target_include_directories(jtac_controller PUBLIC
 )
 target_link_libraries(jtac_controller
   core_types::core_types
+  force_core::force_core
   admittance_controller::admittance_controller
   admittance_controller::admittance_controller_parameters
   joint_trajectory_controller::joint_trajectory_controller
