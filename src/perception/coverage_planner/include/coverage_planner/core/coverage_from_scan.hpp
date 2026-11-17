@@ -66,6 +66,15 @@ struct ScanCoverageResult
   ExpandedCoverage final_plan; ///< Lifted, oriented, pass-expanded tool poses.
 };
 
+/// The planning chain from a wall plane on: rasterize its extent with `regions` (and, when
+/// `observed_points` is given, mark the cells without a point as unknown), plan, lift, expand.
+/// Works for a plane of any orientation (floor, ceiling, column face): nothing in it assumes the
+/// plane is vertical. planCoverageFromScan is the plane fit plus this; `plane` options are ignored.
+ScanCoverageResult planCoverageOnWall(
+  const WallPlane & wall, const std::vector<ObstacleRegion> & regions,
+  const std::vector<scene_model::Vec3> * observed_points, const ToolCoverageProfile & tool,
+  const ScanCoverageOptions & options = {});
+
 /// Whole pipeline. `obstacles` may be empty. Never throws for "no wall found" or "planning
 /// failed": the reason is in `message`.
 ScanCoverageResult planCoverageFromScan(

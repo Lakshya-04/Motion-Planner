@@ -113,14 +113,17 @@ struct CalibrationResult
   double rms_force_n{0.0};          ///< Residual of the fit over the samples.
   double rms_torque_nm{0.0};
   std::size_t samples{0};
+  double condition_number{0.0};     ///< Regressor condition number of the pose set (noise amplification).
   std::string message;
 };
 
 /// Least squares for payload mass, centre of gravity and the bias from static poses without
 /// contact. Needs at least four poses whose gravity directions in the sensor frame differ by at least
 /// about 10 degrees (largest pairwise angle); a degenerate set is rejected, not guessed. A negative fitted
-/// mass (wrong sensor sign) is rejected with a message saying so.
+/// mass (wrong sensor sign) is rejected with a message saying so. A pose set whose regressor condition number
+/// (payload_excitation.hpp) exceeds `max_condition` is rejected too; `condition_number` is always reported.
 CalibrationResult identifyPayload(
-  const std::vector<CalibrationSample> & samples, const Vec3 & gravity_world, double sign = 1.0);
+  const std::vector<CalibrationSample> & samples, const Vec3 & gravity_world, double sign = 1.0,
+  double max_condition = 1000.0);
 
 }  // namespace force_core

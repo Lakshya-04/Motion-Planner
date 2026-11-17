@@ -16,9 +16,13 @@ coverage_planner_node:
     # Obstacle handling
     obstacle_inflation_radius: 0.0  # Safety margin around obstacles in meters
     allow_unknown: false            # Treat unknown cells as free space?
-    plan_all_components: false      # false = largest component only
+    plan_all_components: true       # false = largest component only (a wall cut by a rib is two panels)
     min_component_cells: 25         # Ignore tiny disconnected patches
     optimize_strip_order: false     # Reorder component subpaths to reduce travel
+    components_in_sweep_order: true # Plan components along the stepover axis, not largest first
+    fill_gaps: true                 # Short strokes for free cells beside obstacle keep-outs / far edges
+    min_stroke_length_m: 0.02       # Shortest gap-fill stroke (m)
+    decomposition: "columns"        # "columns" | "cells" (boustrophedon cell decomposition)
 
     # Map configuration
     map_frame: "map"

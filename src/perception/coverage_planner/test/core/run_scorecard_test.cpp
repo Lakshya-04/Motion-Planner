@@ -160,3 +160,85 @@ TEST(RunScorecard, EmptyRunCoversNothingAndRejectsBadOptions)
   bad.swath_m = 0.0;
   EXPECT_THROW(scoreRun(wall(), {}, {}, bad), std::invalid_argument);
 }
+
+namespace
+{
+ObstacleRegion box()
+{
+  ObstacleRegion o;
+  o.id = 3; o.parent_wall = 1;
+  o.u_min = 0.9; o.u_max = 1.1; o.v_min = 0.4; o.v_max = 0.6;
+  o.height_m = 0.04;
+  return o;
+}
+
+RunSample at(double u, double v, double standoff)
+{
+  RunSample s;
+  s.x = u; s.y = v; s.z = -standoff;   // the wall's normal u x v is +z: standing off the wall is -z
+  s.force_n = 0.0;
+  return s;
+}
+}  // namespace
+
+TEST(RunScorecard, ObstacleContactsCountEpisodesNotSamples)
+{
+  std::vector<RunSample> s;
+  for (int i = 0; i < 5; ++i) {s.push_back(at(1.0, 0.5, 0.0));}   // pressing on the box's footprint
+  s.push_back(at(0.5, 0.5, 0.0));                                 // away
+  for (int i = 0; i < 3; ++i) {s.push_back(at(1.0, 0.5, 0.02));}  // again, still below its top
+  const auto card = scoreRun(wall(), {box()}, s, contactOptions());
+  EXPECT_EQ(card.obstacle_contact_samples, 8U);
+  EXPECT_EQ(card.obstacle_contacts, 2U);
+}
+
+TEST(RunScorecard, PassingOverAnObstacleOrBesideItIsNotAContact)
+{
+  std::vector<RunSample> s = {at(1.0, 0.5, 0.06), at(1.0, 0.5, 0.2), at(0.85, 0.5, 0.0), at(1.0, 0.35, 0.0)};
+  EXPECT_EQ(scoreRun(wall(), {box()}, s, contactOptions()).obstacle_contacts, 0U);
+  // another wall's obstacle is ignored
+  ObstacleRegion other = box();
+  other.parent_wall = 2;
+  EXPECT_EQ(scoreRun(wall(), {other}, {at(1.0, 0.5, 0.0)}, contactOptions()).obstacle_contacts, 0U);
+}
+
+TEST(RunScorecard, ObstacleMarginGrowsTheFootprintForTheContactCheck)
+{
+  ScorecardOptions o = contactOptions();
+  const std::vector<RunSample> s = {at(0.88, 0.5, 0.0)};   // 2 cm left of the box
+  EXPECT_EQ(scoreRun(wall(), {box()}, s, o).obstacle_contacts, 0U);
+  o.obstacle_margin_m = 0.03;
+  EXPECT_EQ(scoreRun(wall(), {box()}, s, o).obstacle_contacts, 1U);
+}
+
+TEST(RunScorecard, FlushOpeningCountsOnlyAtTheWallPlane)
+{
+  ObstacleRegion hole = box();
+  hole.height_m = 0.0;
+  EXPECT_EQ(scoreRun(wall(), {hole}, {at(1.0, 0.5, 0.0)}, contactOptions()).obstacle_contacts, 1U);
+  EXPECT_EQ(scoreRun(wall(), {hole}, {at(1.0, 0.5, 0.03)}, contactOptions()).obstacle_contacts, 0U);
+}
+
+TEST(RunScorecard, ContactLimitFailsTheRun)
+{
+  ScorecardLimits l;
+  l.min_covered_fraction = 0.0;
+  l.max_obstacle_contacts = 0;
+  const auto card = scoreRun(wall(), {box()}, {at(1.0, 0.5, 0.0)}, contactOptions(), l);
+  EXPECT_FALSE(card.passed);
+  ASSERT_FALSE(card.failures.empty());
+  EXPECT_NE(card.failures.back().find("obstacle contacts 1"), std::string::npos);
+  l.max_obstacle_contacts = -1;   // not checked
+  EXPECT_TRUE(scoreRun(wall(), {box()}, {at(1.0, 0.5, 0.0)}, contactOptions(), l).passed);
+}
+
+TEST(RunScorecard, KeepoutMarginShrinksTheCoverageTarget)
+{
+  const auto plain = scoreRun(wall(), {box()}, {}, contactOptions());
+  ScorecardOptions o = contactOptions();
+  o.keepout_margin_m = 0.1;
+  const auto keepout = scoreRun(wall(), {box()}, {}, o);
+  const auto none = scoreRun(wall(), {}, {}, contactOptions());
+  EXPECT_LT(plain.coverage.target_cells, none.coverage.target_cells);
+  EXPECT_LT(keepout.coverage.target_cells, plain.coverage.target_cells);
+}

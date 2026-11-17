@@ -216,7 +216,9 @@ def build_world_sdf(shapes, world_name='wall_world', friction=0.8, step_size=0.0
         if sect == 'collision':
             _mu(e, friction)
         else:
-            _sub(_sub(e, 'material'), 'ambient', '0.5 0.5 0.5 1')
+            mat = _sub(e, 'material')
+            _sub(mat, 'ambient', '0.5 0.5 0.5 1')
+            _sub(mat, 'diffuse', '0.5 0.5 0.5 1')   # without it the lit ground renders black
 
     for s in shapes:
         m = _sub(world, 'model', name=s.name)

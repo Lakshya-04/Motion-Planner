@@ -9,11 +9,16 @@ find_package(ament_cmake REQUIRED)
 find_package(core_types REQUIRED)
 find_package(Threads REQUIRED)
 
+# Linked into the JTAC controller plugin (a shared library), so the static library must be PIC.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 add_library(${PROJECT_NAME}
   src/force_stage_fsm.cpp
   src/force_stage_sequencer.cpp
   src/force_limiter.cpp
   src/wrench_conditioning.cpp
+  src/payload_excitation.cpp
+  src/bias_tracker.cpp
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -38,7 +43,7 @@ install(
 
 ament_export_targets(${PROJECT_NAME}Targets)
 ament_export_include_directories(include)
-ament_export_dependencies(core_types)
+ament_export_dependencies(core_types Threads)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -57,6 +62,12 @@ if(BUILD_TESTING)
 
   ament_add_gtest(wrench_conditioning_test test/wrench_conditioning_test.cpp)
   target_link_libraries(wrench_conditioning_test ${PROJECT_NAME})
+
+  ament_add_gtest(payload_excitation_test test/payload_excitation_test.cpp)
+  target_link_libraries(payload_excitation_test ${PROJECT_NAME})
+
+  ament_add_gtest(bias_tracker_test test/bias_tracker_test.cpp)
+  target_link_libraries(bias_tracker_test ${PROJECT_NAME})
 
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)

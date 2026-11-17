@@ -47,9 +47,17 @@ maintainer and are not changed by anything here: the email address in the `@auth
 
 ## Checks
 
-Run the single command set in [docker.md](docker.md#run-all-checks) from a clean checkout, and the Markdown
+Run `docker/run_all_checks.sh` (the command set in [docker.md](docker.md#run-all-checks)) from a clean checkout, and the Markdown
 link check for what changed. State in the release notes which of those were run and which were not
 (for example GPU, MuJoCo and Gazebo scripts) and that nothing has been verified on hardware.
+
+Status of the last full pass (2026-11-17, main at 56712bb): `--skip-sims` green (54 packages, 1259 colcon tests,
+0 failures, 229 skipped; pytest per directory 324 passed, 6 skipped; readiness scan clean). Not verified:
+simulator packages and scripts, GPU planners, hardware, the history scans in the public scan list (names, secrets),
+licence-header decision. Practical notes: use fresh named build volumes (stale `mp_*` volumes break
+`--symlink-install`), run as root with `COLCON_DEFAULTS_FILE=/dev/null` if the volumes were created by another
+user, and use an image built after `moveit_ros_perception` joined `docker/apt-extra.txt` (the live octomap needs it
+at run time; build and tests pass without it).
 
 ## Maintainer decisions (left open)
 

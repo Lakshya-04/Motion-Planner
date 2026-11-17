@@ -87,7 +87,7 @@ mp_world_model() {
 }
 
 mp_record() {
-  python3 "$PKG/lib/sim_mujoco/record_run.py" --record "$REC" --timeout 1200 > "$OUT/record.log" 2>&1 &
+  python3 "$PKG/lib/sim_mujoco/record_run.py" --record "$REC" --timeout 1200 ${MANAGER_PASS_REC_ARGS:-} > "$OUT/record.log" 2>&1 &
   REC_PID=$!
   # MANAGER_PASS_FILM=1: also store the joint states for render_run.py (launch with out_dir:=... to keep the MJCF)
   if [ -n "${MANAGER_PASS_FILM:-}" ]; then

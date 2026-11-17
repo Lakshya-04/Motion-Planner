@@ -14,8 +14,15 @@
  *          (valve open) strokes also feed the thickness raster and the card reports its uniformity;
  *          samples with the valve closed never count, for coverage or thickness.
  *
- *          Limits: geometric coverage (see coverage_verification.hpp), no collision count (the
- *          recorder must report those itself), and the pass criteria are the caller's numbers.
+ *          Obstacles: they are excluded from the coverage target (grown by `keepout_margin_m`, the
+ *          planner's own clearance, so the target is the reachable area). The card also counts
+ *          obstacle contacts: an episode is a run of consecutive samples (any force) whose tool
+ *          point is inside an obstacle's footprint (grown by `obstacle_margin_m`) and lower than
+ *          its height plus `obstacle_contact_tol_m` above the wall. Only the tool point is
+ *          checked, not the arm's links.
+ *
+ *          Limits: geometric coverage (see coverage_verification.hpp), obstacle contacts, and the
+ *          pass criteria are the caller's numbers.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 #pragma once
@@ -49,6 +56,9 @@ struct ScorecardOptions
   double force_band_n{0.0};      ///< Contact tool: |force - target| within this is "in band".
   /// Non-contact tool: the spray footprint; when set the card carries the thickness statistics.
   std::optional<SprayFootprint> spray;
+  double keepout_margin_m{0.0};          ///< Obstacle footprints grown by this are left out of the coverage target.
+  double obstacle_margin_m{0.0};         ///< Obstacle footprints grown by this for the contact check.
+  double obstacle_contact_tol_m{0.003};  ///< Tool point within height + this above the wall counts as inside.
 };
 
 struct ScorecardLimits
@@ -58,6 +68,7 @@ struct ScorecardLimits
   double max_force_peak_n{0.0};        ///< 0 = not checked; the abort threshold of the tool.
   double min_in_band_fraction{0.0};    ///< 0 = not checked.
   double max_thickness_cov{0.0};       ///< Spray: 0 = not checked.
+  int max_obstacle_contacts{-1};       ///< Negative = not checked; 0 = no contact allowed.
 };
 
 struct RunScorecard
@@ -69,6 +80,8 @@ struct RunScorecard
   double force_rms_error_n{0.0};    ///< RMS of (force - target) over engaged samples.
   double force_peak_n{0.0};         ///< Largest force over all samples.
   double in_band_fraction{0.0};     ///< Engaged samples within the force band.
+  size_t obstacle_contact_samples{0};   ///< Samples with the tool point inside an obstacle.
+  size_t obstacle_contacts{0};          ///< Episodes (consecutive such samples count once).
   bool passed{false};
   std::vector<std::string> failures;
 };

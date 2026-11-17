@@ -117,6 +117,21 @@ double poseDistance(
   return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+// Inverse of gridToWorld for a cell centre.
+std::pair<int, int> worldToGridCell(const Pose & pose, const OccupancyGrid & map)
+{
+  const auto & origin = map.info.origin;
+  Eigen::Quaterniond q(
+    origin.orientation.w, origin.orientation.x, origin.orientation.y, origin.orientation.z);
+  const Eigen::Vector3d d(
+    pose.position.x - origin.position.x, pose.position.y - origin.position.y,
+    pose.position.z - origin.position.z);
+  const Eigen::Vector3d local = q.toRotationMatrix().transpose() * d;
+  return {
+    static_cast<int>(std::floor(local.x() / map.info.resolution)),
+    static_cast<int>(std::floor(local.y() / map.info.resolution))};
+}
+
 // Segment-emission mapping: strips and the boundary pass are cartesian/contact-driven; connectors
 // are free-space (OMPL) moves and always force a retraction (never contact-adjacent).
 MotionPlanSegment makeSegment(
@@ -450,6 +465,25 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
   if (params.plan_all_components) {
     selected_components.resize(components.size());
     std::iota(selected_components.begin(), selected_components.end(), 0);
+    if (params.components_in_sweep_order && selected_components.size() > 1) {
+      // Along the stepover axis from the start corner: the panels of a wall come out in the order a
+      // stand planner walks them.
+      const bool asc = use_vertical_sweeps ?
+        (params.start_corner == "top_left" || params.start_corner == "bottom_left") :
+        (params.start_corner == "top_left" || params.start_corner == "top_right");
+      const int map_w = static_cast<int>(map.info.width);
+      std::vector<double> key(components.size(), 0.0);
+      for (size_t c = 0; c < components.size(); ++c) {
+        double sum = 0.0;
+        for (int idx : components[c]) {
+          sum += use_vertical_sweeps ? (idx % map_w) : (idx / map_w);
+        }
+        key[c] = sum / static_cast<double>(components[c].size());
+      }
+      std::stable_sort(
+        selected_components.begin(), selected_components.end(),
+        [&](size_t l, size_t r) {return asc ? key[l] < key[r] : key[l] > key[r];});
+    }
   } else {
     selected_components.push_back(0);  // Largest component only.
   }
@@ -483,7 +517,13 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
         component_segments);
     }
 
-    if (use_vertical_sweeps) {
+    if (params.decomposition == "cells") {
+      int cells_here = 0;
+      generateCellSweeps(
+        map, component_grid, params, use_vertical_sweeps, component_path, component_segments,
+        cells_here);
+      result.num_cells += cells_here;
+    } else if (use_vertical_sweeps) {
       generateVerticalSweeps(
         map, component_grid, params, min_x, max_x, min_y, max_y, component_path,
         component_segments);
@@ -491,6 +531,16 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
       generateHorizontalSweeps(
         map, component_grid, params, min_x, max_x, min_y, max_y, component_path,
         component_segments);
+    }
+
+    if (params.fill_gaps) {
+      result.num_gap_strokes += fillCoverageGaps(
+        map, component_grid, params, use_vertical_sweeps, component_path, component_segments);
+    }
+    if (selected_components.size() > 1) {
+      for (auto & segment : component_segments) {
+        segment.tags.push_back("component_" + std::to_string(component_paths.size()));
+      }
     }
 
     if (!component_path.poses.empty()) {
@@ -605,6 +655,299 @@ CoveragePlannerResult BoustrophedonPlanner::generatePath(
     result.success ? "Coverage path generated successfully" : "Failed to generate coverage path";
 
   return result;
+}
+
+void BoustrophedonPlanner::generateCellSweeps(
+  const OccupancyGrid & map, const std::vector<int8_t> & grid,
+  const CoveragePlannerParams & params, bool vertical, Path & path,
+  std::vector<MotionPlanSegment> & segments, int & num_cells)
+{
+  const int W = static_cast<int>(map.info.width);
+  const int H = static_cast<int>(map.info.height);
+  const int A = vertical ? W : H;  // stepover axis
+  const int B = vertical ? H : W;  // stroke axis
+  const auto is_free = [&](int a, int b) {
+    const int idx = vertical ? b * W + a : a * W + b;
+    return isCellFree(grid[static_cast<size_t>(idx)], params.allow_unknown);
+  };
+  const auto cell_xy = [&](int a, int b) {
+    return vertical ? std::make_pair(a, b) : std::make_pair(b, a);
+  };
+
+  struct Span
+  {
+    int lo, hi, cell;
+  };
+  struct Cell
+  {
+    int a0{0};
+    std::vector<std::pair<int, int>> spans;  // per column from a0: lo, hi
+  };
+  std::vector<Cell> cells;
+  std::vector<Span> prev;
+  for (int a = 0; a < A; ++a) {
+    std::vector<Span> cur;
+    for (int b = 0; b < B;) {
+      if (!is_free(a, b)) {
+        ++b;
+        continue;
+      }
+      int e = b;
+      while (e + 1 < B && is_free(a, e + 1)) {
+        ++e;
+      }
+      cur.push_back({b, e, -1});
+      b = e + 1;
+    }
+    std::vector<int> ncur(cur.size(), 0), nprev(prev.size(), 0), partner(cur.size(), -1);
+    for (size_t i = 0; i < cur.size(); ++i) {
+      for (size_t j = 0; j < prev.size(); ++j) {
+        if (cur[i].lo <= prev[j].hi && prev[j].lo <= cur[i].hi) {
+          ++ncur[i];
+          ++nprev[j];
+          partner[i] = static_cast<int>(j);
+        }
+      }
+    }
+    for (size_t i = 0; i < cur.size(); ++i) {
+      if (ncur[i] == 1 && nprev[static_cast<size_t>(partner[i])] == 1) {
+        cur[i].cell = prev[static_cast<size_t>(partner[i])].cell;
+      } else {
+        cur[i].cell = static_cast<int>(cells.size());
+        cells.emplace_back();
+        cells.back().a0 = a;
+      }
+      cells[static_cast<size_t>(cur[i].cell)].spans.emplace_back(cur[i].lo, cur[i].hi);
+    }
+    prev = std::move(cur);
+  }
+  num_cells = static_cast<int>(cells.size());
+  if (cells.empty()) {
+    return;
+  }
+
+  const int step_cells = std::max(1, static_cast<int>(params.step / map.info.resolution));
+  const bool ascending = vertical ?
+    (params.start_corner == "top_left" || params.start_corner == "bottom_left") :
+    (params.start_corner == "top_left" || params.start_corner == "top_right");
+  const bool start_high = vertical ?
+    (params.start_corner == "bottom_left" || params.start_corner == "bottom_right") :
+    (params.start_corner == "top_right" || params.start_corner == "bottom_right");
+
+  // Columns of a cell in visiting order.
+  const auto cell_columns = [&](const Cell & c) {
+    std::vector<int> cols;
+    const int n = static_cast<int>(c.spans.size());
+    if (ascending) {
+      for (int k = 0; k < n; k += step_cells) {
+        cols.push_back(c.a0 + k);
+      }
+    } else {
+      for (int k = n - 1; k >= 0; k -= step_cells) {
+        cols.push_back(c.a0 + k);
+      }
+    }
+    return cols;
+  };
+
+  std::vector<uint8_t> done(cells.size(), 0);
+  std::pair<int, int> here = cell_xy(ascending ? 0 : A - 1, start_high ? B - 1 : 0);
+  bool have_here = false;
+  const std::string prefix = vertical ? "strip_v_" : "strip_h_";
+  for (size_t n = 0; n < cells.size(); ++n) {
+    // Nearest unvisited cell by the first stroke's nearer end.
+    double best = 1e18;
+    size_t best_i = 0;
+    for (size_t i = 0; i < cells.size(); ++i) {
+      if (done[i]) {
+        continue;
+      }
+      const auto cols = cell_columns(cells[i]);
+      const auto & sp = cells[i].spans[static_cast<size_t>(cols.front() - cells[i].a0)];
+      for (int b : {sp.first, sp.second}) {
+        const auto xy = cell_xy(cols.front(), b);
+        const double d = std::hypot(xy.first - here.first, xy.second - here.second);
+        if (d < best) {
+          best = d;
+          best_i = i;
+        }
+      }
+    }
+    done[best_i] = 1;
+    const Cell & cell = cells[best_i];
+    const auto cols = cell_columns(cell);
+    bool high = start_high;
+    if (have_here) {
+      const auto & sp = cell.spans[static_cast<size_t>(cols.front() - cell.a0)];
+      const auto lo = cell_xy(cols.front(), sp.first);
+      const auto hi = cell_xy(cols.front(), sp.second);
+      high = std::hypot(hi.first - here.first, hi.second - here.second) <
+        std::hypot(lo.first - here.first, lo.second - here.second);
+    }
+    const std::string cell_tag = "cell_" + std::to_string(best_i);
+    for (size_t k = 0; k < cols.size(); ++k) {
+      const auto & sp = cell.spans[static_cast<size_t>(cols[k] - cell.a0)];
+      const int b_from = high ? sp.second : sp.first;
+      const int b_to = high ? sp.first : sp.second;
+      const auto s_xy = cell_xy(cols[k], b_from);
+      const auto e_xy = cell_xy(cols[k], b_to);
+      if (k > 0 && params.add_strip_connectors) {
+        const PoseStamped * ref = path.poses.empty() ? nullptr : &path.poses.back();
+        addStripConnectorWaypoints(
+          path, map, grid, params, here.first, here.second, s_xy.first, s_xy.second, ref, segments);
+      }
+      const auto start_pose = gridToWorld(
+        s_xy.first, s_xy.second, map, path.poses.empty() ? nullptr : &path.poses.back(),
+        params.pose_mode);
+      const auto end_pose = gridToWorld(e_xy.first, e_xy.second, map, &start_pose, params.pose_mode);
+      const uint32_t si = static_cast<uint32_t>(path.poses.size());
+      path.poses.push_back(start_pose);
+      path.poses.push_back(end_pose);
+      segments.push_back(makeStripSegment(
+        prefix + std::to_string(segments.size()), si, si + 1, map.header.frame_id, params,
+        {"strip", cell_tag}));
+      here = e_xy;
+      have_here = true;
+      high = !high;
+    }
+  }
+}
+
+int BoustrophedonPlanner::fillCoverageGaps(
+  const OccupancyGrid & map, const std::vector<int8_t> & grid, const CoveragePlannerParams & params,
+  bool vertical, Path & path, std::vector<MotionPlanSegment> & segments)
+{
+  const int W = static_cast<int>(map.info.width);
+  const int H = static_cast<int>(map.info.height);
+  const int A = vertical ? W : H;
+  const int B = vertical ? H : W;
+  const double res = map.info.resolution;
+  const double radius = 0.5 * params.swath / res + 1e-9;  // cells
+  const int reach = static_cast<int>(std::floor(radius));
+  const auto at = [&](int a, int b) {return static_cast<size_t>(vertical ? b * W + a : a * W + b);};
+  const auto cell_xy = [&](int a, int b) {
+    return vertical ? std::make_pair(a, b) : std::make_pair(b, a);
+  };
+  const auto is_free = [&](int a, int b) {
+    return a >= 0 && a < A && b >= 0 && b < B && isCellFree(grid[at(a, b)], params.allow_unknown);
+  };
+
+  std::vector<uint8_t> covered(grid.size(), 0);
+  // Mark (commit) or measure (gain: uncovered free cells, and their extent along b, inside the swath
+  // band of the stroke a fixed, b in [b0, b1]).
+  const auto band = [&](int a, int b0, int b1, bool commit, int * gain, int * lo, int * hi) {
+      for (int da = -reach; da <= reach; ++da) {
+        const int aa = a + da;
+        if (aa < 0 || aa >= A) {
+          continue;
+        }
+        for (int bb = std::max(0, b0 - reach); bb <= std::min(B - 1, b1 + reach); ++bb) {
+          const int db = bb < b0 ? b0 - bb : (bb > b1 ? bb - b1 : 0);
+          if (std::hypot(da, db) > radius) {
+            continue;
+          }
+          if (commit) {
+            covered[at(aa, bb)] = 1;
+          } else if (is_free(aa, bb) && !covered[at(aa, bb)] && bb >= b0 && bb <= b1) {
+            ++*gain;
+            *lo = std::min(*lo, bb);
+            *hi = std::max(*hi, bb);
+          }
+        }
+      }
+    };
+
+  // Strokes the component already has.
+  std::pair<int, int> here{-1, -1};
+  for (const auto & seg : segments) {
+    if (seg.label.rfind("strip_", 0) != 0) {
+      continue;
+    }
+    const auto s = worldToGridCell(path.poses[seg.start_index].pose, map);
+    const auto e = worldToGridCell(path.poses[seg.end_index].pose, map);
+    const int a = vertical ? s.first : s.second;
+    const int b_s = vertical ? s.second : s.first;
+    const int b_e = vertical ? e.second : e.first;
+    band(a, std::min(b_s, b_e), std::max(b_s, b_e), true, nullptr, nullptr, nullptr);
+    here = e;
+  }
+
+  const int min_cells = params.min_stroke_length_m > 0.0 ?
+    static_cast<int>(std::ceil(params.min_stroke_length_m / res - 1e-9)) : 1;
+  const std::string prefix = vertical ? "strip_v_" : "strip_h_";
+  std::vector<uint8_t> skipped(grid.size(), 0);
+  int added = 0;
+  for (int a0 = 0; a0 < A; ++a0) {
+    for (int b0 = 0; b0 < B; ++b0) {
+      if (!is_free(a0, b0) || covered[at(a0, b0)] || skipped[at(a0, b0)]) {
+        continue;
+      }
+      // Best column within reach of the cell: the one whose free span through the cell covers most
+      // uncovered cells (ties: the one nearest the keep-out edge, i.e. furthest along the stepover).
+      int best_gain = 0, best_a = -1, best_lo = 0, best_hi = 0;
+      for (int a = std::min(A - 1, a0 + reach); a >= a0; --a) {
+        if (!is_free(a, b0)) {
+          continue;
+        }
+        int bl = b0, bh = b0;
+        while (is_free(a, bl - 1)) {
+          --bl;
+        }
+        while (is_free(a, bh + 1)) {
+          ++bh;
+        }
+        if (bh - bl < min_cells) {
+          continue;  // the free span is shorter than a stroke
+        }
+        int gain = 0, lo = bh, hi = bl;
+        band(a, bl, bh, false, &gain, &lo, &hi);
+        if (gain <= 0) {
+          continue;
+        }
+        if (hi - lo < min_cells) {  // widen to the minimum length inside the span
+          lo = std::max(bl, lo - (min_cells - (hi - lo)) / 2);
+          hi = std::min(bh, lo + min_cells);
+          lo = std::max(bl, hi - min_cells);
+        }
+        if (gain > best_gain) {
+          best_gain = gain;
+          best_a = a;
+          best_lo = lo;
+          best_hi = hi;
+        }
+      }
+      if (best_a < 0) {
+        skipped[at(a0, b0)] = 1;
+        continue;
+      }
+      bool from_hi = false;
+      if (here.first >= 0) {
+        const auto lo_xy = cell_xy(best_a, best_lo);
+        const auto hi_xy = cell_xy(best_a, best_hi);
+        from_hi = std::hypot(hi_xy.first - here.first, hi_xy.second - here.second) <
+          std::hypot(lo_xy.first - here.first, lo_xy.second - here.second);
+      }
+      const auto s_xy = cell_xy(best_a, from_hi ? best_hi : best_lo);
+      const auto e_xy = cell_xy(best_a, from_hi ? best_lo : best_hi);
+      const auto start_pose = gridToWorld(
+        s_xy.first, s_xy.second, map, path.poses.empty() ? nullptr : &path.poses.back(),
+        params.pose_mode);
+      const auto end_pose = gridToWorld(e_xy.first, e_xy.second, map, &start_pose, params.pose_mode);
+      const uint32_t si = static_cast<uint32_t>(path.poses.size());
+      path.poses.push_back(start_pose);
+      path.poses.push_back(end_pose);
+      segments.push_back(makeStripSegment(
+        prefix + std::to_string(segments.size()), si, si + 1, map.header.frame_id, params,
+        {"strip", "gap_fill"}));
+      band(best_a, best_lo, best_hi, true, nullptr, nullptr, nullptr);
+      here = e_xy;
+      ++added;
+      if (!covered[at(a0, b0)]) {
+        skipped[at(a0, b0)] = 1;  // never loop on a cell the stroke did not reach
+      }
+    }
+  }
+  return added;
 }
 
 bool BoustrophedonPlanner::extractFreeSpaceBounds(

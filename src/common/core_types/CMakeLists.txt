@@ -24,7 +24,7 @@ ament_export_include_directories(include)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
-  ament_add_gtest(test_core_types test/test_pose.cpp test/test_trajectory.cpp test/test_tool_profile.cpp test/test_wrench.cpp)
+  ament_add_gtest(test_core_types test/test_pose.cpp test/test_trajectory.cpp test/test_tool_profile.cpp test/test_wrench.cpp test/test_command_guard.cpp test/test_pivot_calibration.cpp)
   target_link_libraries(test_core_types ${PROJECT_NAME})
 
   find_package(ament_lint_auto QUIET)

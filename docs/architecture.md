@@ -16,7 +16,7 @@ runtime by config. Nothing downstream knows which implementation produced its in
 ```
 
 Target scope: **any task, any robot, any surface**. Today the surface model is planar
-(walls); the contracts are written so non-planar surfaces drop in without changing
+(walls, floors, ceilings and column faces as patches); the contracts are written so non-planar surfaces drop in without changing
 coverage, planning or control interfaces.
 
 ## Rules every module follows
@@ -74,7 +74,10 @@ Coverage and planning should depend on a surface *interface*, not on "a plane":
 
 - `SurfaceModel`: `frame`, `project(point) -> (u, v)`, `lift(u, v, offset) -> Pose`
   (position + outward normal + tangent frame), `contains(u, v)`, `obstacles() -> regions`.
-- Planar implementation: today's `WallPlane` + `wall_basis` / `wall_pose_lift`.
+- Planar implementation: `SurfacePatch` (`coverage_planner/core/surface_patch.hpp`): wall, floor, ceiling or
+  column face as a plane frame plus (u, v) extent, with `project`, `point`, `contains`, `liftPatchPath` and
+  `planPatchCoverage`; it sits on `WallPlane` + `wall_basis` / `wall_pose_lift`. See
+  [coverage_patterns.md](coverage_patterns.md).
 - Non-planar implementations later: triangle mesh (geodesic / per-face frames), parametric
   patch, height map. Coverage keeps working in `(u, v)`; only `lift()` changes.
 - Keep the contact surface and obstacles as separate scene objects, always.

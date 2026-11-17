@@ -28,8 +28,27 @@ a frame mirrored toward `start_corner`, so it begins at that corner; chains are 
 first and reversed when their far end is closer. Design after the sweepline planner of an earlier
 production stack (polygon based there, on a grid here); written from the algorithm, not copied.
 
-Not done yet: a true cellular decomposition (events, cells, exact cell ordering by a routing
-solver) for large cluttered walls, and spiral. Both fit behind the same interface.
+### Obstacles on a wall: components, gap strokes, cells
+
+Three options of the boustrophedon planner (`CoveragePlannerParams`; the node declares them as parameters, `coverage_planner.yaml`):
+
+- **All free components.** A full-height rib splits the free raster into two panels. `plan_all_components` (now the node default;
+  it was `false`, which planned only the largest panel, the `two_panels` MuJoCo failure) plans every component of at least
+  `min_component_cells`. `components_in_sweep_order` orders them along the stepover axis from `start_corner` (left panel first)
+  instead of largest first; with more than one component each segment carries a `component_N` tag.
+- **Short strokes beside obstacles.** `fill_gaps` rasterises the swath band of the strokes a component already has and, for free
+  cells left further than swath/2 from every stroke (next to a keep-out edge, at a far edge), adds strokes along the free span of the
+  best column in reach, tagged `gap_fill`. `min_stroke_length_m` is the shortest such stroke: a span with fewer cells is left alone,
+  a stroke covering less is widened inside its span. Off in the core struct, on in the node and in `planCoverageFromScan`.
+- **Cell decomposition.** `decomposition: "cells"` splits a component where the free span of a sweep line splits or merges (a window
+  gives left, above, below, right = 4 cells), sweeps each cell as one serpentine block (`cell_N` tag) and visits cells nearest first.
+  Default `"columns"`. Not exact BCD ordering (no routing solver), and the sweepline planner ignores all of these options.
+
+Synthetic rasters (1 cm cells, 0.14 m swath, keep-out already grown; `test_coverage_components`, covered fraction of the free cells
+by `CoverageVerifier`): `two_panels` 0.46 (largest only) -> 0.92 (all components) -> 1.00 (+ gap strokes); `window` 0.92 -> 1.00;
+`protrusion` 0.975 -> 1.00. No sim run.
+
+Not done yet: exact cell ordering by a routing solver, and spiral.
 
 ## Wall patterns
 
@@ -55,6 +74,29 @@ cannot stand nearer the wall ends), `floor_clearance_m` (lowest row's edge above
 frame u along the wall, v up), rasterize observed cells and obstacle footprints, plan the chosen
 pattern, lift every part with its own tool profile and concatenate. See
 [scene_model.md](scene_model.md).
+
+## Floors, ceilings and columns: planar patches
+
+`SurfacePatch` (`core/surface_patch.hpp`) is the planar `SurfaceModel`: a plane origin, a right-handed
+(u, v, normal) frame, a rectangular (u, v) extent and a kind (`wall`, `floor`, `ceiling`, classified from
+the normal). The normal points to the side the tool works from: floor +z, ceiling -z, a column face
+horizontally outward. `makeFloorPatch`, `makeCeilingPatch` and `makeSurfacePatch` build one; for a
+wall `u = up x normal` (v up), for a horizontal plane u = world x. The API:
+
+- `project(world) -> (u, v, n)`, `point(u, v, n)`, `contains(u, v)`;
+- `liftPatchPath(patch, uv_waypoints, tool_task)`: 2D waypoints to tool poses, tool z along -normal, standoff
+  along +normal, edge tilt and yaw from the tool profile (it is `liftCoveragePathPose` on the patch plane);
+  `liftPatchPose` for one point without tilt;
+- `patchObstacles(patch, scene)`: obstacle footprints (any orientation, same filter as a wall);
+- `planPatchCoverage(patch, obstacles, tool, options)`: rasterize, plan (boustrophedon or sweepline, any wall
+  pattern), lift, expand passes. This is the tail of `planCoverageFromScan`, now `planCoverageOnWall`, so a wall
+  gives the same poses as before and a floor or ceiling uses the same code. A scanned floor also works through
+  `planCoverageFromScan` with `plane.normal_hint = +z`.
+
+A room is a list of patches, each planned on its own. Not done: reachability and stand selection for a horizontal
+surface (`chooseStation` still rejects a horizontal plane), reach limits for ceilings, ordering patches, and
+`loadWallScene` flatness is still a threshold on the scene file (it does not look at orientation).
+Tests: `test/core/surface_patch_test.cpp` (floor and ceiling with obstacles, orientation, verification raster).
 
 ## Non-planar surfaces (long term)
 
@@ -92,8 +134,8 @@ wall: coverage (through `CoverageVerifier`), contact force RMS error against the
 of working samples inside the force band, and the duration. A contact tool counts as working while it presses at
 least `engaged_force_n`; a non-contact tool while `tool_active` is set. A new stroke starts after every sample where the
 tool was not working. Obstacles are excluded from the target. The limits are the caller's numbers
-(`ScorecardLimits`); each one that fails adds a line to `failures`. It does not count collisions (the recorder must),
-and the coverage is geometric. It scores recorded samples; recording them from a simulator run is not wired yet.
+(`ScorecardLimits`); each one that fails adds a line to `failures`. The coverage is geometric. It counts obstacle contacts (below), not
+other collisions (the recorder must). It scores recorded samples; recording them from a simulator run is not wired yet.
 
 `ros2 run coverage_planner score_run --samples run.csv --wall wall.json [--swath 0.2] [--target-force 10] [--band 1]
 [--no-contact] [--min-coverage 0.95] [--max-rms N] [--max-peak N] [--min-in-band F]` scores a recording and prints the
@@ -101,4 +143,14 @@ card as JSON (exit 0 passed, 1 failed a limit, 2 bad input). The CSV has the hea
 metres, newtons pressing on the wall, 0/1 valve); the wall JSON is `{"origin": [x,y,z], "u": [..], "v": [..],
 "u_range": [min,max], "v_range": [min,max]}` in the same frame as the positions, with `u` and `v` orthonormal and the
 normal `u x v`. It takes any recording, a simulator run or a hardware log.
+
+Obstacles on the wall: the wall JSON may carry `"obstacles": [{"id": 0, "u": [min,max], "v": [min,max], "height_m": 0.04}]`
+(u, v in the wall's coordinates, `height_m` how far the obstacle stands off the wall, against `u x v`; 0 for a window
+hole). `score_run` then (1) leaves the obstacle out of the coverage target, grown by `--keepout-margin M` (use the
+planner's clearance, so the target is the area the planner may reach) and (2) counts obstacle contacts: an episode is a
+run of consecutive samples, any force, whose tool point is inside an obstacle's footprint (grown by `--obstacle-margin`)
+and not above its top (`height_m` + `--obstacle-tol`, default 3 mm). The card has `obstacle.contacts` and
+`obstacle.contact_samples`; `--max-obstacle-contacts N` fails the run above N. Only the tool point is checked, not the
+arm's links, so an elbow hitting the obstacle is not seen. `record_run.py --scene wall_scene.json` writes the list
+from a wall scene (`docs/sim_mujoco.md`, scenario set).
 

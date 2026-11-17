@@ -11,6 +11,7 @@ uses ([scene_model.md](scene_model.md)).
 | Mock | `mock`, `jtac_mock` | `mobile_manipulator_description` | none (ros2_control mock components, scripted F/T) | working; unit and demo level |
 | Gazebo | `gazebo` | `sim_gazebo` | Gazebo Harmonic (gz-sim 8) with `gz_ros2_control` | not on this branch: arrives with the Gazebo PRs |
 | MuJoCo | `mujoco` | `sim_mujoco` | MuJoCo 4.x through our own ros2_control `SystemInterface` | not on this branch: arrives with the MuJoCo PRs |
+| Real robot | `real` | `mobile_manipulator_description` | vendor driver chosen by arm (xarm_ros2, ur_robot_driver, franka_ros2; not vendored), `real_driver:=mock` for CI | wiring and tests only, nothing run on hardware ([hardware_bringup.md](hardware_bringup.md) section 0a) |
 | Isaac Sim | `isaac` | `sim_isaac` | NVIDIA Isaac Sim | **stub**: contract and plan only, nothing runs |
 
 ## What every backend provides (the contract)
@@ -52,6 +53,8 @@ src/simulation/
 
 Only `sim_isaac` exists on this branch. The `sim_gazebo` and `sim_mujoco` packages and their pages
 (`docs/sim_gazebo.md`, `docs/sim_mujoco.md`) arrive with their own PRs.
+
+What the sims do and do not model, and the opt-in noise, bias and delay models of the MuJoCo plugin: [sim_vs_real.md](sim_vs_real.md).
 
 Docker: the `sim` target holds MuJoCo 4 (`mujoco-core`, MJX, JAX) for Python work
 ([docker.md](docker.md)); a thin Gazebo target arrives with the Gazebo PRs. Isaac Sim is large and ships as its own NVIDIA

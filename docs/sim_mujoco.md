@@ -290,6 +290,7 @@ ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}}"
 A ray-cast depth sensor (`mj_multiRay` against the scene geoms) on the root link publishes
 `sensor_msgs/PointCloud2` on `/depth_sensor/points` (frame `depth_sensor_link`, TF from the launch file); arguments
 `depth_sensor_pose`, `depth_sensor_noise_m`, `depth_sensor_rate_hz`. Off by default and then the MJCF is unchanged.
+`live_octomap:=true` (with `move_group:=true`) feeds the cloud to MoveIt's octomap (`scripts/run_live_octomap.sh`).
 Details, the wall detector that consumes it and `scripts/run_depth_wall.sh` are in [perception_live.md](perception_live.md).
 
 ## MuJoCo 4 notes
@@ -492,6 +493,62 @@ in-band 0.45. The unchanged manager pass (base at the origin, `run_manager_pass.
 earlier run with 3 lost the first column, coverage 0.68), and the F/T peak was 34 N in another run (the scorer limit passed).
 A wall needing several stands: see the multi-stand pass below.
 
+### Scenario set (obstacles on the wall)
+
+`scripts/run_scenarios.sh [-n RUNS] [-l] [scenario ...]` runs named walls through the manager pass and prints one row per run;
+`-l` lists the scenarios. `scripts/make_scenario_scene.py` writes each scenario's three data files (the sim wall
+`smoke_wall_scene.json`, the planned wall `wall_pass_coverage_scene.json`, `walls.pcd`) from the stock smoke wall: the same
+`obstacles[]` entries go into both scene files, so the MuJoCo wall and the plan agree. A `box` obstacle is an oriented box in the
+sim (`wall_world.py`), a blocked region for the coverage planner and a surface in the point cloud (MoveIt's octomap); an
+`opening` (window) is a hole cut through the sim wall, no points in the cloud, a blocked region for the planner.
+
+| scenario | wall | obstacle | pass |
+|---|---|---|---|
+| `plain` | 0.3 m, stock | none | one stand |
+| `plain_wide` | 0.5 m | none (control for the next two) | one stand |
+| `window` | 0.5 m | 0.10 x 0.08 m hole in the middle | one stand |
+| `protrusion` | 0.5 m | 0.07 x 0.07 m box, 35 mm proud, socket-like | one stand |
+| `two_panels` | 0.9 m | full-height 40 mm rib, 30 mm proud, between the panels | multi-stand (two stands) |
+| `two_panels_plain` | 0.9 m | none (control) | multi-stand |
+
+Scoring: each recording is scored twice with `score_run` (`docs/coverage_patterns.md`): `cov_wall` is the covered fraction of the wall
+minus the obstacle's own footprint, `cov_reach` the fraction of the wall minus the obstacle grown by the planner's 0.07 m
+clearance (what the planner may reach). Contacts are episodes in which the tool point was inside an obstacle's footprint below its top
+(the tool point only, not the arm's links). A run passes when the manager exits 0, `cov_reach` is at least 0.9 and there is no contact.
+
+Results (MuJoCo, UR10e, 0.01 m/s, swath 0.14 m, 10 N target, one run at a time; every run twice):
+
+| scenario | run | cov wall | cov reachable | peak N | RMS N | obstacle contacts | result |
+|---|---|---|---|---|---|---|---|
+| plain | 1 | 0.931 | 0.931 | 19.2 | 3.59 | 0 | pass |
+| plain | 2 | 0.931 | 0.931 | 19.9 | 3.56 | 0 | pass |
+| plain_wide | 1 | 0.959 | 0.959 | 19.8 | 3.61 | 0 | pass |
+| plain_wide | 2 | 0.959 | 0.959 | 20.5 | 3.60 | 0 | pass |
+| window | 1 | 0.671 | 0.793 | 20.0 | 3.72 | 0 | FAIL (cov_reach < 0.9) |
+| window | 2 | 0.671 | 0.793 | 20.7 | 3.61 | 0 | FAIL (cov_reach < 0.9) |
+| protrusion | 1 | 0.585 | 0.784 | 22.9 | 3.72 | 0 | FAIL (cov_reach < 0.9) |
+| protrusion | 2 | 0.585 | 0.784 | 19.5 | 3.65 | 0 | FAIL (cov_reach < 0.9) |
+| two_panels | 1 | 0.441 | 0.500 | 108.6 | 2.66 | 0 | FAIL (cov_reach < 0.9) |
+| two_panels | 2 | 0.441 | 0.500 | 17.1 | 2.44 | 0 | FAIL (cov_reach < 0.9) |
+
+`two_panels` is a failure of the planner, not of the scorer: the coverage planner returns strokes for the left panel only (columns at
+y 0.31 to 0.61 of a wall y 0.3 to 1.2; the area beyond the rib is a second free component and is not planned), so the stand planner
+sees a 0.3 m span, one stand serves it ("stand 0/1", 4 columns done, none failed) and the right panel is never visited. Peak 108.6 N in
+run 1 is one press transient (17.1 N in run 2). `two_panels_plain` (no rib, two stands) was not run in this pass.
+
+What the runs showed:
+- Two bugs on the way, both fixed here. The demo coverage node rasterizes the obstacle clearance into the grid but the planner
+  service node then added its own `obstacle_inflation_radius` (default 0.3 m) on top, which removed all free space on a 0.5 m
+  wall; the passes now start it with `-p obstacle_inflation_radius:=0.0`. And `CoverageOutputJsonSource` grouped points by column and
+  stroked from the lowest to the highest one, so a column the planner had split around the obstacle became one stroke through it
+  (first window run: 1 contact episode, 806 samples inside the window edge); it now emits one stroke per span of the plan's segments.
+- The planner leaves only end points of the split columns beside a small obstacle (the keep-out is 0.24 x 0.22 m around the
+  window, on a 0.3 m high patch), and a single point is no stroke, so the area next to the obstacle is not wiped: `cov_reach` stays
+  below 0.9 for `window` and `protrusion` (the failure rows are real, not a scorer artefact). Wiping to the edge of the keep-out
+  needs the planner to emit short strokes, or a smaller clearance than half the swath.
+- Obstacle contacts counted only the tool point; an elbow or the wiper body hitting a protrusion is not seen yet (the MuJoCo plugin
+  does not publish contact pairs).
+
 ### Multi-stand pass (the manager's `execute_coverage` action)
 
 `scripts/run_multi_stand_pass.sh` makes the wall 0.9 m wide (`MULTI_STAND_WALL_WIDTH`, from y = `MULTI_STAND_WALL_DY` 0.3;
@@ -554,10 +611,50 @@ remaining OMPL timeouts (one or two 5 s tries on the first approach of a stand i
 `dock_attempts: 6`. The one failed run lost stand 1 differently: the contact stroke of its column 2 aborted at the reach limit, and
 the arm ended in self-collision (`arm_upper_arm_link` with `lift_carriage_link`, `arm_forearm_link` with `arm_wrist_3_link`), so
 `CheckStartStateCollision` refused the retract and the stow for the rest of the run. That is not the wall, and the wall-clear retry
-cannot help; a recovery that moves out of a self-collision (a joint-space jog, or allowing those link pairs for the one move) is not
-built. Peaks of 83 to 263 N in three of the eight runs (the failed one and two passing ones) were not investigated beyond that.
+cannot help; a recovery that moves out of a self-collision is built in the next section. Peaks of 83 to 263 N in three of the eight runs (the failed one and two passing ones) were not investigated beyond that.
 
-`run_manager_pass.sh` (three columns, no stand change) after the same changes: scorer passes, coverage 0.931, peak 19.6 N, RMS 3.57 N,
+#### Failure handling in the loop (`feat/failure-recovery`)
+
+Cause of the two jams, read from the logs of these runs: after a column the arm can sit with the lift 1.5 mm below its lower stop
+(MoveIt's `CheckStartStateBounds` then refuses every start state: stow and dock fail in 3 to 12 ms) or in a self-collision at
+the end of the reach (`arm_forearm_link` with `arm_wrist_2_link`, `arm_upper_arm_link` with `lift_carriage_link`; the Cartesian
+plan reports a collision truncation and OMPL aborts at once). No planner moves out of such a start state, so what stays is a
+move that does not plan:
+
+- **Recovery jog** (`core/recovery_jog.hpp`, pure logic, gtests). `planRecoveryJog(current, good, params)`: straight line in joint
+  space from the live state to the last configuration known to be good, cut into steps of at most 0.05 rad, smooth timing
+  (fastest joint at most 0.15 rad/s, at least 1 s), target kept `travel_lift_margin_m` inside the joint limits (the lift's travel from the base check by default),
+  refused when a joint would have to move more than `recovery_jog_max_rad` (2.5). The manager runs it straight on the
+  controller (no plan, no collision check: it goes back toward a state the arm came from) when every dock try failed, when a retract
+  failed (contact and spray) and when the stow failed, then repeats the move. "Good" is the stowed arm at the start of a stand and
+  the arm at each column's dock pose (not the pose after a retract, which can be the jammed one). `recovery_jog: false` turns it off.
+- **Column retry, then skip**: a column whose dock or stroke did nothing is run once more (`column_retries`, default 1), after a jog if
+  the retract had failed; if it fails again it is skipped, the loop goes on, and the result lists it under `columns_failed`
+  (per stand too).
+- **Column order**: `column_order: input` (default, the plan's order), `nearest` (nearest neighbour on the travel time from one stroke's
+  end to the next stroke's start, the slowest axis over equal speeds) or `nearest_2opt` (plus a 2-opt pass; strokes keep their
+  direction). The first column of a stand stays first. `core/column_ordering.hpp`, gtests. Not run in the sim (default order kept).
+
+Not done: the allowed-collision-matrix relaxation (the jog was simpler and safe enough); a collision check along the jog.
+
+Runs of `run_multi_stand_pass.sh` with this (this machine, one at a time; in the same session the build before it, without the
+lift limit, passed 4 of 5 with jogs on dock, and the unchanged main failed its first run: columns 5 to 7 of stand 0 did not
+dock, 0.785 / 59.9 N):
+
+| run | passed | columns done | coverage / peak / RMS error |
+| --- | --- | --- | --- |
+| 1 | yes | 9 of 9 (one dock jog) | 0.977 / 53.5 N / 2.83 N |
+| 2 | no | 7 of 9 (columns 5 and 6 failed after their retries; the stow jog got stand 1 reached) | 0.798 / 65.4 N / 2.93 N |
+| 3 | yes | 9 of 9 (one dock jog) | 0.977 / 66.1 N / 2.79 N |
+| 4 | yes | 9 of 9 (jog, one column retry) | 0.977 / 340 N / 14.3 N |
+| 5 | no | 9 of 9 | 0.799 / 330 N / 7.6 N (all columns reported done, coverage low, not investigated) |
+
+Pass rate 3 of 5, against the failure of the same build without recovery (columns 5 to 7 lost every time in the two runs seen).
+Peaks of 330 N and more are the unexplained force spikes noted above; they are not touched by this change.
+
+`run_manager_pass.sh` with this change: scorer passes, coverage 0.931, peak 124 N, RMS 5.35 N, three columns done (one run; the peak is higher than the 19.6 N earlier and was not investigated).
+
+(Earlier note, before the failure handling above:) `run_manager_pass.sh` (three columns, no stand change) after the same changes: scorer passes, coverage 0.931, peak 19.6 N, RMS 3.57 N,
 in-band 0.48, all three columns done (one run); its prime move is now a no-op as well.
 
 What it took, honestly: without `stand_max_span_m` the planner returns **one** stand "reaching" 54 poses for the 0.9 m wall
@@ -574,6 +671,32 @@ over the next second 0.008 rad/s (the unload ramp makes the cancel take 1.65 s f
 was cancelled, the retry arrived (3.9 mm) and the stand ran (that run was stopped early). The flaky first dock and the failed
 stow of those runs are explained in "Why the first dock and the stow failed" above.
 
+#### Mission ledger and resume (`feat/mission-ledger`)
+
+The manager keeps a durable ledger of the mission: per column (and the stand that ran it) one of PENDING, RUNNING, DONE, SKIPPED
+or FAILED, with a typed reason for SKIPPED (`NAV_FAILED`, `DOCK_FAILED`, `PLAN_FAILED`, `CONTACT_OVERLOAD`). It is a JSON file
+written atomically (temp file, then rename) after every state change; `core/mission_ledger.hpp`, ROS-free. Switch it on with
+the manager parameter `ledger_path: /some/dir/mission.json` (empty = off, the old behaviour). The mission id is a hash of the
+plan file's content, so a changed plan never resumes from an old ledger. A column is the unit (the manager runs a wall column as
+one segment); the stand is kept for information only, since stands are planned again after a restart.
+
+- `ExecuteCoverage.Goal.resume: true` keeps the ledger of the same plan and runs only the columns not DONE; RUNNING (the process
+  died in them), PENDING, FAILED (partial) and SKIPPED for a navigation, dock or plan failure are run again. Columns skipped
+  for `CONTACT_OVERLOAD` are not run again by a resume (no blind retry; clear the ledger or send `resume: false` to retry
+  them) and are reported as failed. `resume: false` (default) starts over. A corrupted ledger file is moved to
+  `<path>.corrupt` and the mission starts empty. In multi-stand runs only the unfinished columns are given to `plan_stands`.
+- Contact overload: with `contact_overload_n: 40.0` (0 = off) a column whose tool force passed that limit and did not finish
+  is skipped as `CONTACT_OVERLOAD` and is not retried by `column_retries`.
+- Pause and resume: `ros2 topic pub --once /manipulation_manager/mission_command std_msgs/msg/String "{data: pause}"` (or
+  `resume`). A pause takes effect at the next column boundary (the mission FSM, `core/mission_fsm.hpp`: IDLE, ACTIVE, PAUSED,
+  STOPPED, RECOVERY); the stroke in flight is not interrupted. Cancel is unchanged and works while paused.
+
+Acceptance test (kill mid-wall, restart, only unfinished segments rerun): start `run_multi_stand_pass.sh` with
+`MULTI_STAND_MANAGER_EXTRA` set to `ledger_path: /tmp/mission.json`, kill the manager (`pkill -f manipulation_manager_node`)
+while the second or third column is stroking, restart it with the same parameters and send the same goal with `resume: true` (`execute_coverage_client.py --multi-stand --resume`);
+the log says `resume: N column(s) already settled in the ledger, M to run` and only the columns that were not DONE are docked
+and stroked. The gtest `MissionLedger.KillMidWallRestartRerunsOnlyUnfinished` runs this sequence on the ledger without the sim.
+Not run in the sim yet (the machine was too loaded); not run on hardware.
 
 #### Sensed wall (M4 exit test)
 

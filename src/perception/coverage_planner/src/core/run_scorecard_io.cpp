@@ -3,6 +3,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
+#include <tuple>
 
 #include "coverage_planner/core/wall_basis.hpp"
 
@@ -84,6 +86,24 @@ WallPlane wallFromJson(const nlohmann::json & j)
   return wall;
 }
 
+std::vector<ObstacleRegion> obstaclesFromJson(const nlohmann::json & j, uint32_t wall_id)
+{
+  std::vector<ObstacleRegion> out;
+  if (!j.contains("obstacles")) {return out;}
+  uint32_t next_id = 0;
+  for (const auto & o : j.at("obstacles")) {
+    ObstacleRegion r;
+    r.id = o.value("id", next_id);
+    next_id = r.id + 1;
+    r.parent_wall = wall_id;
+    std::tie(r.u_min, r.u_max) = range(o, "u");
+    std::tie(r.v_min, r.v_max) = range(o, "v");
+    r.height_m = o.value("height_m", 0.0);
+    out.push_back(r);
+  }
+  return out;
+}
+
 nlohmann::json scorecardToJson(const RunScorecard & c)
 {
   nlohmann::json j = {
@@ -101,6 +121,7 @@ nlohmann::json scorecardToJson(const RunScorecard & c)
       {"peak_n", c.force_peak_n},
       {"in_band_fraction", c.in_band_fraction}}},
     {"time", {{"duration_s", c.duration_s}, {"engaged_s", c.engaged_s}}},
+    {"obstacle", {{"contacts", c.obstacle_contacts}, {"contact_samples", c.obstacle_contact_samples}}},
     {"strokes", c.strokes}};
   if (c.coverage.thickness.valid) {
     j["thickness"] = {

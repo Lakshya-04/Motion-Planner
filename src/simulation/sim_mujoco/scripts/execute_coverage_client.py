@@ -26,6 +26,7 @@ def main():
     ap.add_argument('--coverage', default='', help='coverage_output.json (empty: the manager parameter)')
     ap.add_argument('--multi-stand', action='store_true')
     ap.add_argument('--columns', type=int, nargs='*', default=[])
+    ap.add_argument('--resume', action='store_true', help='skip the columns the manager\'s mission ledger holds as done')
     ap.add_argument('--tool-mode', type=int, default=0)
     ap.add_argument('--cancel-after', type=float, default=0.0)
     ap.add_argument('--timeout', type=float, default=3000.0)
@@ -54,6 +55,7 @@ def main():
     goal.multi_stand = args.multi_stand
     goal.tool_mode = args.tool_mode
     goal.columns = args.columns
+    goal.resume = args.resume
     last = {'state': None}
 
     def on_feedback(fb):

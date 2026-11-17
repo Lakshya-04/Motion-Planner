@@ -4,6 +4,8 @@
 #include <cmath>
 #include <utility>
 
+#include "force_core/payload_excitation.hpp"
+
 namespace force_core
 {
 
@@ -145,7 +147,8 @@ constexpr double kMinPayloadMassKg = 1e-3;   // below this a negative fit is noi
 }  // namespace
 
 CalibrationResult identifyPayload(
-  const std::vector<CalibrationSample> & samples, const Vec3 & gravity_world, double sign)
+  const std::vector<CalibrationSample> & samples, const Vec3 & gravity_world, double sign,
+  double max_condition)
 {
   CalibrationResult out;
   out.samples = samples.size();
@@ -172,6 +175,17 @@ CalibrationResult identifyPayload(
       std::to_string(max_angle * 180.0 / M_PI) + " deg, need at least " +
       std::to_string(kMinPoseSpreadRad * 180.0 / M_PI) + " deg";
     return out;
+  }
+  {
+    std::vector<Mat3> rs;
+    for (const auto & s : samples) {rs.push_back(s.r_world_sensor);}
+    out.condition_number = regressorConditionNumber(rs, gravity_world);
+    if (out.condition_number > max_condition) {
+      out.message = "the poses do not excite the fit: regressor condition number " +
+        std::to_string(out.condition_number) + " exceeds " + std::to_string(max_condition) +
+        " (spread the orientations: more poses, rotation about at least two axes)";
+      return out;
+    }
   }
   // y = sign * raw. Force:  F = m g_s + b_F        unknowns [m, bFx, bFy, bFz]
   //                 Torque: T = u x g_s + b_T      unknowns [u = m c (3), bTx, bTy, bTz]

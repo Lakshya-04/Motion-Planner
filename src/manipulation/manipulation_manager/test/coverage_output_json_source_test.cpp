@@ -60,4 +60,28 @@ TEST(CoverageOutputJsonSourceTest, PlusXWallGroupsColumnsByYAndKeepsEachColumnsP
   }
 }
 
+TEST(CoverageOutputJsonSourceTest, ObstacleSplitColumnGivesOneStrokePerSpanNotOneThroughTheObstacle)
+{
+  // Column y = 0.11 split by an obstacle into z 1.01..1.10 and 1.20..1.29, each driven twice (pass 0 and the
+  // reverse pass); the plain column y = 0.01 has one span driven twice. Segments: index ranges into the poses.
+  const std::string poses =
+    pt(0.98, 0.11, 1.01) + "," + pt(0.98, 0.11, 1.10) + "," + pt(0.98, 0.11, 1.10) + "," + pt(0.98, 0.11, 1.01) + "," +
+    pt(0.98, 0.11, 1.20) + "," + pt(0.98, 0.11, 1.29) + "," + pt(0.98, 0.11, 1.29) + "," + pt(0.98, 0.11, 1.20) + "," +
+    pt(0.98, 0.01, 1.01) + "," + pt(0.98, 0.01, 1.29) + "," + pt(0.98, 0.01, 1.29) + "," + pt(0.98, 0.01, 1.01);
+  const std::string path = ::testing::TempDir() + "split.json";
+  std::ofstream(path) << R"({"final_lifted_and_expanded":{"path":{"poses":[)" << poses << R"(]},"segments":[)"
+    << R"({"start_index":0,"end_index":1},{"start_index":2,"end_index":3},{"start_index":4,"end_index":5},)"
+    << R"({"start_index":6,"end_index":7},{"start_index":8,"end_index":9},{"start_index":10,"end_index":11}]}})";
+  CoverageOutputJsonSource src(path, "base_footprint", 0.0, 0.01, 1.0, 1.3, 0.02, WallDirection::from(1, 0, 0));
+  const auto plan = src.getCoveragePlan();
+  ASSERT_EQ(plan.size(), 3U);   // y = 0.11 twice (ascending tangent = y descending), then y = 0.01 once
+  EXPECT_NEAR(plan[0].poses.front().y, 0.11, 1e-6);
+  EXPECT_NEAR(plan[0].poses.front().z, 1.01, 1e-6);
+  EXPECT_NEAR(plan[0].poses.back().z, 1.10, 1e-6);
+  EXPECT_NEAR(plan[1].poses.front().z, 1.20, 1e-6);
+  EXPECT_NEAR(plan[1].poses.back().z, 1.29, 1e-6);
+  EXPECT_NEAR(plan[2].poses.front().y, 0.01, 1e-6);
+  EXPECT_NEAR(plan[2].poses.back().z, 1.29, 1e-6);
+}
+
 }  // namespace manipulation_manager

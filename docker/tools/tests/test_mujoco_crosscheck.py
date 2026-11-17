@@ -94,8 +94,8 @@ def test_sphere_overlap_and_allowed(urdf):
     world = mm.sphere_world(kin, spheres, q)
     assert mm.overlapping_pairs(world, set()) == [('a', 'c')]
     assert mm.overlapping_pairs(world, {frozenset(('a', 'c'))}) == []
-    # exactly touching spheres (distance == r1 + r2) are free; a margin turns them into a hit
-    spheres['c'] = [(centre_in_c + inv_c[:3, :3] @ [0.2, 0, 0], 0.1)]
+    # spheres touching to within float error (distance == r1 + r2 + 1e-9) are free; a margin turns them into a hit
+    spheres['c'] = [(centre_in_c + inv_c[:3, :3] @ [0.2 + 1e-9, 0, 0], 0.1)]
     touching = mm.sphere_world(kin, spheres, q)
     assert mm.overlapping_pairs(touching, set()) == []
     assert mm.overlapping_pairs(touching, set(), margin=0.01) == [('a', 'c')]

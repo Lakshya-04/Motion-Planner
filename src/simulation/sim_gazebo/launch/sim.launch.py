@@ -6,6 +6,7 @@
   ros2 launch sim_gazebo sim.launch.py wall_scene:=/path/wall_scene.json wall_id:=0 standoff:=0.9
   ros2 launch sim_gazebo sim.launch.py profile:=ur10e_telescopic
   ros2 launch sim_gazebo sim.launch.py base_motion:=true                 # planar base on /cmd_vel, /odom, TF odom -> base_footprint
+  ros2 launch sim_gazebo sim.launch.py rgb_camera:=true                  # gz colour camera -> /rgb_camera/image
   ros2 launch sim_gazebo sim.launch.py depth_sensor:=true                # gz depth camera -> /depth_sensor/points
 
 What starts: gz sim (server only unless gui:=true), robot_state_publisher, the robot spawned from
@@ -22,10 +23,10 @@ import tempfile
 
 import xacro
 import yaml
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription,
-                            OpaqueFunction, RegisterEventHandler)
+                            OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable)
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -37,6 +38,24 @@ from sim_gazebo import wall_world
 FT_FRAME = 'ft_sensor_link'   # raw wrench frame: the sensor body between flange and tool
 SENSORS_PLUGIN = ('  <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">'
                   '<render_engine>ogre2</render_engine></plugin>\n')
+WORLD_CAMERA_MODEL = '''  <model name="rgb_camera_world">
+    <static>true</static>
+    <pose>{pose}</pose>
+    <link name="rgb_camera_world_link">
+      <sensor name="rgb_camera" type="camera">
+        <always_on>true</always_on>
+        <update_rate>{rate}</update_rate>
+        <visualize>false</visualize>
+        <topic>/rgb_camera</topic>
+        <camera>
+          <horizontal_fov>1.0472</horizontal_fov>
+          <image><width>{w}</width><height>{h}</height><format>R8G8B8</format></image>
+          <clip><near>0.05</near><far>20.0</far></clip>
+        </camera>
+      </sensor>
+    </link>
+  </model>
+'''
 CONTROLLER_NAMES = {'jtc': 'joint_trajectory_controller', 'jtac': 'combined_arm_lift_controller'}
 
 
@@ -114,6 +133,23 @@ def _launch(context):
         mappings.update(gz_depth_sensor='true', gz_depth_xyz=' '.join(map(str, pose[:3])),
                         gz_depth_rpy=' '.join(map(str, pose[3:])), gz_depth_noise=lc('depth_sensor_noise_m'),
                         gz_depth_rate=lc('depth_sensor_rate_hz'))
+    rgb = lc('rgb_camera') == 'true'
+    world_camera = ''
+    if rgb:
+        pose = [float(v) for v in lc('rgb_camera_pose').split()]
+        size = lc('rgb_camera_size').split()
+        if len(pose) != 6 or len(size) != 2:
+            raise ValueError('rgb_camera_pose needs "x y z roll pitch yaw", rgb_camera_size "width height"')
+        if lc('rgb_camera_frame') not in ('base', 'world'):
+            raise ValueError('rgb_camera_frame is base or world')
+    if rgb and lc('rgb_camera_frame') == 'world':
+        # a static model in the world, so the camera stays put when the base drives (multi-stand films)
+        world_camera = WORLD_CAMERA_MODEL.format(pose=' '.join(map(str, pose)), w=size[0], h=size[1],
+                                                 rate=lc('rgb_camera_rate_hz'))
+    elif rgb:
+        mappings.update(gz_rgb_camera='true', gz_rgb_xyz=' '.join(map(str, pose[:3])),
+                        gz_rgb_rpy=' '.join(map(str, pose[3:])), gz_rgb_width=size[0], gz_rgb_height=size[1],
+                        gz_rgb_rate=lc('rgb_camera_rate_hz'))
     robot_description = xacro.process_file(
         os.path.join(desc_pkg, 'urdf', 'mobile_manipulator.urdf.xacro'), mappings=mappings).toxml()
 
@@ -122,12 +158,14 @@ def _launch(context):
         world = os.path.join(tempfile.mkdtemp(prefix='sim_gazebo_world_'), 'wall.sdf')
         wall_world.generate_world(lc('wall_scene'), world, wall_id=int(lc('wall_id')),
                                   standoff=float(lc('standoff')))
-    if depth:
+    if depth or rgb:
         # the render sensors need the Sensors system in the world (ogre2; no display: gz falls back to headless)
         with open(world) as f:
             sdf = f.read()
-        if 'gz-sim-sensors-system' not in sdf:
-            sdf = sdf.replace('</world>', SENSORS_PLUGIN + '</world>', 1)
+        if 'gz-sim-sensors-system' not in sdf or world_camera:
+            if 'gz-sim-sensors-system' not in sdf:
+                sdf = sdf.replace('</world>', SENSORS_PLUGIN + '</world>', 1)
+            sdf = sdf.replace('</world>', world_camera + '</world>', 1)
             world = os.path.join(tempfile.mkdtemp(prefix='sim_gazebo_world_'), 'world_sensors.sdf')
             with open(world, 'w') as f:
                 f.write(sdf)
@@ -154,15 +192,32 @@ def _launch(context):
                     '/base/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
                     '/base/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V']
         remaps += [('/base/cmd_vel', '/cmd_vel'), ('/base/odom', '/odom'), ('/base/tf', '/tf')]
+    if rgb:
+        bridged.append('/rgb_camera@sensor_msgs/msg/Image[gz.msgs.Image')
+        remaps.append(('/rgb_camera', '/rgb_camera/image'))
     if depth:
         bridged.append('/depth_sensor/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked')
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge', output='screen',
                   arguments=bridged, remappings=remaps,
                   parameters=[{'use_sim_time': True}])
     truth = Node(package='sim_gazebo', executable='contact_ground_truth.py', output='screen',
-                 parameters=[{'use_sim_time': True, 'tcp_frame': fr['tcp']}])
+                 parameters=[{'use_sim_time': True, 'tcp_frame': fr['tcp'],
+                              # gz reports contact points in the world; with base_motion there is no `world` link in TF,
+                              # but `odom` starts at the spawn pose = the world origin (OdometryPublisher)
+                              'world_frame': 'odom' if base_motion else 'world'}])
 
     actions = [gz, rsp, bridge, truth, spawn]
+    if lc('arm_meshes') == 'true':
+        # gz resolves the description's model://ur_description/... URIs through GZ_SIM_RESOURCE_PATH; without it the UR links
+        # have no visual and no collision geometry in gz (only the primitives of the lift, tool and sensor link exist)
+        try:
+            share = os.path.dirname(get_package_share_directory('ur_description'))
+        except PackageNotFoundError:
+            share = ''
+            print('[sim_gazebo] arm_meshes:=true but ur_description is not installed: the UR links have no geometry in gz')
+        if share:
+            actions.insert(0, SetEnvironmentVariable(
+                'GZ_SIM_RESOURCE_PATH', os.pathsep.join(p for p in (os.environ.get('GZ_SIM_RESOURCE_PATH', ''), share) if p)))
     conditioned = lc('ft_conditioner') == 'true'
     if conditioned:
         # raw wrench (ft_sensor_link, with the payload weight) -> contact wrench at the tcp. The
@@ -236,5 +291,20 @@ def generate_launch_description():
                               description='"x y z roll pitch yaw" of depth_sensor_link in base_footprint (x forward)'),
         DeclareLaunchArgument('depth_sensor_noise_m', default_value='0.0', description='Gaussian range noise std, m'),
         DeclareLaunchArgument('depth_sensor_rate_hz', default_value='5.0', description='depth sensor rate, Hz'),
+        DeclareLaunchArgument('arm_meshes', default_value='true',
+                              description='true (default): make the UR meshes resolvable in gz (visual AND collision); false: the '
+                                          'UR links are invisible and have no collision in gz (the old behaviour)'),
+        DeclareLaunchArgument('rgb_camera', default_value='false',
+                              description='true: gz colour camera on base_footprint, Image on /rgb_camera/image in frame '
+                                          'rgb_camera_link (needs gz rendering, ogre2); false adds nothing'),
+        DeclareLaunchArgument('rgb_camera_pose', default_value='0.0 -2.4 1.6 0 0.11 1.38',
+                              description='"x y z roll pitch yaw" of rgb_camera_link in base_footprint (x forward): '
+                                          'the default looks at the wall in front of the arm from the right side, 2.4 m out'),
+        DeclareLaunchArgument('rgb_camera_frame', default_value='base',
+                              description='base: the camera is a link on base_footprint (moves with the base); world: a static '
+                                          'model at rgb_camera_pose in the WORLD frame (stays put when the base drives, for '
+                                          'filming a multi-stand pass)'),
+        DeclareLaunchArgument('rgb_camera_size', default_value='1280 720', description='"width height", pixels'),
+        DeclareLaunchArgument('rgb_camera_rate_hz', default_value='2.0', description='colour camera rate, Hz'),
         OpaqueFunction(function=_launch),
     ])

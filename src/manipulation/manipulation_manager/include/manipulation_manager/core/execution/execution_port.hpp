@@ -29,6 +29,7 @@ struct ExecutionRequest
 {
   std::string planning_group;             ///< MoveIt planning group to execute on.
   core_types::Trajectory trajectory;  ///< The already-planned trajectory to run.
+  double stroke_speed{0.0};           ///< Tool speed (m/s) of a contact seam; 0 = a transition.
 };
 
 /**

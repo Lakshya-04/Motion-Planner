@@ -80,6 +80,8 @@ target_include_directories(jtac_controller PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(jtac_controller
+  core_types::core_types
+  force_core::force_core
   admittance_controller::admittance_controller
   admittance_controller::admittance_controller_parameters
   joint_trajectory_controller::joint_trajectory_controller
@@ -402,6 +404,23 @@ if(BUILD_TESTING)
     )
     ament_target_dependencies(test_redundancy_weighting
       Eigen3
+    )
+  endif()
+
+  # CompliancePort of the JTAC variant against a stand-in controller node (parameters and topics).
+  ament_add_gtest(test_jtac_compliance_port
+    test/test_jtac_compliance_port.cpp
+    TIMEOUT 120
+  )
+  if(TARGET test_jtac_compliance_port)
+    target_link_libraries(test_jtac_compliance_port
+      jtac_controller_compliance_port
+      core_types::core_types
+    )
+    ament_target_dependencies(test_jtac_compliance_port
+      geometry_msgs
+      rclcpp
+      std_msgs
     )
   endif()
 

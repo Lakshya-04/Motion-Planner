@@ -2,6 +2,7 @@
 //   score_run --samples run.csv --wall wall.json [--swath 0.2] [--resolution 0.01] [--no-contact]
 //             [--target-force 10] [--band 1] [--engaged-force 1]
 //             [--spray-standoff 0.3 --spray-half-angle 20 [--spray-sigma 0.25] [--max-thickness-cov 0]]
+//             [--keepout-margin 0.07] [--obstacle-margin 0] [--obstacle-tol 0.003] [--max-obstacle-contacts N]
 //             [--min-coverage 0.95] [--max-rms 0] [--max-peak 0] [--min-in-band 0]
 // Prints the scorecard as JSON. Exit code 0 = passed, 1 = failed a limit, 2 = bad input.
 #include <fstream>
@@ -30,7 +31,9 @@ int main(int argc, char ** argv)
     if (!csv) {throw std::runtime_error("cannot read " + a["--samples"]);}
     if (!wall_file) {throw std::runtime_error("cannot read " + a["--wall"]);}
     const auto samples = coverage_planner::parseRunCsv(csv);
-    const auto wall = coverage_planner::wallFromJson(nlohmann::json::parse(wall_file));
+    const auto wall_json = nlohmann::json::parse(wall_file);
+    const auto wall = coverage_planner::wallFromJson(wall_json);
+    const auto obstacles = coverage_planner::obstaclesFromJson(wall_json, wall.id);
     auto num = [&](const char * key, double dflt) {return a.count(key) ? std::stod(a[key]) : dflt;};
     coverage_planner::ScorecardOptions o;
     o.contact = contact;
@@ -39,6 +42,9 @@ int main(int argc, char ** argv)
     o.engaged_force_n = num("--engaged-force", o.engaged_force_n);
     o.target_force_n = num("--target-force", o.target_force_n);
     o.force_band_n = num("--band", o.force_band_n);
+    o.keepout_margin_m = num("--keepout-margin", o.keepout_margin_m);
+    o.obstacle_margin_m = num("--obstacle-margin", o.obstacle_margin_m);
+    o.obstacle_contact_tol_m = num("--obstacle-tol", o.obstacle_contact_tol_m);
     if (!contact && a.count("--spray-standoff")) {
       o.spray = coverage_planner::SprayFootprint::fromCone(
         std::stod(a["--spray-standoff"]), num("--spray-half-angle", 20.0), num("--spray-sigma", 0.25));
@@ -49,7 +55,8 @@ int main(int argc, char ** argv)
     l.max_force_rms_error_n = num("--max-rms", l.max_force_rms_error_n);
     l.max_force_peak_n = num("--max-peak", l.max_force_peak_n);
     l.min_in_band_fraction = num("--min-in-band", l.min_in_band_fraction);
-    const auto card = coverage_planner::scoreRun(wall, {}, samples, o, l);
+    if (a.count("--max-obstacle-contacts")) {l.max_obstacle_contacts = std::stoi(a["--max-obstacle-contacts"]);}
+    const auto card = coverage_planner::scoreRun(wall, obstacles, samples, o, l);
     std::cout << coverage_planner::scorecardToJson(card).dump(2) << "\n";
     return card.passed ? 0 : 1;
   } catch (const std::exception & e) {

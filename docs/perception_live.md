@@ -76,6 +76,30 @@ error 0.13 mm at the corners and centre, rms 2.8 mm, extent 0.76 x 0.70 m, cover
 (MoveIt variant: `detected_wall` box centre x = 1.005 m, as expected, 0.7 m high). Docker image `motion-planner:build`
 with the MuJoCo SDK mounted, as for the other `run_*.sh` scripts.
 
+## Live octomap and ESDF
+
+`live_octomap:=true` (with `move_group:=true`, `depth_sensor:=true`) loads `mobile_manipulator_moveit_config/config/sensors_3d.yaml`: MoveIt's occupancy
+map monitor with `occupancy_map_monitor/PointCloudOctomapUpdater` on `/depth_sensor/points` (octomap in `base_footprint`, 3 cm, max range 4 m,
+2 Hz). The updater's shape mask removes points inside the robot's padded collision shapes, so `robot_self_filter` is not in this path (the sim
+cloud has no robot hits anyway). Needs `ros-jazzy-moveit-ros-perception` (added to `docker/apt-extra.txt`; the older images lack it). It replaces the
+file-loaded octomap, not the contact handling: the tool must still touch the wall, so a contact segment needs the ACM exclusion as before.
+
+`octomap_esdf_node` (`wall_detector`; `wall_detector.launch.py esdf:=true`) polls `/get_planning_scene` for the octomap, rasterises it into a
+fixed window (default centre 0.8 0 1.0, 1.6 m cube, 5 cm) and runs `scene_model::computeEsdf`. `~/esdf` is a `Float32MultiArray` in the layout of
+`curobo_bridge_msgs/srv/SetEsdf` (x-major), `~/esdf_info` is `[voxel_size, cx, cy, cz, nx, ny, nz]`. Nothing connects it to `set_esdf` yet.
+
+`scripts/run_live_octomap.sh` checks, on the smoke wall with no file octomap and no wall box: the planning scene has an octomap from the cloud
+(13.7 kB, 3 cm); the ESDF has its first negative voxel at x 0.975 (wall 0.98) and reads 0.300 / 0.600 at 0.3 / 0.6 m in front; from the FREE pose
+(tool x 0.949) a Cartesian path 12 cm toward the wall with collision checking stops at fraction 0.62 (tool x 1.023), 1.00 without checking, and 1.00
+away from the wall. The tool x at which it stops is 4 cm past the plane (the thin sensed shell, 3 cm cells and the tool geometry offset): the
+check only requires a stop short of the path end. The ESDF took 41-56 ms per update.
+
+## Use for docking
+
+With `target_frame:=odom` the plane is a world plane, and `stand_navigator`'s `wall_docking_node` servos the base to a standoff
+and yaw from it (`WallDock` action, `docs/stand_navigation.md`, `scripts/run_wall_docking.sh`: 0.4 m and 15 degrees off, docked
+within 5.2 mm and 0.01 degrees, three runs). `accumulate_frames:=3` keeps the fits frequent while the base moves.
+
 ## Limits
 
 - One planar wall per scan; no obstacle detection (`obstacles` is empty), no merging of scans from different base
