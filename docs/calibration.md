@@ -87,8 +87,8 @@ ros2 service call /wrench_conditioner/clear_samples std_srvs/srv/Trigger  # star
 - Verify: mass close to the weighed tool + plate + adapter; conditioned force near zero in poses not used in
   the fit. Repeat after warm-up and after any tool change.
 - `identify` also reports the regressor condition number of the pose set and rejects a set above 1000
-  (`identifyPayload(..., max_condition)`). Well-spread sets of 8 to 10 poses give 3 to 6; a planar sweep of
-  0.6 rad gives hundreds. Noise on the readings is amplified by about this number.
+  (`identifyPayload(..., max_condition)`). The planner's 8 to 10 well-spread poses give about 1.4; six poses within 0.5 rad of one axis give tens
+  to hundreds. Noise on the readings is amplified by about this number.
 
 ### Choosing the poses: safe excitation planner (ROS-free)
 
@@ -116,8 +116,9 @@ service runs the plan yet, and the proxy is yours: the planner is only as safe a
 offline form of the idea in arXiv 2504.21486 (bounded excitation); it has no online set-based safety
 guarantee, and its code was not used (no licence).
 
-Simulated numbers (gtest, 2 kg payload, 0.1 N force and 0.01 N m torque noise, 10 poses, 50 trials): see
-the CHANGELOG entry.
+Simulated numbers (gtest, 2 kg payload, 0.1 N force and 0.01 N m torque noise, 10 poses, 50 trials): worst
+mass error 0.0096 kg, worst centre-of-gravity error 0.68 mm, worst force-bias error 0.09 N, condition 1.4. The
+8-pose plan in that test spans 69 s at half the velocity and acceleration bounds.
 
 ## 3b. Bias and temperature drift
 
