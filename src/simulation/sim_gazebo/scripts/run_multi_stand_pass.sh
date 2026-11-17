@@ -87,7 +87,7 @@ manipulation_manager:
     coverage_eef_speed_mps: ${MULTI_STAND_SPEED:-0.01}
     dock_at_stroke_start: true
     stand_max_span_m: ${MULTI_STAND_MAX_SPAN:-0.5}
-    stand_arrival_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1'
+    stand_arrival_command: 'python3 -u $PKG/lib/sim_gazebo/wait_arm_settled.py --timeout ${MULTI_STAND_SETTLE_TIMEOUT:-90} >> $OUT/settle.log 2>&1; ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1'
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
