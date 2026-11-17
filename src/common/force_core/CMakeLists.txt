@@ -9,6 +9,9 @@ find_package(ament_cmake REQUIRED)
 find_package(core_types REQUIRED)
 find_package(Threads REQUIRED)
 
+# Linked into the JTAC controller plugin (a shared library), so the static library must be PIC.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 add_library(${PROJECT_NAME}
   src/force_stage_fsm.cpp
   src/force_stage_sequencer.cpp

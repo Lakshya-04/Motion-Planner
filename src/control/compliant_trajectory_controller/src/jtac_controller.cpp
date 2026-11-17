@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
 #include <memory>
 
 #include "controller_interface/helpers.hpp"
@@ -282,6 +283,45 @@ controller_interface::CallbackReturn JtacController::on_configure(
     }
   }
 
+  force_limiter_.reset();
+  force_limiter_windup_n_ = 0.0;
+  if (!get_node()->has_parameter("force_limiter.enabled")) {
+    get_node()->declare_parameter("force_limiter.enabled", false);
+  }
+  if (get_node()->get_parameter("force_limiter.enabled").as_bool()) {
+    force_core::NormalAxisLimiterParams lp;
+    const auto number = [this](const std::string & name, double fallback) {
+        const std::string full = "force_limiter." + name;
+        if (!get_node()->has_parameter(full)) {get_node()->declare_parameter(full, fallback);}
+        return get_node()->get_parameter(full).as_double();
+      };
+    lp.limiter.f_max_n = number("f_max_n", lp.limiter.f_max_n);
+    lp.limiter.alpha_per_s = number("alpha_per_s", lp.limiter.alpha_per_s);
+    lp.limiter.k_min_n_per_m = number("k_min_n_per_m", lp.limiter.k_min_n_per_m);
+    lp.limiter.k_max_n_per_m = number("k_max_n_per_m", lp.limiter.k_max_n_per_m);
+    lp.limiter.contact_force_n = number("contact_force_n", lp.limiter.contact_force_n);
+    lp.limiter.free_space_speed_mps =
+      number("free_space_speed_mps", lp.limiter.free_space_speed_mps);
+    lp.max_offset_m = number("max_offset_m", lp.max_offset_m);
+    lp.windup_gain_n_per_m = number("windup_gain_n_per_m", lp.windup_gain_n_per_m);
+    lp.retreat_speed_mps = number("retreat_speed_mps", lp.retreat_speed_mps);
+    lp.reference_speed_cap_mps = number("reference_speed_cap_mps", lp.reference_speed_cap_mps);
+    force_limiter_reading_offset_n_ = number("reading_offset_n", 0.0);
+    if (!has_ft_sensor_) {
+      RCLCPP_ERROR(get_node()->get_logger(), "force_limiter.enabled needs an F/T sensor (ft_sensor.name)");
+      return controller_interface::CallbackReturn::ERROR;
+    }
+    try {
+      force_limiter_ = std::make_unique<force_core::NormalAxisLimiter>(lp);
+    } catch (const std::invalid_argument & e) {
+      RCLCPP_ERROR(get_node()->get_logger(), "force_limiter: %s", e.what());
+      return controller_interface::CallbackReturn::ERROR;
+    }
+    RCLCPP_INFO(
+      get_node()->get_logger(), "force limiter enabled (f_max %.1f N, offset cap %.3f m)",
+      lp.limiter.f_max_n, lp.max_offset_m);
+  }
+
   command_guard_.reset();
   if (!get_node()->has_parameter("command_guard.enabled")) {
     get_node()->declare_parameter("command_guard.enabled", false);
@@ -335,6 +375,8 @@ controller_interface::CallbackReturn JtacController::on_configure(
 controller_interface::CallbackReturn JtacController::on_activate(const rclcpp_lifecycle::State &)
 {
   if (command_guard_) {command_guard_->reset();}  // re-activation clears a latched fault
+  if (force_limiter_) {force_limiter_->reset();}
+  force_limiter_windup_n_ = 0.0;
   joint_position_command_interface_.clear();
   joint_velocity_command_interface_.clear();
   joint_position_state_interface_.clear();
@@ -518,6 +560,62 @@ void JtacController::clampCartesianOffset()
   for (size_t i = 0; i < num_joints_; ++i) {
     state_desired_.positions[i] =
       state_reference_.positions[i] + scale * (q_desired[static_cast<long>(i)] - q_reference[static_cast<long>(i)]);
+  }
+}
+
+void JtacController::applyForceLimiter(const geometry_msgs::msg::Wrench & measured, double dt)
+{
+  const Eigen::VectorXd q_reference = Eigen::VectorXd::Map(
+    state_reference_.positions.data(), static_cast<long>(state_reference_.positions.size()));
+  const Eigen::VectorXd q_desired = Eigen::VectorXd::Map(
+    state_desired_.positions.data(), static_cast<long>(state_desired_.positions.size()));
+  const Eigen::VectorXd q_current = Eigen::VectorXd::Map(
+    state_current_.positions.data(), static_cast<long>(state_current_.positions.size()));
+
+  Eigen::Isometry3d reference_tf, desired_tf, current_tf;
+  Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian(6, num_joints_);
+  const bool ok =
+    offset_clamp_kinematics_->calculate_link_transform(
+    q_reference, params_.kinematics.tip, reference_tf) &&
+    offset_clamp_kinematics_->calculate_link_transform(
+    q_desired, params_.kinematics.tip, desired_tf) &&
+    offset_clamp_kinematics_->calculate_link_transform(
+    q_current, params_.kinematics.tip, current_tf) &&
+    offset_clamp_kinematics_->calculate_jacobian(q_desired, params_.kinematics.tip, jacobian);
+  if (!ok) {
+    return;
+  }
+
+  // Into the wall is the tool's +Z (the pressing direction of the F/T convention: force.z < 0).
+  const Eigen::Vector3d axis = current_tf.rotation().col(2);
+  const double p_desired = desired_tf.translation().dot(axis);
+  const double p_reference = reference_tf.translation().dot(axis);
+  const double p_measured = current_tf.translation().dot(axis);
+  const double force_n = -measured.force.z + force_limiter_reading_offset_n_;
+
+  const double p_cmd = force_limiter_->step(dt, p_desired, p_reference, p_measured, force_n);
+  force_limiter_windup_n_ = force_limiter_->windupForce();
+
+  if (force_limiter_->resetRequested()) {
+    // Retreat: drop the admittance offset now instead of letting it relax over seconds.
+    admittance_rule_->reset(num_joints_);
+    std::fill(weighted_joint_pos_offset_.begin(), weighted_joint_pos_offset_.end(), 0.0);
+    std::fill(weighted_joint_vel_offset_.begin(), weighted_joint_vel_offset_.end(), 0.0);
+  }
+
+  const double delta = p_cmd - p_desired;
+  if (!std::isfinite(delta) || std::fabs(delta) < 1e-9) {
+    return;
+  }
+  // Damped least squares: dq = J^T (J J^T + lambda^2 I)^-1 (axis * delta), translational part only.
+  const Eigen::Matrix<double, 3, Eigen::Dynamic> j_lin = jacobian.topRows<3>();
+  const Eigen::Matrix3d jjt = j_lin * j_lin.transpose() + 1e-6 * Eigen::Matrix3d::Identity();
+  const Eigen::VectorXd dq = j_lin.transpose() * jjt.ldlt().solve(axis * delta);
+  if (!dq.allFinite()) {
+    return;
+  }
+  for (size_t i = 0; i < num_joints_; ++i) {
+    state_desired_.positions[i] += dq[static_cast<long>(i)];
   }
 }
 
@@ -800,6 +898,8 @@ controller_interface::return_type JtacController::update(
   // documents (force_z negative while pressing along the tool's own +Z).
   auto biased_wrench = measured_wrench;
   biased_wrench.force.z += *target_force_n_.readFromRT();
+  // Anti-windup back-calculation: push the admittance offset out of the wall while the output is clamped.
+  biased_wrench.force.z -= force_limiter_windup_n_;
 
   state_desired_.positions = state_reference_.positions;
   state_desired_.velocities = state_reference_.velocities;
@@ -813,6 +913,17 @@ controller_interface::return_type JtacController::update(
   // See clampCartesianOffset()'s own doc comment -- must run on EITHER path above, before the
   // result is ever written to the command interfaces.
   clampCartesianOffset();
+
+  if (force_limiter_) {
+    if (params_.admittance.selected_axes[2]) {
+      applyForceLimiter(measured_wrench, period.seconds());
+    } else {
+      // The force axis is not engaged (free-space moves, calibration: the wrench may still carry an
+      // uncompensated payload): the limiter must not act on it. Start clean when it engages.
+      force_limiter_->reset();
+      force_limiter_windup_n_ = 0.0;
+    }
+  }
 
   // See enforceJointRateLimits()'s own doc comment -- must run last, after clampCartesianOffset(),
   // so a finite-but-real-joint-limit-violating Cartesian clamp result still gets bounded to what
