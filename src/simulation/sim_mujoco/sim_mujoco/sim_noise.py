@@ -10,7 +10,7 @@ NOISE_KEYS = {'ft_noise_density': 'SIM_MUJOCO_FT_NOISE_DENSITY', 'ft_bias_walk':
 def parse_sim_noise(text):
     """'ft_noise_density=0.05 ft_delay_ms=5' -> {environment variable: value} for the plugin; '' = all off."""
     out = {}
-    for item in text.split():
+    for item in text.replace(",", " ").split():
         key, sep, value = item.partition('=')
         if not sep or key not in NOISE_KEYS:
             raise ValueError(f'sim_noise: unknown or malformed "{item}"; keys: {", ".join(NOISE_KEYS)}')

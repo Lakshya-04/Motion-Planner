@@ -27,7 +27,7 @@ short form of this table); the overview of the backends is [simulation.md](simul
 
 ## Opt-in sensor non-idealities in the MuJoCo plugin
 
-`sim_noise` (launch argument of `sim_mujoco.launch.py`, a string of `key=value` pairs; empty means ideal and nothing
+`sim_noise` (launch argument of `sim_mujoco.launch.py`, a string of `key=value` pairs separated by spaces or commas; empty means ideal and nothing
 changes) switches on a per-signal model in `sim_mujoco/signal_model.hpp`, applied inside the plugin once per controller
 period. Order per sample: signal + bias + white noise, first-order low-pass, fixed delay, quantisation.
 
@@ -55,4 +55,29 @@ The model is gtest-covered (`test_signal_model`: noise standard deviation agains
 the square root of time, low-pass step response, delay shift, quantisation, repeatability). The values are not
 those of any sensor; they are a stress setting. Gazebo has no equivalent yet.
 
-RESULT_PLACEHOLDER
+## Contact test with the models on
+
+`CONTACT_LAUNCH_ARGS="sim_noise:=..." run_contact.sh --err-force-max 5 --err-torque-max 2` (the same scripted
+test as in [sim_mujoco.md](sim_mujoco.md), 100 Hz controller, 10 N target, one run each, seed 3, MuJoCo 4.0.1).
+Settings of run B: `ft_noise_density=0.02` (std 0.14 N per sample at 100 Hz), `ft_bias_walk=0.01`, `ft_lowpass_hz=50`,
+`ft_delay_ms=10`, `ft_quantum=0.01`, `joint_pos_noise=0.0002`, `joint_vel_noise=0.002`, `control_delay_ms=10`.
+Run A used `ft_noise_density=0.05` (std 0.35 N), the rest equal.
+
+| | ideal sensor | run B (density 0.02) | run A (density 0.05) |
+|---|---|---|---|
+| steady force, ground truth, 10 N target, tolerance +-1.5 N | 10.13 N, std 0.03 | 10.18 N, std 0.23 (pass) | 10.23 N, std 0.30 (pass) |
+| conditioned minus truth, force rms / max | <= 0.001 / 0.004 N | 0.41 N / 1.26 N (fz); fx, fy 0.19 N | fz 0.54 N, but fx 4.9 N (not calibrated) |
+| conditioned minus truth, torque rms | <= 0.0005 N m | 0.16 N m | 0.85 N m (not calibrated) |
+| payload identification | 0.5012 kg, bias < 2e-4 | 0.4982 kg, CoG error up to 13 mm, bias up to 0.10 N m | rejected: 5 of 6 poses refused |
+| release after disengage | quiet after 4.1 s | quiet 0.6 s into the 4 s retreat | same |
+
+Reading: the contact is held within the +-1.5 N band in both runs (truth force 10.18 N and 10.23 N), so JTAC does not
+need a clean sensor for that, and the conditioner's own error is dominated by the sensor noise (rms 0.4 N on Fz,
+close to the 0.14 N per-sample noise plus the 10 ms delay and the drifting bias during the hold). Two things the
+ideal sensor hid: at density 0.05 the conditioner's `capture_pose` gate (`capture_max_spread_n` 1.0 N, not exposed
+in the launch) rejected five of six calibration poses, so the payload was never removed and the conditioned
+Fx carried a 4.9 N error while Fz still held; and with the noise on, the identified centre of gravity and bias are
+off by millimetres and a tenth of a unit, which fails the test's own noise-free checks on those (the "FAIL" lines of
+run B: centre of gravity, bias, and "free space after approach" at its tight tolerance). The overall script exit code is
+therefore 1 for both runs by design of those checks; the lines above are the numbers. One run each, so no spread
+over seeds.
