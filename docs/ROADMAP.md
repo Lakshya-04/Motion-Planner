@@ -71,7 +71,7 @@ without code, when we can implement it.
       opens the valve (`std_msgs/Bool` on `/tool/valve`) for the stroke only, closes it, retracts; no force engage, no press, no wall-contact
       allowance. Proven in the MuJoCo sim (`run_spray_pass.sh`: 3 columns, valve recorded and scored). Not done: a valve driver on real
       hardware, `tool_off_lead_s` / `tool_on_at_speed_ratio` timing, valve forced off on a fault, the standoff held by feedback (it is open loop)
-- [ ] Contact tools: adaptive line spacing from a contact-area model (a cheap published idea, 2-3 days on top of a planner)
+- [~] Contact tools: adaptive line spacing from a contact-area model. Done: `coverage.contact_area` (width from force, tilt, curvature) drives `toolSwath` / `toolLineSpacing`; `contactStripOffsets` with edge zones; verified on a `CoverageVerifier` raster (`test_contact_spacing`). Not done: the boustrophedon/sweepline planners still use one uniform step, so edge spacing is not applied to a generated path; no hardware fit of the gain (`docs/tools.md`)
 - [x] "How to add a tool" guide (`docs/tools.md`)
 
 ## 5. Motion planning (any backend, contact and non-contact)
@@ -129,7 +129,7 @@ without code, when we can implement it.
 - [~] JTAC compliance offset accumulates on every axis while blocked and releases over about 3 s after the reference retreats (`docs/sim_mujoco.md`)
 - [~] **Force-CBF limiter on JTAC** (arXiv 2405.04859 idea, no code used): `force_core::ForceLimiter` bounds the velocity into the wall by `alpha (F_max - F) / k` with an online stiffness estimate and a free-space speed cap; closed-loop tests keep the force under the limit on 1-40 kN/m walls (`docs/ft_sensing.md`). Not wired into JTAC's command path yet (needs a simulator run), and there is no energy tank around the slow release; the existing `max_offset_m` clamp stays
 - [~] **Hardware parameter template**: `compliant_trajectory_controller/config/hardware_template.yaml` lists every value to set (conditioner, bridge, JTAC, tool profile) with safe defaults marked; documented only, no launch file loads it yet and nothing is tested on hardware
-- [ ] Payload identification with safe excitation trajectories and bounds (arXiv 2504.21486, about 1.5 weeks; its code, `roahmlab/OnlineSafeSysID`, has no licence file, so implement from the paper) and bias/temperature drift tracking (3-5 days);
+- [~] Payload identification with safe excitation trajectories and bounds (arXiv 2504.21486; its code, `roahmlab/OnlineSafeSysID`, has no licence file, so implemented from the paper) and bias/temperature drift tracking: ROS-free `force_core` cores with simulated-noise gtests (`identifyPayload` condition-number check, `generateExcitationPoses`, `BiasTracker`, `docs/calibration.md` sections 3 and 3b). Not done: a service that runs the plan on the arm, wiring the tracker into the conditioner, any hardware run, the paper's online set-based safety;
       optionally replace the gravity step with the `control_toolbox` gravity-compensation filter (Apache-2.0; gravity and centre-of-gravity torque only, so sign, bias and the lever arm stay ours)
 - [ ] Gain auto-tuning by Bayesian optimisation on the MuJoCo twin (cost: force RMS + overshoot + windup; method reference arXiv 2512.03772: SAASBO tuning of a torque-level MPC on a UR10e with a digital twin, not admittance gains, no code; 1-2 weeks)
 - [ ] Production gains per tool and robot; a stability analysis for moving references (today an empirical 4x mass factor)

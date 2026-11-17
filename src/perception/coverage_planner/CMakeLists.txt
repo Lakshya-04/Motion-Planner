@@ -35,6 +35,7 @@ add_library(coverage_planner_core
   src/core/run_scorecard.cpp
   src/core/run_scorecard_io.cpp
   src/core/tool_profile_loading.cpp
+  src/core/contact_spacing.cpp
 )
 target_include_directories(coverage_planner_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -182,6 +183,11 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_run_scorecard_io test/core/run_scorecard_io_test.cpp)
   target_link_libraries(test_run_scorecard_io coverage_planner_core)
+
+  ament_add_gtest(test_contact_spacing test/core/contact_spacing_test.cpp)
+  target_link_libraries(test_contact_spacing coverage_planner_core ros_adapters::ros_adapters)
+  target_compile_definitions(test_contact_spacing PUBLIC
+    TOOL_PROFILES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/tool_profiles.yaml")
 
   ament_add_gtest(test_tool_profiles test/core/tool_profiles_test.cpp)
   target_link_libraries(test_tool_profiles coverage_planner_core ros_adapters::ros_adapters)
