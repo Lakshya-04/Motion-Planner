@@ -17,6 +17,7 @@ anything verified on hardware.
 
 ### Fixed
 
+- Gazebo multi-stand pass: `scripts/wait_arm_settled.py` blocks until the arm joints stop creeping (the gz position loop under `jtac_position_only` has a 10 s time constant) and runs in front of `stand_arrival_command` in `run_multi_stand_pass.sh` (`MULTI_STAND_SETTLE_TIMEOUT`). 3 measured passes on a loaded host: 6/10, 10/10, 10/10 columns, coverage 0.60 / 0.94 / 1.00, peaks 36 / 54 / 3025 N (before: 1 of 2 to 1 of 3 passing); the remaining failure (dock plans refused after an in-stand approach) is not fixed, see `docs/sim_gazebo.md`.
 - VAMP robot model rejected most benchmark endpoints (60 of 72 in the empty scene, every `stow_side` pair): FOAM's 6 spheres on the 0.04 m lift carriage plate bulged into the upper arm. `docker/tools/generate_vamp_robot.sh` now defaults `FOAM_ARGS` to `--lift_carriage_link=4` (23 plate spheres, 50 in total); on the same 158 problems VAMP goes from 10/158 to 158/158. Numbers in `docs/planner_benchmark.md`.
 
 ### Added
