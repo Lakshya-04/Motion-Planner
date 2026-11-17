@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "core_types/contact_area.hpp"
+
 namespace core_types
 {
 
@@ -124,6 +126,14 @@ struct ToolCoverage
                                            ///< recomputed so a profile author can override it.
   bool ensure_coverage_within_boundary{false}; ///< Force a final pass exactly at the region edge.
   bool uniform_direction{false};          ///< All passes traverse the same direction (sprayer bias).
+
+  /// Contact tools, opt-in: when enabled (pad_width_m > 0) the swath is the effective contact
+  /// width at task.target_force_n (contact_area.hpp) instead of swath_m.
+  ContactAreaModel contact_area;
+  /// Contact tools, opt-in: strips within edge_zone_m of the region boundary or an obstacle are
+  /// spaced edge_spacing_scale times closer (1.0 = uniform spacing, the default).
+  double edge_zone_m{0.0};
+  double edge_spacing_scale{1.0};
 };
 
 /**

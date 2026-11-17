@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "core_types/contact_area.hpp"
 #include "coverage_planner/core/types.hpp"
 #include <string>
 #include <vector>
@@ -38,6 +39,7 @@ struct ToolTask
 {
   bool contact{false};     ///< True for tools physically touching the wall.
   double standoff_m{0.0};  ///< Stand-off along the normal; 0.0 for contact tools.
+  double target_force_n{0.0};  ///< Contact tools: normal force; feeds the contact-area model.
 
   /// "constant": TCP Z always along -normal. "tilt_at_edges": may tilt at a physical wall
   /// corner/edge for reach -- a geometric trigger, non-contact tools only.
@@ -75,6 +77,14 @@ struct ToolCoverage
                                                 ///< explicitly so a profile author can override it.
   bool ensure_coverage_within_boundary{false};  ///< Force a final pass exactly at the region edge.
   bool uniform_direction{false};  ///< All passes traverse the same direction (sprayer bias).
+
+  /// Contact tools, opt-in: enabled (pad_width_m > 0) replaces swath_m by the effective contact
+  /// width at task.target_force_n (see core_types/contact_area.hpp).
+  core_types::ContactAreaModel contact_area;
+  /// Contact tools, opt-in: strips within edge_zone_m of an edge are spaced edge_spacing_scale
+  /// times closer (see contactStripOffsets). 1.0 = uniform.
+  double edge_zone_m{0.0};
+  double edge_spacing_scale{1.0};
 };
 
 /**
@@ -90,7 +100,8 @@ struct ToolCoverageProfile
 };
 
 /// Swath the planner must use for this tool: the stand-off dependent cone model for a non-contact
-/// tool with spray_half_angle_deg > 0, else coverage.swath_m.
+/// tool with spray_half_angle_deg > 0, the contact-area width at the target force for a contact
+/// tool with contact_area enabled, else coverage.swath_m.
 /// @throws std::invalid_argument if the cone parameters or the stand-off are out of range.
 double toolSwath(const ToolCoverageProfile & tool);
 
