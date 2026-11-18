@@ -114,6 +114,11 @@ YAML
 python3 "$PKG/lib/sim_mujoco/record_run.py" --record "$REC" --timeout 3000 --frame odom --wall-x "$WALL_X" \
   --wall-y $WALL_Y0 $WALL_Y1 --wall-z 1.0 1.3 --scene "$OUT/data/wall_pass_coverage_scene.json" > "$OUT/record.log" 2>&1 &
 REC_PID=$!
+# MULTI_STAND_FILM=1: also store the joint states for render_run.py (launch with out_dir:=... in MULTI_STAND_LAUNCH_ARGS)
+if [ -n "${MULTI_STAND_FILM:-}" ]; then
+  python3 "$PKG/lib/sim_mujoco/render_run.py" record --out "$OUT/run_film.npz" > "$OUT/film.log" 2>&1 &
+  FILM_PID=$!
+fi
 sleep 25   # sim, controllers and move_group up
 
 # 3. the wall into MoveIt's scene (world frame; TF places it relative to base_footprint)
@@ -135,6 +140,7 @@ if [ "$CANCEL_AFTER" != 0 ]; then
   exit $RC
 fi
 kill -INT "$REC_PID" 2>/dev/null; wait "$REC_PID" 2>/dev/null; REC_PID=
+if [ -n "${FILM_PID:-}" ]; then kill -INT "$FILM_PID" 2>/dev/null; wait "$FILM_PID" 2>/dev/null; cat "$OUT/film.log"; fi
 cat "$OUT/record.log"
 SC=0
 if [ -f "$REC" ]; then
