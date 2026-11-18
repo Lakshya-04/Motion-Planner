@@ -16,6 +16,10 @@ anything verified on hardware.
 - 2026-11-17, main at 56712bb: `docker/run_all_checks.sh --skip-sims` (fresh build volumes, image `motion-planner:build-live`): 54 packages built, `colcon test` 1259 tests, 0 errors, 0 failures, 229 skipped (lint and optional-dependency tests); pytest per directory 324 passed, 6 skipped (MuJoCo, cuRobo and torch absent); public-readiness scan 0 problems. Not run: sim_gazebo, sim_mujoco, sim_isaac, the simulator scripts, GPU planners, hardware.
 - `moveit_ros_perception` (needed at run time by the live octomap) is an `exec_depend` of `mobile_manipulator_moveit_config`, not a build dependency. The older `motion-planner:build` image lacks it, so build and test pass there but `live_octomap:=true` fails until the image is rebuilt (it is in `docker/apt-extra.txt`). The feature stays opt-in.
 
+### Added
+
+- `reachability` core: `chooseHorizontalStation` and `planHorizontalStands` (`core/horizontal_stands.hpp`) pick base stands under or over a ceiling or floor patch (grid over the footprint plus a margin, lift bands for a vertical tool axis, greedy multi-stand cover) and report targets outside lift + arm height reach separately (`out_of_lift_range`). 9 gtests. Not wired into a ROS service or the manager.
+
 ### Fixed
 
 - Gazebo multi-stand pass: `scripts/wait_arm_settled.py` blocks until the arm joints stop creeping (the gz position loop under `jtac_position_only` has a 10 s time constant) and runs in front of `stand_arrival_command` in `run_multi_stand_pass.sh` (`MULTI_STAND_SETTLE_TIMEOUT`). 3 measured passes on a loaded host: 6/10, 10/10, 10/10 columns, coverage 0.60 / 0.94 / 1.00, peaks 36 / 54 / 3025 N (before: 1 of 2 to 1 of 3 passing); the remaining failure (dock plans refused after an in-stand approach) is not fixed, see `docs/sim_gazebo.md`.
