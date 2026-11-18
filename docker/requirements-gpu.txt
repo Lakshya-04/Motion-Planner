@@ -5,8 +5,8 @@ torch==2.8.0
 numpy<2.3
 
 # cuRobo v2 (NVlabs/curobo, Apache-2.0), pinned to a commit. The v2 API differs from v1
-# (v1 is tag v0.7.8).
-nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@78fd485
+# (v1 is tag v0.7.8). 42498cf is tag v0.9.0 (cuRoboV2-Fast).
+nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@42498cf4e7d0d6fbd4ef9fbcec1243c00c888a83
 
 # mesh handling (scene loaders, convex decomposition for VAMP polytopes)
 trimesh
