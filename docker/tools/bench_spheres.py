@@ -441,7 +441,9 @@ def cmd_run_vamp(a):
                    f'-L/opt/vamp/lib -lsimdxorshift -lcdd -o {binary}')
     run_cmd = f'{binary} /work/vamp_problems.txt /out/{out.name} {a.name}'
     steps = ([] if a.skip_compile else [compile_cmd]) + ([] if a.compile_only else [run_cmd])
-    cmd = ['docker', 'run', '--rm', '--user', f'{__import__("os").getuid()}:{__import__("os").getgid()}',
+    cpuset = getattr(a, 'cpuset', None)
+    cmd = ['docker', 'run', '--rm', *(['--cpuset-cpus', cpuset] if cpuset else []),
+           '--user', f'{__import__("os").getuid()}:{__import__("os").getgid()}',
            '-v', f'{work}:/work', '-v', f'{header.parent}:/hdr:ro', '-v', f'{HERE}:/tools:ro',
            '-v', f'{out.parent}:/out', a.image, 'bash', '-c', 'set -e; ' + ' && '.join(steps)]
     print(' '.join(cmd))
