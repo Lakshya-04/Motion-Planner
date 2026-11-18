@@ -197,3 +197,104 @@ def test_esdf_needs_a_configured_grid(planner):
     with pytest.raises(ValueError):
         planner.set_world(esdf=np.zeros((4, 4, 4), dtype=np.float32))
 
+
+
+# ---- trajectory-optimisation fallback ---------------------------------------------------------
+class _FakeCfg:
+    always_run_trajopt = True
+    run_trajopt_on_graph_seed = True
+
+
+class _FakeResult:
+    def __init__(self, ok, source='trajopt'):
+        self.success = torch.tensor([[ok]])
+        self.trajectory_source = source
+        self.total_time = 0.25
+        self._plan = type('P', (), {'position': torch.zeros(1, 1, 3, 2), 'joint_names': ['a', 'b']})()
+
+    def get_interpolated_plan(self):
+        return self._plan
+
+
+class _FakeMotionPlanner:
+    """plan_cspace that 'fails trajectory optimisation' (the default config) and succeeds from a graph seed
+    when the two bypass switches are off; records the calls and the config seen."""
+    joint_names = ['a', 'b']
+    config = _FakeCfg()
+
+    def __init__(self, seed_ok=True):
+        self.calls, self.seed_ok = [], seed_ok
+        self.trajopt_solver = type('T', (), {'config': type('C', (), {'interpolation_dt': 0.025})()})()
+
+    def plan_cspace(self, goal, cur, max_attempts=20, enable_graph_attempt=1, finetune_attempts=1):
+        bypass = not self.config.always_run_trajopt and not self.config.run_trajopt_on_graph_seed
+        self.calls.append((max_attempts, enable_graph_attempt, bypass))
+        if bypass and self.seed_ok:
+            return _FakeResult(True, 'graph_fit')
+        return _FakeResult(False)
+
+
+def _fake_planner(seed_fallback, seed_ok=True, enable_trajopt=True):
+    from curobo_bridge.planner import CuroboPlanner
+    p = CuroboPlanner.__new__(CuroboPlanner)
+    p._planner = _FakeMotionPlanner(seed_ok)
+    _FakeMotionPlanner.config = _FakeCfg()
+    p._seed_fallback = seed_fallback and enable_trajopt
+    p._fallback_attempts = 6
+    p._enable_graph_attempt = 1
+    p._torch = torch
+    p._check_state = lambda q, what: None
+    p._state = lambda q: None
+    return p
+
+
+def test_trajopt_failure_falls_back_to_the_validated_graph_seed():
+    p = _fake_planner(seed_fallback=True)
+    r = p.plan_joint([0.0, 0.0], [1.0, 1.0])
+    assert r.success and r.route == 'graph_seed'
+    assert 'not optimised' in r.message
+    assert r.planning_time_s == pytest.approx(0.5)            # the failed pass and the fallback both count
+    assert p._planner.calls == [(20, 1, False), (6, 0, True)]
+    cfg = p._planner.config                                     # the switches are put back
+    assert cfg.always_run_trajopt and cfg.run_trajopt_on_graph_seed
+
+
+def test_fallback_can_be_turned_off_and_failure_stays_a_failure():
+    off = _fake_planner(seed_fallback=False)
+    r = off.plan_joint([0.0, 0.0], [1.0, 1.0])
+    assert not r.success and r.route == '' and len(off._planner.calls) == 1
+    no_seed = _fake_planner(seed_fallback=True, seed_ok=False)
+    r = no_seed.plan_joint([0.0, 0.0], [1.0, 1.0])
+    assert not r.success and r.failure_reason_code == 'no_path' and len(no_seed._planner.calls) == 2
+    assert no_seed._planner.config.always_run_trajopt          # restored on the failing path too
+    seed_only = _fake_planner(seed_fallback=True, enable_trajopt=False)
+    assert len(seed_only._planner.calls) == 0 and not seed_only.plan_joint([0.0, 0.0], [1.0, 1.0]).success
+    assert len(seed_only._planner.calls) == 1                  # enable_trajopt=False is already the seed route
+
+
+@needs_gpu
+def test_fallback_returns_a_valid_seed_when_trajopt_fails_on_the_real_planner(planner):
+    """Force 'trajectory optimisation fails' (every default-config plan_cspace returns no trajectory) and
+    check the real graph-seed route gives a trajectory that cuRobo's own checker accepts."""
+    mp = planner._planner
+    real = mp.plan_cspace
+
+    def failing_when_default(goal, cur, **kw):
+        if mp.config.always_run_trajopt:
+            return None
+        return real(goal, cur, **kw)
+
+    planner._seed_fallback, mp.plan_cspace = True, failing_when_default
+    try:
+        start = planner.default_joint_state
+        goal = list(np.array(start) + np.array([0.4, -0.2, 0.2, 0.1, 0.0, 0.2, 0.0]))
+        r = planner.plan_joint(start, goal)
+    finally:
+        mp.plan_cspace = real
+    assert r.success, r.message
+    assert r.route == 'graph_seed'
+    assert np.allclose(r.positions[-1], goal, atol=2e-2)
+    assert planner.check_motion(r.positions, max_step=0.1)
+    assert mp.config.always_run_trajopt and mp.config.run_trajopt_on_graph_seed
+    normal = planner.plan_joint(start, goal)
+    assert normal.success and normal.route == 'trajopt'
