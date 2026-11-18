@@ -392,8 +392,11 @@ class CuroboPlanner:
         if not len(states):
             return []
         t = self._torch
-        mask = self._planner.graph_planner.check_samples_feasibility(
-            t.tensor([list(q) for q in states], device='cuda', dtype=t.float32))
+        gp = self._planner.graph_planner
+        # the PRM planner has the check itself; the GPU RRT planner (graph_planner_algorithm='rrt') keeps it
+        # on its shared resources
+        check = getattr(gp, 'check_samples_feasibility', None) or gp.resources.check_samples_feasibility
+        mask = check(t.tensor([list(q) for q in states], device='cuda', dtype=t.float32))
         # a single state comes back as a 0-d tensor
         return [bool(v) for v in np.atleast_1d(mask.detach().cpu().numpy()).tolist()]
 

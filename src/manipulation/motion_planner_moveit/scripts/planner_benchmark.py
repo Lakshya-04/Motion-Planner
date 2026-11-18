@@ -184,6 +184,9 @@ def cmd_run_curobo(a):
     from curobo_bridge.planner import Box, CuroboPlanner
     kw = CUROBO_MODES[a.mode]
     doc = json.loads((pathlib.Path(a.work) / 'problems.json').read_text())
+    if a.limit:
+        for sc in doc['scenes']:
+            sc['problems'] = sc['problems'][:a.limit]
     poll = VramPoll(torch)
     poll.start()
     t0 = time.perf_counter()
@@ -464,6 +467,7 @@ def main():
     p.add_argument('--out', required=True)
     p.add_argument('--mode', choices=sorted(CUROBO_MODES), default='plan_cspace')
     p.add_argument('--pass-index', type=int, default=0)
+    p.add_argument('--limit', type=int, default=0, help='only the first N problems of each scene (smoke test)')
     p.set_defaults(fn=cmd_run_curobo)
     p = sub.add_parser('refload')
     p.add_argument('--label', default='')
