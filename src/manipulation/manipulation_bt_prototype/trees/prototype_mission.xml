@@ -1,0 +1,20 @@
+<root BTCPP_format="4">
+  <!-- Prototype tree. ctx (blackboard) holds the MissionContext. -->
+  <BehaviorTree ID="Mission">
+    <Fallback>
+      <Sequence>
+        <NavigateToStand/>
+        <SegmentLoop>
+          <Sequence>
+            <SwitchController mode="contact"/>
+            <ExecuteSegment/>
+          </Sequence>
+        </SegmentLoop>
+        <ReportStatus outcome="finished"/>
+      </Sequence>
+      <ForceFailure>
+        <ReportStatus outcome="aborted"/>
+      </ForceFailure>
+    </Fallback>
+  </BehaviorTree>
+</root>
