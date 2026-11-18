@@ -205,34 +205,55 @@ def cmd_run_curobo(a):
     t = time.perf_counter()
     first = planner.plan_joint(p0['start'], p0['goal'])
     first_call_s = time.perf_counter() - t
-    out = {'backend': 'curobo', 'set': a.mode, 'mode': a.mode, 'cfg': a.cfg, 'pass': a.pass_index,
-           'construct_warmup_s': construct_s, 'first_call_s': first_call_s, 'first_call_ok': bool(first.success),
-           'loadavg_start': os.getloadavg(), 'scenes': []}
-    for sc in doc['scenes']:
-        world(sc)
-        rec = {'id': sc['id'], 'problems': []}
-        for p in sc['problems']:
-            valid = planner.check_states([p['start'], p['goal']])
-            t = time.perf_counter()
-            res = planner.plan_joint(p['start'], p['goal'])
-            wall = time.perf_counter() - t
-            rec['problems'].append({
-                'id': p['id'], 'success': bool(res.success), 'wall_s': wall, 'solver_s': res.planning_time_s,
-                'traj_s': res.duration, 'reason': res.failure_reason_code,
-                'endpoints_valid': [bool(v) for v in valid],
-                'path': np.asarray(res.positions).round(5).tolist() if res.success else []})
-        out['scenes'].append(rec)
-        print(f'scene {sc["id"]} {sc["family"]}: {sum(p["success"] for p in rec["problems"])}/{len(rec["problems"])} ok',
-              flush=True)
+    for pi in range(a.passes):
+        index = a.pass_index + pi
+        out = {'backend': 'curobo', 'set': a.mode, 'mode': a.mode, 'cfg': a.cfg, 'pass': index,
+               'passes_in_this_process': a.passes, 'construct_warmup_s': construct_s, 'first_call_s': first_call_s,
+               'first_call_ok': bool(first.success), 'loadavg_start': os.getloadavg(), 'time_start': time.strftime('%H:%M:%S'),
+               'scenes': []}
+        for sc in doc['scenes']:
+            world(sc)
+            rec = {'id': sc['id'], 'problems': []}
+            probe = 0
+            for p in sc['problems']:
+                valid = [bool(v) for v in planner.check_states([p['start'], p['goal']])]
+                row = {'id': p['id'], 'endpoints_valid': valid}
+                if not all(valid) and not a.plan_invalid:
+                    # cuRobo's own model rejects an endpoint: counted as a failure without calling the planner
+                    # (a plan from or to a state it considers in collision cannot succeed; --verify-invalid N
+                    # plans N such problems per scene to show that, and what they cost)
+                    row.update(success=False, wall_s=0.0, solver_s=0.0, traj_s=0.0, reason='endpoint_invalid',
+                               path=[], planned=False)
+                    if probe < a.verify_invalid:
+                        probe += 1
+                        t = time.perf_counter()
+                        res = planner.plan_joint(p['start'], p['goal'])
+                        row.update(probe_success=bool(res.success), probe_wall_s=time.perf_counter() - t)
+                    rec['problems'].append(row)
+                    continue
+                t = time.perf_counter()
+                res = planner.plan_joint(p['start'], p['goal'])
+                wall = time.perf_counter() - t
+                row.update(success=bool(res.success), wall_s=wall, solver_s=res.planning_time_s, traj_s=res.duration,
+                           reason=res.failure_reason_code, planned=True,
+                           path=np.asarray(res.positions).round(5).tolist() if res.success else [])
+                rec['problems'].append(row)
+            out['scenes'].append(rec)
+            print(f'pass {index} scene {sc["id"]} {sc["family"]}: '
+                  f'{sum(p["success"] for p in rec["problems"])}/{len(rec["problems"])} ok', flush=True)
+        out['loadavg_end'] = os.getloadavg()
+        out['time_end'] = time.strftime('%H:%M:%S')
+        out['vram_base_mib'] = poll.base
+        out['vram_peak_mib'] = poll.peak          # the process so far (construct, warmup and the passes up to this one)
+        out['vram_torch_max_allocated_mib'] = torch.cuda.max_memory_allocated() / 2**20
+        path = pathlib.Path(a.out)
+        if a.passes > 1 or a.pass_index:
+            path = path.with_name(f'{path.stem}_p{index}{path.suffix}')
+        path.write_text(json.dumps(out))
     poll.stop_flag = True
     poll.join()
-    out['vram_base_mib'] = poll.base
-    out['vram_peak_mib'] = poll.peak
-    out['vram_torch_max_allocated_mib'] = torch.cuda.max_memory_allocated() / 2**20
-    out['loadavg_end'] = os.getloadavg()
     planner.close()
-    pathlib.Path(a.out).write_text(json.dumps(out))
-    print(f'{a.mode} pass {a.pass_index}: construct+warmup {construct_s:.1f} s, first call {first_call_s:.2f} s, '
+    print(f'{a.mode}: construct+warmup {construct_s:.1f} s, first call {first_call_s:.2f} s, '
           f'VRAM peak {poll.peak:.0f} MiB (base {poll.base:.0f})')
 
 
@@ -466,7 +487,10 @@ def main():
     p.add_argument('--bridge', default='/ws/src/manipulation/curobo_bridge')
     p.add_argument('--out', required=True)
     p.add_argument('--mode', choices=sorted(CUROBO_MODES), default='plan_cspace')
-    p.add_argument('--pass-index', type=int, default=0)
+    p.add_argument('--pass-index', type=int, default=0, help='number of the first pass')
+    p.add_argument('--passes', type=int, default=1, help='repeat the whole problem set this many times in one process (one warmup)')
+    p.add_argument('--plan-invalid', action='store_true', help='call the planner even when cuRobo rejects an endpoint')
+    p.add_argument('--verify-invalid', type=int, default=0, help='plan N endpoint-invalid problems per scene anyway, record the outcome')
     p.add_argument('--limit', type=int, default=0, help='only the first N problems of each scene (smoke test)')
     p.set_defaults(fn=cmd_run_curobo)
     p = sub.add_parser('refload')
