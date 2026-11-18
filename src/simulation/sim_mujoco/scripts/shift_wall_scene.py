@@ -61,6 +61,39 @@ def shift_pcd(path, out, dx, dy, width=PATCH_WIDTH):
         f.writelines(' '.join(v) + '\n' for v in points)
 
 
+def sim_wall_pcd(scene_path, pcd_in, pcd_out):
+    """walls.pcd stretched to the sim wall's whole extent (smoke_wall_scene.json, with its 0.25 m margin around the
+    contact patch): the cloud MoveIt's octomap is made of. walls.pcd covers the patch only, so MoveIt let the arm
+    swing through the part of the physical wall it did not know (the tool came to rest on the wall's top edge, z 1.53,
+    in about one run in four of the multi-stand pass). Same grid step and x as walls.pcd, label 0."""
+    with open(scene_path) as f:
+        w = json.load(f)['walls'][0]
+    header, points, in_data = [], [], False
+    with open(pcd_in) as f:
+        for line in f:
+            if in_data and line.strip():
+                points.append(line.split())
+            else:
+                header.append(line)
+                if line.startswith('DATA'):
+                    in_data = True
+    ys = sorted({float(v[1]) for v in points})
+    zs = sorted({float(v[2]) for v in points})
+    step = min(ys[1] - ys[0], zs[1] - zs[0])
+    x = points[0][0]
+    oy, oz = w['origin_xyz'][1], w['origin_xyz'][2]
+    u0, u1 = w['u_range_m']
+    v0, v1 = w['v_range_m']
+    y_lo, y_hi, z_lo, z_hi = oy + u0, oy + u1, oz - v1, oz - v0   # basis_v is -z
+    ny, nz = round((y_hi - y_lo) / step), round((z_hi - z_lo) / step)
+    cloud = [[x, f'{y_lo + i * step:.4f}', f'{z_lo + j * step:.4f}', '0'] for i in range(ny + 1) for j in range(nz + 1)]
+    header = [f'WIDTH {len(cloud)}\n' if h.startswith('WIDTH') else
+              f'POINTS {len(cloud)}\n' if h.startswith('POINTS') else h for h in header]
+    with open(pcd_out, 'w') as f:
+        f.writelines(header)
+        f.writelines(' '.join(v) + '\n' for v in cloud)
+
+
 def main():
     src, dst, dx, dy = sys.argv[1], sys.argv[2], float(sys.argv[3]), float(sys.argv[4])
     width = float(sys.argv[5]) if len(sys.argv) > 5 else PATCH_WIDTH
@@ -69,6 +102,8 @@ def main():
     shift_scene(os.path.join(src, 'wall_pass_coverage_scene.json'), os.path.join(dst, 'wall_pass_coverage_scene.json'),
                 dx, dy, width)
     shift_pcd(os.path.join(src, 'walls.pcd'), os.path.join(dst, 'walls.pcd'), dx, dy, width)
+    sim_wall_pcd(os.path.join(dst, 'smoke_wall_scene.json'), os.path.join(dst, 'walls.pcd'),
+                 os.path.join(dst, 'walls_sim.pcd'))
 
 
 if __name__ == '__main__':

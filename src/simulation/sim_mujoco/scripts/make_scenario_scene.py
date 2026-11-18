@@ -180,6 +180,11 @@ def build(src, out, name):
         wall = json.load(f)['walls'][0]
     if obstacles:
         edit_pcd(os.path.join(out, 'walls.pcd'), os.path.join(out, 'walls.pcd'), obstacles, wall)
+    # MoveIt's octomap: the sim wall's whole extent (with the obstacles cut / added like walls.pcd)
+    sws.sim_wall_pcd(os.path.join(out, 'smoke_wall_scene.json'), os.path.join(out, 'walls.pcd'),
+                     os.path.join(out, 'walls_sim.pcd'))
+    if obstacles:
+        edit_pcd(os.path.join(out, 'walls_sim.pcd'), os.path.join(out, 'walls_sim.pcd'), obstacles, wall)
     return {'MODE': sc['mode'], 'DX': dx, 'DY': dy, 'WIDTH': width, 'WALL_X': round(0.98 + dx, 6),
             'WALL_Y0': dy, 'WALL_Y1': round(dy + width, 6), 'OBSTACLES': len(obstacles)}
 
