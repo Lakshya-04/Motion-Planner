@@ -73,13 +73,14 @@ class CuroboPlannerNode(Node):
         ik_weights = [w for w in self.declare_parameter('ik_weights', [0.0]).value if w > 0.0]
         seed_fallback = bool(self.declare_parameter('seed_fallback', True).value)
         fallback_attempts = int(self.declare_parameter('fallback_attempts', 6).value)
+        max_attempts = int(self.declare_parameter('max_attempts', 20).value)
         self._planner = planner
         if self._planner is None:
             try:
                 self._planner = CuroboPlanner(
                     robot, max_boxes=max_boxes, prismatic_joints=prismatic,
                     ik_prismatic_factor=ik_prismatic_factor, ik_weights=ik_weights,
-                    seed_fallback=seed_fallback, fallback_attempts=fallback_attempts,
+                    seed_fallback=seed_fallback, fallback_attempts=fallback_attempts, max_attempts=max_attempts,
                     esdf=esdf_from_parameters(esdf_dims, esdf_voxel, esdf_center))
                 self.get_logger().info(
                     f'cuRobo ready: {self._planner.dimension} joints, tool {self._planner.tool_frames}')

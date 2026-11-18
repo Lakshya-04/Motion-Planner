@@ -241,6 +241,7 @@ def _fake_planner(seed_fallback, seed_ok=True, enable_trajopt=True):
     _FakeMotionPlanner.config = _FakeCfg()
     p._seed_fallback = seed_fallback and enable_trajopt
     p._fallback_attempts = 6
+    p._max_attempts = 20
     p._enable_graph_attempt = 1
     p._torch = torch
     p._check_state = lambda q, what: None

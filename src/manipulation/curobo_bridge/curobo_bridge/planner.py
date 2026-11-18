@@ -177,7 +177,8 @@ class CuroboPlanner:
                  prismatic_joints: Sequence[str] = (), ik_prismatic_factor: float = PRISMATIC_IK_FACTOR,
                  ik_weights: Optional[Sequence[float]] = None,
                  graph_planner_algorithm: str = 'prm', enable_trajopt: bool = True,
-                 enable_graph_attempt: int = 1, seed_fallback: bool = True, fallback_attempts: int = 6):
+                 enable_graph_attempt: int = 1, seed_fallback: bool = True, fallback_attempts: int = 6,
+                 max_attempts: int = 20):
         """`graph_planner_algorithm` ('prm' or 'rrt', the GPU bidirectional RRT), `enable_trajopt` (False:
         the graph seed is retimed and validated, trajectory optimisation is skipped) and
         `enable_graph_attempt` (the plan_cspace attempt at which graph seeding starts; 0 = from the
@@ -189,7 +190,10 @@ class CuroboPlanner:
         passes cuRobo's dense validation (collision, limits, dynamics, goal) is returned, reported as
         `route == 'graph_seed'`. cuRobo's optimiser can fail on a problem whose graph path is valid (it
         smooths the path into a few millimetres of self-collision in a tight wrist pose; see
-        docs/planner_benchmark.md). Ignored with `enable_trajopt=False`, which is that route already."""
+        docs/planner_benchmark.md). Ignored with `enable_trajopt=False`, which is that route already.
+        `max_attempts` is cuRobo's attempt cap for the first (normal) pass, 20 by default; a problem the
+        optimiser cannot solve costs all of them before the fallback runs (6 to 30 s measured), so lower
+        it when the fallback is on and latency matters."""
         import torch
         from curobo.motion_planner import MotionPlanner, MotionPlannerCfg
         from curobo.types import JointState
@@ -213,6 +217,7 @@ class CuroboPlanner:
         self._enable_graph_attempt = enable_graph_attempt
         self._seed_fallback = bool(seed_fallback) and enable_trajopt
         self._fallback_attempts = int(fallback_attempts)
+        self._max_attempts = int(max_attempts)
         self._planner = MotionPlanner(MotionPlannerCfg.create(
             robot=robot, max_goalset=max_goalset, collision_cache=cache, **extra))
         if warmup:
@@ -333,7 +338,8 @@ class CuroboPlanner:
         if bad:
             return bad
         cur, tgt = self._state(start), self._state(goal)
-        result = self._planner.plan_cspace(tgt, cur, enable_graph_attempt=self._enable_graph_attempt)
+        result = self._planner.plan_cspace(tgt, cur, max_attempts=self._max_attempts,
+                                           enable_graph_attempt=self._enable_graph_attempt)
         out = self._wrap(result, last=goal)
         if out.success or not self._seed_fallback:
             return out

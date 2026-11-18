@@ -13,7 +13,7 @@ run: docs/planner_benchmark.md.
   run-moveit   docker (motion-planner:build with the workspace installed): OMPL RRT-Connect on a MoveIt
                PlanningScene, the `planner_benchmark` executable of motion_planner_moveit
   run-curobo   inside motion-planner:gpu with --gpus all: cuRobo v0.9.0 in process (CuroboPlanner), one
-               --mode per run: plan_cspace | bi_rrt_trajopt | bi_rrt_seed; first call, steady state, VRAM
+               --mode per run: plan_cspace | plan_cspace_fallback | bi_rrt_trajopt | bi_rrt_seed; first call, steady state, VRAM
   refload      a fixed single-thread numpy workload, repeated: the host-load yardstick (run it under taskset)
   report       CPU: path length, clearance and a markdown table from whichever result files exist; result
                files of the same backend/set are passes of one benchmark and give a spread
@@ -144,12 +144,15 @@ def cmd_run_vamp(a):
 
 # cuRobo v0.9.0 routes through MotionPlanner.plan_cspace (see docs/planner_benchmark.md):
 #   plan_cspace      defaults: attempt 0 is a straight-line seed + trajectory optimisation, graph (PRM) seeding
-#                    from attempt 1 on; what CuroboPlanner.plan_joint and the ROS node use
+#                    from attempt 1 on; cuRobo's own behaviour (CuroboPlanner seed_fallback=False)
+#   plan_cspace_fallback  the same, then, if no trajectory came back, the validated graph seed
+#                    (CuroboPlanner default, what the ROS node uses)
 #   bi_rrt_trajopt   graph_planner_algorithm='rrt' (GPU bidirectional RRT), seeded from attempt 0, then
 #                    trajectory optimisation
 #   bi_rrt_seed      the same RRT seed, retimed and validated, trajectory optimisation skipped
 CUROBO_MODES = {
-    'plan_cspace': {},
+    'plan_cspace': {'seed_fallback': False},
+    'plan_cspace_fallback': {},
     'bi_rrt_trajopt': {'graph_planner_algorithm': 'rrt', 'enable_graph_attempt': 0},
     'bi_rrt_seed': {'graph_planner_algorithm': 'rrt', 'enable_graph_attempt': 0, 'enable_trajopt': False},
 }
@@ -235,7 +238,7 @@ def cmd_run_curobo(a):
                 res = planner.plan_joint(p['start'], p['goal'])
                 wall = time.perf_counter() - t
                 row.update(success=bool(res.success), wall_s=wall, solver_s=res.planning_time_s, traj_s=res.duration,
-                           reason=res.failure_reason_code, planned=True,
+                           reason=res.failure_reason_code, planned=True, route=res.route,
                            path=np.asarray(res.positions).round(5).tolist() if res.success else [])
                 rec['problems'].append(row)
             out['scenes'].append(rec)
