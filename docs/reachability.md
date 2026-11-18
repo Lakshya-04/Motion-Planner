@@ -40,6 +40,7 @@ adds an orientation constraint (tool normal to the wall); query with the constra
 | `ArmModel` port (joint limits + FK/validity per configuration) and `ChainModel` (revolute chain, optional validity callback, fingerprint, `loadChainYaml`) | `core/arm_model.hpp` |
 | `buildMap`: uniform joint sampling on N threads, deterministic for a seed, stats (valid, in window, saturated cells) | `core/builder.hpp` |
 | `planLiftBands`: greedy set cover of target poses over candidate lift heights for a base station; reports unreachable targets | `core/lift_bands.hpp` |
+| `chooseHorizontalStation` / `planHorizontalStands`: stands for a ceiling or floor patch (vertical tool axis): grid over the patch footprint plus a margin, lift bands per stand, greedy multi-stand cover, targets outside the lift + arm height window reported as `out_of_lift_range` | `core/horizontal_stands.hpp` |
 | Versioned binary map file with a robot fingerprint (a map for another robot is rejected) | `core/io.hpp` |
 | `scripts/urdf_to_chain.py`: URDF -> chain YAML (folds fixed joints, records axes and limits) | `scripts/` |
 | `rm4d_tool build / info / bands` | `apps/rm4d_tool.cpp` |
@@ -160,6 +161,60 @@ column at y = 0 (3 targets): greedy 3 stands, 7.0 s driving; set cover 2 stands,
 8.3 -> 7.5, 5.6 -> 5.6, 8.0 -> 7.1 s). Same stand count where greedy was already minimal, the saving
 there is the ordering and the choice of station among equals. Synthetic walls on one coarse generic-arm map,
 no Gazebo or MuJoCo run.
+
+## Horizontal surfaces (ceiling, floor)
+
+`chooseStation` needs a wall plane and a free side, so it refuses a horizontal one. `planHorizontalStands(map,
+request)` (`core/horizontal_stands.hpp`) is the counterpart for a ceiling (tool pointing up) or a floor (tool
+pointing down). The tool axis is vertical, so the map has no azimuth: a cell depends only on the horizontal
+distance and the height between base and target, and one stand reaches a ring around itself.
+
+- Search grid: the patch footprint (bounding box of the targets) plus `margin`, step `grid_step`; stands go under or
+  over the patch, there is no free side. Ranking per station: fewest unreachable targets, then fewest lift bands,
+  then base travel time (with a base model and `from`) or distance to the middle of the patch. Scan order is fixed,
+  so the result is deterministic.
+- Lift: `planLiftBands` over `lift_min..lift_max` gives the lift height per stand. A target whose world height no lift
+  position brings into the map's vertical window (`heightWithinLiftReach`) goes to `out_of_lift_range`, which is
+  also part of `plan.unreachable`, so "too high for lift plus arm" is told apart from "no stand within horizontal reach".
+- A patch wider than one stand's reach is covered by the same greedy loop as `planStands` (most remaining targets
+  per round, `max_stands`, `not_planned` when capped); indices are into the request.
+- Not done: base footprint or obstacle clearance (a stand is any arm base position the map accepts; yaw is 0), the
+  set-cover strategy (greedy only), a check that the tool axis really is vertical (an inclined ceiling goes through
+  the same map query but is not the case this was written for), a ROS service, use by `manipulation_manager`.
+  Tests: `test/core/horizontal_stands_test.cpp` (9: one-stand ceiling, wide patch with several stands, ceiling above
+  reach, mixed patch, floor, floor below the window, determinism, empty, single target).
+
+### Global stand selection over explicit candidates (`selectStands`)
+
+`selectStands(map, request, candidates, start, options)` (`core/global_stands.hpp`) takes all wall targets
+and a candidate set (`makeCandidateStands(request)` gives the `chooseStation` grid: free side, footprint
+clearance for the base model; any list of `CandidateStand` works) and returns a `StandSelection`:
+`success`, a `code` (`ok`, `no_targets`, `invalid_request`, `no_candidates`, `unreachable_targets`) and a
+`message`, the stands in tour order (targets, lift bands, mean margin, leg cost), `unreachable`, `tour_cost`,
+`input_order_cost`, and whether the budget cut the tour short.
+
+1. Each candidate is scored once with `reachableByHeight`; the share of lift heights that reach a target is
+   the reachability margin of that pair.
+2. Weighted greedy set cover: lowest `cost / newly covered`, with a fixed per-stand `cost = 1 +
+   margin_penalty * (1 - mean margin)` (default penalty 0.5; 0 is plain greedy by count). With fixed costs the
+   textbook bound holds: cost within H(n) <= 1 + ln(n) of the cheapest cover in those costs, so the stand count
+   is within (1 + penalty) * H(n) of the fewest stands. Stands made redundant are dropped; each target goes to
+   the chosen stand where its margin is highest (ties to the earlier pick).
+3. Open tour from `start` (with a base model: `travelTime`; without one: metres, first stop is the lowest along
+   the wall): nearest neighbour then 2-opt, and the cover's own order as a second 2-opt seed, so the tour is
+   never longer than the cover's order. `time_budget_s` (default 2 s, 0 disables the clock) and
+   `max_two_opt_passes` bound it; `tour_budget_hit` says it stopped early.
+
+Targets no candidate reaches are never dropped: they come back in `unreachable`, `success` is false with code
+`unreachable_targets`, and the rest are still planned. No random numbers; ties go to the lower index; the result
+is identical across runs unless the wall-clock budget trips. `rm4d_tool station ... --multi 1 --strategy global
+[--margin-penalty w --time-budget s]` prints it.
+
+This overlaps `StandStrategy::SetCover` above, which stays the one `planStands` and the node use (it adds a
+bounded exact search for fewer stands and moves stands to cheaper stations; this one takes caller-supplied
+candidates, weights by margin and returns a coded result). Not done: wiring into `reachability_node` or the
+manager, IK confirmation, a comparison with the exact search on real walls; tested on synthetic generic-arm
+walls (`global_stands_test`) only, no simulator.
 
 ## Limits and next steps
 
