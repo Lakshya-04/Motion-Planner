@@ -6,6 +6,7 @@
 # ft_conditioner, compliant_trajectory_controller, coverage_planner, manipulation_manager and
 # mobile_manipulator_moveit_config installed. Extra arguments go to `ros2 launch manipulation_manager`.
 # The wall comes from a file; run_sensed_pass.sh runs the same pass on a wall sensed by the simulated depth camera.
+# MANAGER_PASS_PLANNER_PARAMS="-p decomposition:=cells" adds parameters to the coverage planner node (cells variant).
 # MANAGER_PASS_DATA=dir takes the three wall files (smoke_wall_scene.json, wall_pass_coverage_scene.json, walls.pcd)
 # from there instead of the stock smoke wall (run_scenarios.sh writes them with make_scenario_scene.py);
 # MANAGER_PASS_REC_ARGS goes to record_run.py (--wall-y .. .. --scene .. for a wall that is not the stock one).
@@ -20,7 +21,7 @@ trap mp_stop_all EXIT
 mp_start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=ur10e_telescopic controller:=jtac conditioner:=true \
   payload_mass_kg:=0.5 move_group:=true scene:=$DATA/smoke_wall_scene.json ${MANAGER_PASS_LAUNCH_ARGS:-}
 # the demo rasterizes the obstacle clearance into the grid itself; the service node would add its own 0.3 m default
-mp_start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0
+mp_start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0 ${MANAGER_PASS_PLANNER_PARAMS:-}
 
 # 1. coverage plan for the wall's contact region (the wall scene schema, with walls.pcd beside it)
 sleep 3

@@ -22,6 +22,8 @@ anything verified on hardware.
 
 ### Fixed
 
+- Wall rasterizer blocked one cell more than the inflated obstacle overlaps (the cell past `ceil(max)`), so the planner's keep-out was up to 0.02 m wider per side than the scorer's 0.07 m clearance and a strip beside a small obstacle was never wiped; the clearance itself is unchanged. MuJoCo scenario reruns (12 runs, `docs/sim_mujoco.md`): single-stand scenarios 8 of 8 pass (protrusion cov reachable 0.884 -> 0.983, window 0.793 -> 1.000), multi-stand 2 of 4 pass (stand 1 approach fails in about half of the runs, cause open).
+- `CoverageOutputJsonSource`: a one-cell gap stroke becomes a short stroke instead of being dropped. `run_manager_pass.sh` takes `MANAGER_PASS_PLANNER_PARAMS`, `run_scenarios.sh` `SCEN_DECOMP`; `run_multi_stand_pass.sh` takes `MULTI_STAND_FILM=1`.
 - Gazebo multi-stand pass: `scripts/wait_arm_settled.py` blocks until the arm joints stop creeping (the gz position loop under `jtac_position_only` has a 10 s time constant) and runs in front of `stand_arrival_command` in `run_multi_stand_pass.sh` (`MULTI_STAND_SETTLE_TIMEOUT`). 3 measured passes on a loaded host: 6/10, 10/10, 10/10 columns, coverage 0.60 / 0.94 / 1.00, peaks 36 / 54 / 3025 N (before: 1 of 2 to 1 of 3 passing); the remaining failure (dock plans refused after an in-stand approach) is not fixed, see `docs/sim_gazebo.md`.
 - VAMP robot model rejected most benchmark endpoints (60 of 72 in the empty scene, every `stow_side` pair): FOAM's 6 spheres on the 0.04 m lift carriage plate bulged into the upper arm. `docker/tools/generate_vamp_robot.sh` now defaults `FOAM_ARGS` to `--lift_carriage_link=4` (23 plate spheres, 50 in total); on the same 158 problems VAMP goes from 10/158 to 158/158. Numbers in `docs/planner_benchmark.md`.
 

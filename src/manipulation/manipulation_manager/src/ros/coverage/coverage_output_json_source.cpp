@@ -75,6 +75,7 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
   }
   std::map<long, std::vector<RawPoint>> columns_by_x_key;
   constexpr double kXQuantum = 1e-3;
+  constexpr double kPointStrokeHalfM = 0.02;
   size_t pose_index = 0;
   for (const auto & p : poses) {
     RawPoint pt;
@@ -122,8 +123,15 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
     }
     const auto & rep = column.front();
     for (const auto & span : spans) {
-      const double z_min = std::max(z_min_m_, span.first);
-      const double z_max = std::min(z_max_m_, span.second);
+      double z_min = std::max(z_min_m_, span.first);
+      double z_max = std::min(z_max_m_, span.second);
+      // The planner's gap strokes beside a small obstacle can be a single grid cell (first == last): a stroke of
+      // zero length would be dropped and the strip next to the obstacle never wiped. Give it a short stroke
+      // around the point instead (the keep-out clearance leaves room for it).
+      if (span.second - span.first < 1e-6 && z_max >= z_min) {
+        z_min = std::max(z_min_m_, span.first - kPointStrokeHalfM);
+        z_max = std::min(z_max_m_, span.first + kPointStrokeHalfM);
+      }
 
       CoverageSegmentIntent intent;
       intent.label = "wall_column_" + std::to_string(column_index);

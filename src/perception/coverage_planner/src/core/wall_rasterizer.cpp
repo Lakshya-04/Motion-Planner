@@ -119,14 +119,18 @@ OccupancyGrid rasterizeWallCoverageGrid(
   for (const auto & obstacle : obstacles) {
     const InflatedObstacle inflated = inflate(obstacle, tool_coverage);
 
-    const int x_min =
-      std::max(0, static_cast<int>(std::floor((inflated.u_min - wall.u_min) / resolution)));
-    const int x_max =
-      std::min(width - 1, static_cast<int>(std::ceil((inflated.u_max - wall.u_min) / resolution)));
-    const int y_min =
-      std::max(0, static_cast<int>(std::floor((inflated.v_min - wall.v_min) / resolution)));
-    const int y_max =
-      std::min(height - 1, static_cast<int>(std::ceil((inflated.v_max - wall.v_min) / resolution)));
+    // Every cell the inflated rectangle overlaps, and no more: [floor(min), ceil(max) - 1] in cell
+    // indices (the cell past ceil(max) starts beyond the rectangle; it used to be blocked too, which
+    // made the keep-out up to one cell wider than the clearance asked for on each side).
+    constexpr double kEps = 1e-9;
+    const int x_min = std::max(
+      0, static_cast<int>(std::floor((inflated.u_min - wall.u_min) / resolution + kEps)));
+    const int x_max = std::min(
+      width - 1, static_cast<int>(std::ceil((inflated.u_max - wall.u_min) / resolution - kEps)) - 1);
+    const int y_min = std::max(
+      0, static_cast<int>(std::floor((inflated.v_min - wall.v_min) / resolution + kEps)));
+    const int y_max = std::min(
+      height - 1, static_cast<int>(std::ceil((inflated.v_max - wall.v_min) / resolution - kEps)) - 1);
 
     for (int y = y_min; y <= y_max; ++y) {
       for (int x = x_min; x <= x_max; ++x) {
