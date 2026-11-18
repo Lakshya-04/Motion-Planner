@@ -378,6 +378,27 @@ few above 1000 N) at the start of a press or on a jam, which the constraint solv
 force-limiting guard in the controller path (the `force_core` `ForceLimiter` is not wired into JTAC) would be the real bound; not
 done here, the controller belongs to another change.
 
+**Multi-stand with `wait_arm_settled.py`** (this branch, `fix/gazebo-multistand-dock`; 10 columns, two stands, same script and map, 3 runs in a row,
+the host was NOT idle: the load average rose to 21 on 12 cores during run 1 to 2 from an unrelated browser, run 3 ran at 13 to 18; every run
+started after the loadavg gate of below 12; the start/end loadavg was only sampled from run 2 on, so run 1 has none):
+
+| run | columns done | coverage | peak (score) | RMS error | in band | result | load at end | `settle.log` waits |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 6 of 10 (stand 0: columns 4, 5, 6 dock failed; stand 1: column 3 dock failed) | 0.601 | 35.8 N | 2.4 N | 0.85 | fails | not sampled | 2.7 s, 20.3 s, 505 s |
+| 2 | 10 of 10 | 0.941 | 54.0 N | 3.7 N | 0.85 | scorer passes | 16.7 | 2.7 s, 430 s |
+| 3 | 10 of 10 | 1.000 | 3025 N (one impact, RMS 88 N) | 88.0 N | 0.55 | scorer passes | 17.7 | 2.7 s, 47.1 s |
+
+2 of 3 pass against 1 of 3 and 1 of 2 before, but with 3 runs on a loaded host that is not a demonstrated improvement. Peaks are 35 to 54 N in the two
+runs without a single-sample impact (before: 1248 to 3424 N); run 3 has one 3025 N sample. The refused-plan pattern of run 1 is the old one: the
+OMPL `*_approach` segment completes (29 s) and the next Cartesian dock plan is truncated at the self-collision pair `arm_forearm_link` <->
+`arm_wrist_3_link` / `tool_mount_link` and refused 6 times, then `recovery jog refused: the good state is too far away`. That fits a joint
+state that still lags the plan (gz position loop, 10 s time constant) at the start of the dock plan. `wait_arm_settled.py` only runs in front
+of the stand arrival world-model reload (the stow move before a stand), so it does not cover the lag after an in-stand approach segment: in run 1 the
+failing docks were the first ones of stand 0, 37 s after the arrival, and the settle wait before them had returned after 2.7 s (the arm was at rest). Whether
+the load (timing) or the approach lag caused the failures could not be separated in 3 runs; not ruled out. Not tested: `dock_approach_extra_m`,
+the dock standoff margin, the wall octomap (0.98) vs the Gazebo wall (0.915), a slower approach (`retime_vel_scale`); no collision check was loosened.
+The next step is a settle wait between the approach and the dock (a manager hook) or a slower approach retiming, measured on an idle host.
+
 **Re-measured again on this branch (27 s spray seed; the multi-stand pass has no seed move, so the fix does not touch it), 2 runs, same script,
 reachability map reused, `ROS_DOMAIN_ID` 81, 82:**
 
