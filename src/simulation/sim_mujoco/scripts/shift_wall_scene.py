@@ -61,11 +61,15 @@ def shift_pcd(path, out, dx, dy, width=PATCH_WIDTH):
         f.writelines(' '.join(v) + '\n' for v in points)
 
 
-def sim_wall_pcd(scene_path, pcd_in, pcd_out):
+def sim_wall_pcd(scene_path, pcd_in, pcd_out, curtain=True):
     """walls.pcd stretched to the sim wall's whole extent (smoke_wall_scene.json, with its 0.25 m margin around the
-    contact patch): the cloud MoveIt's octomap is made of. walls.pcd covers the patch only, so MoveIt let the arm
-    swing through the part of the physical wall it did not know (the tool came to rest on the wall's top edge, z 1.53,
-    in about one run in four of the multi-stand pass). Same grid step and x as walls.pcd, label 0."""
+    contact patch), and with `curtain` on to the whole plane behind which the arm has no business (y 0.5 m beyond
+    the wall on each side, z 0 to 2.6 m): the cloud MoveIt's octomap is made of. walls.pcd covers the patch only, so
+    MoveIt let the arm swing through the part of the physical wall it did not know, and over the top of the wall: the
+    approach path from the stowed pose crosses the wall plane at z 1.55 and the tool came to rest on the wall's top
+    edge (tcp z 1.53, x 1.0 to 1.14, 100 to 170 N), in about one run in four of the multi-stand pass. Same grid step
+    and x as walls.pcd, label 0. No clearance or collision margin changes: the space behind the wall is only declared
+    occupied."""
     with open(scene_path) as f:
         w = json.load(f)['walls'][0]
     header, points, in_data = [], [], False
@@ -79,12 +83,14 @@ def sim_wall_pcd(scene_path, pcd_in, pcd_out):
                     in_data = True
     ys = sorted({float(v[1]) for v in points})
     zs = sorted({float(v[2]) for v in points})
-    step = min(ys[1] - ys[0], zs[1] - zs[0])
+    step = max(min(ys[1] - ys[0], zs[1] - zs[0]), 0.01)   # the octomap's resolution is 0.01
     x = points[0][0]
     oy, oz = w['origin_xyz'][1], w['origin_xyz'][2]
     u0, u1 = w['u_range_m']
     v0, v1 = w['v_range_m']
     y_lo, y_hi, z_lo, z_hi = oy + u0, oy + u1, oz - v1, oz - v0   # basis_v is -z
+    if curtain:
+        y_lo, y_hi, z_lo, z_hi = y_lo - 0.5, y_hi + 0.5, 0.0, 2.6
     ny, nz = round((y_hi - y_lo) / step), round((z_hi - z_lo) / step)
     cloud = [[x, f'{y_lo + i * step:.4f}', f'{z_lo + j * step:.4f}', '0'] for i in range(ny + 1) for j in range(nz + 1)]
     header = [f'WIDTH {len(cloud)}\n' if h.startswith('WIDTH') else
