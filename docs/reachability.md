@@ -184,6 +184,38 @@ distance and the height between base and target, and one stand reaches a ring ar
   Tests: `test/core/horizontal_stands_test.cpp` (9: one-stand ceiling, wide patch with several stands, ceiling above
   reach, mixed patch, floor, floor below the window, determinism, empty, single target).
 
+### Global stand selection over explicit candidates (`selectStands`)
+
+`selectStands(map, request, candidates, start, options)` (`core/global_stands.hpp`) takes all wall targets
+and a candidate set (`makeCandidateStands(request)` gives the `chooseStation` grid: free side, footprint
+clearance for the base model; any list of `CandidateStand` works) and returns a `StandSelection`:
+`success`, a `code` (`ok`, `no_targets`, `invalid_request`, `no_candidates`, `unreachable_targets`) and a
+`message`, the stands in tour order (targets, lift bands, mean margin, leg cost), `unreachable`, `tour_cost`,
+`input_order_cost`, and whether the budget cut the tour short.
+
+1. Each candidate is scored once with `reachableByHeight`; the share of lift heights that reach a target is
+   the reachability margin of that pair.
+2. Weighted greedy set cover: lowest `cost / newly covered`, with a fixed per-stand `cost = 1 +
+   margin_penalty * (1 - mean margin)` (default penalty 0.5; 0 is plain greedy by count). With fixed costs the
+   textbook bound holds: cost within H(n) <= 1 + ln(n) of the cheapest cover in those costs, so the stand count
+   is within (1 + penalty) * H(n) of the fewest stands. Stands made redundant are dropped; each target goes to
+   the chosen stand where its margin is highest (ties to the earlier pick).
+3. Open tour from `start` (with a base model: `travelTime`; without one: metres, first stop is the lowest along
+   the wall): nearest neighbour then 2-opt, and the cover's own order as a second 2-opt seed, so the tour is
+   never longer than the cover's order. `time_budget_s` (default 2 s, 0 disables the clock) and
+   `max_two_opt_passes` bound it; `tour_budget_hit` says it stopped early.
+
+Targets no candidate reaches are never dropped: they come back in `unreachable`, `success` is false with code
+`unreachable_targets`, and the rest are still planned. No random numbers; ties go to the lower index; the result
+is identical across runs unless the wall-clock budget trips. `rm4d_tool station ... --multi 1 --strategy global
+[--margin-penalty w --time-budget s]` prints it.
+
+This overlaps `StandStrategy::SetCover` above, which stays the one `planStands` and the node use (it adds a
+bounded exact search for fewer stands and moves stands to cheaper stations; this one takes caller-supplied
+candidates, weights by margin and returns a coded result). Not done: wiring into `reachability_node` or the
+manager, IK confirmation, a comparison with the exact search on real walls; tested on synthetic generic-arm
+walls (`global_stands_test`) only, no simulator.
+
 ## Limits and next steps
 
 - **Sampling density.** Uniform joint sampling leaves cells empty at fine resolution: 3 M samples

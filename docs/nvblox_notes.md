@@ -53,6 +53,11 @@ nvblox is one **implementation of the perception-source module**, not a new core
 | Isaac ROS nvblox (v5.0-0) | alternative or additional source through ROS topics (ESDF, mesh, costmap slice), useful for navigation and for visualization |
 | `scene_model` CPU voxelizer | static scans and offline scenes, no GPU |
 
+Measured 2026-11-18 ([curobo_v2_notes.md](curobo_v2_notes.md), `docker/tools/eval_curobo_mapper.py`): the cuRobo `Mapper` runs standalone on the
+4 GB RTX 3050 (0.17-0.34 GB for 2x2x2 and 4x4x2 m at 2-8 cm voxels, 1.4 GB for 6x6x2 m at 1 cm, about 1-1.7 ms per depth frame, ESDF 0.2-6 ms),
+its ESDF has our sign (positive outside) and layout, and it needs a float32 CPU copy, a clamp and an even cell count to go into `set_esdf`. Use
+0.04 m or finer; the default `gather` seeding is about one voxel conservative, `scatter` is exact. nvblox itself was not run.
+
 All of them produce the same `scene_model` types (`VoxelGrid` / `EsdfGrid`), and the planning
 backends consume those. The self filter runs in front of every source.
 

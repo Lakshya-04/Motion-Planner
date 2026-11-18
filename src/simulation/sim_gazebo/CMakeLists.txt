@@ -6,7 +6,7 @@ find_package(ament_cmake_python REQUIRED)
 
 ament_python_install_package(${PROJECT_NAME})
 install(DIRECTORY urdf config launch worlds DESTINATION share/${PROJECT_NAME}/)
-install(PROGRAMS scripts/wall_world_gen.py scripts/smoke_test.py scripts/contact_control_test.py scripts/contact_ground_truth.py scripts/record_run.py scripts/ready_pose.py scripts/run_manager_pass.sh scripts/base_motion_test.py scripts/depth_wall_test.py scripts/run_base_motion.sh scripts/run_depth_wall.sh scripts/run_spray_pass.sh scripts/run_multi_stand_pass.sh scripts/gz_pass_common.sh scripts/capture_still.py scripts/shift_wall_scene.py scripts/execute_coverage_client.py
+install(PROGRAMS scripts/wall_world_gen.py scripts/smoke_test.py scripts/contact_control_test.py scripts/contact_ground_truth.py scripts/record_run.py scripts/ready_pose.py scripts/wait_arm_settled.py scripts/run_manager_pass.sh scripts/base_motion_test.py scripts/depth_wall_test.py scripts/run_base_motion.sh scripts/run_depth_wall.sh scripts/run_spray_pass.sh scripts/run_multi_stand_pass.sh scripts/gz_pass_common.sh scripts/capture_still.py scripts/shift_wall_scene.py scripts/execute_coverage_client.py
   DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY test/data DESTINATION share/${PROJECT_NAME}/test)
 
