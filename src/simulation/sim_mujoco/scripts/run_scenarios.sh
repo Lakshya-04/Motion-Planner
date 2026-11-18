@@ -16,6 +16,7 @@
 # obstacle's footprint below its top; the tool point only, not the arm's links). A run passes when the manager
 # exits 0 and the scorer passes (cov_reach >= SCEN_MIN_COVERAGE, default 0.9, and no obstacle contact).
 # Output in SCEN_OUT (default /tmp/scenarios): per-run folders, results.tsv, and the table on stdout.
+# SCEN_DECOMP=cells runs the single-stand scenarios with the cell decomposition (MANAGER_PASS_PLANNER_PARAMS).
 # Needs the same ROS environment as run_manager_pass.sh / run_multi_stand_pass.sh (and their env switches apply).
 set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
@@ -38,6 +39,7 @@ while getopts "n:l" opt; do
 done
 shift $((OPTIND - 1))
 LIST=${*:-$DEFAULT_LIST}
+[ -n "${SCEN_DECOMP:-}" ] && export MANAGER_PASS_PLANNER_PARAMS="-p decomposition:=$SCEN_DECOMP"
 mkdir -p "$OUT"
 TSV=$OUT/results.tsv
 printf 'scenario\trun\tmanager_rc\tcov_wall\tcov_reach\tpeak_n\trms_n\tcontacts\tstatus\n' > "$TSV"

@@ -1,0 +1,91 @@
+<root BTCPP_format="4" main_tree_to_execute="CoverageMission">
+  <!--
+    Target tree for ExecuteCoverage (single and multi stand). DESIGN ONLY: the leaves marked (ROS2) would be
+    BehaviorTree.ROS2 action nodes (not packaged for Jazzy, see docs/behavior_tree_evaluation.md); the others are
+    plain custom nodes. The manager does not run this tree. A test in manipulation_bt_prototype loads this file with
+    stub leaves to check that it is well-formed and every node used is declared.
+
+    Blackboard: ctx (mission context: FSM, ledger, tracker), stands (planned stand queue), columns (this stand's
+    columns), mission_id.
+  -->
+
+  <BehaviorTree ID="CoverageMission">
+    <!-- Always report: the work either finishes and reports, or fails and the fallback still reports. -->
+    <Fallback>
+      <Sequence>
+        <LoadPlan/>                  <!-- coverage json, ledger begin(mission, resume) -->
+        <PlanStands/>                <!-- (ROS2) reachability plan_stands; single stand: one stand, no navigation -->
+        <ForEachStand stand="{stand}">
+          <SubTree ID="Stand" stand="{stand}"/>
+        </ForEachStand>
+        <ReportStatus outcome="finished"/>
+      </Sequence>
+      <ForceFailure>
+        <ReportStatus outcome="aborted"/>
+      </ForceFailure>
+    </Fallback>
+  </BehaviorTree>
+
+  <!-- One stand. A stand that cannot be reached is SKIPPED (NAV_FAILED for all its columns); the mission goes on:
+       ForEachStand treats the stand's FAILURE as skip and records the blackboard reason for its columns. -->
+  <BehaviorTree ID="Stand">
+    <Fallback>
+      <Sequence>
+        <StowForDrive/>                                      <!-- (ROS2) arm to the travel pose before driving -->
+        <RetryUntilSuccessful num_attempts="2">              <!-- nav_attempts parameter -->
+          <NavigateToStand stand="{stand}"/>                 <!-- (ROS2) stand_navigator NavigateToStand -->
+        </RetryUntilSuccessful>
+        <PrimeScene/>                                        <!-- octomap / scene for this stand -->
+        <ForEachColumn column="{column}" stand="{stand}">
+          <SubTree ID="Column" column="{column}"/>
+        </ForEachColumn>
+      </Sequence>
+      <ForceFailure>
+        <SetSkipReason reason="NAV_FAILED"/>
+      </ForceFailure>
+    </Fallback>
+  </BehaviorTree>
+
+  <!--
+    One column = one ledger segment. ForEachColumn: pause guard at the boundary (PAUSED waits here), ledger
+    markRunning before the child, markDone on SUCCESS, markSkipped with the blackboard skip reason (SetSkipReason,
+    default PLAN_FAILED) on FAILURE, resume skips settled columns. A halt leaves the column RUNNING in the ledger.
+    The reasons are set where the cause is known: DOCK_FAILED by DockColumn itself, CONTACT_OVERLOAD below.
+  -->
+  <BehaviorTree ID="Column">
+    <Fallback>
+      <Sequence>
+        <SwitchController mode="position"/>                  <!-- only here: between columns, never in flight -->
+        <DockColumn column="{column}"/>                      <!-- (ROS2) plan + trajectory to the wall; DOCK_FAILED -->
+        <SwitchController mode="contact"/>
+        <Fallback>
+          <Sequence>
+            <PressStrokeRetract column="{column}"/>          <!-- (ROS2) force stage, stroke, retract -->
+          </Sequence>
+          <Sequence>
+            <!-- Contact overload is checked first and is never retried (contact_overload_n). -->
+            <ContactOverloaded/>
+            <ForceFailure>
+              <SetSkipReason reason="CONTACT_OVERLOAD"/>
+            </ForceFailure>
+          </Sequence>
+          <Sequence>
+            <!-- column_retries: one more attempt after freeing a stuck arm (RECOVERY in the FSM). -->
+            <RecoverArm/>
+            <RetryUntilSuccessful num_attempts="1">
+              <PressStrokeRetract column="{column}"/>
+            </RetryUntilSuccessful>
+          </Sequence>
+          <ForceFailure>
+            <SetSkipReason reason="PLAN_FAILED"/>
+          </ForceFailure>
+        </Fallback>
+        <SwitchController mode="position"/>
+      </Sequence>
+      <!-- Tool off, admittance off, force target 0 on every non-success exit of the column. -->
+      <ForceFailure>
+        <SafeState/>
+      </ForceFailure>
+    </Fallback>
+  </BehaviorTree>
+</root>

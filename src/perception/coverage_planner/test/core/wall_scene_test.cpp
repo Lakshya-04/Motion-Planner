@@ -147,6 +147,36 @@ TEST(WallRasterizer, UniformInflationExpandsBothAxes)
   EXPECT_LT(cellAt(0.1, 0.1), 50);  // far away -- must stay free
 }
 
+TEST(WallRasterizer, KeepOutIsNoWiderThanTheCellsTheInflatedBoxOverlaps)
+{
+  const auto wall = makeSyntheticWall();
+  coverage_planner::ToolCoverage coverage;
+  coverage.obstacle_inflation = "uniform";
+  coverage.obstacle_inflation_radius_m = 0.15;
+  coverage.sweep_direction = "vertical";
+
+  // Inflated box u in [0.75, 1.25], v in [0.25, 0.75] on a 0.1 m grid: cells 7.5..12.5 and 2.5..7.5
+  // overlap it, i.e. indices 7..12 and 2..7 (cell 13 and cell 8 in v start beyond the box).
+  const auto grid = coverage_planner::rasterizeWallCoverageGrid(
+    wall, {makeCenteredObstacle()}, coverage, 0.1, "map");
+  const int width = static_cast<int>(grid.info.width);
+  int blocked_x_min = width, blocked_x_max = -1, blocked_y_min = 1000, blocked_y_max = -1;
+  for (size_t i = 0; i < grid.data.size(); ++i) {
+    if (grid.data[i] > 50) {
+      const int x = static_cast<int>(i) % width;
+      const int y = static_cast<int>(i) / width;
+      blocked_x_min = std::min(blocked_x_min, x);
+      blocked_x_max = std::max(blocked_x_max, x);
+      blocked_y_min = std::min(blocked_y_min, y);
+      blocked_y_max = std::max(blocked_y_max, y);
+    }
+  }
+  EXPECT_EQ(blocked_x_min, 7);
+  EXPECT_EQ(blocked_x_max, 12);
+  EXPECT_EQ(blocked_y_min, 2);
+  EXPECT_EQ(blocked_y_max, 7);
+}
+
 TEST(WallRasterizer, PrimaryAxisInflationOnlyExpandsSweepAxis)
 {
   const auto wall = makeSyntheticWall();

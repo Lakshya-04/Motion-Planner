@@ -84,4 +84,21 @@ TEST(CoverageOutputJsonSourceTest, ObstacleSplitColumnGivesOneStrokePerSpanNotOn
   EXPECT_NEAR(plan[2].poses.back().z, 1.29, 1e-6);
 }
 
+TEST(CoverageOutputJsonSourceTest, SingleCellGapStrokeBecomesAShortStroke)
+{
+  // Beside a small obstacle the planner leaves a column as two one-cell strokes (z 1.01 and z 1.29, first == last)
+  const std::string poses =
+    pt(0.98, 0.11, 1.01) + "," + pt(0.98, 0.11, 1.01) + "," + pt(0.98, 0.11, 1.29) + "," + pt(0.98, 0.11, 1.29);
+  const std::string path = ::testing::TempDir() + "point.json";
+  std::ofstream(path) << R"({"final_lifted_and_expanded":{"path":{"poses":[)" << poses << R"(]},"segments":[)"
+    << R"({"start_index":0,"end_index":1},{"start_index":2,"end_index":3}]}})";
+  CoverageOutputJsonSource src(path, "base_footprint", 0.0, 0.01, 1.0, 1.3, 0.02, WallDirection::from(1, 0, 0));
+  const auto plan = src.getCoveragePlan();
+  ASSERT_EQ(plan.size(), 2U);
+  EXPECT_NEAR(plan[0].poses.front().z, 1.0, 1e-6);    // clamped to the coverage z range
+  EXPECT_NEAR(plan[0].poses.back().z, 1.03, 1e-6);
+  EXPECT_NEAR(plan[1].poses.front().z, 1.27, 1e-6);
+  EXPECT_NEAR(plan[1].poses.back().z, 1.3, 1e-6);
+}
+
 }  // namespace manipulation_manager

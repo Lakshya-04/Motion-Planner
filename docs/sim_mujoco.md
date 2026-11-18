@@ -516,38 +516,64 @@ minus the obstacle's own footprint, `cov_reach` the fraction of the wall minus t
 clearance (what the planner may reach). Contacts are episodes in which the tool point was inside an obstacle's footprint below its top
 (the tool point only, not the arm's links). A run passes when the manager exits 0, `cov_reach` is at least 0.9 and there is no contact.
 
-Results (MuJoCo, UR10e, 0.01 m/s, swath 0.14 m, 10 N target, one run at a time; every run twice):
+Results (MuJoCo, UR10e, 0.01 m/s, swath 0.14 m, 10 N target, one run at a time, every scenario twice; branch `feat/scenario-rerun`
+with the coverage components, the one-cell gap stroke and the rasterizer fix below; load = `loadavg` at the start and end of the run, host
+shared with other jobs):
 
-| scenario | run | cov wall | cov reachable | peak N | RMS N | obstacle contacts | result |
-|---|---|---|---|---|---|---|---|
-| plain | 1 | 0.931 | 0.931 | 19.2 | 3.59 | 0 | pass |
-| plain | 2 | 0.931 | 0.931 | 19.9 | 3.56 | 0 | pass |
-| plain_wide | 1 | 0.959 | 0.959 | 19.8 | 3.61 | 0 | pass |
-| plain_wide | 2 | 0.959 | 0.959 | 20.5 | 3.60 | 0 | pass |
-| window | 1 | 0.671 | 0.793 | 20.0 | 3.72 | 0 | FAIL (cov_reach < 0.9) |
-| window | 2 | 0.671 | 0.793 | 20.7 | 3.61 | 0 | FAIL (cov_reach < 0.9) |
-| protrusion | 1 | 0.585 | 0.784 | 22.9 | 3.72 | 0 | FAIL (cov_reach < 0.9) |
-| protrusion | 2 | 0.585 | 0.784 | 19.5 | 3.65 | 0 | FAIL (cov_reach < 0.9) |
-| two_panels | 1 | 0.441 | 0.500 | 108.6 | 2.66 | 0 | FAIL (cov_reach < 0.9) |
-| two_panels | 2 | 0.441 | 0.500 | 17.1 | 2.44 | 0 | FAIL (cov_reach < 0.9) |
+| scenario | run | cov wall | cov reachable | peak N | RMS N | obstacle contacts | load | result |
+|---|---|---|---|---|---|---|---|---|
+| plain | 1 | 1.000 | 1.000 | 21.4 | 3.56 | 0 | 13.8 / 12.5 | pass |
+| plain | 2 | 1.000 | 1.000 | 21.8 | 3.60 | 0 | 12.5 / 12.2 | pass |
+| plain_wide | 1 | 1.000 | 1.000 | 19.9 | 3.61 | 0 | 12.2 / 7.7 | pass |
+| plain_wide | 2 | 1.000 | 1.000 | 20.1 | 3.59 | 0 | 7.7 / 4.8 | pass |
+| window | 1 | 0.916 | 1.000 | 22.3 | 3.66 | 0 | 11.7 / 11.3 | pass |
+| window | 2 | 0.916 | 1.000 | 20.3 | 3.69 | 0 | 11.3 / 13.8 | pass |
+| protrusion | 1 | 0.840 | 0.983 | 20.6 | 3.68 | 0 | 11.7 / 8.5 | pass |
+| protrusion | 2 | 0.840 | 0.983 | 20.4 | 3.63 | 0 | 8.5 / 11.7 | pass |
+| two_panels | 1 | 0.584 | 0.670 | 128.3 | 13.72 | 0 | 4.8 / 14.6 | FAIL (stand 1: columns 1 to 3 failed, 5 of 8 done) |
+| two_panels | 2 | 0.696 | 0.749 | 150.3 | 17.81 | 0 | 14.6 / 7.9 | FAIL (8 of 8 columns done, tool jammed above the wall for about 300 s, cov_reach < 0.9) |
+| two_panels_plain | 1 | 1.000 | 1.000 | 451.2 | 20.06 | 0 | 7.9 / 12.4 | pass (one press transient of 451 N) |
+| two_panels_plain | 2 | 0.761 | 0.761 | 501.1 | 38.58 | 0 | 12.4 / 11.3 | FAIL (stand 1: columns 1 to 3 failed, 7 of 10 done) |
 
-`two_panels` is a failure of the planner, not of the scorer: the coverage planner returns strokes for the left panel only (columns at
-y 0.31 to 0.61 of a wall y 0.3 to 1.2; the area beyond the rib is a second free component and is not planned), so the stand planner
-sees a 0.3 m span, one stand serves it ("stand 0/1", 4 columns done, none failed) and the right panel is never visited. Peak 108.6 N in
-run 1 is one press transient (17.1 N in run 2). `two_panels_plain` (no rib, two stands) was not run in this pass.
+Single-stand walls (plain, plain_wide, window, protrusion): 8 of 8 runs pass, force 20 to 22 N peak and 3.6 N RMS as before, no obstacle
+contact. The multi-stand walls are not reliable: 2 of 4 runs pass, and only one of the two passes has a clean force record (the other
+has a 451 N transient). Before the rasterizer fix (same code otherwise) the multi-stand runs were two_panels 2 of 2 pass (cov_reach 1.00;
+peaks 213.6 and 17.6 N) and two_panels_plain 1 of 2 (0.822 and 1.000), the single-stand `protrusion` 0.884 and 0.884 (fail); so the
+rib wall went from 2 of 2 to 0 of 2 with a plan that differs by one 0.02 m cell. With 3 of 8 multi-stand runs failing in all, the same failure
+on the wall without any obstacle (`two_panels_plain`, before the fix), I read it as a run-to-run property of stand 1 and not as an effect of
+the planner change, but 4 runs on each side cannot exclude it. A first round of `protrusion` run at load 10 to 23 (another job was compiling) was discarded and repeated at load 8 to 12.
+
+Gallery (one filmed run per scenario, the run 1 row of the table; `MANAGER_PASS_FILM=1` / `MULTI_STAND_FILM=1`, rendered with
+`render_run.py video` at 12x, `plot_run.py` for the force and coverage plot):
+
+| scenario | result of the filmed run | film | force and coverage plot |
+|---|---|---|---|
+| plain | pass, cov 1.000, peak 21.4 N | ![plain](media/scenario_plain.gif) | [png](media/scenario_plain.png) |
+| plain_wide | pass, cov 1.000, peak 19.9 N | ![plain_wide](media/scenario_plain_wide.gif) | [png](media/scenario_plain_wide.png) |
+| window | pass, cov reach 1.000, peak 22.3 N | ![window](media/scenario_window.gif) | [png](media/scenario_window.png) |
+| protrusion | pass, cov reach 0.983, peak 20.6 N | ![protrusion](media/scenario_protrusion.gif) | [png](media/scenario_protrusion.png) |
+| two_panels | FAIL, cov reach 0.670, peak 128.3 N (the plot shows where it fails: right panel not wiped, a stray stroke above the wall) | ![two_panels](media/scenario_two_panels.gif) | [png](media/scenario_two_panels.png) |
+| two_panels_plain | pass, cov 1.000, peak 451.2 N (press transient) | ![two_panels_plain](media/scenario_two_panels_plain.gif) | [png](media/scenario_two_panels_plain.png) |
 
 What the runs showed:
-- Two bugs on the way, both fixed here. The demo coverage node rasterizes the obstacle clearance into the grid but the planner
-  service node then added its own `obstacle_inflation_radius` (default 0.3 m) on top, which removed all free space on a 0.5 m
-  wall; the passes now start it with `-p obstacle_inflation_radius:=0.0`. And `CoverageOutputJsonSource` grouped points by column and
-  stroked from the lowest to the highest one, so a column the planner had split around the obstacle became one stroke through it
-  (first window run: 1 contact episode, 806 samples inside the window edge); it now emits one stroke per span of the plan's segments.
-- The planner leaves only end points of the split columns beside a small obstacle (the keep-out is 0.24 x 0.22 m around the
-  window, on a 0.3 m high patch), and a single point is no stroke, so the area next to the obstacle is not wiped: `cov_reach` stays
-  below 0.9 for `window` and `protrusion` (the failure rows are real, not a scorer artefact). Wiping to the edge of the keep-out
-  needs the planner to emit short strokes, or a smaller clearance than half the swath.
+- Fixed on the way (earlier in this branch): the demo coverage node rasterizes the obstacle clearance into the grid but the planner service
+  node then added its own `obstacle_inflation_radius` (default 0.3 m); the passes start it with `-p obstacle_inflation_radius:=0.0`.
+  `CoverageOutputJsonSource` emits one stroke per span of the plan's segments (a split column was one stroke through the obstacle), and
+  a one-cell gap stroke now becomes a short stroke (test `SingleCellGapStrokeBecomesAShortStroke`).
+- Fixed in this rerun: `rasterizeWallCoverageGrid` blocked the cell past `ceil(max)` of the inflated obstacle as well, so the planner's keep-out
+  was up to one cell (0.02 m) wider on each side than the 0.07 m clearance, while the scorer's reachable area uses exactly 0.07 m. A strip of
+  free wall beside the protrusion was therefore neither planned nor in the scorer's keep-out (`cov_reach` 0.884). It now blocks exactly the
+  cells the inflated box overlaps (gtest `KeepOutIsNoWiderThanTheCellsTheInflatedBoxOverlaps`); the clearance is unchanged and the scorer
+  is unchanged. `protrusion` goes to 0.983, `window` to 1.000 (the previous coverage-components fix had already taken it from 0.793).
 - Obstacle contacts counted only the tool point; an elbow or the wiper body hitting a protrusion is not seen yet (the MuJoCo plugin
-  does not publish contact pairs).
+  does not publish contact pairs). `cov_wall` is below 1 by design: it includes the 0.07 m clearance ring the planner keeps out of.
+- Open: the multi-stand pass fails about every second run on stand 1. In the failed runs the manager's `approach` of columns 1 to 3 fails
+  six times in a row with `CartesianPlanner: collision truncation at link pair 'arm_upper_arm_link' <-> 'lift_carriage_link'` (or
+  `arm_forearm_link <-> arm_wrist_2_link`) and "collision recovery found no jump-safe configuration", then `recovery jog refused: the good
+  state is too far away`; in the `two_panels` run 2 the tool sat for about 300 s at z 1.53 m, x 1.037 m (above the wall, pressing with 25
+  to 45 N) before the stand's columns ran. The same stand and the same plan pass in other runs, with 11 instead of 71 truncation
+  warnings. This is the arm's pose choice at the second stand (IK seed, OMPL randomness), not a timing effect: host load was 5 to 15 in the
+  failed runs. The collision matrix and margins were not touched; I did not find the cause.
 
 ### Multi-stand pass (the manager's `execute_coverage` action)
 

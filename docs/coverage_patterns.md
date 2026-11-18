@@ -93,8 +93,7 @@ wall `u = up x normal` (v up), for a horizontal plane u = world x. The API:
   gives the same poses as before and a floor or ceiling uses the same code. A scanned floor also works through
   `planCoverageFromScan` with `plane.normal_hint = +z`.
 
-A room is a list of patches, each planned on its own. Not done: reachability and stand selection for a horizontal
-surface (`chooseStation` still rejects a horizontal plane), reach limits for ceilings, ordering patches, and
+A room is a list of patches, each planned on its own. Stands for a horizontal patch: `planHorizontalStands` ([reachability.md](reachability.md), core only, no ROS service or manager use yet). Not done: ordering patches, and
 `loadWallScene` flatness is still a threshold on the scene file (it does not look at orientation).
 Tests: `test/core/surface_patch_test.cpp` (floor and ceiling with obstacles, orientation, verification raster).
 

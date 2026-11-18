@@ -10,6 +10,12 @@ end to end in headless one-command passes (coverage planner, manager, MoveIt, co
 and scored). Nothing here has run on hardware, and the base does not yet move between stands in those passes.
 The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
+**Where it stands (2026-11-18):** single-stand wall passes in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
+Multi-stand passes are not: runs fail at the second stand about half the time in MuJoCo (2 of 4 runs failed) and 1 of 3 in Gazebo, causes not yet found,
+see [Obstacle scenarios](#obstacle-scenarios-mujoco). Planning backends are MoveIt/OMPL, VAMP and cuRobo v2 (the pin is the 0.8.0 line; the
+newer cuRoboV2-Fast, v0.9.0, is being evaluated). cuRobo and VAMP are tested standalone and through their ROS clients, but no simulator pass has yet
+used them as the planner. Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md).
+
 ```
 sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware) -> base stands
         -> navigation / docking -> motion planning -> execution (JTAC + F/T) -> monitoring
@@ -79,6 +85,26 @@ loaded, which also gives the arm collision geometry; that run scored 0.58 covera
 | Gazebo: first move to the stroke | Gazebo: mid-stroke |
 |---|---|
 | ![gazebo seed](docs/media/gazebo_spray_seed.png) | ![gazebo stroke](docs/media/gazebo_spray_stroke.png) |
+
+### Obstacle scenarios (MuJoCo)
+
+`run_scenarios.sh` runs named walls through the manager pass (UR10e, each scenario twice). One filmed run per scenario is shown; the
+failing one is included on purpose. Full results, load averages and the failure analysis:
+[docs/sim_mujoco.md](docs/sim_mujoco.md#scenario-set-obstacles-on-the-wall).
+
+| scenario | runs passed | filmed run | film | force and coverage |
+|---|---|---|---|---|
+| plain | 2 of 2 | pass, coverage 1.000, peak 21.4 N | ![plain](docs/media/scenario_plain.gif) | [plot](docs/media/scenario_plain.png) |
+| plain_wide | 2 of 2 | pass, coverage 1.000, peak 19.9 N | ![plain_wide](docs/media/scenario_plain_wide.gif) | [plot](docs/media/scenario_plain_wide.png) |
+| window (hole in the wall) | 2 of 2 | pass, reachable coverage 1.000, peak 22.3 N | ![window](docs/media/scenario_window.gif) | [plot](docs/media/scenario_window.png) |
+| protrusion | 2 of 2 | pass, reachable coverage 0.983, peak 20.6 N | ![protrusion](docs/media/scenario_protrusion.gif) | [plot](docs/media/scenario_protrusion.png) |
+| two_panels (two stands, a rib) | 0 of 2 | **fail**, reachable coverage 0.670, peak 128.3 N | ![two_panels](docs/media/scenario_two_panels.gif) | [plot](docs/media/scenario_two_panels.png) |
+| two_panels_plain (two stands, no obstacle) | 1 of 2 | pass, coverage 1.000, one 451 N press transient | ![two_panels_plain](docs/media/scenario_two_panels_plain.gif) | [plot](docs/media/scenario_two_panels_plain.png) |
+
+The single-stand scenarios pass, with peaks near 20 N against a 10 N target. The two-stand ones fail about every second run at the second stand,
+including on a plain wall, so it is not the obstacle: the approach to the first columns is refused six times in a row by collision truncation
+and recovery finds no safe configuration. The cause is not isolated (the arm's pose at the second stand is the suspect). Several host loads were
+10 to 14 during these runs, recorded per run in the docs. No hardware was involved.
 
 ## Simulators
 
