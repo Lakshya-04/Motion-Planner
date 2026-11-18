@@ -8,6 +8,8 @@
 # Mirrors sim_mujoco/scripts/run_manager_pass.sh (UR10e profile, same ready pose and contact region): the plane the
 # tcp touches is x = 0.98 in base_footprint (the world wall is at 0.915: the tool tip ends 6.5 cm short of the tcp),
 # the contact region y 0..0.3, z 1.0..1.3.
+# MANAGER_PASS_PLANNING_CONFIG=/path/planning_curobo.yaml: the manager builds its planners from that file (planning_config
+# parameter, written into manager.yaml; unset = the packaged planning.yaml). Needs the cuRobo node: docs/sim_*.md.
 set -u
 PKG=$(ros2 pkg prefix sim_gazebo)
 SHARE=$PKG/share/sim_gazebo
@@ -62,6 +64,7 @@ manipulation_manager:
     dock_standoff_m: ${MANAGER_PASS_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MANAGER_PASS_PRESS:-0.005}
     target_force_n: ${MANAGER_PASS_TARGET:-10.0}
+${MANAGER_PASS_PLANNING_CONFIG:+    planning_config: $MANAGER_PASS_PLANNING_CONFIG}
 YAML
 
 # 3. the wall into MoveIt's planning scene as an octomap (so free-space moves do not plan through it or over its

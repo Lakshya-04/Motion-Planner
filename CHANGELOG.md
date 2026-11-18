@@ -19,6 +19,7 @@ anything verified on hardware.
 
 ### Added
 
+- cuRobo sim pass, authored and not run: `manipulation_manager/config/planning_curobo.yaml` (`free_space: curobo`, Cartesian seams on MoveIt), `docker/tools/generate_curobo_7dof.sh` and `docker/tools/run_curobo_node.sh` (7-joint config, node in `motion-planner:full`, waits for `cuRobo ready` and the services), `MANAGER_PASS_PLANNING_CONFIG` in the MuJoCo and Gazebo pass scripts (writes `planning_config` into the pass's `manager.yaml`; unset changes nothing), and a 'Running a pass with cuRobo as the planner' section with checklist and risks in `docs/sim_mujoco.md` and `docs/sim_gazebo.md`. Nothing was built, started or run; only `bash -n` and YAML parsing.
 - `reachability` core: `chooseHorizontalStation` and `planHorizontalStands` (`core/horizontal_stands.hpp`) pick base stands under or over a ceiling or floor patch (grid over the footprint plus a margin, lift bands for a vertical tool axis, greedy multi-stand cover) and report targets outside lift + arm height reach separately (`out_of_lift_range`). 9 gtests. Not wired into a ROS service or the manager.
 
 ### Fixed

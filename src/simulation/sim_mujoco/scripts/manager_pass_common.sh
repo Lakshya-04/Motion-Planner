@@ -76,6 +76,7 @@ manipulation_manager:
     contact_y_overshoot_m: ${MANAGER_PASS_PRESS:-0.0015}
     target_force_n: ${MANAGER_PASS_TARGET:-10.0}
 ${MP_MANAGER_YAML_EXTRA:-}
+${MANAGER_PASS_PLANNING_CONFIG:+    planning_config: $MANAGER_PASS_PLANNING_CONFIG}
 YAML
 }
 

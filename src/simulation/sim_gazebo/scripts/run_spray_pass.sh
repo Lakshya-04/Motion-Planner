@@ -17,6 +17,8 @@
 #   SPRAY_PASS_SEED_Q / SPRAY_PASS_SEED_SCALE (the seed joints in ready_pose.FREE order, velocity scale of the MoveIt plan, default 0.04 = a 27 s plan: it has to be slower than gz's 10 s joint loop, see docs/sim_gazebo.md)
 #   SPRAY_PASS_SCORE_ARGS (extra score_run arguments)  SPRAY_PASS_LAUNCH_ARGS
 #   GZ_PASS_STILLS=N (colour camera on, N PNG stills into OUT/stills, one every GZ_PASS_STILLS_EVERY s)
+# MANAGER_PASS_PLANNING_CONFIG=/path/planning_curobo.yaml: the manager builds its planners from that file (planning_config
+# parameter, written into manager.yaml; unset = the packaged planning.yaml). Needs the cuRobo node: docs/sim_*.md.
 set -u
 PKG=$(ros2 pkg prefix sim_gazebo)
 SHARE=$PKG/share/sim_gazebo
@@ -68,6 +70,7 @@ manipulation_manager:
     dock_standoff_m: 0.04
     contact: false
     valve_topic: /tool/valve
+${MANAGER_PASS_PLANNING_CONFIG:+    planning_config: $MANAGER_PASS_PLANNING_CONFIG}
 YAML
 
 # 3. the whole wall into MoveIt's scene as an octomap (see run_manager_pass.sh for why it must be the whole wall)

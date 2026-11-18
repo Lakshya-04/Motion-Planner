@@ -1,0 +1,42 @@
+# Planning backends for a sim pass with cuRobo v0.9.0 as the free-space planner.
+# Use it with the pass scripts:  MANAGER_PASS_PLANNING_CONFIG=<this file> run_manager_pass.sh
+# (docs/sim_mujoco.md and docs/sim_gazebo.md, section "Running a pass with cuRobo as the planner").
+# Schema and plugin names: docs/backend_selection.md. Needs the cuRobo node running first
+# (docker/tools/run_curobo_node.sh) with the 7-joint lift + UR10e robot config
+# (docker/tools/generate_curobo_7dof.sh): lift_joint, arm_shoulder_pan_joint .. arm_wrist_3_joint,
+# the same order as the manager's lift_arm group.
+planning:
+  # Stays MoveIt. The manager's planners do their own IK and do not call the selected IkPlugin
+  # (docs/backend_selection.md, Limitations), so curobo_ik would change nothing here; moveit_ik
+  # is also the only one that knows the wall-contact seeds the seams need.
+  ik: moveit_ik
+
+  # cuRobo: plugin name `curobo` (src/manipulation/curobo_planner/plugins.xml). It takes a joint
+  # goal or exactly one pose goal and plans in joint space, so it only gets transitions.
+  # The manager still tries Cartesian first on a free_space segment and hands over to this planner
+  # only when the Cartesian attempt falls short, and it also uses it as the bridge across a jump or
+  # collision inside a contact segment (motion_planner.cpp, MotionPlanner::plan).
+  free_space: curobo
+
+  # Contact seams (press, stroke, retract) stay on the MoveIt Cartesian planner: cuRobo has no
+  # Cartesian path, no wall-contact handling and no pose-based collision input.
+  cartesian: moveit_cartesian
+
+  # Stays MoveIt. curobo_collision accepts joint-space inputs only and the manager asks about
+  # poses; the manager's planners also answer collision queries themselves.
+  collision: moveit_collision
+
+  # No scene plugin on purpose: curobo_scene would only accept boxes and points, and the manager
+  # does not feed the ScenePlugin yet. Consequence: cuRobo plans against an EMPTY world (it does not
+  # see the wall that MoveIt's octomap holds). See "Risks" in the sim docs.
+  # scene: curobo_scene
+
+  # Per-segment routing. These are the defaults, written out so the intent is explicit.
+  segments: {contact: cartesian, transition: free_space}
+
+  plugin_params:
+    curobo:
+      node_name: /curobo_planner   # the node's name is fixed in curobo_bridge/ros_node.py
+      wait_for_service_sec: 5      # a call with no node answers `unavailable` after this long
+      timeout_sec: 60              # per call. The node warms up (kernel compile, 40-60 s) before it
+                                   # offers its services, so a plan call is not the one that pays for it.

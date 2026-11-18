@@ -334,6 +334,110 @@ A spray pass is filmed the same way (`MANAGER_PASS_FILM=1 SPRAY_PASS_LAUNCH_ARGS
 the wall (`--standoff`, `--half-angle` set their size; the sim has no spray, this is the scorer's model). The result is in
 [Spray pass](#spray-pass-non-contact-tool).
 
+## Running a pass with cuRobo as the planner
+
+Authored, **not run** (no sim pass has used cuRobo yet). It makes cuRobo v0.9.0 the free-space planner of the manager in a
+MuJoCo pass; contact seams stay on MoveIt Cartesian. The selection file is
+`manipulation_manager/config/planning_curobo.yaml` (`free_space: curobo`, everything else as the default `planning.yaml`;
+each choice is explained in the file: IK and collision stay MoveIt because the manager's planners do not call the selected
+plugins and cuRobo's collision input is joint-space only, no `scene` plugin because the manager does not feed it).
+
+Two containers, one host: the cuRobo node runs in `motion-planner:full` (GPU, `--network host`), the sim and the manager in
+the image you already use for the pass (`docs/sim_mujoco.md` Build). They find each other through DDS, so both need the same `ROS_DOMAIN_ID`
+(and the same RMW, and the same IPC namespace if Fast DDS shared memory is on: add `--ipc host` to both, or set
+`CUROBO_DOCKER_ARGS=--ipc host`). The manager container needs `curobo_planner` and `curobo_bridge_msgs` built (they are
+in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_planner_plugins`); the node container needs
+`curobo_bridge` and `curobo_bridge_msgs` in an install space.
+
+1. Generate the 7-joint robot config (lift + UR10e, joint order of the manager's `lift_arm` group; GPU, a few minutes):
+
+   ```bash
+   docker/tools/generate_curobo_7dof.sh --out "$PWD/build/robot_assets/ur10e_telescopic"
+   # -> build/robot_assets/ur10e_telescopic/lift_arm.yml  (absolute paths inside: do not move the directory)
+   ```
+
+2. Start the node (waits for `cuRobo ready` and the six services, then returns; the container keeps running):
+
+   ```bash
+   export ROS_DOMAIN_ID=7          # any value, the same in the sim container
+   docker/tools/run_curobo_node.sh start --ws "$PWD" \
+       --robot "$PWD/build/robot_assets/ur10e_telescopic/lift_arm.yml" --max-boxes 256
+   ```
+
+   Add `--esdf-dims 2,2,2 --esdf-voxel 0.04 --esdf-center 0.9,0,1.2` to reserve an ESDF grid (not used by the pass).
+   `docker/tools/run_curobo_node.sh status|logs|stop` manage it.
+
+3. Start the pass with the env var, in the sim container with the same `ROS_DOMAIN_ID`. The path must be readable
+   there (the installed share or the repo mount):
+
+   ```bash
+   export ROS_DOMAIN_ID=7
+   MANAGER_PASS_PLANNING_CONFIG=$(ros2 pkg prefix manipulation_manager)/share/manipulation_manager/config/planning_curobo.yaml \
+       src/simulation/sim_mujoco/scripts/run_manager_pass.sh
+   ```
+
+   `run_multi_stand_pass.sh, run_sensed_pass.sh and run_spray_pass.sh (the latter through `manager_pass_common.sh`)` takes the same variable. The variable adds `planning_config: <path>` to the `manager.yaml` the script writes
+   into its output directory (the launch's `params_file`), so with the variable unset nothing changes.
+
+4. `docker/tools/run_curobo_node.sh stop` afterwards.
+
+The MuJoCo scripts do not publish `/clock` (the manager runs with `use_sim_time:=false`), which does not matter for the node.
+
+### Log lines that show it
+
+- Node container (`run_curobo_node.sh logs`): `cuRobo ready: 7 joints, tool ['tcp_link']`. If instead
+  `cuRobo planner unavailable: ...` appears, the services answer `unavailable`.
+- `manager.log` at start-up: `planning backends from <path>/planning_curobo.yaml: cartesian=moveit_cartesian free_space=curobo ik=moveit_ik collision=moveit_collision`
+  (`manipulation_manager_node.cpp`, `buildPlanners`). A bad selection stops the node with
+  `planning backend '<plugin>' (<role>) failed: [<code>] <message> (config <path>)`.
+- Per segment: `segment_exec id=.. label=.. outcome=.. mode=.. planner=.. ...` (`MotionExecReporter`). **`planner=` is not
+  proof of cuRobo**: `MotionPlanner` fills it with the legacy planner name (`ompl`) whatever plugin did the work
+  (`motion_planner.cpp`, `planner_used = planner_for_segment`), so a cuRobo transition reads `planner=ompl` too.
+  Use `mode=fsp` (a free-space segment) together with the evidence below.
+- Evidence that cuRobo planned: `nvidia-smi` shows the node's process and its utilisation rises during transitions; the
+  trajectory of a transition should look like cuRobo's (dense, 0.025 s interpolation; not checked); and the negative control: stop the node
+  (`run_curobo_node.sh stop`) and re-run: transitions the Cartesian attempt cannot do fail with
+  `cuRobo planner service is not available` (`failure_reason_code: unavailable`, within `wait_for_service_sec` = 5 s each).
+  The node logs nothing per call, so there is no call counter; if one is wanted, a log line in `ros_node.py` is a one-line change.
+
+### Checklist for the run
+
+- [ ] `cuRobo ready` in the node log; six services under `/curobo_planner` (`ros2 service list`) seen from the sim container.
+- [ ] Manager start-up line names `free_space=curobo`; no `[unavailable]`/`[unknown_plugin]` error.
+- [ ] Contact segments (`press`, `stroke`, `retract` labels) are `mode=cartesian`, completion as in the plain-MoveIt run.
+- [ ] Transition segments (`mode=fsp`) succeed; compare time and path against the MoveIt run (same seed and scene).
+- [ ] How often cuRobo was actually reached: transitions are tried as Cartesian first, so only those the Cartesian attempt
+      falls short on (and jump or collision bridges inside contact segments) go to cuRobo. Expect few; if none, the
+      pass proves nothing about cuRobo. The negative control above shows which ones.
+- [ ] With the node stopped: those segments fail as `unavailable`, the manager does not hang (each call waits at most 5 s).
+- [ ] Score of the pass unchanged (coverage, force) against the MoveIt-only run.
+- [ ] Joint order: a plan from cuRobo has 7 positions in `lift_joint, arm_shoulder_pan_joint .. arm_wrist_3_joint` order.
+
+### Risks found by reading the code
+
+- **cuRobo plans in an empty world.** The scene plugin is not selected and the manager does not feed the `ScenePlugin`
+  (`docs/backend_selection.md`, Limitations); nothing calls `setWorld` / `updateWorldGeometry` of the client. The wall in
+  MoveIt's octomap and any later scene update are invisible to cuRobo, which also checks only against its own robot
+  spheres (self-collision). A cuRobo transition can therefore pass through the wall. Keep transitions short and in free air,
+  or feed the world by hand (`ros2 service call /curobo_planner/set_world ...`) before the run. Syncing it with the manager's
+  scene updates needs a manager change (another PR) and is not authored here.
+- **Frame.** The node works in the robot base frame of the generated URDF (`base_link`, `lift_arm` chain); pose goals are
+  sent as given by the manager, whose `frame_id` is `base_footprint`. The client only checks a world update's frame when
+  `Options::base_frame` is set (it is not set from the YAML), and rejects a differing frame (test `RejectsAWorldInAnotherFrame`).
+  Whether `base_footprint` and `base_link` coincide for this profile was not checked; joint goals are not affected, pose goals are.
+- **One planner per process.** One cuRobo node, one planner; the manager's plugin shares one client. Do not start a second
+  node or run the GPU tests/benchmarks at the same time on a 4 GB card.
+- **First-call compile.** CUDA/Warp kernels compile in the node's start-up warm-up (about 40 to 60 s cold, shorter with the
+  `~/.cache/motion-planner-curobo` cache), before the services exist; `run_curobo_node.sh` waits for it. A plan call is not
+  expected to pay it, but a first plan with new shapes may be slower than later ones; `timeout_sec` is 60 s against the
+  manager's own segment timeouts (not checked against them).
+- **Cartesian-first.** `free_space` keeps "Cartesian first, free-space planner on shortfall", and `curobo` also serves as the
+  bridge inside contact segments; "contact seams stay on Cartesian" holds for the seam itself, not for a bridge around a jump.
+- **Plan-only pose goals.** cuRobo takes a joint goal or exactly one pose goal and no Cartesian path; the lift is in its
+  joint set (limits 0 to 1.5 m, lift velocity from the profile is not in the config: time scaling not checked).
+- **Same network, two containers.** Mismatched `ROS_DOMAIN_ID`, RMW or SHM settings show up as `service is not available`.
+- Not verified: everything above was read from source; nothing was built or run.
+
 ## Not modelled / limits
 
 - Wheels, wheel-ground contact and slip (`base_motion:=true` moves the base kinematically as a planar velocity
