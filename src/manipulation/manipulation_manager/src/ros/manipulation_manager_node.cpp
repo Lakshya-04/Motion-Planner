@@ -197,6 +197,11 @@ public:
     // configuration (the stowed pose before the first dock) and handed to the planner as a joint goal; the pose goal
     // stays as the fallback of the later attempts.
     dock_ik_seeded_ = this->declare_parameter<bool>("dock_ik_seeded", true);
+    // The seed of that IK: a configuration of the arm docked at the wall (planning group order, lift first). Every
+    // dock is then solved from the same seed, so the lift / shoulder / wrist branch does not creep from one column to
+    // the next (a chain of seeds drifted into upper arm <-> lift carriage self-collision at the last column of a
+    // stand). Empty: the seed is the previous docked configuration, the stowed pose before the first dock.
+    dock_seed_ = this->declare_parameter<std::vector<double>>("dock_seed_joint_state", std::vector<double>{});
     // The free-space move of a dock stops this far short of the dock pose and a short straight move closes the
     // gap (0 = plan straight to the dock pose). Planning to a pose a few cm from the wall fails or times out
     // when the tool mount clips the wall voxels on the way in; see docs/sim_mujoco.md.
@@ -1255,7 +1260,8 @@ private:
   std::vector<double> seededDockIk(const core_types::Pose & pose)
   {
     const auto ik = pipeline_.ik();
-    const auto & seed = dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_;
+    const auto & seed = !dock_seed_.empty() ? dock_seed_ :
+      (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
     if (!ik || seed.empty()) {
       return {};
     }
@@ -1289,7 +1295,12 @@ private:
       std::snprintf(buf, sizeof(buf), "%s%.4f", txt.empty() ? "" : ", ", v);
       txt += buf;
     }
-    RCLCPP_INFO(this->get_logger(), "ARMSTATE %s stand %zu: q=[%s]", tag.c_str(), stand_index_, txt.c_str());
+    FrameTransform tcp;
+    const std::string wf = world_frame_.empty() ? frame_id_ : world_frame_;
+    const bool have_tcp = lookup(wf, "tcp_link", tcp);
+    RCLCPP_INFO(
+      this->get_logger(), "ARMSTATE %s stand %zu: q=[%s] tcp_in_%s=(%.3f, %.3f, %.3f)", tag.c_str(), stand_index_,
+      txt.c_str(), wf.c_str(), have_tcp ? tcp.t[0] : 0.0, have_tcp ? tcp.t[1] : 0.0, have_tcp ? tcp.t[2] : 0.0);
   }
 
   /// A trivial joint-space "move to where the arm already is" segment -- its only purpose is
@@ -1569,6 +1580,7 @@ private:
     }
     markGoodState();
     dock_branch_seed_ = last_good_state_;
+    logArmState("docked_" + intent.label);
     if (!contact_) {
       return runSprayStroke(intent, wall_dir, standoff_pose);
     }
@@ -1852,6 +1864,7 @@ private:
   double dock_standoff_{0.0};
   int dock_attempts_{3};
   bool dock_ik_seeded_{true};
+  std::vector<double> dock_seed_;
   std::vector<double> dock_branch_seed_;   ///< the last docked configuration: the IK seed of the next dock
   double travel_lift_margin_{0.01};
   double dock_approach_extra_m_{0.0};
