@@ -11,7 +11,7 @@ and scored). Nothing here has run on hardware, and the base does not yet move be
 The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
 **Where it stands (2026-11-18):** single-stand wall passes in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
-Multi-stand passes are not: about every second run fails at the second stand (2 of 4 runs in MuJoCo, 2 of 3 in Gazebo, causes not yet found),
+Multi-stand passes are not: runs fail at the second stand about half the time in MuJoCo (2 of 4 runs failed) and 1 of 3 in Gazebo, causes not yet found,
 see [Obstacle scenarios](#obstacle-scenarios-mujoco). Planning backends are MoveIt/OMPL, VAMP and cuRobo v2 (the pin is the 0.8.0 line; the
 newer cuRoboV2-Fast, v0.9.0, is being evaluated). cuRobo and VAMP are tested standalone and through their ROS clients, but no simulator pass has yet
 used them as the planner. Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md).
