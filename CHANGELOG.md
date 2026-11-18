@@ -12,6 +12,8 @@ anything verified on hardware.
 
 ### Fixed
 
+- Wall rasterizer blocked one cell more than the inflated obstacle overlaps (the cell past `ceil(max)`), so the planner's keep-out was up to 0.02 m wider per side than the scorer's 0.07 m clearance and a strip beside a small obstacle was never wiped; the clearance itself is unchanged. MuJoCo scenario reruns (12 runs, `docs/sim_mujoco.md`): single-stand scenarios 8 of 8 pass (protrusion cov reachable 0.884 -> 0.983, window 0.793 -> 1.000), multi-stand 2 of 4 pass (stand 1 approach fails in about half of the runs, cause open).
+- `CoverageOutputJsonSource`: a one-cell gap stroke becomes a short stroke instead of being dropped. `run_manager_pass.sh` takes `MANAGER_PASS_PLANNER_PARAMS`, `run_scenarios.sh` `SCEN_DECOMP`; `run_multi_stand_pass.sh` takes `MULTI_STAND_FILM=1`.
 - VAMP robot model rejected most benchmark endpoints (60 of 72 in the empty scene, every `stow_side` pair): FOAM's 6 spheres on the 0.04 m lift carriage plate bulged into the upper arm. `docker/tools/generate_vamp_robot.sh` now defaults `FOAM_ARGS` to `--lift_carriage_link=4` (23 plate spheres, 50 in total); on the same 158 problems VAMP goes from 10/158 to 158/158. Numbers in `docs/planner_benchmark.md`.
 
 ### Added
