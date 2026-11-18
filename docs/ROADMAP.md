@@ -9,7 +9,7 @@ sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware
         -> navigation / docking -> motion planning -> execution (JTAC + F/T) -> monitoring
 ```
 
-Last verified: 2026-11-17 on main at 56712bb (PRs up to #94): simulator-free checks green (`docker/run_all_checks.sh --skip-sims`: 54 packages built, 1259 colcon tests, 0 failures, 229 skipped; 5 pytest directories passed; public-readiness scan clean). Simulator, GPU and hardware items below were not re-run for that date; their evidence is the earlier run each line cites. Legend: `[x]` done, `[~]` partial (what is
+Last verified: 2026-11-17 on main at 56712bb (PRs up to #94): simulator-free checks green (`docker/run_all_checks.sh --skip-sims`: 54 packages built, 1259 colcon tests, 0 failures, 229 skipped; 5 pytest directories passed; public-readiness scan clean). Since then (2026-11-18, PRs #96, #101 to #106) only the package tests of the touched packages were re-run, not the whole suite. Simulator, GPU and hardware items below were not re-run for that date; their evidence is the earlier run each line cites. Legend: `[x]` done, `[~]` partial (what is
 missing is stated), `[ ]` not done (some are design-only). Each item names its evidence. Tick items as they land
 and update the date. **Policy:** reuse maintained open source before writing our own (section 17); ROS 2 distro
 support is not a reason to reject a candidate (we port); prefer the newest method that fits, including papers
@@ -224,10 +224,11 @@ without code, when we can implement it.
 
 ## 16. The PR stack
 
-#5 `feat/scene-adapters` -> main, then #6 bases, #7 base-aware stationing, #8 lifts, #9 asset command, #10 MuJoCo cross-check,
-#11 multi-stand, #12 `~/plan_stands`, #13 simulation contract, #14 F/T conditioning, #15 MuJoCo backend, #16 arm profile, #17 arm profile
-nodes, #18 Gazebo backend, #19 sphere benchmark, #20 `ft_conditioner`, #21 MuJoCo contact test, #22 Gazebo contact test. Pending: cleanup of
-stale `CLAUDE.md` references (committed locally; push waits for GitHub), this roadmap. #5 merges cleanly into `main`; merging it first shrinks the chain.
+All pull requests up to #106 are merged into `main` except two drafts kept on purpose: #41 (a JTAC force barrier whose own description says there is
+no usable bound at the 100 Hz loop, conflicts with `main`) and any newer work in progress. The earlier chain (#5 `feat/scene-adapters` onward,
+through #22 Gazebo contact test) is merged. History is merge commits, so each PR is a named line in `git log --merges`. There is deliberately no CI;
+each merged PR ran the local checks named in its description. Not run for the latest batch (#101 to #106): the full `run_all_checks.sh`; each PR's
+own package tests were run instead (reachability 10 executables, coverage_planner 17, the behaviour-tree prototype 10).
 
 ## 17. Reuse map: adopt, implement from a paper, avoid
 
