@@ -423,24 +423,24 @@ def cmd_report(a):
                        f"{r['vram_peak_mib']:.0f} ({r['vram_peak_mib'] - r['vram_base_mib']:.0f}) | "
                        f"{r['vram_torch_max_allocated_mib']:.0f} | {r['loadavg_start'][0]:.1f} / {r['loadavg_end'][0]:.1f} |")
 
-    # node + C++ client against the in-process runs, same problem ids
-    for run in runs:
-        if run['backend'] != 'curobo_node':
+    # node + C++ client against the in-process runs, same problem ids (passes of the client pooled)
+    for label, nruns in groups.items():
+        if nruns[0]['backend'] != 'curobo_node':
             continue
-        ids = [i for i, p in run['problems'].items()]
-        ok = [i for i in ids if run['problems'][i]['success']]
-        out += ['', f"cuRobo through the ROS node and C++ client ({run['set']}): {len(ok)}/{len(ids)} planned; "
-                    'same problem ids, in-process mode shown for the same ids:',
+        ids = sorted(set().union(*[set(r['problems']) for r in nruns]))
+        times = [r['problems'][i]['wall_s'] * 1e3 for r in nruns for i in ids if i in r['problems'] and r['problems'][i]['success']]
+        total = sum(len(r['problems']) for r in nruns)
+        node_ms = [r['problems'][i]['node_ms'] for r in nruns for i in ids if i in r['problems'] and r['problems'][i]['success']]
+        traj = [r['problems'][i]['traj_s'] for r in nruns for i in ids if i in r['problems'] and r['problems'][i]['success']]
+        out += ['', f"cuRobo through the ROS node and C++ client: {len(times)}/{total} planned ({len(nruns)} client passes over "
+                    f"{len(ids)} problems); the same problem ids in process, per mode and pass:",
                 '', '| path | n | median ms | p95 ms | min ms | max ms |', '|---|---|---|---|---|---|']
-        nt = [run['problems'][i]['wall_s'] * 1e3 for i in ok]
-        out.append(f"| node + client (wall around `plan()`) | {len(nt)} | {f(bs.pct(nt, 50))} | {f(bs.pct(nt, 95))} | "
-                   f"{f(min(nt) if nt else float('nan'))} | {f(max(nt) if nt else float('nan'))} |")
-        nodes = [run['problems'][i].get('node_ms') for i in ok]
-        out.append(f"| node's own `planning_time_ms` (cuRobo `total_time`, ms resolution) | {len(nodes)} | "
-                   f"{f(bs.pct(nodes, 50))} | {f(bs.pct(nodes, 95))} | {f(min(nodes) if nodes else float('nan'))} | "
-                   f"{f(max(nodes) if nodes else float('nan'))} |")
+        out.append(f"| node + client (wall around `plan()`) | {len(times)} | {f(bs.pct(times, 50))} | {f(bs.pct(times, 95))} | "
+                   f"{f(min(times) if times else float('nan'))} | {f(max(times) if times else float('nan'))} |")
+        out.append(f"| node's own `planning_time_ms` (cuRobo `total_time`, whole ms) | {len(node_ms)} | {f(bs.pct(node_ms, 50))} | "
+                   f"{f(bs.pct(node_ms, 95))} | {f(min(node_ms) if node_ms else float('nan'))} | {f(max(node_ms) if node_ms else float('nan'))} |")
         for r in cur:
-            ts = [r['problems'][i]['wall_s'] * 1e3 for i in ok if i in r['problems'] and r['problems'][i]['success']]
+            ts = [r['problems'][i]['wall_s'] * 1e3 for i in ids if i in r['problems'] and r['problems'][i]['success']]
             out.append(f"| in process, {r['set']} pass {r['pass']} | {len(ts)} | {f(bs.pct(ts, 50))} | "
                        f"{f(bs.pct(ts, 95))} | {f(min(ts) if ts else float('nan'))} | {f(max(ts) if ts else float('nan'))} |")
     (work / 'results.txt').write_text('\n'.join(out) + '\n')

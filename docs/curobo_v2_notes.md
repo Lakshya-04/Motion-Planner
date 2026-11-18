@@ -498,3 +498,11 @@ wired. The tolerance behaviour above (1 cm failing on a straight line) should be
 The C++ end-to-end test and the ROS node tests (need the `full` image); any comparison of planning time or success rate against 78fd485; TimeOpt,
 payload / torque limits, the C++ runtime; the 7-joint config in the ROS node or on the real lift limits; VRAM of a whole planner on the 4 GB card in Warp terms
 (only torch's allocation was read); `plan_pose_waypoints` with obstacles or on the 7-joint robot.
+
+## Planning times and the RRT route (measured 2026-11-18, cuRobo 0.9.0)
+
+Joint-space planning times on the 158-problem benchmark, the three routes through `plan_cspace` (defaults, GPU bidirectional RRT + trajectory
+optimisation, RRT seed only), warmup and first call, VRAM (RRT modes 3.3 GB of the 4 GB card against 1 GB for the defaults) and the ROS node overhead
+(3 to 6 ms per call) are in [planner_benchmark.md](planner_benchmark.md). `CuroboPlanner(graph_planner_algorithm='rrt', enable_trajopt=..., enable_graph_attempt=...)`
+selects the route; the node still uses cuRobo's defaults.
+
