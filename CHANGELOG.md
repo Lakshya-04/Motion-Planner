@@ -12,6 +12,7 @@ anything verified on hardware.
 
 ### Verified
 
+- 2026-11-18: cuRobo v2's `Mapper` standalone on the RTX 3050 Laptop (4 GB) in `motion-planner:gpu`, synthetic depth (wall plane plus box, `docker/tools/eval_curobo_mapper.py`): 2x2x2 and 4x4x2 m at 2, 4 and 8 cm voxels, 320x240 and 640x480, all fit in 0.17-0.34 GB device memory, 1.0-1.7 ms per frame, ESDF 0.2-6 ms; 4 cm or finer is needed (8 cm gives 0.25-0.5 m far-field error), `scatter` seeding is exact and the default `gather` about one voxel conservative; ESDF sign and layout match `CuroboPlanner.set_esdf` (conversion: float32 CPU copy, clamp, even voxel count). 8x8x2 m at 1 cm was killed (SIGKILL, cause not found). Not run: real depth, ROS, Mapper plus planner together. Results in `docs/curobo_v2_notes.md`.
 - 2026-11-17, main at 56712bb: `docker/run_all_checks.sh --skip-sims` (fresh build volumes, image `motion-planner:build-live`): 54 packages built, `colcon test` 1259 tests, 0 errors, 0 failures, 229 skipped (lint and optional-dependency tests); pytest per directory 324 passed, 6 skipped (MuJoCo, cuRobo and torch absent); public-readiness scan 0 problems. Not run: sim_gazebo, sim_mujoco, sim_isaac, the simulator scripts, GPU planners, hardware.
 - `moveit_ros_perception` (needed at run time by the live octomap) is an `exec_depend` of `mobile_manipulator_moveit_config`, not a build dependency. The older `motion-planner:build` image lacks it, so build and test pass there but `live_octomap:=true` fails until the image is rebuilt (it is in `docker/apt-extra.txt`). The feature stays opt-in.
 
