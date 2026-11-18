@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>manipulation_bt_prototype</name>
+  <version>0.1.0</version>
+  <description>
+    Opt-in evaluation prototype: BehaviorTree.CPP 4 nodes (always-report fallback, segment loop with typed skips,
+    pause at segment boundaries, halt cleanup) over fake segment executors, ROS-free. Not used by the manager; see
+    docs/behavior_tree_evaluation.md. Builds only when behaviortree_cpp is found.
+  </description>
+  <maintainer email="100lakshyaagarwal@gmail.com">Lakshya Agarwal</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>behaviortree_cpp</depend>
+  <depend>nlohmann-json-dev</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

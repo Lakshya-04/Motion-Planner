@@ -13,7 +13,7 @@ TCP), then wall plane, then base-to-wall.
 |---|---|---|
 | F/T sign and bias check | by hand + `ros2 topic echo` | `sign`, `bias` of `ft_conditioner` |
 | Tool TCP position | `core_types::pivotCalibration` (ROS-free) | `tcp_xyz` of the tool profile, `tool_in_sensor_xyz` |
-| Payload (mass, centre of gravity, bias) | `ft_conditioner` services | `payload_mass_kg`, `payload_cog_xyz`, `bias` |
+| Payload (mass, centre of gravity, bias) | `ft_conditioner` services; `force_core` excitation planner | `payload_mass_kg`, `payload_cog_xyz`, `bias` |
 | Wall plane | `wall_detector` node | `wall_scene.json` for the coverage planner |
 | Base-to-wall | `wall_detector` in `base_footprint` + a touch check | stand/base pose, `target_frame` |
 
@@ -85,7 +85,104 @@ ros2 service call /wrench_conditioner/clear_samples std_srvs/srv/Trigger  # star
   returns a YAML snippet for `payload_mass_kg`, `payload_cog_xyz` and `bias`. Degenerate pose sets are rejected
   with a reason.
 - Verify: mass close to the weighed tool + plate + adapter; conditioned force near zero in poses not used in
-  the fit. Repeat after warm-up and after any tool change (bias drift is not tracked).
+  the fit. Repeat after warm-up and after any tool change.
+- `identify` also reports the regressor condition number of the pose set and rejects a set above 1000
+  (`identifyPayload(..., max_condition)`). The planner's 8 to 10 well-spread poses give about 1.4; six poses within 0.5 rad of one axis give tens
+  to hundreds. Noise on the readings is amplified by about this number.
+
+### Choosing the poses: safe excitation planner (ROS-free)
+
+`force_core/payload_excitation.hpp` picks the poses and times the moves. You supply forward kinematics (sensor
+orientation from joints), the joint limits and velocity / acceleration bounds, and optionally a safety proxy
+(`std::function<bool(q)>`, true = safe: your self-collision spheres, a workspace box, a keep-out on the wrist).
+
+```cpp
+force_core::ExcitationLimits lim;  // q_min, q_max, v_max, a_max, margin_rad (0.1), velocity_scale (0.5)
+force_core::ExcitationOptions opt; // num_poses (8), num_candidates (400), dwell_s (1.5), seed
+auto plan = force_core::generateExcitationPoses(q_now, lim, fk, is_safe, gravity_world, opt);
+if (plan.ok) {                      // plan.waypoints[k].q, t_arrive_s, t_leave_s; plan.condition_number
+  auto q = force_core::sampleExcitationPlan(plan, t);   // joint reference at time t
+}
+```
+
+Candidates are random joint configurations inside the limits minus the margin that pass the proxy; poses are
+chosen farthest-point first on the gravity direction seen in the sensor frame, and each move from the previous
+pose must pass the proxy along the straight joint-space path (checked every `path_step_rad`). Moves are
+rest-to-rest quintics, slowed until peak velocity and acceleration are within `velocity_scale` of the bounds.
+It returns `ok = false` with a reason if fewer than six reachable, safe, well-spread poses exist, and
+warns (still `ok`) when the condition number is above `max_condition` (20). Send the waypoints to the arm
+through your normal trajectory interface, wait `dwell_s` at each pose and call `capture_pose` there. No ROS
+service runs the plan yet, and the proxy is yours: the planner is only as safe as it is. This is the simple,
+offline form of the idea in arXiv 2504.21486 (bounded excitation); it has no online set-based safety
+guarantee, and its code was not used (no licence).
+
+Simulated numbers (gtest, 2 kg payload, 0.1 N force and 0.01 N m torque noise, 10 poses, 50 trials): worst
+mass error 0.0096 kg, worst centre-of-gravity error 0.68 mm, worst force-bias error 0.09 N, condition 1.4. The
+8-pose plan in that test spans 69 s at half the velocity and acceleration bounds.
+
+## 3b. Bias and temperature drift
+
+`force_core/bias_tracker.hpp` (`BiasTracker`) tracks the six bias values slowly while the tool is free. A
+per-axis Kalman filter (random-walk bias) updates only when the caller says the tool is free of contact and
+the arm is still. It rejects an innovation above 1 N / 0.1 N m (a missed contact or a payload change must not
+be absorbed), caps the total correction at 2 N / 0.2 N m from the starting bias, and sets `needsRecalibration()`
+after 20 rejections in a row (re-run section 3).
+
+### In the conditioner node (opt-in)
+
+`bias_tracking.enabled:=true` (default false: the node behaves exactly as before) feeds the tracker with the
+sign-applied raw wrench minus the payload's gravity (what the bias should equal at rest, sensor frame). The two
+gates:
+
+- Free of contact: a `std_msgs/Bool` on `bias_tracking.contact_free_topic` (default `contact_free`), for example
+  from a node that watches the force state machine or the conditioned force. Fail safe: no message within
+  `bias_tracking.contact_free_timeout_s` (1 s) counts as in contact.
+- Arm still: `sensor_msgs/JointState` on `bias_tracking.joint_states_topic` (default `joint_states`); the largest
+  |joint velocity| must be below `bias_tracking.still_velocity_rad_s` (0.01) and the message at most
+  `bias_tracking.joint_state_timeout_s` (0.5 s) old. A message without velocities counts as moving.
+
+Outputs:
+
+- `~/tracked_bias` (`WrenchStamped`, sensor frame, latched): the tracked six values, same convention as the
+  `bias` parameter. With `bias_tracking.apply:=false` (default) it is only published and the conditioner keeps
+  the static `bias`; with `apply:=true` the conditioner uses it.
+- `~/recalibrate_needed` (`std_msgs/Bool`, latched): true after `bias_tracking.max_consecutive_rejects` (20)
+  rejected samples in a row, false again after an accepted one or a reset. Re-run `identify`.
+- `~/reset_bias_tracker` (`Trigger`): restart from the `bias` parameter (also undoes an applied correction).
+  Setting `bias`, `payload_mass_kg`, `payload_cog_xyz`, `sign` or `gravity_world` (so also `identify`) restarts the
+  tracker as well, because the tracked residual depends on them.
+
+Filter tuning parameters: `bias_tracking.process_noise_force` / `_torque`, `measurement_noise_force` / `_torque`,
+`reject_threshold_force` / `_torque`, `max_total_correction_force` / `_torque`. The defaults assume a 0.1 N noise
+sigma and very slow drift; raise the process noise if the bias moves faster (the node test uses 1e-4).
+
+Tests (`ft_conditioner`, fake wrench stream, no simulator): a bias ramp of 0.1 to 0.5 N over 3 s of stream is
+tracked to within 0.06 N when free and still; applying it zeroes the conditioned output (below 0.12 N summed);
+nothing is learned while the flag says contact, while a joint moves, or once the flag goes stale; a 4 N push the
+flag missed is rejected, `recalibrate_needed` goes true and the reset service clears it. Not run on hardware;
+nothing in the repo publishes `contact_free` yet, so the node waits for one you supply.
+
+### Running the excitation plan: `~/plan_excitation`
+
+`ros2 service call /wrench_conditioner/plan_excitation std_srvs/srv/Trigger` plans the static poses of section 3
+and answers with the waypoint times and joint values (YAML), the regressor condition number of the set and the
+smallest angle between gravity directions. It only plans: it does not move the arm, so follow it by hand or with
+your own trajectory sender, then `capture_pose` at each waypoint. There is no URDF forward kinematics inside the
+node; the input is joint-space parameters:
+
+| Parameter | Meaning |
+|---|---|
+| `excitation.q_start`, `q_min`, `q_max`, `v_max`, `a_max` | n values each: current joints, limits [rad], velocity and acceleration bounds |
+| `excitation.joint_axes` | 3 n values: unit axis of each revolute joint at q = 0, in the base frame |
+| `excitation.home_rpy` | sensor orientation at q = 0 in the base frame (roll, pitch, yaw) |
+| `excitation.margin_rad` (0.1), `velocity_scale` (0.5), `num_poses` (8), `num_candidates` (400), `seed` (1), `dwell_s` (1.5), `max_condition` (20) | planner options (`ExcitationLimits` / `ExcitationOptions`) |
+
+The node builds the rotation-only forward kinematics of a serial revolute chain from these
+(`R(q) = exp(a1 q1) ... exp(an qn) R_home`); only the sensor orientation matters for gravity directions. Axes
+and `home_rpy` come from the URDF at the zero configuration; getting them wrong gives a good-looking condition
+number for the wrong poses. No self-collision or workspace proxy is applied (poses are inside the joint limits
+with the margin only): review every pose before moving. The base frame must be the world frame in which
+`gravity_world` is expressed (a mobile base on level ground).
 
 ## 4. Wall plane
 

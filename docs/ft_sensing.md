@@ -146,5 +146,74 @@ estimate exists it assumes `k_max`, the conservative choice. Before contact is f
 loop rate). Retreat velocities are never held back.
 
 Limits: one axis (the wall normal), a linear spring model, no energy tank; it bounds the force the controller is told
-to build and does not replace the tool's abort threshold or an e-stop. It is not connected to JTAC's command path yet.
+to build and does not replace the tool's abort threshold or an e-stop.
 
+### Force limiter on JTAC (opt-in)
+
+`force_limiter.enabled` (default false, needs `ft_sensor.name`) runs `force_core::NormalAxisLimiter` in
+`JtacController::update()` after the Cartesian offset clamp, along the tool +Z (into the wall). Parameters
+`force_limiter.{f_max_n, alpha_per_s, k_min_n_per_m, k_max_n_per_m, contact_force_n, free_space_speed_mps,
+max_offset_m, windup_gain_n_per_m, retreat_speed_mps, reference_speed_cap_mps (0.1), reading_offset_n}`. Per cycle, with
+`F = -force.z + reading_offset_n` (the conditioned wrench JTAC already reads):
+
+1. offset cap: the commanded position is at most `reference + max_offset_m` into the wall;
+2. force barrier: the command advances at most `alpha (F_max - F) / k` per second once in contact (before contact:
+   the planned reference advance up to 0.1 m/s passes through, the compliance offset's own advance is held to
+   `free_space_speed_mps`); the stiffness `k` is identified from the *commanded* position to the force, which is what
+   the barrier acts through (for a soft position-controlled arm it is far below the wall's stiffness);
+3. anti-windup: the offset beyond `max_offset_m` becomes a force `windup_gain_n_per_m * excess` subtracted from the
+   pressing force the admittance rule sees, so its integrator stops growing while the output is clamped;
+4. retreat: a reference leaving the wall faster than `retreat_speed_mps` while the offset points into the wall caps
+   the offset at zero and resets the admittance state, so the release is immediate instead of the 2 s relaxation
+   (`docs/sim_mujoco.md`, "Retreat").
+
+The limiter acts only while the Z force axis is engaged (`admittance.selected_axes[2]`); otherwise it is reset and passes everything through, because an uncalibrated payload reads as a force in free space.
+
+The correction is mapped to joints by damped least squares on the translational Jacobian. The F/T bridge's
+`target_wrench` removes the target from the reading upstream: then `F` is the excess over the target, so set `f_max_n`
+relative to the target (limit above target) and leave `reading_offset_n` at 0. A fixed `reading_offset_n` is wrong
+while the bridge target is not yet published (it adds that offset in free space: the first MuJoCo attempt below).
+
+Spring-wall tests at 100 Hz (`force_limiter_test.cpp`, `NormalAxisLimiter.*`; a position-controlled arm of 50 kN/m or
+320 N/m servo stiffness, the ros2_controllers admittance rule, F_max 15 N, offset cap 5 cm against a 10 cm clamp
+without the limiter; sensors: noise as stated), true peak force:
+
+| case | without | with |
+|---|---|---|
+| step reference 15 cm into the wall, stiff arm | 488 N | 15.0 N |
+| same, soft arm | 31 N | 15.0 N |
+| ramp 5 cm/s through the wall, stiff / soft arm | 56 / 30 N | 15.2 / 15.0 N |
+| ramp 5 cm/s, 0.6 N noise, 20 kN/m wall, stiff / soft arm | 58 / 31 N | 26.3 / 14.5 N |
+| ramp 2 cm/s, same noise and wall, stiff arm | 23 N | 15.0 N |
+| 10 N hold, steady force (stiff / soft arm) | 9.64 / 9.47 N | 9.64 / 9.52 N |
+| retreat from 5 cm past (soft arm, 32 N target): peak, time to below 0.5 N | 40 N, not within 5 s | 15 N, 0.0 s |
+
+What it does not solve: the first contact. A planned approach speed is passed through before contact, so the first
+contact still adds about `k_eff * v * dt` on top of the limit (the 26.3 N row: 14 kN/m, 5 cm/s, 100 Hz is 7 N a
+step, plus the arm's lag); only an approach at the limiter's own `free_space_speed_mps` stays within about 2.5 N of
+`f_max_n` on a 20 kN/m wall. The loop rate sets the bound, as in #41. The simulated plant is a model: the sim arm and
+the admittance rule differ from it in detail, and the windup release time without the limiter (not within 5 s here,
+about 3 s measured) is not reproduced exactly.
+
+MuJoCo contact check (`run_contact.sh`, 10 N target, 100 Hz, `f_max_n` 1.0 N relative to the bridge target so the absolute
+limit is 11 N, `reading_offset_n` 0, limiter defaults otherwise). Three runs, the first two earlier failures of the
+design that are fixed (the planned approach was throttled; a fixed reading offset stalled the arm in free space), and
+one more that exposed the engaged-axis rule (the limiter acted on the uncompensated payload during calibration and
+stalled the arm; it now acts only while `selected_axes[2]` is engaged). Final pair, from the recordings:
+
+| | limiter off | limiter on |
+|---|---|---|
+| test verdict | passed | passed |
+| steady force (middle half of the contact) | 10.11 N, sd 0.05 | 10.11 N, sd 0.05 |
+| ground-truth peak | 12.27 N | 12.27 N |
+| last sample above 0.5 N after the retreat | 0.3 s after the last above 5 N | 0.3 s after the last above 5 N |
+
+The hold and the release are not harmed, and the limiter does nothing for the peak here: 12.27 N is 1.27 N above
+the 11 N limit in both runs. Reason: the stiffness estimate is learned from the commanded position, which barely moves
+in contact on this soft arm (about 300 N/m), so the estimate stays at the prior `k_max_n_per_m` (50 kN/m) and the
+barrier's retreat speed `alpha (F_max - F) / k` is 0.5 mm/s, about 0.14 N/s. A run with `k_min_n_per_m` 200 and
+`k_max_n_per_m` 1000 was planned and not made (run budget). The 100 Hz peak bound of #41 is therefore not solved in
+the simulator by this stage with default stiffness bounds; the model tests above show the bound when the stiffness is
+identified. In the recordings the release after retreat is the same with and without it, because the slow compliance
+release is reset only when the reference moves back faster than `retreat_speed_mps`, and the test's retreat is a
+joint-space trajectory (the end-of-trajectory release was already 0.3 s here with the force target off).

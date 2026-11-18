@@ -107,3 +107,17 @@ combined_arm_lift_controller:
     # .hpp: the check gates the call at the top of every update() cycle). No controller code is
     # needed for live reconfiguration; this one flag is the entire mechanism.
     enable_parameter_update_without_reactivation: true
+
+    # Opt-in force limiter (default off, needs ft_sensor.name). Along the tool +Z it caps the compliance
+    # offset into the wall, bounds the approach speed by alpha (f_max - F) / k (online stiffness from the
+    # command to the force), subtracts a back-calculation force while the offset is clamped, and resets the
+    # admittance offset when the reference retreats. docs/ft_sensing.md "Force limiter on JTAC".
+    # force_limiter:
+    #   enabled: true
+    #   f_max_n: 15.0
+    #   alpha_per_s: 20.0
+    #   free_space_speed_mps: 0.02
+    #   max_offset_m: 0.05
+    #   windup_gain_n_per_m: 1000.0
+    #   retreat_speed_mps: 0.005
+    #   reading_offset_n: 0.0   # set to the bridge target_wrench force when the F/T bridge removes it upstream

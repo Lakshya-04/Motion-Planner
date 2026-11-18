@@ -18,6 +18,19 @@
 // ~/capture_pose averages the raw wrenches of the last capture_window_s and refuses when the input is stale
 // (newest older than capture_max_age_s), too short (< capture_min_samples) or not still (force spread above
 // capture_max_spread_n, orientation drift above capture_max_rotation_rad).
+//
+// Bias tracking (opt-in, bias_tracking.enabled, default false): while the tool is free of contact and the arm
+// is still, the sign-applied raw wrench minus the payload's gravity is pure bias error, and a force_core::BiasTracker
+// follows it slowly (temperature drift). "Free of contact" comes from a std_msgs/Bool on contact_free_topic (fail
+// safe: no message within bias_tracking.contact_free_timeout_s counts as in contact); "still" from the largest
+// |joint velocity| on joint_states_topic below bias_tracking.still_velocity_rad_s (stale or missing = moving).
+// The tracked bias is published on ~/tracked_bias (WrenchStamped, sensor frame, sign-applied offset like the
+// `bias` parameter) and, only with bias_tracking.apply:=true, used by the conditioner. ~/recalibrate_needed
+// (std_msgs/Bool, latched) goes true when the tracker rejects too many samples in a row (re-run ~/identify).
+// ~/reset_bias_tracker puts the tracker (and the applied bias) back to the `bias` parameter.
+//
+// ~/plan_excitation plans the static poses for payload identification from joint-space parameters
+// (excitation.*, see docs/calibration.md section 3). It only plans: it does not move the arm.
 #pragma once
 
 #include <cstdint>
@@ -29,11 +42,15 @@
 #include <vector>
 
 #include <geometry_msgs/msg/wrench_stamped.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
+#include "force_core/bias_tracker.hpp"
+#include "force_core/payload_excitation.hpp"
 #include "force_core/wrench_conditioning.hpp"
 
 namespace ft_conditioner
@@ -58,6 +75,11 @@ public:
   std::size_t samples() const;
   force_core::ConditionerConfig config() const;
   std::vector<force_core::CalibrationSample> calibrationSamples() const;
+  /// Tracked bias (the `bias` parameter while tracking is off) and the tracker's counters.
+  core_types::Wrench trackedBias() const;
+  std::size_t biasAccepted() const;
+  std::size_t biasRejected() const;
+  bool recalibrationNeeded() const;
 
 private:
   void onRaw(const geometry_msgs::msg::WrenchStamped::SharedPtr msg);
@@ -68,6 +90,12 @@ private:
     std::shared_ptr<std_srvs::srv::Trigger::Response> res);
   void identify(const std::shared_ptr<std_srvs::srv::Trigger::Request>,
     std::shared_ptr<std_srvs::srv::Trigger::Response> res);
+  void resetBiasTracker(const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> res);
+  void planExcitation(const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> res);
+  void trackBias(const core_types::Wrench & raw, const force_core::Mat3 & r, const rclcpp::Time & stamp,
+    const std::string & sensor_frame);
   void clearSamples(const std::shared_ptr<std_srvs::srv::Trigger::Request>,
     std::shared_ptr<std_srvs::srv::Trigger::Response> res);
 
@@ -91,6 +119,22 @@ private:
   double capture_window_s_{0.5}, capture_max_age_s_{0.25}, capture_max_spread_n_{1.0};
   double capture_max_rotation_rad_{0.02};
   std::size_t capture_min_samples_{5};
+
+  // Bias tracking (guarded by mutex_).
+  bool bias_tracking_{false}, bias_apply_{false};
+  double still_velocity_rad_s_{0.01}, contact_free_timeout_s_{1.0}, joint_state_timeout_s_{0.5};
+  force_core::BiasTrackerConfig bias_cfg_;
+  std::unique_ptr<force_core::BiasTracker> tracker_;
+  core_types::Wrench reference_bias_;           // the `bias` parameter: what reset returns to
+  bool contact_free_{false}, have_contact_free_{false}, recal_sent_{false}, recal_state_{false};
+  rclcpp::Time contact_free_stamp_{0, 0, RCL_ROS_TIME}, joint_state_stamp_{0, 0, RCL_ROS_TIME};
+  double max_joint_speed_{0.0};
+  bool have_joint_state_{false};
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr contact_free_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
+  rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr bias_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr recal_pub_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_bias_srv_, plan_srv_;
 
   double max_tf_age_s_{0.1};
   std::size_t published_{0}, dropped_{0}, stamp_fallbacks_{0}, stale_tf_{0};

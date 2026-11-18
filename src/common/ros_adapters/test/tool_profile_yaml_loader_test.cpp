@@ -213,5 +213,69 @@ TEST(ToolProfileYamlLoader, ThrowsOnBadSprayCone)
   EXPECT_THROW(loadToolProfile(fraction.path(), "bad"), std::runtime_error);
 }
 
+TEST(ToolProfileYamlLoader, LoadsContactAreaAndEdgeSpacing)
+{
+  TempYamlFile file(
+    "schema_version: 1\n"
+    "tools:\n"
+    "  pad:\n"
+    "    task: {contact: true, target_force_n: 20.0}\n"
+    "    coverage:\n"
+    "      contact_area: {pad_width_m: 0.2, pad_length_m: 0.1, reference_force_n: 10.0,\n"
+    "                     width_gain_per_n: 0.01, max_width_factor: 1.3, nominal_tilt_deg: 10.0}\n"
+    "      edge_zone_m: 0.15\n"
+    "      edge_spacing_scale: 0.6\n"
+    "    control: {controller: admittance_chain, admittance: {wrench_reference_z_n: 20.0}}\n");
+  const auto profile = loadToolProfile(file.path(), "pad");
+  const auto & a = profile.coverage.contact_area;
+  EXPECT_TRUE(a.enabled());
+  EXPECT_DOUBLE_EQ(a.pad_width_m, 0.2);
+  EXPECT_DOUBLE_EQ(a.reference_force_n, 10.0);
+  EXPECT_DOUBLE_EQ(a.width_gain_per_n, 0.01);
+  EXPECT_DOUBLE_EQ(a.max_width_factor, 1.3);
+  EXPECT_DOUBLE_EQ(a.min_width_factor, 0.5);  // default
+  EXPECT_DOUBLE_EQ(a.nominal_tilt_deg, 10.0);
+  EXPECT_DOUBLE_EQ(profile.coverage.edge_zone_m, 0.15);
+  EXPECT_DOUBLE_EQ(profile.coverage.edge_spacing_scale, 0.6);
+}
+
+TEST(ToolProfileYamlLoader, ContactAreaDefaultsAreOff)
+{
+  TempYamlFile file(
+    "schema_version: 1\n"
+    "tools:\n"
+    "  gun:\n"
+    "    task: {contact: false, standoff_m: 0.3}\n");
+  const auto profile = loadToolProfile(file.path(), "gun");
+  EXPECT_FALSE(profile.coverage.contact_area.enabled());
+  EXPECT_DOUBLE_EQ(profile.coverage.edge_zone_m, 0.0);
+  EXPECT_DOUBLE_EQ(profile.coverage.edge_spacing_scale, 1.0);
+}
+
+TEST(ToolProfileYamlLoader, ThrowsOnBadContactAreaOrEdgeSpacing)
+{
+  const char * contact_head =
+    "schema_version: 1\ntools:\n  bad:\n    task: {contact: true, target_force_n: 5.0}\n"
+    "    control: {controller: admittance_chain, admittance: {wrench_reference_z_n: 5.0}}\n";
+  for (const char * coverage : {
+      "    coverage: {contact_area: {pad_width_m: 0.2, min_width_factor: 1.5}}\n",
+      "    coverage: {contact_area: {pad_width_m: 0.2, nominal_tilt_deg: 95.0}}\n",
+      "    coverage: {contact_area: {pad_width_m: 0.2, pad_stiffness_n_per_m: -1.0}}\n",
+      "    coverage: {edge_zone_m: 0.1, edge_spacing_scale: 1.5}\n",
+      "    coverage: {edge_zone_m: -0.1}\n"})
+  {
+    TempYamlFile f(std::string(contact_head) + coverage);
+    EXPECT_THROW(loadToolProfile(f.path(), "bad"), std::runtime_error) << coverage;
+  }
+  TempYamlFile non_contact(
+    "schema_version: 1\ntools:\n  bad:\n    task: {contact: false, standoff_m: 0.3}\n"
+    "    coverage: {contact_area: {pad_width_m: 0.2}}\n");
+  EXPECT_THROW(loadToolProfile(non_contact.path(), "bad"), std::runtime_error);
+  TempYamlFile non_contact_edge(
+    "schema_version: 1\ntools:\n  bad:\n    task: {contact: false, standoff_m: 0.3}\n"
+    "    coverage: {edge_zone_m: 0.1, edge_spacing_scale: 0.5}\n");
+  EXPECT_THROW(loadToolProfile(non_contact_edge.path(), "bad"), std::runtime_error);
+}
+
 }  // namespace
 }  // namespace ros_adapters

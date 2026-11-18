@@ -32,7 +32,7 @@ names, frames and home pose drive everything), `world`, `wall_scene`/`wall_id`/`
 the sensor `ft_sensor_tcp`), `payload_mass_kg` (initial payload for the conditioner, 0: calibrate),
 `ft_filter` (JTAC `ft_sensor.filter_coefficient`), `move_group` (also start MoveIt for planning, hardware `jtac_mock`),
 `jtac_position_only` (JTAC claims only the position command interface, see the manager pass),
-`base_motion`, `rgb_camera` (+ `rgb_camera_pose`, `rgb_camera_size`, `rgb_camera_rate_hz`), `arm_meshes` and `depth_sensor` (+ `depth_sensor_pose`, `depth_sensor_noise_m`, `depth_sensor_rate_hz`; both off by default, see
+`base_motion`, `rgb_camera` (+ `rgb_camera_pose`, `rgb_camera_size`, `rgb_camera_rate_hz`), `rgb_camera_frame` (`base` | `world`), `arm_meshes` (default `true`) and `depth_sensor` (+ `depth_sensor_pose`, `depth_sensor_noise_m`, `depth_sensor_rate_hz`; the sensors are off by default, see
 below). Several containers on one Docker bridge share DDS
 multicast: give each simulation its own `ROS_DOMAIN_ID` (or `ROS_LOCALHOST_ONLY=1`), otherwise
 another stack's `/robot_description` can reach the gz controller manager.
@@ -151,14 +151,21 @@ Default `false`: nothing is added. With `true` the description gets `rgb_camera_
 default `0.0 -2.4 1.6 0 0.11 1.38`: 2.4 m to the right of the base, looking at the wall in front of the arm), a gz-sim `camera`
 (`rgb_camera_size` default 1280 x 720, 60 degrees, `rgb_camera_rate_hz` 2) and the launch file adds the `Sensors` system (ogre2,
 software rendering, no display) and bridges `/rgb_camera/image` (`sensor_msgs/Image`, rgb8). The camera is fixed to the base, so
-after a base move it moves with it (a multi-stand run with stills showed this: the base drives toward the wall and the camera ends up against it, every later frame is a blank wall; a world-fixed camera would be needed to film a multi-stand pass, not done; the multi-stand run with meshes was stopped at stand 0 with a 1512 N peak and not scored). `scripts/capture_still.py OUT_DIR --every S --count N` writes PNGs (no imaging library).
+after a base move it moves with it (a multi-stand run with stills showed this: the base drives toward the wall and the camera ends up against it, every later frame is a blank wall) (`rgb_camera_frame:=world` below fixes this). `scripts/capture_still.py OUT_DIR --every S --count N` writes PNGs (no imaging library).
 `GZ_PASS_STILLS=N` in the pass scripts turns the camera on and runs it.
 
-`arm_meshes:=true` (also `GZ_PASS_MESHES=1` in the pass scripts) adds the `ur_description` share to `GZ_SIM_RESOURCE_PATH`.
-**Finding:** without it gz cannot resolve the UR links' `model://ur_description/...` meshes (an error per link in the log), so the
-arm has NO visual and NO collision geometry in Gazebo (only the lift, the sensor link and the tool exist). Every Gazebo number in
-this document except the "with meshes" ones was measured that way; the arm cannot collide with the wall or itself there. The
-stills need the meshes, so they are taken in separate runs, scored on their own.
+`rgb_camera_frame:=world` (also `GZ_PASS_CAMERA_FRAME=world` in the pass scripts) makes the camera a static model in the world at
+`rgb_camera_pose` (now a world pose), so it stays put while the base drives: the multi-stand pass can be filmed (the default `base`
+keeps the old behaviour). The default pose `0 -2.4 1.6 0 0.11 1.38` is 2.4 m to the right of the spawn point; for a 0.9 m patch
+starting at y = 0.3 a pose further back may be wanted. Rendering was checked only through the generated world (unit tests), not
+filmed in a run.
+
+**`arm_meshes` (default `true`).** gz resolves the description's `model://ur_description/...` URIs through `GZ_SIM_RESOURCE_PATH`;
+the launch file now adds the `ur_description` share to it by default (a warning if the package is missing). Before, gz could not
+find the UR meshes (an error per link), so the arm had NO visual and NO collision geometry (only the lift, the sensor link and the
+tool existed) and every earlier Gazebo number in this document was measured that way. `arm_meshes:=false` (`GZ_PASS_MESHES=0`)
+restores that. With the meshes the physics differ (arm collision, arm self-collision, real link shapes), see the spray and multi-stand
+tables for the effect on the passes.
 
 ## Tests
 
@@ -219,8 +226,12 @@ Steps and results (profile `generic_6dof_telescopic`, wall 0.9 m in front of the
    k_tip (F_t + K e)/(K + k_tip) where e is the reference penetration, as for the MuJoCo wall; the reference
    pose therefore sets how close to the target the force settles (8.4 N at the wall, 9.7 N at 5 mm past the
    wall). The residual (0.3 to 1.6 N) is the admittance spring acting on the reference offset; it was not tuned further.
-   Overpressing past the tip travel (35 mm past the wall in step 2) still ends on the hard stop and gives about
-   105 N, as before. With 20 N/mm the hold is at 10.94 N, but the conditioned-vs-truth check at 35 mm failed
+   **Bump stop** (`stop_stiffness` 50 N/mm, `stop_damping` 500 Ns/m, `stop_travel` 5 mm): `tool_tip_link` now hangs off a
+   second, stiff and short prismatic stage (`tool_tip_stop_joint`, link `tool_tip_stop_link`, 10 g) in series behind the soft one,
+   so beyond the 20 mm travel the force rises 50 N per mm instead of the joint limit stopping the tool at once (a joint limit alone
+   is rigid). It adds 10 g to the payload (the conditioner identifies 0.8703 kg against 0.8500 in the URDF, check tolerance 0.02 kg).
+   Effect measured in the multi-stand pass: none on the peaks (see there). Overpressing past the tip travel (35 mm past the wall in step 2)
+   gives about 106 N, as before. With 20 N/mm the hold is at 10.94 N, but the conditioned-vs-truth check at 35 mm failed
    (107 N difference, the hard-stop contact; not investigated), so 5 N/mm is the default.
 4. **Release:** target to zero, disengage, retreat to the standoff: ground-truth force 0.000 N after the retreat.
 
@@ -293,6 +304,49 @@ Seed, 20 degree cone, 0.30 m stand-off, 0.05 m/s, 20 percent overlap, `score_run
 Pass rate: the 4 runs without meshes pass (3 plain, 1 with the camera on); with the meshes 1 of 2 passes; 1 further run hung (7 attempts). MuJoCo: coverage 1.0, CoV 0.52. Gazebo
 matches in the three plain runs. The CoV is a property of the stroke spacing and the speed, the valve was open 346 to 594 samples.
 
+**Re-measured with `arm_meshes` on (now the default), idle host, built from this branch (`fix/gazebo-build-tip`):**
+
+| run | coverage | thickness CoV | result | what happened |
+|---|---|---|---|---|
+| 1 | 0.920 (856/930) | 0.80 | passes | 142 s |
+| 2 | 0.573 | 1.16 | fails | the manager's first free-space plan (`prime_continuity`) was refused by MoveIt ("collision truncation" octomap vs `arm_wrist_2_link` / `arm_forearm_link`), JTAC logged "Cartesian offset diverged" 53 times |
+| 3 | 0.000 | - | fails | same refused plan, 24 JTAC divergences, 73 s |
+| (stray run, log lost) | 0.484 | 1.73 | fails | |
+
+1 of 3 (1 of 4 counting the stray run) against 4 of 4 without meshes.
+
+**Root cause and fix (this branch).** Not the manager, not the SRDF and not the wall octomap margin. Traced with the joint states and
+link poses of a seed move in the sim: the seed is a MoveIt plan of 4.1 s (velocity scale 0.3), but gz_ros2_control's position loop
+under `jtac_position_only` has a 10 s time constant (gain 0.1 /s). The joints therefore do not follow the planned path: all of them
+converge exponentially on the goal, i.e. the arm goes along a joint-space straight line from the stowed pose, which MoveIt never
+checked. That line takes the wrist (`arm_wrist_1/2_link`) over the wall at z 2.06 to 2.1 m, the wall is 2.0 m tall with its front at
+x = 0.915; with the meshes the arm has real collision, so the wrist comes to rest on the wall top (wrist 1 at x 1.10, z 2.09) and
+elbow / shoulder_lift / lift stay 0.5 to 1.2 rad off the seed (tcp (0.79, 0.27, 2.28) instead of (0.68, 0.25, 1.26)). The manager's
+first plan (`prime_continuity`, a joint goal to the live state) then starts in collision with the wall octomap (plane x = 0.98,
+z up to 2.0) and `CheckStartStateCollision` refuses it; whether the arm slides off the wall top or not decides pass or fail (hence
+0.92 / 0.57 / 0.0 and the random JTAC "Cartesian offset diverged": the controller is told to hold a reference the arm cannot reach).
+Without the meshes the arm passes through the wall top, which is why it never showed. The geometry mismatch (octomap at 0.98 against
+the wall at 0.915) is not the cause: the converged arm is clear of both. The seed plan is now 27 s (`SPRAY_PASS_SEED_SCALE`, default
+0.04, 270 points): the arm follows it, the seed is reached to 1 mrad (tcp 0.68, 0.25, 1.26) and the first plan is accepted.
+Collision checking, the ACM and the scene are unchanged. Baseline with the old scale on the same build (3 more runs): coverage
+0.988 (passes, 83 JTAC divergences), 0.805 (fails), and one failed diagnostic run, all with the refused first plan.
+
+**Re-measured, meshes on, 27 s seed, idle host (4 runs, 4 containers in a row, `ROS_DOMAIN_ID` 71 to 74):**
+
+| run | coverage | thickness CoV | result | notes |
+|---|---|---|---|---|
+| 1 | 0.919 (855/930) | 0.55 | passes | 202 s, 38 JTAC divergence warnings |
+| 2 | 1.000 | 0.57 | passes | 147 s, 3 warnings |
+| 3 | 1.000 | 0.62 | passes | 198 s, 54 warnings; 884 N ground-truth peak while the valve was closed (a retract touched the wall) |
+| 4 | 0.963 | 0.65 | passes | 159 s, 26 warnings |
+
+4 of 4 pass (the scorer's limit is coverage 0.9), against 1 of 3 before, no refused plan in any run (the old seed on the same build:
+0.988 / 0.805 / failed). Run 1 and run 4 sit near the 0.9 limit, so the margin is thin. What is left: the JTAC "Cartesian
+offset diverged" warnings still appear (they start during the seed move itself, the arm lags the reference by far more than the
+controller's offset clamp, and none of the 4 runs failed on them), and the 0.9 coverage floor is hit with only 6 percent to spare once.
+The MuJoCo twin is coverage 1.0.
+
+
 **Multi-stand** (`scripts/run_multi_stand_pass.sh`, 0.9 m patch from y = 0.3, `stand_max_span_m` 0.5, two stands, 9 columns,
 about 9 minutes, `base_motion:=true`, contact pass at 10 N). The reachability map is built once (`STAND_MAP`). The Gazebo world wall
 is the stock 3 m wall centred on the robot (the generator always centres the wall), its one obstacle moved out of the patch.
@@ -304,9 +358,63 @@ is the stock 3 m wall centred on the robot (the generator always centres the wal
 | c | 7 of 9 (stand 1 columns 0 and 1 failed) | 0.763 | 3424 N | 147 N | 0.67 | fails |
 
 Pass rate 1 of 3. Both stands were reached every time (arrival error 4 mm, 0.014 rad). MuJoCo's twin: 9 of 9 once and 5 of 9 once
-(`docs/sim_mujoco.md`). The force numbers are far worse than the MuJoCo ones (20 N peaks) because the compliant tip's 20 mm travel
-is exceeded on a press or a jam and the contact then ends on the hard stop (hundreds to thousands of newtons, see Limits); the
-manager's own `peak_force_n` (conditioned wrench) was 236 to 380 N in runs that finished all columns.
+(`docs/sim_mujoco.md`). The force numbers are far worse than the MuJoCo ones (20 N peaks): the manager's own `peak_force_n`
+(conditioned wrench) was 236 to 380 N in runs that finished all columns, the ground truth peaks are single-sample impacts.
+
+**Re-measured with the arm meshes on and the tip bump stop** (this branch, idle host, 3 runs in a row, same script, reachability map reused):
+
+| run | columns done | coverage | peak (score) | RMS error | in band | samples above 350 N / 1000 N | result |
+|---|---|---|---|---|---|---|---|
+| 1 | 6 of 9 (columns 0 to 2: dock failed) | 0.749 | 1368 N | 75.9 N | 0.53 | 1198 / 252 of 210k | fails |
+| 2 | 8 of 9 (column 0: dock failed) | 0.939 | 1248 N | 34.3 N | 0.59 | 1058 / 12 of 246k | scorer passes (558 s) |
+| 3 | 7 of 9 (column 2 only on retry, others failed) | 0.889 | 1758 N | 35.3 N | 0.62 | 627 / 4 of 249k | fails |
+
+1 of 3 again. The bump stop did NOT bound the peaks: they are the same order as before (922 to 3424 N without meshes, 1248 to 1758 N
+now). A fourth run with a softer, more damped stop (30 N/mm, 10 mm, 2000 Ns/m) completed 9 of 9 columns but regulated worse (in band
+0.04, peak 1710 N), so the stiffer 50 N/mm / 5 mm stop is kept. Why the stop is not the cause: in the quasi-static overpress
+(`contact_control_test.py`, tip 35 mm past the wall) the ground truth is 105.9 N with or without the stop, i.e. the tip never goes
+rigid at the arm's servo stiffness; the spikes are sub-millisecond contact impacts (hundreds of samples above 350 N, but only a
+few above 1000 N) at the start of a press or on a jam, which the constraint solver produces with whichever stop is behind the tip. A
+force-limiting guard in the controller path (the `force_core` `ForceLimiter` is not wired into JTAC) would be the real bound; not
+done here, the controller belongs to another change.
+
+**Multi-stand with `wait_arm_settled.py`** (this branch, `fix/gazebo-multistand-dock`; 10 columns, two stands, same script and map, 3 runs in a row,
+the host was NOT idle: the load average rose to 21 on 12 cores during run 1 to 2 from an unrelated browser, run 3 ran at 13 to 18; every run
+started after the loadavg gate of below 12; the start/end loadavg was only sampled from run 2 on, so run 1 has none):
+
+| run | columns done | coverage | peak (score) | RMS error | in band | result | load at end | `settle.log` waits |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 6 of 10 (stand 0: columns 4, 5, 6 dock failed; stand 1: column 3 dock failed) | 0.601 | 35.8 N | 2.4 N | 0.85 | fails | not sampled | 2.7 s, 20.3 s, 505 s |
+| 2 | 10 of 10 | 0.941 | 54.0 N | 3.7 N | 0.85 | scorer passes | 16.7 | 2.7 s, 430 s |
+| 3 | 10 of 10 | 1.000 | 3025 N (one impact, RMS 88 N) | 88.0 N | 0.55 | scorer passes | 17.7 | 2.7 s, 47.1 s |
+
+2 of 3 pass against 1 of 3 and 1 of 2 before, but with 3 runs on a loaded host that is not a demonstrated improvement. Peaks are 35 to 54 N in the two
+runs without a single-sample impact (before: 1248 to 3424 N); run 3 has one 3025 N sample. The refused-plan pattern of run 1 is the old one: the
+OMPL `*_approach` segment completes (29 s) and the next Cartesian dock plan is truncated at the self-collision pair `arm_forearm_link` <->
+`arm_wrist_3_link` / `tool_mount_link` and refused 6 times, then `recovery jog refused: the good state is too far away`. That fits a joint
+state that still lags the plan (gz position loop, 10 s time constant) at the start of the dock plan. `wait_arm_settled.py` only runs in front
+of the stand arrival world-model reload (the stow move before a stand), so it does not cover the lag after an in-stand approach segment: in run 1 the
+failing docks were the first ones of stand 0, 37 s after the arrival, and the settle wait before them had returned after 2.7 s (the arm was at rest). Whether
+the load (timing) or the approach lag caused the failures could not be separated in 3 runs; not ruled out. Not tested: `dock_approach_extra_m`,
+the dock standoff margin, the wall octomap (0.98) vs the Gazebo wall (0.915), a slower approach (`retime_vel_scale`); no collision check was loosened.
+The next step is a settle wait between the approach and the dock (a manager hook) or a slower approach retiming, measured on an idle host.
+
+**Re-measured again on this branch (27 s spray seed; the multi-stand pass has no seed move, so the fix does not touch it), 2 runs, same script,
+reachability map reused, `ROS_DOMAIN_ID` 81, 82:**
+
+| run | columns done | coverage | peak (score) | RMS error | in band | result |
+|---|---|---|---|---|---|---|
+| 1 | 8 of 10 (stand 1 columns 2 and 3: dock failed, 6 attempts each, plus a retry) | 0.746 | 2560 N | 63.8 N | 0.58 | fails (1095 s) |
+| 2 | 9 of 10 (column 0: dock failed on stand 1) | 0.990 | 1476 N | 96.1 N | 0.62 | scorer passes (1149 s) |
+
+1 of 2 (with the two earlier sets, 3 of 8 over the meshed physics). Both stands are reached every time (arrival error 4 mm and 20 mm).
+The columns lost are always on stand 1 (the second stand, after the base drove): the dock plan is refused (`wall_column_N_dock`
+`planning_failed`, 12 to 24 times per failed column), and the manager logs `CartesianPlanner: collision truncation` for
+`<octomap>` against `tool_mount_link` (138 times in run 1) and `arm_upper_arm_link` against `lift_carriage_link` (22). That is the tool
+mount, in front of the wrist, meeting the wall octomap plane (x = 0.98) at the dock standoff of 0.04 m with a 0.1 m approach, not the
+wrist-over-the-wall mechanism of the spray seed. Not root-caused here (the pass was only re-measured); the likely levers are the
+`dock_approach_extra_m` / `dock_standoff_m` margins and the stand's arm base y, not the collision checking. Peaks are the same single-sample
+impacts as before.
 
 Three things this exposed, all fixed here:
 - **Ground truth under `base_motion`.** `contact_ground_truth.py` looked the tcp up against the TF frame `world`, which does not
@@ -316,14 +424,14 @@ Three things this exposed, all fixed here:
   is in the manager and is left to its owner.)
 - The recorder takes `--frame odom` and the wall in odom, like the MuJoCo one.
 
-Not done: `run_stand_pass.sh` (single stand, `stand_drive.py`) has no Gazebo twin; the scorer's thin 0.9 limit on peak force is not
+Not done: the stand 1 dock failures with the meshes; a controller-side peak-force guard; `run_stand_pass.sh` (single stand, `stand_drive.py`) has no Gazebo twin; the scorer's thin 0.9 limit on peak force is not
 used (`--max-peak` default 0), so a pass with a 922 N spike still passes; a cancel run (`MULTI_STAND_CANCEL_AFTER_S`) was not tried;
 the spray with a different wall x, and a run with a wall that the tool tip really sits 0.30 m from, were not done.
 
 ## Limits
 
-- Contact is compliant only through the tool tip spring (5 N/mm, 20 mm travel). Past the travel the tool is
-  rigid again: about 105 N at 35 mm past the wall. It settles 0.3 to 1.6 N below the target depending on the reference depth (9.69 N with the
+- Contact is compliant only through the tool tip spring (5 N/mm, 20 mm travel) and the bump stage behind it (50 N/mm, 5 mm). Past the travel the tool is
+  rigid again; the quasi-static force is about 106 N at 35 mm past the wall, the contact impacts in a manager pass reach 1.2 to 1.8 kN for a sample. It settles 0.3 to 1.6 N below the target depending on the reference depth (9.69 N with the
   default 5 mm). The wall itself is still a rigid primitive. Spring and damper are plausible round numbers,
   not an identified tool.
 - Joint dynamics are idealised: `gz_ros2_control` position/velocity interfaces, no gearbox

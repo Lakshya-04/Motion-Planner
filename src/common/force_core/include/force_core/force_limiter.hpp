@@ -74,4 +74,61 @@ private:
   double prev_force_{0.0};
 };
 
+/// Parameters of the position-level stage that wraps ForceLimiter for a controller that commands a position.
+struct NormalAxisLimiterParams
+{
+  ForceLimiterParams limiter{};
+  /// Largest compliance offset (commanded minus reference) into the wall, m. A tight clamp: the
+  /// admittance offset cannot wind up past it, so a retreat releases within this distance.
+  double max_offset_m{0.05};
+  /// A reference moving back out of the wall faster than this (m/s) while the offset is into the wall
+  /// is a retreat: the offset cap drops to zero and `resetRequested()` asks the controller to clear
+  /// its admittance state, so the release is immediate instead of the integrator's slow relaxation.
+  double retreat_speed_mps{0.005};
+  /// Before contact is felt, a planned reference advance up to this speed (m/s) is passed through; only
+  /// the compliance offset's own advance is held to `limiter.free_space_speed_mps`. Throttling the
+  /// planned approach itself makes the command lag the trajectory by metres (found in the MuJoCo run).
+  /// Above this speed the approach is capped to it.
+  double reference_speed_cap_mps{0.1};
+  /// Back-calculation gain, N per m of offset beyond `max_offset_m`: the controller subtracts
+  /// `windupForce()` from the pressing force it feeds the admittance rule so its own offset state
+  /// stops growing while the output is clamped.
+  double windup_gain_n_per_m{1000.0};
+};
+
+/// Anti-windup and force barrier on the tool's position along the wall normal, for a controller that
+/// outputs `desired = reference + compliance offset`. Per cycle:
+///   target = min(desired, reference + max_offset)               (offset clamp, 0 on a retreat)
+///   cmd    = min(target, previous cmd + v_max(F) dt)            (force barrier on the velocity;
+///            before contact v_max is the larger of the offset speed cap and the planned reference advance)
+/// The command follows a retreat at once (nothing is integrated below the target) and a detected
+/// retreat also asks for the admittance state to be reset; the barrier only ever lags the approach. Plain C++, no ROS, no clock.
+class NormalAxisLimiter
+{
+public:
+  /// @throws std::invalid_argument if a parameter is out of range.
+  explicit NormalAxisLimiter(const NormalAxisLimiterParams & params = {});
+
+  /// Positions are along the wall normal pointing INTO the wall (m); `force_n` is the measured
+  /// pressing force (N, positive pressing); `dt` > 0 in s. Returns the position to command.
+  double step(double dt, double p_desired, double p_reference, double p_measured, double force_n);
+
+  /// Force (N, >= 0) to take away from the pressing force fed to the admittance rule this cycle.
+  double windupForce() const {return windup_force_n_;}
+  /// True on a cycle that detected a retreat: the caller should reset its admittance offset state.
+  bool resetRequested() const {return reset_requested_;}
+  const ForceLimiter & limiter() const {return limiter_;}
+  void reset();
+
+private:
+  NormalAxisLimiterParams p_;
+  ForceLimiter limiter_;
+  bool have_prev_{false};
+  double prev_cmd_{0.0};
+  double windup_force_n_{0.0};
+  bool reset_requested_{false};
+  bool have_prev_ref_{false};
+  double prev_ref_{0.0};
+};
+
 }  // namespace force_core
