@@ -197,6 +197,11 @@ public:
     // configuration (the stowed pose before the first dock) and handed to the planner as a joint goal; the pose goal
     // stays as the fallback of the later attempts.
     dock_ik_seeded_ = this->declare_parameter<bool>("dock_ik_seeded", true);
+    // true: after an approach segment the tool must be within approach_tolerance_m of the approach pose, otherwise the
+    // attempt counts as failed (and the arm is jogged back / the continuity re-primed) instead of docking from where
+    // the arm happens to be.
+    verify_approach_ = this->declare_parameter<bool>("verify_approach", true);
+    approach_tolerance_m_ = this->declare_parameter<double>("approach_tolerance_m", 0.05);
     // The seed of that IK: a configuration of the arm docked at the wall (planning group order, lift first). Every
     // dock is then solved from the same seed, so the lift / shoulder / wrist branch does not creep from one column to
     // the next (a chain of seeds drifted into upper arm <-> lift carriage self-collision at the last column of a
@@ -1285,6 +1290,20 @@ private:
     return res.joint_solution;
   }
 
+  /// True when the tool frame is within `tol` of `pose` (both in frame_id_); `err` is the distance. An unknown tool
+  /// frame counts as near: the check must not block a run that has no tcp_link.
+  bool tcpNear(const core_types::Pose & pose, double tol, double & err)
+  {
+    FrameTransform tcp;
+    if (!lookup(frame_id_, "tcp_link", tcp)) {
+      err = 0.0;
+      return true;
+    }
+    err = std::sqrt(
+      std::pow(tcp.t[0] - pose.x, 2) + std::pow(tcp.t[1] - pose.y, 2) + std::pow(tcp.t[2] - pose.z, 2));
+    return err <= tol;
+  }
+
   /// One diagnostic line: the planning group's live joint values (lift first) with a tag, for comparing runs.
   void logArmState(const std::string & tag)
   {
@@ -1543,6 +1562,23 @@ private:
             this->get_logger(), "%s: approach attempt %d failed, retrying...", intent.label.c_str(),
             attempt + 1);
           continue;
+        }
+        // "completed" only says the trajectory ran: an arm that did not move (the first plan after a drive that
+        // is a no-op) or that rests on the wall's top edge half way stops short of the pose, and the dock from
+        // there starts a Cartesian path from the wrong place and ends on another branch. Check where the tool is.
+        if (verify_approach_) {
+          waitFor(0.5, false);
+          double err = 0.0;
+          if (!tcpNear(first_goal, approach_tolerance_m_, err)) {
+            RCLCPP_WARN(
+              this->get_logger(), "%s: approach attempt %d ended %.3f m from the approach pose, not docking from there",
+              intent.label.c_str(), attempt + 1, err);
+            logArmState("approach_short_" + intent.label);
+            if (!recoverArm("approach")) {
+              primeContinuityFromLiveState();
+            }
+            continue;
+          }
         }
       }
       if (dock_approach_extra_m_ > 0.0 || !use_q) {
@@ -1864,6 +1900,8 @@ private:
   double dock_standoff_{0.0};
   int dock_attempts_{3};
   bool dock_ik_seeded_{true};
+  bool verify_approach_{true};
+  double approach_tolerance_m_{0.05};
   std::vector<double> dock_seed_;
   std::vector<double> dock_branch_seed_;   ///< the last docked configuration: the IK seed of the next dock
   double travel_lift_margin_{0.01};
