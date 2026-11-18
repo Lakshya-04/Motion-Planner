@@ -20,8 +20,16 @@ if(behaviortree_cpp_FOUND AND nlohmann_json_FOUND)
   add_library(${PROJECT_NAME} INTERFACE)
   target_include_directories(${PROJECT_NAME} INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${MM_CORE_INCLUDE}>)
-  target_link_libraries(${PROJECT_NAME} INTERFACE BT::behaviortree_cpp nlohmann_json::nlohmann_json)
+    $<BUILD_INTERFACE:${MM_CORE_INCLUDE}>
+    ${behaviortree_cpp_INCLUDE_DIRS})
+  # The Jazzy ROS package exports no imported target; it sets behaviortree_cpp_LIBRARIES / _INCLUDE_DIRS (ament style).
+  # Upstream's own CMake package provides BT::behaviortree_cpp instead.
+  if(TARGET BT::behaviortree_cpp)
+    set(BT_TARGET BT::behaviortree_cpp)
+  else()
+    set(BT_TARGET ${behaviortree_cpp_LIBRARIES})
+  endif()
+  target_link_libraries(${PROJECT_NAME} INTERFACE ${BT_TARGET} nlohmann_json::nlohmann_json)
 
   if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)

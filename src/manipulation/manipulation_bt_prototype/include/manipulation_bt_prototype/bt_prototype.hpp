@@ -208,7 +208,7 @@ public:
         ctx->report.skips.emplace_back(index_, ctx->segment_reason);
         ++ctx->report.skipped;
       }
-      resetChild(0);
+      resetChildren();
       in_segment_ = false;
       ++index_;
       return index_ < ctx->segment_count ? BT::NodeStatus::RUNNING : BT::NodeStatus::SUCCESS;

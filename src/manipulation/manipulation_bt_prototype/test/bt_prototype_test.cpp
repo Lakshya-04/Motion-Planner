@@ -133,7 +133,7 @@ TEST(BtPrototype, FailedSegmentIsSkippedWithItsTypedReasonAndTheRunContinues)
   EXPECT_TRUE(f.ctx->ledger.resumeSkips(3));
 }
 
-TEST(BtPrototype, UntypedFailureDefaultsToPlanFailed)
+TEST(BtPrototype, UntypedFailureIsStillSkipped)
 {
   Fixture f(1);
   f.exec->script[0] = {0, true, SkipReason::kNone};   // the executor gave no reason
