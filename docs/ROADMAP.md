@@ -92,7 +92,7 @@ without code, when we can implement it.
 - [~] Segment ordering by a time metric: `column_order: nearest | nearest_2opt` orders the columns of a stand by travel time (`core/column_ordering.hpp`, gtests); default is the input order, not run in the sim. Failure-aware resequencing (replan a failed column from another stand) is not done
 - [~] cuRobo v2 for moves between stands: v0.8.0 (April 2026, the open-source cuRoboV2) and v0.9.0 (2026-11-05, cuRoboV2-Fast: faster planning, Cartesian waypoint planning with moving starts, C++ motion planner, TimeOpt); pin v0.9.0 or later, not v0.7.8; mobile-base support is unverified (the Mapper's VRAM on 4 GB is measured, see `docs/curobo_v2_notes.md`). Done: `docker/requirements-gpu.txt` pins v0.9.0 (42498cf), the `gpu` image rebuilt, `curobo_bridge` tests (except the ROS and C++ ones, which need the `full` image) and the Mapper script pass unchanged, a 7-joint lift + UR10e config (`lift_arm` joint order) plans a lift move and fails with `no_path` through an obstacle (generated on demand, not committed); `plan_pose_waypoints` tried once. Not done: the `full` image on 0.9.0 (C++ end-to-end test), 7-joint config wired into the node or the manager, `plan_pose_waypoints` exposed, any measurement of 0.9.0's speed-ups
 - [ ] Recovery proposer (design only: `docs/learned_recovery.md`) and the policy slot
-- [~] Shared planner benchmark across backends (success, time, path, clearance): `motion_planner_moveit/scripts/planner_benchmark.py`, joint-space transitions between stand, stow and dock-like UR10e configurations, results in `docs/planner_benchmark.md`; cuRobo did not run (see the doc), pose-goal and contact planning are not benchmarked
+- [~] Shared planner benchmark across backends (success, time, path, clearance): `motion_planner_moveit/scripts/planner_benchmark.py`, joint-space transitions between stand, stow and dock-like UR10e configurations, results in `docs/planner_benchmark.md`. Done: VAMP, OMPL and cuRobo v0.9.0 on the 158 problems, cuRobo in three modes (`plan_cspace`, GPU bi-RRT + trajopt, GPU bi-RRT seed only), first call versus steady state, VRAM, node + C++ client overhead (21 problems), 3 passes in each of 2 sessions with a host-load yardstick. Not done / limits: the host was shared and loaded (times vary up to 5x on the yardstick, pinned cores are hyperthread siblings of the simulation's), cuRobo `plan_cspace` fails 52/158 (every problem with `dock_1`, `dock_2` or `dock_3`), cause not investigated, pose-goal, batch and contact planning are not benchmarked, no idle-machine run
 
 ## 6. Robot generality (any arm, lift, base)
 
@@ -220,7 +220,7 @@ without code, when we can implement it.
 - [x] 736 colcon tests in 26 packages, 0 failures; Python tests for description, profiles, sim generators, tools
 - [x] Tests for the coverage ROS nodes (`coverage_planner_node`, `wall_coverage_service_node`), the JTAC compliance port and the manager run reporter; `docker/run_all_checks.sh` runs everything that needs no simulator
 - [ ] Sim end-to-end checks as a test target (sections 10 and 11)
-- [~] Planner-level benchmark on shared scenarios (section 5): see `docs/planner_benchmark.md`
+- [~] Planner-level benchmark on shared scenarios (section 5): see `docs/planner_benchmark.md` (cuRobo, VAMP and OMPL timed in two sessions on a shared host; not an idle-machine measurement)
 
 ## 16. The PR stack
 

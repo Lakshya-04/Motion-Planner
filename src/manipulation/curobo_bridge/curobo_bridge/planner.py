@@ -171,7 +171,14 @@ class CuroboPlanner:
     def __init__(self, robot: str = 'franka.yml', max_goalset: int = 1, max_boxes: int = 256,
                  esdf: Optional[EsdfSpec] = None, warmup: bool = True,
                  prismatic_joints: Sequence[str] = (), ik_prismatic_factor: float = PRISMATIC_IK_FACTOR,
-                 ik_weights: Optional[Sequence[float]] = None):
+                 ik_weights: Optional[Sequence[float]] = None,
+                 graph_planner_algorithm: str = 'prm', enable_trajopt: bool = True,
+                 enable_graph_attempt: int = 1):
+        """`graph_planner_algorithm` ('prm' or 'rrt', the GPU bidirectional RRT), `enable_trajopt` (False:
+        the graph seed is retimed and validated, trajectory optimisation is skipped) and
+        `enable_graph_attempt` (the plan_cspace attempt at which graph seeding starts; 0 = from the
+        first attempt, 1 = after one straight-line-seed attempt, cuRobo's default) select the
+        plan_cspace route plan_joint takes. The defaults are cuRobo's own and what the node uses."""
         import torch
         from curobo.motion_planner import MotionPlanner, MotionPlannerCfg
         from curobo.types import JointState
@@ -187,8 +194,14 @@ class CuroboPlanner:
         if esdf is not None:
             esdf.shape()   # validate before allocating anything on the GPU
             cache['voxel'] = {'layers': 1, 'dims': list(esdf.dims), 'voxel_size': esdf.voxel_size}
+        extra = {}
+        if graph_planner_algorithm != 'prm':
+            extra['graph_planner_algorithm'] = graph_planner_algorithm
+        if not enable_trajopt:
+            extra['enable_trajopt'] = False
+        self._enable_graph_attempt = enable_graph_attempt
         self._planner = MotionPlanner(MotionPlannerCfg.create(
-            robot=robot, max_goalset=max_goalset, collision_cache=cache))
+            robot=robot, max_goalset=max_goalset, collision_cache=cache, **extra))
         if warmup:
             self._planner.warmup(enable_graph=True, num_warmup_iterations=3)
         # IK picks the solution nearest the seed: metres of a prismatic joint must not count as radians.
@@ -307,7 +320,7 @@ class CuroboPlanner:
         if bad:
             return bad
         cur, tgt = self._state(start), self._state(goal)
-        result = self._planner.plan_cspace(tgt, cur)
+        result = self._planner.plan_cspace(tgt, cur, enable_graph_attempt=self._enable_graph_attempt)
         return self._wrap(result, last=goal)
 
     def plan_pose(self, start: Sequence[float], position: Sequence[float],
@@ -379,8 +392,11 @@ class CuroboPlanner:
         if not len(states):
             return []
         t = self._torch
-        mask = self._planner.graph_planner.check_samples_feasibility(
-            t.tensor([list(q) for q in states], device='cuda', dtype=t.float32))
+        gp = self._planner.graph_planner
+        # the PRM planner has the check itself; the GPU RRT planner (graph_planner_algorithm='rrt') keeps it
+        # on its shared resources
+        check = getattr(gp, 'check_samples_feasibility', None) or gp.resources.check_samples_feasibility
+        mask = check(t.tensor([list(q) for q in states], device='cuda', dtype=t.float32))
         # a single state comes back as a 0-d tensor
         return [bool(v) for v in np.atleast_1d(mask.detach().cpu().numpy()).tolist()]
 
