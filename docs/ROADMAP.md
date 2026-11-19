@@ -9,7 +9,7 @@ sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware
         -> navigation / docking -> motion planning -> execution (JTAC + F/T) -> monitoring
 ```
 
-Last verified: 2026-11-17 on main at 56712bb (PRs up to #94): simulator-free checks green (`docker/run_all_checks.sh --skip-sims`: 54 packages built, 1259 colcon tests, 0 failures, 229 skipped; 5 pytest directories passed; public-readiness scan clean). Since then (2026-11-18, PRs #96, #101 to #106) only the package tests of the touched packages were re-run, not the whole suite. Simulator, GPU and hardware items below were not re-run for that date; their evidence is the earlier run each line cites. Legend: `[x]` done, `[~]` partial (what is
+Last verified: 2026-11-19 on main at a2b5df9 (PRs up to #114), in the compile-only `build` image (the Dockerfile `build` stage itself failed two tests that day, fixed in #117): simulator-free checks green (`docker/run_all_checks.sh --skip-sims` with `NO_BUILD=1`: 29 packages, 1352 colcon tests, 0 failures, 226 skipped; pytest directories passed: tools 36 passed 2 skipped, description 224, moveit_config 30, curobo_bridge 1 skipped, stand_navigator 42). The public-readiness scan was not part of this run. Simulator, GPU and hardware items below were not re-run for that date; their evidence is the earlier run each line cites. Legend: `[x]` done, `[~]` partial (what is
 missing is stated), `[ ]` not done (some are design-only). Each item names its evidence. Tick items as they land
 and update the date. **Policy:** reuse maintained open source before writing our own (section 17); ROS 2 distro
 support is not a reason to reject a candidate (we port); prefer the newest method that fits, including papers
