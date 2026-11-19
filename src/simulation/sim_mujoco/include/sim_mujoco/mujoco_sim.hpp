@@ -27,7 +27,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <map>
 #include <random>
 #include <string>
 #include <vector>
@@ -82,6 +84,15 @@ public:
   Wrench groundTruthWrench() const;
   /// One entry per tool/environment contact (geom and body names, normal force), for diagnostics.
   std::string describeToolContacts() const;
+
+  /// Contacts that should not happen in a coverage pass: robot body against robot body (self collision, tool included)
+  /// or a non-tool robot body against the world geoms (an arm link on the wall or an obstacle). The tool against the
+  /// world is the intended contact and is not listed. Only penetrating contacts (dist < 0) count. Call once per
+  /// step; the first sighting of a body pair is returned in `new_pairs` ("A <-> B [self|link_world] depth=..") and
+  /// every sighting is counted for unexpectedContactSummary().
+  void scanUnexpectedContacts(std::vector<std::string> & new_pairs);
+  /// "none" or one line per pair: steps seen and deepest penetration.
+  std::string unexpectedContactSummary() const;
 
   /// Planar base (present when the MJCF has base_x_joint, base_y_joint, base_yaw_joint).
   bool hasBase() const {return base_.present;}
@@ -153,6 +164,8 @@ private:
   std::vector<double> velocity_command_;
   int tcp_site_{-1};
   std::vector<char> tool_body_;
+  struct PairStat {long steps{0}; double depth{0.0}; std::string kind;};
+  std::map<std::string, PairStat> unexpected_;
   int force_adr_{-1};
   int torque_adr_{-1};
   Wrench tare_{};

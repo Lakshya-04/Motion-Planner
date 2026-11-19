@@ -210,6 +210,9 @@ CallbackReturn MujocoSystemInterface::on_activate(const rclcpp_lifecycle::State 
 
 CallbackReturn MujocoSystemInterface::on_deactivate(const rclcpp_lifecycle::State &)
 {
+  if (sim_) {
+    RCLCPP_INFO(kLogger, "UNEXPECTED_CONTACT_SUMMARY %s", sim_->unexpectedContactSummary().c_str());
+  }
   return CallbackReturn::SUCCESS;
 }
 
@@ -258,6 +261,13 @@ hardware_interface::return_type MujocoSystemInterface::read(
   raw_pub_->publish(fill(ft_frame_id_, ft_));
   const Wrench truth = sim_->groundTruthWrench();
   truth_pub_->publish(fill(tcp_frame_id_, truth));
+  {
+    std::vector<std::string> fresh;
+    sim_->scanUnexpectedContacts(fresh);
+    for (const auto & s : fresh) {
+      RCLCPP_WARN(kLogger, "UNEXPECTED_CONTACT t=%.3f %s", sim_->time(), s.c_str());
+    }
+  }
   static const bool diag_contacts = std::getenv("SIM_DIAG_CONTACTS") != nullptr;
   if (diag_contacts && std::abs(truth[2]) > 15.0) {
     RCLCPP_WARN(kLogger, "DIAG t=%.3f truth=[%.1f %.1f %.1f] raw=[%.1f %.1f %.1f] contacts: %s", sim_->time(),
