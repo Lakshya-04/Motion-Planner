@@ -379,6 +379,13 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    `run_multi_stand_pass.sh, run_sensed_pass.sh and run_spray_pass.sh (the latter through `manager_pass_common.sh`)` takes the same variable. The variable adds `planning_config: <path>` to the `manager.yaml` the script writes
    into its output directory (the launch's `params_file`), so with the variable unset nothing changes.
 
+   Without `MANAGER_PASS_CUROBO_WORLD=1` cuRobo plans with an empty world (it cannot see the wall). With it set,
+   `mp_world_model` (MuJoCo) and `gz_world_model` (Gazebo) also run `ros2 run curobo_planner curobo_world_loader` for the
+   same cloud (`frame_id:=base_link`, `offset_z:=-0.31`: the cloud is in base_footprint, the node plans in base_link
+   0.31 m higher). The log is `curobo_world.log` in the output directory. Authored and compiled, not run. Single-stand
+   passes only: the multi-stand arrival command loads the cloud in `odom`, and cuRobo cannot transform it, so a
+   multi-stand cuRobo pass would need the cloud in the base frame at each stand (not done).
+
 4. `docker/tools/run_curobo_node.sh stop` afterwards.
 
 The MuJoCo scripts do not publish `/clock` (the manager runs with `use_sim_time:=false`), which does not matter for the node.

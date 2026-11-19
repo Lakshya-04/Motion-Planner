@@ -23,6 +23,11 @@ int main(int argc, char ** argv)
   auto node = std::make_shared<rclcpp::Node>("curobo_world_loader");
   const std::string path = node->declare_parameter<std::string>("point_cloud_path", "");
   const std::string frame_id = node->declare_parameter<std::string>("frame_id", "base_link");
+  // Pose of the file's frame in frame_id (translation only): a cloud written in base_footprint, with
+  // the planner's base frame base_link 0.31 m above it, is loaded with offset_z:=-0.31.
+  const double offset_x = node->declare_parameter<double>("offset_x", 0.0);
+  const double offset_y = node->declare_parameter<double>("offset_y", 0.0);
+  const double offset_z = node->declare_parameter<double>("offset_z", 0.0);
   const bool clear = node->declare_parameter<bool>("clear", false);
   curobo_planner::Options options;
   options.node_name = node->declare_parameter<std::string>("curobo_node", "/curobo_planner");
@@ -44,7 +49,10 @@ int main(int argc, char ** argv)
     if (clear) {
       ok = client.clearWorld(&message);
     } else {
-      const auto update = motion_planner::loadPointCloudFile(path, frame_id);
+      auto update = motion_planner::loadPointCloudFile(path, frame_id);
+      update.points_origin.x = offset_x;
+      update.points_origin.y = offset_y;
+      update.points_origin.z = offset_z;
       RCLCPP_INFO(node->get_logger(), "Loaded %zu points from %s", update.points.size(), path.c_str());
       ok = client.setWorld(update, &message);
     }

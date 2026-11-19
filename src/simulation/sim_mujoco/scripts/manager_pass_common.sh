@@ -87,6 +87,13 @@ mp_world_model() {
     -p point_cloud_path:=$1 -p frame_id:=base_footprint -p octomap_resolution:=0.01 \
     > "$OUT/world_model.log" 2>&1 &
   WM=$!
+  # MANAGER_PASS_CUROBO_WORLD=1: the same cloud into the cuRobo node's world too (the node plans in base_link, 0.31 m
+  # above base_footprint, so the cloud is shifted by -0.31 in z). Without it cuRobo plans with an empty world.
+  if [ -n "${MANAGER_PASS_CUROBO_WORLD:-}" ]; then
+    timeout 60 ros2 run curobo_planner curobo_world_loader --ros-args \
+      -p point_cloud_path:=$1 -p frame_id:=base_link -p offset_z:=-0.31 \
+      > "$OUT/curobo_world.log" 2>&1 || echo "curobo_world_loader failed (see $OUT/curobo_world.log)"
+  fi
 }
 
 mp_record() {
