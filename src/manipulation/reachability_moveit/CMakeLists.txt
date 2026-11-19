@@ -30,8 +30,6 @@ target_link_libraries(port_stand_verifier PUBLIC reachability::reachability_core
 target_compile_features(port_stand_verifier PUBLIC cxx_std_17)
 set_target_properties(port_stand_verifier PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-set(_targets port_stand_verifier)
-
 # The probe needs MoveIt (motion_planner_moveit); the verifier and its tests do not.
 find_package(motion_planner_moveit QUIET)
 find_package(rclcpp QUIET)
@@ -50,7 +48,9 @@ else()
   message(WARNING "reachability_moveit: motion_planner_moveit not found, building without stand_verify_probe")
 endif()
 
-install(TARGETS ${_targets} ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
+# The library is static and linked into the probe; it is not installed as a target (colcon's symlink install
+# refuses a target whose link interface holds imported targets). Include it with add_subdirectory or copy the
+# two files if another package needs it.
 install(DIRECTORY include/ DESTINATION include)
 
 if(BUILD_TESTING)
