@@ -1,7 +1,7 @@
 # Planner benchmark across backends
 
-One set of joint-space free-space transitions, planned by MoveIt/OMPL, VAMP and (where it can run)
-cuRobo, on the same scenes, judged by one planner-independent model. It complements
+One set of joint-space free-space transitions, planned by MoveIt/OMPL, VAMP and cuRobo v0.9.0, on the same
+scenes, judged by one planner-independent model. It complements
 [spherization_benchmark.md](spherization_benchmark.md), which compares sphere sets on random start/goal
 pairs; this one uses the moves the manager actually makes between stands: stand to stow, stand to dock.
 
@@ -29,30 +29,148 @@ self-collision of links more than 2 movable joints apart ignored, boxes as world
 
 ## Metrics
 
-- success: a path was returned (a backend whose own model rejects an endpoint counts a failure; the
-  second column leaves those out).
-- time: wall clock around solve plus simplification, successful plans only, one run per problem. VAMP and
-  OMPL run on the CPU, single thread, same machine under load from other jobs (read times as order of
-  magnitude).
-- path length: joint-space polyline length of the returned path, radians (median).
+- success: a path (cuRobo: a trajectory) was returned by that backend, in that backend's own model. A backend
+  whose own model rejects an endpoint counts a failure; the second column leaves those problems out (cuRobo
+  accepted all 158 endpoint pairs, so that column equals the first for every row). What "success" means differs per
+  backend, see the list below the results.
+- time: wall clock around the call that plans, successful plans only, one run per problem per pass, three passes
+  per backend (see Isolation). VAMP: RRT-Connect plus simplification. OMPL: RRT-Connect plus simplification, no
+  `move_group`. cuRobo: `CuroboPlanner.plan_joint`, i.e. the pre-check, host to device copy, `plan_cspace` and
+  the trajectory copied back to the host; the planner's own `total_time` is within 2 to 12 ms of it (median 2.2 ms
+  in session A, 4.2 ms in B for `plan_cspace`). Problems cuRobo fails are not in its time figures (a failure takes
+  20 attempts, tens of seconds, and is counted in the success column only).
+- **Planning time is not trajectory time.** VAMP and OMPL return a geometric path; cuRobo returns a
+  time-parameterised trajectory (B-spline knots, retimed under velocity and acceleration limits). The "trajectory
+  s" column is that trajectory's duration (median 1.25 to 1.6 s): how long the arm would take, not how long the
+  planner took. Only the planning is timed.
+- path length: joint-space polyline length of the returned path or trajectory, radians (median over that backend's
+  successful problems; the sets differ, so lengths are comparable only where the success column is the same).
 - clearance: the smallest gap between any reference sphere and any box along the path densified to 0.05 rad
   (median and minimum over paths; negative is a penetration of the reference model). Empty scene: none.
 - hits in reference model: paths whose clearance is negative.
+- first call: cuRobo only. `construct + warmup` is `CuroboPlanner(..., warmup=True)` (Warp kernel compile or
+  cache load, torch compile, CUDA graph capture); `first call` is the first `plan_joint` after that, timed alone.
+- VRAM: device-wide used memory (`torch.cuda.mem_get_info`, polled every 20 ms, the counter `nvidia-smi` shows) minus the
+  value before the planner was built, over the whole process (construct, warmup, all passes), as in
+  `docker/tools/eval_curobo_mapper.py`. Warp allocates outside torch, so torch's own peak (also given) is lower.
 
 ## Results
 
-Machine: the development host (CPU, shared, loaded); VAMP and OMPL with default settings; OMPL
-RRT-Connect, 5 s limit, validity resolution 0.1 percent of the extent, then path simplification.
+Two complete sessions (A: 2026-11-18 22:05 to 23:08, node run until 23:14, B: 2026-11-18 23:14 to 2026-11-19 00:51), same problems, same
+binaries, each = VAMP and OMPL three times (once before each cuRobo mode) and each cuRobo mode as three consecutive
+passes in one process, so every row of a session comes from one window of one to one and a half hours. Machine: Intel i5-10500H
+(6 cores, 12 threads), RTX 3050 Laptop 4 GB (driver 595.99), cuRobo `nvidia-curobo 0.9.0`
+(cuRoboV2-Fast) in `motion-planner:gpu` / `full`, MoveIt and OMPL as shipped in `motion-planner:build` (Jazzy),
+VAMP from the pinned Cricket header with 50 FOAM spheres. Every container ran with `--cpuset-cpus=10-11`.
+**The host was shared and loaded (see Isolation): these are not times of an idle machine, and the two sessions
+differ by up to 1.5x on the cuRobo rows for that reason.** Success counts are the same in both sessions unless two
+numbers are shown. In the time columns: the median of the three per-pass medians, with the lowest and highest pass median in brackets
+(p95 the same way); "all" pools the three scenes.
 
-| backend | scene | success | success, valid endpoints | median ms | p95 ms | path rad (median) | clearance cm (median / min) | hits in reference model |
-|---|---|---|---|---|---|---|---|---|
-| vamp | empty | 72/72 | 72/72 | <0.1 | 0.1 | 4.55 | - | 0 |
-| vamp | wall | 56/56 | 56/56 | <0.1 | 0.1 | 4.65 | 13.4 / 0.1 | 0 |
-| vamp | wall_box | 30/30 | 30/30 | 0.1 | 0.2 | 4.52 | 12.7 / 0.1 | 0 |
-| moveit_ompl | empty | 72/72 | 72/72 | 9.8 | 16.5 | 4.55 | - | 0 |
-| moveit_ompl | wall | 56/56 | 56/56 | 9.7 | 17.2 | 4.76 | 13.4 / -3.9 | 3 |
-| moveit_ompl | wall_box | 30/30 | 30/30 | 11.2 | 26.0 | 4.52 | 14.4 / -20.3 | 3 |
-| cuRobo | all | not run | - | - | - | - | - | see below |
+| backend | scene | success (A, B) | median ms, session A (3 pass medians min-max) | p95 ms, A | median ms, session B | p95 ms, B | path rad | clearance cm (median / min), A / B | hits in ref. model, A / B | trajectory s (median) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| vamp | empty | 72/72 | 0.04 (0.04-0.07) | 0.06 (0.04-0.15) | 0.05 (0.04-0.07) | 0.12 (0.06-0.22) | 4.55 | - | 0 / 0 | - |
+| vamp | wall | 56/56 | 0.05 (0.04-0.12) | 0.15 (0.13-0.45) | 0.06 (0.04-0.10) | 0.18 (0.13-0.49) | 4.65 | 13.4 / 0.1, 13.4 / 0.1 | 0 / 0 | - |
+| vamp | wall_box | 30/30 | 0.07 (0.05-0.11) | 0.2 (0.2-0.3) | 0.08 (0.05-0.12) | 0.2 (0.2-0.5) | 4.52 | 12.7 / 0.1, 12.7 / 0.1 | 0 / 0 | - |
+| vamp | all | 158/158 | 0.05 (0.04-0.10) | 0.15 (0.13-0.36) | 0.06 (0.04-0.08) | 0.18 (0.13-0.49) | 4.58 | - | - | - |
+| moveit_ompl | empty | 72/72 | 32.9 (32.4-35.4) | 58.1 (54.4-65.5) | 44.4 (38.0-45.1) | 79.4 (70.8-87.2) | 4.55 | - | 0 / 0 | - |
+| moveit_ompl | wall | 56/56 | 29.9 (28.2-45.8) | 61.3 (59.7-76.2) | 41.5 (39.7-52.5) | 85.7 (78.4-101.3) | 4.67 | 14.2 / -0.2, 13.4 / -2.9 | 2 / 3 | - |
+| moveit_ompl | wall_box | 30/30 | 35.5 (32.0-44.5) | 62.5 (59.9-84.8) | 47.1 (42.7-47.3) | 99.8 (69.3-123.7) | 4.52 | 12.7 / -0.2, 12.7 / -0.2 | 2 / 2 | - |
+| moveit_ompl | all | 158/158 | 31.9 (31.6-39.1) | 62.2 (59.8-74.6) | 43.5 (39.1-47.0) | 91.9 (74.6-97.8) | 4.58 | - | - | - |
+| cuRobo plan_cspace | empty | 48/72 | 203.8 (199.7-278.6) | 395.7 (341.8-505.1) | 224.3 (151.9-415.3) | 455.6 (276.1-529.1) | 3.69 | - | 0 / 0 | 1.25 |
+| cuRobo plan_cspace | wall | 36/56 | 192.2 (183.5-314.3) | 391.6 (333.6-558.7) | 232.8 (207.0-553.3) | 522.8 (419.0-574.5) | 3.77 | 11.1 / -0.2, 11.1 / -0.2 | 2 / 2 | 1.38 |
+| cuRobo plan_cspace | wall_box | 22/30 | 268.5 (242.7-303.7) | 367.9 (300.5-544.6) | 325.0 (180.9-464.6) | 591.0 (329.2-598.3) | 2.71 | 10.6 / -0.2, 10.6 / -0.2 | 2 / 2 | 1.38 |
+| cuRobo plan_cspace | all | 106/158 | 231.3 (203.0-247.5) | 485.5 (374.1-487.8) | 223.1 (189.8-442.4) | 563.4 (442.4-579.5) | 3.75 | - | - | 1.38 |
+| cuRobo bi_rrt_trajopt | empty | 48/72 | 231.7 (166.1-232.2) | 237.7 (198.0-238.9) | 344.1 (338.6-344.3) | 451.3 (354.0-461.9) | 3.69 | - | 0 / 0 | 1.25 |
+| cuRobo bi_rrt_trajopt | wall | 37/56 | 252.9 (216.3-258.6) | 302.7 (301.2-466.8) | 475.7 (386.9-497.3) | 553.4 (526.8-596.6) | 3.79 | 10.6 / -0.2, 10.6 / -0.2 | 2 / 2 | 1.38 |
+| cuRobo bi_rrt_trajopt | wall_box | 22/30 | 263.1 (256.9-264.4) | 310.7 (305.5-457.1) | 394.0 (391.0-403.3) | 460.1 (457.7-472.8) | 2.72 | 10.6 / -0.2, 10.6 / -0.2 | 2 / 2 | 1.38 |
+| cuRobo bi_rrt_trajopt | all | 107/158 | 248.6 (190.5-249.9) | 341.5 (273.3-378.3) | 386.3 (361.9-391.8) | 509.3 (503.0-515.3) | 3.75 | - | - | 1.38 |
+| cuRobo bi_rrt_seed | empty | 72/72 | 23.6 (23.2-24.1) | 47.0 (41.5-49.3) | 29.8 (26.7-30.1) | 61.3 (54.0-67.4) | 4.56 | - | 0 / 0 | 1.60 |
+| cuRobo bi_rrt_seed | wall | 56/56 | 28.5 (28.4-34.3) | 58.5 (50.1-76.9) | 32.2 (28.7-37.0) | 75.2 (57.7-93.5) | 4.62 | 11.5 / -0.7, 11.5 / -0.7 | 4 / 4 | 1.60 |
+| cuRobo bi_rrt_seed | wall_box | 30/30 | 29.9 (24.4-31.9) | 62.2 (53.4-63.3) | 30.2 (29.7-33.4) | 74.5 (64.6-81.7) | 4.53 | 11.7 / -0.7, 11.7 / -0.7 | 4 / 4 | 1.60 |
+| cuRobo bi_rrt_seed | all | 158/158 | 27.9 (26.8-28.2) | 55.8 (51.7-63.5) | 32.0 (28.4-32.7) | 64.7 (61.2-79.4) | 4.59 | - | - | 1.60 |
+
+What "success" and the path judged here mean per backend (this is not a ranking, see below):
+
+- **vamp**: RRT-Connect found a path in the 50-sphere Cricket model, 158/158.
+- **moveit_ompl**: OMPL RRT-Connect (5 s limit) found a path that FCL accepts on the URDF collision meshes with the
+  hops-2 matrix, 158/158; 2 to 3 of the paths touch a box in the reference model in each session.
+- **cuRobo plan_cspace**: `MotionPlanner.plan_cspace` with cuRobo's defaults (attempt 0 a straight-line seed refined by trajectory
+  optimisation, PRM graph seeds from attempt 1 on, up to 20 attempts) returned a trajectory that satisfies cuRobo's constraints in its own
+  sphere model (644 spheres from `RobotBuilder`). 106/158. cuRobo accepted every start and goal as collision free
+  (`check_states`), yet fails **52 problems, every one with `dock_1`, `dock_2` or `dock_3` as an endpoint (`dock_3` in 30 of them, `dock_2` in 22,
+  `dock_1` in 8; dock-to-dock pairs count twice), in the empty scene too**; the failing set is the same in all passes. The numbers in this
+  paragraph, the table below and the `bi_rrt_*` rows are from the config generated before the fix described next; see "Dock failure: cause and fix".
+- **cuRobo bi_rrt_trajopt**: the GPU bidirectional RRT seeds every attempt, then trajectory optimisation. 107/158, the
+  same failing set except one pair.
+- **cuRobo bi_rrt_seed**: the RRT path is fitted to a B-spline, retimed and densely validated in cuRobo's model, trajectory
+  optimisation is skipped. 158/158, but the path is cuRobo's own validated seed, not an optimised trajectory; 4 of its paths in each
+  box scene touch a box in the reference model (up to 0.7 cm).
+
+Path lengths: only the rows with the same success counts are comparable. VAMP, OMPL and `bi_rrt_seed` solve the same 158
+problems (4.52 to 4.67 rad medians); `plan_cspace` and `bi_rrt_trajopt` solve the 106/107 problems that do not involve the
+failing docks, so their medians (2.7 to 3.8 rad) are over easier problems.
+
+### cuRobo: first call, warmup, VRAM
+
+| mode | construct + warmup, s (session A / B, cold) | first `plan_joint`, s | VRAM peak, MiB device (above base) | torch max allocated, MiB |
+|---|---|---|---|---|
+| plan_cspace | 346 / 300 (cold kernel cache, quiet: 199) | 0.14 / 0.18 (0.12 cold) | 1070 (978) | 601 |
+| bi_rrt_trajopt | 118 / 426 | 0.60 / 3.24 | 3390 (3298) | 2805 |
+| bi_rrt_seed | 117 / 199 | 0.51 / 0.50 | 3280 (3188) | 2805 |
+
+- **The first call is the construction, not the first plan.** Warmup (inside `CuroboPlanner(...)`) takes 2 to 7 minutes on cores 10-11,
+  then the first `plan_joint` costs only 0.1 to 0.6 s (one 3.2 s outlier in session B on a loaded host). The one run with an empty Warp
+  kernel cache (a fresh cache directory, host quiet, load average 1.9) took 199 s; runs with a warm cache took 117 to 426 s depending on
+  host load, so the warmup is not mainly kernel compilation: it includes torch compile workers and CUDA graph capture, both CPU-bound, and
+  is as variable as the load. A service that must answer within seconds has to build the planner at start and not on the first request.
+- **Steady state** is every problem after the warmup and first call: the medians and p95s in the table above.
+- **VRAM**: `plan_cspace` peaks at about 1 GB of the 4 GB card; both RRT modes at 3.3 GB (the RRT planner's buffers, 2.8 GB in torch
+  alone), which leaves under 0.8 GB on a 4 GB GPU: the cuRobo `Mapper` evaluation in [curobo_v2_notes.md](curobo_v2_notes.md)
+  needs 0.17 to 1.4 GB, so RRT planning and mapping do not fit together on this card. The peaks are over the whole process; I did not split
+  warmup from the passes.
+
+### cuRobo through the ROS node and the C++ client
+
+`curobo_planner_benchmark` (new, `src/manipulation/curobo_planner/src/planner_benchmark.cpp`) drives
+`curobo_planner::CuroboClientPlanner` against a running `curobo_planner_node` (cuRobo `plan_cspace` defaults, same robot config, boxes
+through `setWorld`), one container, node in the background, cores 10-11. 21 problems (every third of the first 21 of each scene), three
+client passes; 48 of the 63 plans succeeded (the others are the same dock failures). Wall clock around `CuroboClientPlanner::plan()`:
+
+| session | node + client median / p95 ms | node's own `planning_time_ms` (whole ms, cuRobo `total_time`) median | service overhead per call (client wall minus node time) median (min-max) | in-process on the same ids, `plan_cspace` pass medians |
+|---|---|---|---|---|
+| A (quiet host, load average 2) | 188 / 356 | 184.5 | 3.6 ms (2.9-9.6) | 247 / 252 / 211 |
+| B (loaded host) | 301 / 496 | 294.5 | 5.7 ms (3.3-10.7) | 189 / 200 / 438 |
+
+The ROS layer adds 3 to 6 ms to a 200 to 300 ms plan (about 2 percent): about 1.5 ms over the in-process wrapper (which itself adds 2.2 to 4.2 ms
+over `total_time`: the pre-check, tensor copies and the trajectory to the host). The in-process and node medians above differ by more
+than that overhead, in both directions, because the host load changed between the runs (in B the third in-process pass ran while the load
+average was above 10); the overhead column is the reliable number. The node's first plan took 135 ms (A) and 204 ms (B) after its
+warmup, which the client waits for (up to 300 s) before the first call.
+
+### Isolation: what was and was not controlled
+
+- Every container of the benchmark ran with `--cpuset-cpus=10-11`; no other containers of mine ran, one at a time, `MAKEFLAGS=-j2` for the builds.
+  A MuJoCo simulation container (`mfs_sim`) stayed up on the host on CPU cores 0-7, other users' browsers and jobs ran throughout.
+- **The pinning does not isolate the cores.** `thread_siblings_list` says CPU 10 shares a physical core with CPU 4, and CPU 11 with CPU 5, which
+  are in the simulation's range: its threads and mine ran on the two hyperthreads of the same cores. Pinning only stopped the scheduler from
+  moving my processes onto busier cores.
+- The host had about 1.8 GB of RAM available and 4.8 GB of swap in use during the runs.
+- Reference workload (`planner_benchmark.py refload`: 40 chained 384 x 384 float64 matmuls, one thread, `taskset -c 10-11`, 15 repeats, run
+  before and after every stage). Median of the repeats, ms: **session A** 406 at the start, 443 to 468 through VAMP, OMPL and the start of
+  the `plan_cspace` passes, 86 to 90 from 22:52 until the end (23:14, range 86-101), i.e. a **5.4x** swing within one session;
+  **session B** 436 at the start, 356 to 450 until 00:12, then 155 to 221 from 00:13 to 00:43, 95 to 107 at 00:43 (185 again after the node run): a **4.6x** swing. Within one
+  measurement, min to max spanned about 50 percent of the median when loaded and 15 to 20 percent when quiet. Load average (1 min) ranged from 1.7 to 14.8.
+- So: the cuRobo `plan_cspace` passes of A ran from 443 ms of the yardstick at the start down to 86 ms at the end, B's `plan_cspace` passes at about 410 and the
+  `bi_rrt_trajopt` passes at 220 down to 170. The same mode differs 1.4x (OMPL: 32 against 44 ms) to 1.5x (cuRobo `bi_rrt_trajopt`: 249 ms quiet in A, 386 ms
+  loaded in B) between sessions, one `plan_cspace` pass in B was 2x slower than its siblings (442 ms against 190 and 200), VAMP's
+  medians moved between 0.04 and 0.12 ms. Three passes bound the spread inside one session (the parenthesised ranges); they do not make a quiet
+  machine. One stray, unpinned `docker run` of the GPU image (listing package files, under a minute) happened during session A's `plan_cspace` passes (about 22:21).
+- Only the large ratios survive this: VAMP (0.04 to 0.12 ms) against everything else, and cuRobo with trajectory optimisation
+  (190 to 440 ms) against the rest. OMPL (32 to 44 ms) and the cuRobo seed route (28 to 32 ms) are not distinguishable here; absolute milliseconds are not
+  to be trusted beyond the load they were taken under.
+- OMPL here (32 to 44 ms median) is 3 to 4 times slower than the 9.8 ms of the previous version of this document, which ran on a different
+  build of the same package and a different load; I did not find out which of the two it is. VAMP's median is unchanged (under 0.1 ms).
 
 ## How to read this, and what it does not show
 
@@ -94,39 +212,138 @@ RRT-Connect, 5 s limit, validity resolution 0.1 percent of the extent, then path
   sphere model** (up to 20 cm deep). The meshes are tighter than the FOAM spheres, so this is the
   coarser model flagging the finer one, not proof of a collision with the real mesh; it shows that paths
   from one model are not safe in another, the same finding as the sphere benchmark.
-- VAMP's numbers beat OMPL's by two orders of magnitude on the problems both solve, which is its
-  design (SIMD collision kernel) and is consistent with the sphere benchmark.
+- VAMP's numbers beat OMPL's by almost three orders of magnitude on the problems both solve, which is its
+  design (SIMD collision kernel) and is consistent with the sphere benchmark. cuRobo's `plan_cspace` takes 0.2 to 0.3 s on the
+  problems it solves and failed a third of the set with the first generated config (all of it with the 2-hop matrix, see "Dock failure"); its RRT-seed route is in OMPL's range (28 to 32 ms) with a time-parameterised
+  trajectory and 158/158 success, at 3.3 GB of VRAM. These are three different kinds of output (a geometric path, a
+  retimed validated seed, an optimised trajectory), in three collision models.
 - The OMPL runner is the OMPL planner on a MoveIt `PlanningScene`, not a `move_group` round trip: no
   request adapters, no time parameterisation, no ROS messages. Time through `move_group` is higher.
-- One run per problem, one seed (OMPL and VAMP are randomised): no confidence intervals, small sample (158
-  problems, 10 configurations).
+- One run per problem per pass, three passes (VAMP's sampler is a fixed Halton sequence, so its passes differ only in timing; OMPL
+  and cuRobo's RRT are randomised): small sample (158 problems, 10 configurations), no confidence intervals beyond the pass ranges.
+- The OMPL runner and `CuroboPlanner` both include costs the other does not (the latter copies tensors and the trajectory
+  across PCIe, the former does not touch ROS messages); they are described in Metrics, not corrected for.
 - Pose goals, Cartesian and contact planning are not part of this benchmark (VAMP and cuRobo-pose do not do
   them either; see the table in [backend_selection.md](backend_selection.md)).
 
-## cuRobo: not run
+## Dock failure: cause and fix (2026-11-19)
 
-The GPU image could not start on the benchmark host: `nvidia-smi` fails with "Driver/library version
-mismatch" (NVML 595.99) and `docker run --gpus all` fails creating the container. The host needs a reboot
-or a matching driver. The runner is in place (`run-curobo`, the same one as the sphere benchmark, from
-`motion-planner:gpu` with `--gpus all`; it needs a cuRobo robot config from `generate_robot_assets.sh`'s
-`curobo` stage, which also needs the GPU) and its output goes into the same `report` stage, but no cuRobo
-number is claimed here. The earlier sphere benchmark measured 0.2 to 4 s per plan on random pairs on the
-4 GB RTX 3050 (see [spherization_benchmark.md](spherization_benchmark.md)); that is a different problem set.
+Reproduced on 7 problems in the empty scene (3 failing docks, 4 controls) in one process, then the 158 problems.
+
+**Cause: the cuRobo self-collision model, not the optimiser's settings.** Every failed solve has `path_valid` true,
+`limits_and_dynamics_valid` true and `collision_valid` false (`TrajOptSolverResult.debug_info['validation']`), the goal pose error is 0, and
+in the empty scene the only collision left is self-collision (`self_collision` constraint 1.0002, `scene_collision` 0). Rolling the
+returned trajectory through cuRobo's interpolated metrics rollout, 2 to 4 of the 77 steps violate it (steps 51 to 54 for
+`stand_home>dock_3`, 24 and 25 for `dock_2>stand_left`). Computing the sphere distances of those configurations with the config's own sphere
+table and ignore list: the pair is **`arm_forearm_link` against `arm_wrist_2_link`**, penetration 0.5 to 1.7 mm. That pair is two joints apart
+(forearm, wrist_1, wrist_2), and the matrix generated by `generate_curobo_robot.py` did not ignore it (`arm_forearm_link` ignored only the
+upper arm and wrist_1; the rest of the matrix is cuRobo's sampled one). The spheres of the two links clear each other by 4.2 cm at
+`stand_home` but 3.2 cm at `dock_2` and `dock_3` (wrist 1 folded back to about 2.8 rad), so the passage into those poses is a thin sliver of
+joint space. The graph (PRM) path through it is valid (the planner's binary check, activation distance zero, and the dense validation of the
+fitted seed accept it), but trajectory optimisation smooths it into a millimetre of penetration, and all 20 attempts (1 straight-line seed, 19 graph
+seeds, all 19 graph calls successful) end the same way. Docks 0 and 1 have more room for this pair (4.0 to 4.1 cm), which is why most of their pairs pass.
+The endpoint check was never the problem: `collision_valid` at the dock poses themselves is true.
+
+Changing one thing at a time on `stand_home>dock_3`, `dock_2>stand_left`, `stand_home>dock_2`, `dock_3>stand_home` (all four fail by default
+in 8 to 12 s):
+
+| change | result |
+|---|---|
+| `finetune_attempts=6`, `max_attempts=60`, `enable_graph_attempt=0` | still fail (all 4) |
+| `run_trajopt_on_graph_seed=False` alone, `always_run_trajopt=False` alone | still fail (all 4) |
+| `always_run_trajopt=False` and `run_trajopt_on_graph_seed=False` (graph seed evaluated, trajectory optimisation bypassed) | solve (all 4), attempt 2, 0.3 to 0.4 s, `trajectory_source == 'graph_fit'` |
+| config with the forearm to wrist_2 pair ignored (2-hop matrix), defaults | solve (all 4 and 5 more), attempt 1, 0.13 to 0.4 s |
+
+Not changed one at a time (rebuild needed, minutes of warmup each): `collision_activation_distance`, `num_trajopt_seeds`, sphere padding. The
+distance table above says the pair penetrates in the optimiser's own result, so a different activation distance would only move the
+trajectory further from a pair whose passage is 1 to 2 cm wide; I did not test it.
+
+**Fix.** (1) `docker/tools/robot_assets.py` passes `--ignore-hops` (its `--hops`, default 2, the same value the VAMP SRDF and the OMPL matrix of this
+benchmark use) to `generate_curobo_robot.py`, so the three planners now share one allowed-pair rule on a serial arm; the generator already had the
+option. (2) `CuroboPlanner` has a fallback (`seed_fallback=True`, ROS node parameter of the same name): if `plan_cspace` returns nothing it asks again with
+`always_run_trajopt=False`, `run_trajopt_on_graph_seed=False`, `enable_graph_attempt=0`, `fallback_attempts=6`, and returns the first graph seed that passes
+cuRobo's dense validation, with `PlanResult.route == 'graph_seed'` and a message saying it is not optimised (`'trajopt'` for a normal plan).
+The first pass still runs all `max_attempts` (20) attempts, so a problem the optimiser cannot solve costs 6 to 33 s before the fallback
+returns; lower `max_attempts` if that matters.
+
+Results, the same 158 problems, one process each (3 minutes warmup), the second config being the old matrix regenerated with the same tool
+(654 spheres; its baseline is 96/158, not the 106/158 of the table above, because the sphere fit is not identical between runs):
+
+| config | mode | success | notes |
+|---|---|---|---|
+| new (2-hop matrix) | `plan_cspace` (no fallback) | **158/158** | median 191.5 ms, p95 380 ms; every plan through trajectory optimisation; 2 + 2 paths touch a box in the reference model, as before |
+| old matrix | `plan_cspace_fallback` | 154/158 | 96 by trajectory optimisation, 58 by the graph-seed fallback (median 18.1 s wall: 20 failed attempts first), 4 still fail (`dock_2>dock_0` empty; `dock_0>dock_2`, `dock_0>dock_3`, `dock_3>dock_0` wall) |
+
+So the matrix fixes all 158 without needing the fallback, and the fallback alone recovers 58 of the 62 optimiser failures with an unoptimised
+(but validated) trajectory. Not verified: that the forearm and wrist_2 of the real UR10e cannot touch (the 2-hop rule is the one VAMP and OMPL
+use, and the reference model of the report is a FOAM sphere set with the same matrix, so those hits would not show); the new config on the sim or on
+the node and C++ client (not re-run); more than one pass per mode; the fallback's 4 remaining failures were not looked into.
+
+## cuRobo v0.9.0: which modes can be called
+
+Read from the installed `nvidia-curobo 0.9.0` package (`curobo/_src/motion/motion_planner.py`, `motion_planner_cfg.py`, the
+`examples/getting_started/motion_planning.py` example; the wheel carries no CHANGELOG, so this is from the code, not the release notes):
+
+- `MotionPlanner.plan_cspace(goal_state, current_state, max_attempts=20, enable_graph_attempt=1, finetune_attempts=1)`: joint-space
+  goal. Attempt 0 refines a straight-line seed with trajectory optimisation; from attempt `enable_graph_attempt` on, a graph
+  planner's path seeds it. This is what `CuroboPlanner.plan_joint` (and so the ROS node and the C++ client) calls, **mode `plan_cspace`**.
+- The graph planner is chosen at construction: `MotionPlannerCfg.create(graph_planner_algorithm="prm" | "rrt", ...)`. `"rrt"` is the new GPU
+  bidirectional RRT (`BiRRTPlanner`). With `enable_graph_attempt=0` it seeds the first attempt, then trajectory optimisation runs
+  (**mode `bi_rrt_trajopt`**).
+- `enable_trajopt=False` returns the RRT seed fitted, retimed and densely validated, with no trajectory optimisation (**mode
+  `bi_rrt_seed`**, the "graph search + timeopt" route of the `enable_timeopt` docstring).
+- Not exposed here: `plan_pose` and the goal-set / batch planners (this benchmark has joint goals), and `always_run_trajopt` /
+  `run_trajopt_on_graph_seed` variants (only the three routes above were run).
+
+`CuroboPlanner` takes `graph_planner_algorithm`, `enable_trajopt` and `enable_graph_attempt` for this (defaults are cuRobo's, nothing changes for the
+node). Two bridge findings on the way: `check_states` called `graph_planner.check_samples_feasibility`, which the RRT planner does not have (it
+lives on its `resources`), so it raised `AttributeError` in the RRT modes: fixed; and every cuRobo planner is one process, one planner (see
+[curobo_v2_notes.md](curobo_v2_notes.md)), so each mode ran in its own container.
 
 ## Reproduce
 
+All commands from the repository root; `$S` is the script. Assets are generated once (needs `CRICKET_SRC`, a Cricket checkout at the pinned
+ref with `resources/templates`, and the GPU for the cuRobo config, about 2 minutes):
+
 ```bash
-# assets for the profile (FOAM spheres, VAMP header); CRICKET_SRC is a Cricket checkout at the pinned ref
-docker/tools/generate_robot_assets.sh src/description/mobile_manipulator_description/config/profiles/ur10e_nolift.yaml \
-  --out /tmp/assets --only urdf,srdf,spheres,vamp
 S=src/manipulation/motion_planner_moveit/scripts/planner_benchmark.py
-python3 $S prepare --urdf /tmp/assets/arm_only/resolved/robot.urdf --spheres /tmp/assets/vamp/spherized.urdf --work /tmp/bench
-python3 $S run-vamp --work /tmp/bench --header /tmp/assets/vamp/Ur10eNolift.hh --struct Ur10eNolift --out /tmp/bench/vamp.jsonl
-# OMPL: build motion_planner_moveit, then run the `planner_benchmark` executable (see its header) with the
-# arm-only URDF (mesh paths as file:// URIs) and an SRDF with an `arm` group plus the hops-2 matrix
-python3 $S report --work /tmp/bench --urdf /tmp/assets/arm_only/resolved/robot.urdf \
-  --spheres /tmp/assets/vamp/spherized.urdf /tmp/bench/vamp.jsonl /tmp/bench/moveit.jsonl
+export CRICKET_SRC=...   # Cricket checkout, pinned ref (docker/tools/build_robot_tools.sh)
+docker/tools/generate_robot_assets.sh src/description/mobile_manipulator_description/config/profiles/ur10e_nolift.yaml \
+  --out /tmp/bench_assets --only urdf,srdf,spheres,vamp,curobo      # URDF, FOAM spheres, VAMP header, cuRobo config (644 spheres)
+python3 $S prepare --urdf /tmp/bench_assets/arm_only/resolved/robot.urdf --spheres /tmp/bench_assets/vamp/spherized.urdf --work /tmp/bench
+# OMPL inputs: the URDF with mesh paths as file:///robot/... (the directory is mounted at /robot), and an SRDF with an `arm` group plus the hops-2 matrix
+sed 's#filename="ur_description/#filename="file:///robot/arm_only/resolved/ur_description/#' /tmp/bench_assets/arm_only/resolved/robot.urdf > /tmp/bench_assets/ompl.urdf
+sed 's#<robot name="mobile_manipulator">#&<group name="arm"><chain base_link="arm_base_link" tip_link="tcp_link"/></group>#' /tmp/bench_assets/vamp/rigid.srdf > /tmp/bench_assets/ompl.srdf
+# build motion_planner_moveit once (about 8 minutes at -j2) and curobo_planner + curobo_bridge in the full image
+docker run --rm --user $(id -u):$(id -g) -e HOME=/tmp -e MAKEFLAGS=-j2 -v $PWD:/ws:ro -v /tmp/bench_ws:/out motion-planner:build bash -c \
+  'source /opt/ros/jazzy/setup.bash; cd /out; colcon build --base-paths /ws/src --packages-up-to motion_planner_moveit --build-base /out/build --install-base /out/install --parallel-workers 1 --cmake-args -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release'
+docker run --rm --user $(id -u):$(id -g) -e HOME=/tmp -e MAKEFLAGS=-j2 -v $PWD:/ws:ro -v /tmp/bench_ws_full:/out motion-planner:full bash -c \
+  'source /opt/ros/jazzy/setup.bash; cd /out; colcon build --base-paths /ws/src --packages-up-to curobo_planner curobo_bridge --build-base /out/build --install-base /out/install --parallel-workers 1 --cmake-args -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release'
+
+# the yardstick, before and after every stage (host, same cores)
+taskset -c 10-11 python3 $S refload --label "session start" --out /tmp/out/refload.jsonl
+# VAMP and OMPL, one pass each (repeat 3 times; --skip-compile after the first VAMP pass)
+python3 $S run-vamp --work /tmp/bench --header /tmp/bench_assets/vamp/Ur10eNolift.hh --struct Ur10eNolift --out /tmp/out/vamp_1.jsonl --image motion-planner:full --cpuset 10-11
+python3 $S run-moveit --work /tmp/bench --urdf /tmp/bench_assets/ompl.urdf --srdf /tmp/bench_assets/ompl.srdf --install /tmp/bench_ws/install --out /tmp/out/moveit_1.jsonl --cpuset 10-11
+# cuRobo, one mode per container, three passes in it (mode: plan_cspace | bi_rrt_trajopt | bi_rrt_seed). The cuRobo config stores absolute
+# paths, so /tmp/bench_assets is mounted at the same path; a persistent HOME keeps the Warp kernel cache.
+docker run --rm --gpus all --cpuset-cpus=10-11 --user $(id -u):$(id -g) -e HOME=/tmp/warp_home -e OMP_NUM_THREADS=1 \
+  -v $PWD:/ws:ro -v /tmp/bench_assets:/tmp/bench_assets:ro -v /tmp/bench:/work -v /tmp/out:/out -v /tmp/bench_warp:/tmp/warp_home motion-planner:gpu \
+  /opt/venv/bin/python /ws/$S run-curobo --work /work --cfg /tmp/bench_assets/curobo/Ur10eNolift.yml --mode plan_cspace --passes 3 --pass-index 1 --out /out/curobo_plan_cspace_1.json
+# node + C++ client: node in the background, 3 client passes of 21 problems (limit per scene 7, stride 3)
+docker run --rm --gpus all --cpuset-cpus=10-11 --user $(id -u):$(id -g) -e HOME=/tmp/warp_home -v $PWD:/ws:ro -v /tmp/bench_assets:/tmp/bench_assets:ro \
+  -v /tmp/bench:/work -v /tmp/out:/o -v /tmp/bench_warp:/tmp/warp_home -v /tmp/bench_ws_full:/out:ro motion-planner:full bash -c '
+  source /opt/ros/jazzy/setup.bash; source /out/install/setup.bash
+  /opt/venv/bin/python -m curobo_bridge.ros_node --ros-args -p robot:=/tmp/bench_assets/curobo/Ur10eNolift.yml -p max_boxes:=16 > /o/node_log.txt 2>&1 &
+  for p in 1 2 3; do /out/install/curobo_planner/lib/curobo_planner/curobo_planner_benchmark /work/vamp_problems.txt /o/node_$p.jsonl plan_cspace_node 7 3; done; kill %1'
+# the table (results.txt, results.json in --work)
+python3 $S report --work /tmp/bench --urdf /tmp/bench_assets/arm_only/resolved/robot.urdf --spheres /tmp/bench_assets/vamp/spherized.urdf \
+  /tmp/out/vamp_?.jsonl /tmp/out/moveit_?.jsonl /tmp/out/curobo_plan_cspace_1_p?.json /tmp/out/curobo_bi_rrt_trajopt_1_p?.json \
+  /tmp/out/curobo_bi_rrt_seed_1_p?.json /tmp/out/node_?.jsonl
 ```
+
+`run-curobo --verify-invalid N` plans N problems per scene whose endpoints cuRobo's own model rejects (normally counted as failures
+without calling the planner); it was not needed here (no endpoint was rejected) and `--limit N` is a smoke test.
 
 ## Backend routing test
 

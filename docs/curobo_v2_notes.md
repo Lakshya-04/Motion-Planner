@@ -2,7 +2,7 @@
 
 Research notes for using [cuRobo v2](https://github.com/NVlabs/curobo) as the
 planning backend and as the perception/world-model source. Written from the
-upstream source at commit `78fd485` (2026-09-10) and the
+upstream source at commit `78fd485` (2026-09-10; the pin is now v0.9.0, see the last section) and the
 [cuRoboV2 paper](https://arxiv.org/abs/2603.05493). Re-check upstream before
 relying on any API below; v2 is a rewrite of v1 and still moving.
 
@@ -409,3 +409,127 @@ Mapper (conservative: the dilated band), 3 valid with the Mapper but invalid wit
 Mapper plus planner running together in one process and their combined VRAM; real depth (noise, holes, specular surfaces) and sensor/robot pose
 error; the robot self-filter (`RobotSegmenter`); more than one camera; colour, lidar, static obstacles, `clear_region`, a sliding ESDF window; the
 SIGKILL at 8x8x2 / 1 cm; the cause of the `FilterDepth` result; ROS integration (a node that subscribes to depth and publishes `SetEsdf`).
+
+## Upgrade to v0.9.0 (cuRoboV2-Fast)
+
+Pin moved from `78fd485` (0.8.0 line, 2026-09-10) to tag `v0.9.0`, commit `42498cf4e7d0d6fbd4ef9fbcec1243c00c888a83`
+(`docker/requirements-gpu.txt`). Only the `gpu` image was rebuilt (`docker build -f docker/Dockerfile --target gpu -t motion-planner:gpu .`);
+`motion-planner:full` was removed first to make disk room (22 GB free before) and is not rebuilt yet. Installed metadata:
+`nvidia-curobo 0.9.0` (the distribution name is unchanged), `direct_url.json` shows the pinned commit. Torch stays 2.8.0+cu128.
+The notes above describe the 78fd485 API; every call used by `curobo_bridge` and the Mapper script still works as written.
+
+### What changed for us
+
+Nothing broke and no code in `curobo_bridge` was changed. New upstream things that exist in this version and that we do not use yet:
+`MotionPlanner.plan_pose_waypoints` (below), TimeOpt (`timeopt_duration` / `timeopt_time` on the result), B-spline trajectory
+optimisation (the interpolated trajectory has 1000 steps for a 12-waypoint plan), payload-aware torque limits, GPU bidirectional RRT,
+a C++ runtime. We did not evaluate those.
+The Mapper API (`MapperCfg`, `Mapper.integrate`, `compute_esdf`) is unchanged.
+
+### Test results (RTX 3050 Laptop 4 GB, `--gpus all`, one pytest process per module because of the one-planner-per-process rule)
+
+Command: `docker run --rm --gpus all -e HOME=/tmp -v "$PWD":/ws:ro -e PYTHONPATH=/ws/src/manipulation/curobo_bridge motion-planner:gpu /opt/venv/bin/python -m pytest -q /ws/src/manipulation/curobo_bridge/test/<module>.py`
+
+| Module | Result on v0.9.0 |
+|---|---|
+| `test_planner.py` (joint / pose planning, world boxes, IK, validity) | 16 passed, 1 skipped (the generated-robot test, needs `CUROBO_TEST_ROBOT`), 190 s |
+| `test_planner_esdf.py` (ESDF world, set_esdf, IK and validity with an ESDF) | 8 passed, 594 s (cold Warp cache) |
+| `test_closest_solution.py`, `test_world_esdf_kept.py` | 5 and 2 passed |
+| `test_ros_node.py` | skipped (no rclpy / `curobo_bridge_msgs` in the gpu image) |
+| C++ `curobo_planner` end-to-end client test | not run: needs the `full` image (ROS), which was removed for disk |
+
+"Old vs new": the 78fd485 image was overwritten by the rebuild and no per-test counts of the earlier runs were kept in these notes, so there is
+no side-by-side; the earlier notes say the same tests passed on 78fd485. The old run was not repeated.
+
+Mapper (`docker/tools/eval_curobo_mapper.py --extent 2 --voxel 0.04 --res 640x480`, gather seeding): works, VRAM peak 278 MiB (same as the 78fd485
+table: 278), ESDF 50^3 in 0.4 ms (0.36 before), accuracy identical (near 0.030 / 0.117 m, far 0.029 / 0.050 m mean / max abs, wall at x = 0.96).
+Integrate time was 4.6 ms mean against 1.19 ms before, measured while the simulator ran on the same GPU and the host load average was 11 to 14, so
+treat the integrate figure as not comparable.
+
+### 7-joint robot: lift + UR10e arm (`lift_arm` group)
+
+Joint names and order equal the manager's `lift_arm` group: `lift_joint, arm_shoulder_pan_joint, ..., arm_wrist_3_joint`. Generated from the
+profile `ur10e_telescopic.yaml` (xacro `arm:=ur10e`, the profile's own lift settings, no `lift_fixed_height`), with the full model, mimic stages included:
+
+```bash
+docker/tools/generate_robot_assets.sh src/description/mobile_manipulator_description/config/profiles/ur10e_telescopic.yaml \
+    --out /tmp/ra/ur10e_telescopic --only urdf                     # robot.urdf (full, lift moving)
+# then in the build image (ROS sourced): resolve package:// meshes and turn primitives into STL
+python3 docker/tools/resolve_package_uris.py /tmp/ra/ur10e_telescopic/robot.urdf /tmp/ra/ur10e_telescopic/full_resolved
+python3 docker/tools/primitives_to_meshes.py /tmp/ra/ur10e_telescopic/full_resolved/robot.urdf /tmp/ra/ur10e_telescopic/meshed
+cp -r /tmp/ra/ur10e_telescopic/full_resolved/ur_description /tmp/ra/ur10e_telescopic/meshed/   # primitives_to_meshes copies only its STLs
+# in the gpu image (GPU), same paths mounted:
+docker run --rm --gpus all -v /tmp/ra:/tmp/ra -v "$PWD/docker/tools:/tools:ro" motion-planner:gpu \
+    /opt/venv/bin/python /tools/generate_curobo_robot.py --urdf /tmp/ra/ur10e_telescopic/meshed/robot.urdf \
+    --tool-frame tcp_link --out /tmp/ra/ur10e_telescopic/lift_arm.yml
+```
+
+- cuRobo's URDF parser handles `<mimic>`: the two stage joints (`lift_stage_1_joint`, `lift_stage_2_joint`) are not part of the 7 actuated
+  joints; their links stay as collision links (13 collision links, `base_link` to `tool_mount_link`), and no fixed-stage URDF was needed. The
+  generated config lists 7 joints, `tool_frames = [tcp_link]`, lift limits 0 to 1.5 m, default state `[0.75, 0, ...]`. Forward kinematics: the tool
+  moves exactly +1.000 m in z when `lift_joint` goes 0 to 1. Not checked separately: the poses of the stage links themselves (a visual check that the stage
+  collision cylinders follow the lift).
+- Generation took well under a minute on the 4 GB card (not timed exactly) (fitted spheres, default density). Arm limits come from the URDF (the cuRobo velocity / acceleration
+  / jerk scales stay at their defaults: the lift's 0.2 m/s from the profile is not in the config; check the time scaling before using it on the real lift).
+- `CuroboPlanner(path, prismatic_joints=['lift_joint'])` (so IK weights treat the lift's metres separately). Verified in the gpu image:
+  `plan_joint` from lift 0.1 to 0.9 with the arm moving too: success, 177 rows, first row lift 0.10, last 0.90, goal error 7e-8, duration 4.4 s;
+  lift-only move succeeds; a 8 x 8 x 0.1 m slab at z = 1.55 through the arm: `no_path` (stage `planning`), and success again after `clear_world`;
+  `plan_pose` to a tcp pose succeeds; `tool_frames == ['tcp_link']`. torch peak allocation 0.69 GB (Warp memory not counted). Verification script:
+  not committed (about 40 lines over `CuroboPlanner`); the test `test_generated_robot_config_plans_and_respects_obstacles` asserts dimension 6, so it
+  skips for the 7-joint file.
+- The YAML is 100 KB but is **not committed**: it stores absolute paths to the URDF and meshes (`asset_root_path`), so it only works where it was
+  generated, and the repo keeps generated robot assets under the ignored `build/robot_assets/` (see `robot_assets.md`). Regenerate with the commands above.
+  The `curobo` stage of `generate_robot_assets.sh` still builds the 6-joint model (lift pinned); it was not changed to also write the 7-joint one.
+
+### `plan_pose_waypoints` (tried once, Franka)
+
+Signature: `plan_pose_waypoints(GoalToolPose[batch, N (1..256), links, 1, 3 or 4], current_state [batch, dof], *, path_tolerance=(m, rad),
+final_tolerance=(m, rad), ...)`; the waypoints exclude the current pose. Result: `TrajOptSolverResult` (`success`, `path_position_error`,
+`interpolated_trajectory`, `motion_time`).
+Try: 12 waypoints on a straight 0.24 m x 0.18 m segment, orientation held, Franka default start. With path tolerance 1 cm: failed in 1.4 s
+(path error 1.4 cm), with 3 cm: success in 45 ms (path error 1.7 cm, endpoint error 1.5e-7 m, trajectory 1000 x 9 including the two finger joints).
+With `track_orientation=False` and 1 cm it also failed. A box across the path made it return `None` (no result object), so callers must handle that.
+Worth exposing: yes for coverage strokes (it is the cuRobo equivalent of a MoveIt Cartesian path, with collision checking on the GPU and time
+parameterisation included), but it needs a new bridge method, a service and a `Planner` port method (the port has no waypoint call), so it was not
+wired. The tolerance behaviour above (1 cm failing on a straight line) should be understood first; only one start pose and one line were tried.
+
+### Not verified
+
+The C++ end-to-end test and the ROS node tests (need the `full` image); any comparison of planning time or success rate against 78fd485; TimeOpt,
+payload / torque limits, the C++ runtime; the 7-joint config in the ROS node or on the real lift limits; VRAM of a whole planner on the 4 GB card in Warp terms
+(only torch's allocation was read); `plan_pose_waypoints` with obstacles or on the 7-joint robot.
+
+## Planning times and the RRT route (measured 2026-11-18, cuRobo 0.9.0)
+
+Joint-space planning times on the 158-problem benchmark, the three routes through `plan_cspace` (defaults, GPU bidirectional RRT + trajectory
+optimisation, RRT seed only), warmup and first call, VRAM (RRT modes 3.3 GB of the 4 GB card against 1 GB for the defaults) and the ROS node overhead
+(3 to 6 ms per call) are in [planner_benchmark.md](planner_benchmark.md). `CuroboPlanner(graph_planner_algorithm='rrt', enable_trajopt=..., enable_graph_attempt=...)`
+selects the route; the node uses cuRobo's defaults plus the fallback below.
+
+### Dock poses, trajectory optimisation and the graph-seed fallback (2026-11-19)
+
+With the matrix `generate_curobo_robot.py` produced by default (cuRobo's sampled collision matrix), the default `plan_cspace` failed every
+problem with a dock pose of the UR10e benchmark as an endpoint (52 of 158 in the first run, 62 in a regenerated config): the optimiser's
+trajectory penetrated 0.5 to 1.7 mm between the `arm_forearm_link` and `arm_wrist_2_link` spheres (two joints apart, not in the ignore list), the
+dense validation rejected it (`debug_info['validation']['collision_valid']` false), while the graph seed itself was valid. Evidence, the one-change-at-a-time
+table and the numbers are in [planner_benchmark.md](planner_benchmark.md) ("Dock failure: cause and fix"). To look at a failing solve:
+wrap `planner._planner.trajopt_solver.solve_cspace` and read `result.debug_info['validation']` (`path_valid`, `collision_valid`,
+`limits_and_dynamics_valid`) and `position_error` / `rotation_error`; `planner._planner._last_graph_call_telemetry` and `_last_planning_attempts` say how many
+graph calls succeeded.
+
+- Fix 1, the model: `robot_assets.py` passes `--ignore-hops` (default 2, same as the VAMP SRDF) to the generator. Regenerate cuRobo configs
+  generated earlier (`generate_robot_assets.sh <profile> --only curobo`); 158/158 afterwards.
+- Fix 2, a guard: `CuroboPlanner(seed_fallback=True, fallback_attempts=6, max_attempts=20)` and the node parameters of the same names. When
+  `plan_cspace` returns no trajectory, `plan_joint` retries with `config.always_run_trajopt = False` and `config.run_trajopt_on_graph_seed = False`
+  (the planner config is mutable; both are put back) and `enable_graph_attempt=0`, which returns the first graph seed that survives cuRobo's dense validation.
+  `PlanResult.route` is `'graph_seed'` then (`'trajopt'` otherwise) and the message says the trajectory is not optimised. Cost: the failed first pass runs
+  its 20 attempts (6 to 33 s measured), then the fallback 0.3 to 0.4 s. `seed_fallback=False` restores cuRobo's own behaviour.
+- Node hardening (review fixes): every service handler turns an exception into a failed response (`failure_reason_code` `internal_error`) instead
+  of killing the node; `ik_weights` is validated against the joint count at construction and a zero keeps its place (zero = ignore the joint;
+  the node used to drop zeros and leave a short vector that failed every IK call); `prismatic_joints` naming an unknown joint is an error;
+  `voxelize_points` refuses a cap of 0 or an unsatisfiable cap (it returned one cube of up to 204.8 m); `check_motion` caps the interpolation at
+  100000 states; `PlanJoint` / `PlanPose` responses carry `route` ('trajopt' | 'graph_seed'), which the C++ client maps to
+  `PlanningResult::status` `success_graph_seed` (message: not optimised). `CuroboClientPlanner::collision` checks `joint_values` and a trajectory as two requests
+  (one request also interpolated the line `joint_values -> trajectory[0]`). GPU tests now check that `clear_world()` and a smaller `set_world()` really
+  remove cuboids from cuRobo (they do: the stale-layer behaviour noted for voxels does not apply to cuboids).
+

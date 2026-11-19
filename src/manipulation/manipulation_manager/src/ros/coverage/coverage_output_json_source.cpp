@@ -75,7 +75,10 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
   }
   std::map<long, std::vector<RawPoint>> columns_by_x_key;
   constexpr double kXQuantum = 1e-3;
-  constexpr double kPointStrokeHalfM = 0.02;
+  // Half the length of the short stroke given to a one-cell gap. A free cell lies wholly outside the inflated
+  // obstacle, so a stroke within half a cell of the cell centre cannot enter the keep-out clearance. 0.01 m is
+  // half the 0.02 m grid resolution of the demo scenes; a coarser grid is safe, a finer one needs this lowered.
+  constexpr double kPointStrokeHalfM = 0.01;
   size_t pose_index = 0;
   for (const auto & p : poses) {
     RawPoint pt;
@@ -127,7 +130,7 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
       double z_max = std::min(z_max_m_, span.second);
       // The planner's gap strokes beside a small obstacle can be a single grid cell (first == last): a stroke of
       // zero length would be dropped and the strip next to the obstacle never wiped. Give it a short stroke
-      // around the point instead (the keep-out clearance leaves room for it).
+      // around the point instead, kept inside the free cell (see kPointStrokeHalfM).
       if (span.second - span.first < 1e-6 && z_max >= z_min) {
         z_min = std::max(z_min_m_, span.first - kPointStrokeHalfM);
         z_max = std::min(z_max_m_, span.first + kPointStrokeHalfM);

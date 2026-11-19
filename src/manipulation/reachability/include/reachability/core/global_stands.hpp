@@ -14,8 +14,8 @@
 //     neighbour, then 2-opt, under a solve-time budget. The tour is never longer than visiting the
 //     stands in the order the cover picked them.
 // Targets nothing reaches are reported in `unreachable`, never dropped. Deterministic: no random
-// numbers; ties go to the lower index. The one exception is the wall-clock budget: if it expires the
-// 2-opt stops early (`tour_budget_hit`), so the tour may differ between machines; set
+// numbers; ties go to the lower index. The one exception is the wall-clock budget (it covers the
+// 2-opt step only, not scoring or the cover): if it expires the 2-opt stops early (`tour_budget_hit`), so the tour may differ between machines; set
 // `time_budget_s` to 0 for a pure work-count limit (`max_two_opt_passes`).
 #pragma once
 
@@ -50,7 +50,8 @@ const char * toString(StandSelectionCode code);
 struct StandSelectionOptions
 {
   double margin_penalty{0.5};     ///< >= 0. 0 = plain greedy by count; larger prefers stands with more lift slack.
-  double time_budget_s{2.0};      ///< Wall-clock limit for the tour step; <= 0 disables the clock.
+  double time_budget_s{2.0};      ///< Wall-clock limit for the 2-opt step alone (the clock starts when the tour step
+                                  ///< starts, not at selectStands); <= 0 disables the clock.
   size_t max_two_opt_passes{100}; ///< Deterministic limit on 2-opt sweeps.
 };
 
@@ -60,7 +61,7 @@ struct SelectedStand
   double standoff{0.0};
   double footprint_clearance{0.0};
   size_t candidate_index{0};        ///< Index into the candidate list.
-  size_t pick_index{0};             ///< Position in the order the cover picked it (before the tour).
+  size_t pick_index{0};             ///< Position in the cover's pick order (redundant picks dropped, before the tour).
   std::vector<size_t> targets;      ///< Indices into request.targets_world done from this stand.
   LiftBandPlan lift_bands;          ///< Bands over `targets` (pose indices are into targets_world).
   double mean_margin{0.0};          ///< Mean reachability margin of `targets` here, in (0, 1].
@@ -87,8 +88,9 @@ struct StandSelection
 /// tests), every point that passes, in a fixed order (away from the wall, then along it).
 std::vector<CandidateStand> makeCandidateStands(const StationRequest & request);
 
-/// `start` is where the base is now (used only with request.base; without a base model the
-/// first stop is the one at the lowest position along the wall and costs are metres).
+/// `start` is where the base is now (used only with request.base). Without a base model costs are
+/// metres and the nearest-neighbour seed starts at the stand lowest along the wall; 2-opt may then
+/// reorder, so the first stop is not guaranteed to be that one.
 StandSelection selectStands(
   const Map4D & map, const StationRequest & request, const std::vector<CandidateStand> & candidates,
   const std::optional<Stand> & start = std::nullopt, const StandSelectionOptions & options = {});

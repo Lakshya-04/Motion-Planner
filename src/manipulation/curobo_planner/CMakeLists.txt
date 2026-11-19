@@ -34,6 +34,12 @@ target_link_libraries(curobo_planner_plugins PUBLIC curobo_planner pluginlib::pl
 pluginlib_export_plugin_description_file(motion_planner plugins.xml)
 install(TARGETS curobo_planner_plugins ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
 
+# Wall-clock benchmark of the node + client path: scripts/planner_benchmark.py in motion_planner_moveit,
+# docs/planner_benchmark.md.
+add_executable(curobo_planner_benchmark src/planner_benchmark.cpp)
+target_link_libraries(curobo_planner_benchmark curobo_planner)
+install(TARGETS curobo_planner_benchmark RUNTIME DESTINATION lib/${PROJECT_NAME})
+
 install(TARGETS curobo_planner EXPORT export_curobo_planner
   ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)

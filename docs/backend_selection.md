@@ -35,7 +35,7 @@ planning:
     contact:    cartesian           # allow_target_contact segments (the contact seam)
     transition: free_space          # every other segment
   plugin_params:                    # per plugin name, passed to initialize() as strings
-    curobo: {node_name: /curobo_planner, timeout_sec: 30}
+    curobo: {node_name: /curobo_planner, timeout_sec: 45}
     vamp:   {robot: ur5}
 ```
 
@@ -58,10 +58,24 @@ planning:
 | `moveit_ik` | Ik | motion_planner_moveit | params `ik_extra_seeds`, `ik_seed_perturbation` |
 | `moveit_collision` | Collision | motion_planner_moveit | |
 | `moveit_scene` | Scene | motion_planner_moveit | param `octomap_resolution` |
-| `curobo` | Planner | curobo_planner | needs the cuRobo node (GPU); params `node_name`, `wait_for_service_sec`, `timeout_sec` |
+| `curobo` | Planner | curobo_planner | needs the cuRobo node (GPU); params `node_name`, `wait_for_service_sec`, `timeout_sec` (default 45 s), `base_frame` |
 | `curobo_ik`, `curobo_collision`, `curobo_scene` | Ik, Collision, Scene | curobo_planner | share the client of `curobo` |
-| `vamp` | Planner | vamp_planner | params `robot`, `max_iterations`, `range`, `point_radius`, `nominal_joint_speed`, `simplify`, `require_world` |
-| `vamp_collision`, `vamp_scene` | Collision, Scene | vamp_planner | share the planner of `vamp` for the same robot |
+| `vamp` | Planner | vamp_planner | params `robot`, `max_iterations`, `range`, `point_radius`, `nominal_joint_speed`, `simplify`, `require_world`, `base_frame` |
+| `vamp_collision`, `vamp_scene` | Collision, Scene | vamp_planner | share the planner of `vamp` for the same robot (a `base_frame` param on any of them applies to the shared planner) |
+
+### cuRobo: base frame, world size and timeouts
+
+- `base_frame` (cuRobo and VAMP plugins): without it an update in another frame is not rejected (nothing to compare with); with it, a
+  `ScenePort` update whose `frame_id` differs is refused before it reaches the backend. The plugins of one backend share one client / planner,
+  so the first plugin to initialise builds it and a later plugin's `base_frame` is applied to the shared object.
+- The cuRobo node's obstacle cache is `max_boxes` (default 256) cubes for the whole world; the scene adapter caps `max_obstacle_boxes`
+  (default 2000) per object, so a cloud or mesh obstacle (or several objects together) can exceed it and the node refuses the update, keeping its
+  previous world. The client then treats the world as stale: `plan`, `ik` and `collision` fail with `world_stale` until an update succeeds
+  or the world is cleared. Raise the node's `max_boxes` or lower `max_obstacle_boxes` (the adapter default is not lowered: it is per object, so
+  it cannot guarantee the total, and VAMP / MoveIt do not need the limit).
+- `timeout_sec` default is 45 s: one `plan_joint` on the node can take 6 to 33 s (20 attempts) plus the seed fallback (docs/planner_benchmark.md).
+  The node is single-threaded: after a client timeout it still finishes the abandoned plan and later calls queue behind it. A plan result
+  with `status == "success_graph_seed"` is the validated graph path that was not optimised (its `message` says so).
 
 ## How to switch backends
 

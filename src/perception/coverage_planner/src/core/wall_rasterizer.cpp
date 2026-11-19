@@ -118,6 +118,13 @@ OccupancyGrid rasterizeWallCoverageGrid(
 
   for (const auto & obstacle : obstacles) {
     const InflatedObstacle inflated = inflate(obstacle, tool_coverage);
+    // A NaN or infinite bound would cast to an arbitrary int and silently block nothing (it fails open).
+    if (!std::isfinite(inflated.u_min) || !std::isfinite(inflated.u_max) ||
+      !std::isfinite(inflated.v_min) || !std::isfinite(inflated.v_max))
+    {
+      throw std::runtime_error(
+        "rasterizeWallCoverageGrid: obstacle " + std::to_string(obstacle.id) + " has a non-finite bound");
+    }
 
     // Every cell the inflated rectangle overlaps, and no more: [floor(min), ceil(max) - 1] in cell
     // indices (the cell past ceil(max) starts beyond the rectangle; it used to be blocked too, which
