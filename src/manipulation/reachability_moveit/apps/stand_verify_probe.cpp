@@ -73,6 +73,12 @@ int main(int argc, char ** argv)
   cfg.collision_group = P("collision_group", std::string("lift_arm"));
   cfg.arm_base_in_plan.translation() = Eigen::Vector3d(P("arm_base_x", 0.0), P("arm_base_y", 0.0), mount_z);
   cfg.lift_max = lift_max;
+  if (P("seed_set", false)) {
+    // UR-style folded arm seeds (the backend otherwise solves from the model's zero state): the first
+    // collision-free solution wins, so a solution that hits the lift column no longer counts as a refusal.
+    cfg.seeds = {{0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0}, {0.0, -1.2, 1.0, -1.4, -1.5708, 0.0},
+      {0.0, -2.0, 2.2, -1.8, -1.5708, 0.0}};
+  }
   auto verifier = std::make_shared<reachability_moveit::PortStandVerifier>(cfg, ik_backend, col_backend);
 
   // Triples (candidate, target, height) by what RM4D says.
