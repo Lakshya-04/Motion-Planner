@@ -40,6 +40,11 @@ add_executable(curobo_planner_benchmark src/planner_benchmark.cpp)
 target_link_libraries(curobo_planner_benchmark curobo_planner)
 install(TARGETS curobo_planner_benchmark RUNTIME DESTINATION lib/${PROJECT_NAME})
 
+# One-shot loader: a point-cloud file into the cuRobo node's world (sim passes, next to world_model_loader).
+add_executable(curobo_world_loader src/curobo_world_loader_node.cpp)
+target_link_libraries(curobo_world_loader curobo_planner)
+install(TARGETS curobo_world_loader RUNTIME DESTINATION lib/${PROJECT_NAME})
+
 install(TARGETS curobo_planner EXPORT export_curobo_planner
   ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
