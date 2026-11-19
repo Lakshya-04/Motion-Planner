@@ -61,6 +61,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && grep -v '^\s*#' /tmp/apt-extra.txt | grep -v '^\s*$' | sed "s/@ROS@/${ROS_DISTRO}/g" | xargs apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
+############################ pylibs ###########################
+# CUDA PyTorch + cuRobo v2 in /opt/venv, independent of the workspace manifests (see `gpu`).
+FROM base AS pylibs
+COPY docker/requirements-gpu.txt /tmp/requirements-gpu.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m venv --system-site-packages /opt/venv \
+    && /opt/venv/bin/pip install --upgrade pip \
+    && /opt/venv/bin/pip install -r /tmp/requirements-gpu.txt
+
 ############################ dev ##############################
 FROM deps AS dev
 ARG USERNAME=dev
@@ -105,12 +114,10 @@ ARG USERNAME=dev
 ARG UID=1000
 ARG GID=1000
 USER root
-COPY docker/requirements-gpu.txt /tmp/requirements-gpu.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m venv --system-site-packages /opt/venv \
-    && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install -r /tmp/requirements-gpu.txt \
-    && chown -R ${UID}:${GID} /opt/venv
+# The Python stack (CUDA PyTorch + cuRobo, about 12 GB) comes from `pylibs`, which depends only on `base` and
+# docker/requirements-gpu.txt. Editing any package.xml invalidates `deps` (and so `dev`), but not `pylibs`, so the
+# torch layer is no longer rebuilt for a manifest change.
+COPY --from=pylibs --chown=${UID}:${GID} /opt/venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility
