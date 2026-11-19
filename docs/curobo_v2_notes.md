@@ -504,5 +504,24 @@ payload / torque limits, the C++ runtime; the 7-joint config in the ROS node or 
 Joint-space planning times on the 158-problem benchmark, the three routes through `plan_cspace` (defaults, GPU bidirectional RRT + trajectory
 optimisation, RRT seed only), warmup and first call, VRAM (RRT modes 3.3 GB of the 4 GB card against 1 GB for the defaults) and the ROS node overhead
 (3 to 6 ms per call) are in [planner_benchmark.md](planner_benchmark.md). `CuroboPlanner(graph_planner_algorithm='rrt', enable_trajopt=..., enable_graph_attempt=...)`
-selects the route; the node still uses cuRobo's defaults.
+selects the route; the node uses cuRobo's defaults plus the fallback below.
+
+### Dock poses, trajectory optimisation and the graph-seed fallback (2026-11-19)
+
+With the matrix `generate_curobo_robot.py` produced by default (cuRobo's sampled collision matrix), the default `plan_cspace` failed every
+problem with a dock pose of the UR10e benchmark as an endpoint (52 of 158 in the first run, 62 in a regenerated config): the optimiser's
+trajectory penetrated 0.5 to 1.7 mm between the `arm_forearm_link` and `arm_wrist_2_link` spheres (two joints apart, not in the ignore list), the
+dense validation rejected it (`debug_info['validation']['collision_valid']` false), while the graph seed itself was valid. Evidence, the one-change-at-a-time
+table and the numbers are in [planner_benchmark.md](planner_benchmark.md) ("Dock failure: cause and fix"). To look at a failing solve:
+wrap `planner._planner.trajopt_solver.solve_cspace` and read `result.debug_info['validation']` (`path_valid`, `collision_valid`,
+`limits_and_dynamics_valid`) and `position_error` / `rotation_error`; `planner._planner._last_graph_call_telemetry` and `_last_planning_attempts` say how many
+graph calls succeeded.
+
+- Fix 1, the model: `robot_assets.py` passes `--ignore-hops` (default 2, same as the VAMP SRDF) to the generator. Regenerate cuRobo configs
+  generated earlier (`generate_robot_assets.sh <profile> --only curobo`); 158/158 afterwards.
+- Fix 2, a guard: `CuroboPlanner(seed_fallback=True, fallback_attempts=6, max_attempts=20)` and the node parameters of the same names. When
+  `plan_cspace` returns no trajectory, `plan_joint` retries with `config.always_run_trajopt = False` and `config.run_trajopt_on_graph_seed = False`
+  (the planner config is mutable; both are put back) and `enable_graph_attempt=0`, which returns the first graph seed that survives cuRobo's dense validation.
+  `PlanResult.route` is `'graph_seed'` then (`'trajopt'` otherwise) and the message says the trajectory is not optimised. Cost: the failed first pass runs
+  its 20 attempts (6 to 33 s measured), then the fallback 0.3 to 0.4 s. `seed_fallback=False` restores cuRobo's own behaviour.
 

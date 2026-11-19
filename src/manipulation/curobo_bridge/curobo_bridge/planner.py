@@ -33,6 +33,10 @@ class PlanResult:
     positions: List[List[float]] = field(default_factory=list)   # one row per waypoint
     dt: float = 0.0                       # seconds between rows (cuRobo's interpolation step)
     planning_time_s: float = 0.0
+    # how the trajectory was produced: 'trajopt' (cuRobo's trajectory optimisation, the normal route),
+    # 'graph_seed' (trajectory optimisation failed; the graph path, fitted, retimed and validated in
+    # cuRobo's model, was returned as is: see CuroboPlanner seed_fallback), '' when nothing was planned
+    route: str = ''
 
     @property
     def duration(self) -> float:
@@ -173,12 +177,23 @@ class CuroboPlanner:
                  prismatic_joints: Sequence[str] = (), ik_prismatic_factor: float = PRISMATIC_IK_FACTOR,
                  ik_weights: Optional[Sequence[float]] = None,
                  graph_planner_algorithm: str = 'prm', enable_trajopt: bool = True,
-                 enable_graph_attempt: int = 1):
+                 enable_graph_attempt: int = 1, seed_fallback: bool = True, fallback_attempts: int = 6,
+                 max_attempts: int = 20):
         """`graph_planner_algorithm` ('prm' or 'rrt', the GPU bidirectional RRT), `enable_trajopt` (False:
         the graph seed is retimed and validated, trajectory optimisation is skipped) and
         `enable_graph_attempt` (the plan_cspace attempt at which graph seeding starts; 0 = from the
         first attempt, 1 = after one straight-line-seed attempt, cuRobo's default) select the
-        plan_cspace route plan_joint takes. The defaults are cuRobo's own and what the node uses."""
+        plan_cspace route plan_joint takes. The defaults are cuRobo's own and what the node uses.
+
+        `seed_fallback`: when plan_cspace finds no trajectory, plan_joint asks again for up to
+        `fallback_attempts` attempts with trajectory optimisation bypassed: the first graph seed that
+        passes cuRobo's dense validation (collision, limits, dynamics, goal) is returned, reported as
+        `route == 'graph_seed'`. cuRobo's optimiser can fail on a problem whose graph path is valid (it
+        smooths the path into a few millimetres of self-collision in a tight wrist pose; see
+        docs/planner_benchmark.md). Ignored with `enable_trajopt=False`, which is that route already.
+        `max_attempts` is cuRobo's attempt cap for the first (normal) pass, 20 by default; a problem the
+        optimiser cannot solve costs all of them before the fallback runs (6 to 30 s measured), so lower
+        it when the fallback is on and latency matters."""
         import torch
         from curobo.motion_planner import MotionPlanner, MotionPlannerCfg
         from curobo.types import JointState
@@ -200,6 +215,9 @@ class CuroboPlanner:
         if not enable_trajopt:
             extra['enable_trajopt'] = False
         self._enable_graph_attempt = enable_graph_attempt
+        self._seed_fallback = bool(seed_fallback) and enable_trajopt
+        self._fallback_attempts = int(fallback_attempts)
+        self._max_attempts = int(max_attempts)
         self._planner = MotionPlanner(MotionPlannerCfg.create(
             robot=robot, max_goalset=max_goalset, collision_cache=cache, **extra))
         if warmup:
@@ -320,8 +338,35 @@ class CuroboPlanner:
         if bad:
             return bad
         cur, tgt = self._state(start), self._state(goal)
-        result = self._planner.plan_cspace(tgt, cur, enable_graph_attempt=self._enable_graph_attempt)
-        return self._wrap(result, last=goal)
+        result = self._planner.plan_cspace(tgt, cur, max_attempts=self._max_attempts,
+                                           enable_graph_attempt=self._enable_graph_attempt)
+        out = self._wrap(result, last=goal)
+        if out.success or not self._seed_fallback:
+            return out
+        fallback = self._plan_graph_seed(tgt, cur)
+        if fallback is None:
+            return out
+        fallback.planning_time_s += out.planning_time_s
+        return fallback
+
+    def _plan_graph_seed(self, goal_state, current_state) -> Optional[PlanResult]:
+        """plan_cspace with trajectory optimisation bypassed: graph seeds are evaluated (fitted, retimed,
+        densely validated) and the first valid one is returned. Attempt 0 already uses the graph. None
+        if no seed passes. The two switches live on cuRobo's planner config and are restored."""
+        cfg = self._planner.config
+        saved = (cfg.always_run_trajopt, cfg.run_trajopt_on_graph_seed)
+        cfg.always_run_trajopt, cfg.run_trajopt_on_graph_seed = False, False
+        try:
+            result = self._planner.plan_cspace(goal_state, current_state, max_attempts=self._fallback_attempts,
+                                               enable_graph_attempt=0)
+        finally:
+            cfg.always_run_trajopt, cfg.run_trajopt_on_graph_seed = saved
+        out = self._wrap(result)
+        if not out.success:
+            return None
+        if out.route == 'graph_seed':
+            out.message = 'trajectory optimisation failed; returned the validated graph path (not optimised)'
+        return out
 
     def plan_pose(self, start: Sequence[float], position: Sequence[float],
                   quat_wxyz: Sequence[float] = (1.0, 0.0, 0.0, 0.0)) -> PlanResult:
@@ -443,4 +488,5 @@ class CuroboPlanner:
         out.planning_time_s = float(getattr(result, 'total_time', 0.0) or 0.0)
         out.success = True
         out.failure_stage = 'none'
+        out.route = 'trajopt' if getattr(result, 'trajectory_source', 'trajopt') == 'trajopt' else 'graph_seed'
         return out

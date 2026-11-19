@@ -211,7 +211,7 @@ def host_vamp(profile, out, env, hops):
         env={**env, 'SKIP_FOAM': '1'})
 
 
-def host_curobo(profile, out, env, batch_size):
+def host_curobo(profile, out, env, batch_size, hops):
     cdir = out / 'curobo'
     cdir.mkdir(exist_ok=True)
     run([sys.executable, TOOLS / 'primitives_to_meshes.py', out / 'arm_only' / 'resolved' / 'robot.urdf', cdir / 'meshed'])
@@ -224,7 +224,8 @@ def host_curobo(profile, out, env, batch_size):
     cmd = ['docker', 'run', '--rm', '--gpus', 'all', '--user', f'{os.getuid()}:{os.getgid()}', '-e', 'HOME=/tmp',
            '-v', f'{REPO}:/repo:ro', '-v', f'{out}:{out}', '-w', str(out), IMAGES['gpu'],
            '/opt/venv/bin/python', '/repo/docker/tools/generate_curobo_robot.py', '--urdf', cdir / 'meshed' / 'robot.urdf',
-           '--tool-frame', profile['frames']['tcp'], '--batch-size', str(batch_size), '--out', cdir / f'{name}.yml']
+           '--tool-frame', profile['frames']['tcp'], '--batch-size', str(batch_size), '--ignore-hops', str(hops),
+           '--out', cdir / f'{name}.yml']
     run(cmd)
 
 
@@ -306,7 +307,8 @@ def main():
     ap.add_argument('--out', help='output directory (default build/robot_assets/<profile name>)')
     ap.add_argument('--only', type=lambda s: s.split(','), help='comma-separated stages to run')
     ap.add_argument('--skip', type=lambda s: s.split(','), help='comma-separated stages to skip')
-    ap.add_argument('--hops', type=int, default=2, help='rigid_pairs_srdf.py --hops for the VAMP SRDF')
+    ap.add_argument('--hops', type=int, default=2, help='rigid_pairs_srdf.py --hops for the VAMP SRDF, and --ignore-hops of the cuRobo '
+                    'self-collision matrix (links up to N joints apart are not checked against each other)')
     ap.add_argument('--curobo-batch-size', type=int, default=1000)
     ap.add_argument('--inner', choices=['urdf', 'srdf', 'reach', 'check'], help=argparse.SUPPRESS)
     ap.add_argument('--list', action='store_true', help='list the stages and exit')
@@ -346,7 +348,7 @@ def main():
             elif stage == 'vamp':
                 host_vamp(profile, out, env, args.hops)
             elif stage == 'curobo':
-                host_curobo(profile, out, env, args.curobo_batch_size)
+                host_curobo(profile, out, env, args.curobo_batch_size, args.hops)
             elif stage == 'manifest':
                 status_file.write_text(json.dumps(status, indent=2))
                 host_manifest(profile, out, status)
