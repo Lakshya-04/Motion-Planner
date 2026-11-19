@@ -530,5 +530,6 @@ graph calls succeeded.
   `voxelize_points` refuses a cap of 0 or an unsatisfiable cap (it returned one cube of up to 204.8 m); `check_motion` caps the interpolation at
   100000 states; `PlanJoint` / `PlanPose` responses carry `route` ('trajopt' | 'graph_seed'), which the C++ client maps to
   `PlanningResult::status` `success_graph_seed` (message: not optimised). `CuroboClientPlanner::collision` checks `joint_values` and a trajectory as two requests
-  (one request also interpolated the line `joint_values -> trajectory[0]`).
+  (one request also interpolated the line `joint_values -> trajectory[0]`). GPU tests now check that `clear_world()` and a smaller `set_world()` really
+  remove cuboids from cuRobo (they do: the stale-layer behaviour noted for voxels does not apply to cuboids).
 
