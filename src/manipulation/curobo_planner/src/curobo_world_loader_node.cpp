@@ -39,6 +39,10 @@ int main(int argc, char ** argv)
   curobo_planner::Options options;
   options.node_name = node->declare_parameter<std::string>("curobo_node", "/curobo_planner");
   options.base_frame = frame_id;
+  // A request can get no reply when the reply path is not matched yet (a ROS 2 service discovery race, seen while a
+  // simulator starts on the same cores): try again with a short deadline instead of waiting out the planner default.
+  options.timeout_sec = node->declare_parameter<double>("attempt_timeout_sec", 10.0);
+  const int attempts = static_cast<int>(node->declare_parameter<int>("attempts", 5));
   if (path.empty() && !clear) {
     RCLCPP_ERROR(node->get_logger(), "'point_cloud_path' is required (or clear:=true)");
     rclcpp::shutdown();
@@ -56,7 +60,10 @@ int main(int argc, char ** argv)
   bool ok = false;
   try {
     if (clear) {
-      ok = client.clearWorld(&message);
+      for (int k = 0; k < attempts && !ok; ++k) {
+        ok = client.clearWorld(&message);
+        if (!ok) {RCLCPP_WARN(node->get_logger(), "clear attempt %d failed: %s", k + 1, message.c_str());}
+      }
     } else {
       auto update = motion_planner::loadPointCloudFile(path, frame_id);
       if (!source_frame.empty()) {
@@ -76,7 +83,10 @@ int main(int argc, char ** argv)
         update.points_origin.z = offset_z;
       }
       RCLCPP_INFO(node->get_logger(), "Loaded %zu points from %s", update.points.size(), path.c_str());
-      ok = client.setWorld(update, &message);
+      for (int k = 0; k < attempts && !ok; ++k) {
+        ok = client.setWorld(update, &message);
+        if (!ok) {RCLCPP_WARN(node->get_logger(), "set_world attempt %d failed: %s", k + 1, message.c_str());}
+      }
     }
   } catch (const std::exception & e) {
     message = e.what();

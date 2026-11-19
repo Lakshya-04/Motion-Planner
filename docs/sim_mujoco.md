@@ -336,7 +336,7 @@ the wall (`--standoff`, `--half-angle` set their size; the sim has no spray, thi
 
 ## Running a pass with cuRobo as the planner
 
-Authored, **not run** (no sim pass has used cuRobo yet). It makes cuRobo v0.9.0 the free-space planner of the manager in a
+First run 2026-11-20 (single-stand pass, `run_manager_pass.sh`, MuJoCo, one run): the node came up, the wall cloud loaded, the manager logged `free_space=curobo`, and the pass passed (4 of 4 columns, coverage 1.0, peak 19.9 N). The only free-space segment of a single-stand pass is `prime_continuity` (a move to the current state); it reached cuRobo (`fsp_backend=curobo`) and was refused `invalid_request` at precheck (no start joint state in the request, most likely: MoveIt fills in the current state, cuRobo needs one), after which every segment was Cartesian on MoveIt. So that pass barely exercises cuRobo; a multi-stand pass (approach, stow, between-stand moves) is the real test and needs the cloud posed per stand (`source_frame`, not wired into those scripts yet). It makes cuRobo v0.9.0 the free-space planner of the manager in a
 MuJoCo pass; contact seams stay on MoveIt Cartesian. The selection file is
 `manipulation_manager/config/planning_curobo.yaml` (`free_space: curobo`, everything else as the default `planning.yaml`;
 each choice is explained in the file: IK and collision stay MoveIt because the manager's planners do not call the selected
@@ -387,6 +387,10 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    uses and look its pose up from TF at each call: `ros2 run curobo_planner curobo_world_loader --ros-args -p
    point_cloud_path:=<walls.pcd> -p frame_id:=base_link -p source_frame:=odom` (compiled, not run; the multi-stand
    scripts do not call it yet, so a multi-stand pass still plans with an empty cuRobo world).
+
+   Run the sim container as the same user as the node container (the images' `dev`, uid 1000; do not pass `-u root`).
+   With a root sim container and a non-root node every request to the node was lost without an error (Fast DDS shared
+   memory does not cross users): the cuRobo world update just timed out. Both with `--network host --ipc host`.
 
 4. `docker/tools/run_curobo_node.sh stop` afterwards.
 
