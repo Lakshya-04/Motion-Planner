@@ -567,13 +567,48 @@ What the runs showed:
   is unchanged. `protrusion` goes to 0.983, `window` to 1.000 (the previous coverage-components fix had already taken it from 0.793).
 - Obstacle contacts counted only the tool point; an elbow or the wiper body hitting a protrusion is not seen yet (the MuJoCo plugin
   does not publish contact pairs). `cov_wall` is below 1 by design: it includes the 0.07 m clearance ring the planner keeps out of.
-- Open: the multi-stand pass fails about every second run on stand 1. In the failed runs the manager's `approach` of columns 1 to 3 fails
-  six times in a row with `CartesianPlanner: collision truncation at link pair 'arm_upper_arm_link' <-> 'lift_carriage_link'` (or
-  `arm_forearm_link <-> arm_wrist_2_link`) and "collision recovery found no jump-safe configuration", then `recovery jog refused: the good
-  state is too far away`; in the `two_panels` run 2 the tool sat for about 300 s at z 1.53 m, x 1.037 m (above the wall, pressing with 25
-  to 45 N) before the stand's columns ran. The same stand and the same plan pass in other runs, with 11 instead of 71 truncation
-  warnings. This is the arm's pose choice at the second stand (IK seed, OMPL randomness), not a timing effect: host load was 5 to 15 in the
-  failed runs. The collision matrix and margins were not touched; I did not find the cause.
+- Second stand of the multi-stand pass (was open, fixed on this branch, PR #110): on `origin/main` the stand-1 `approach` of columns
+  1 to 3 was refused six times in a row with `CartesianPlanner: collision truncation at link pair 'arm_upper_arm_link' <->
+  'lift_carriage_link'` (or `arm_forearm_link <-> arm_wrist_2_link`), then `recovery jog refused: the good state is too far away`, or a
+  stroke was "successful" with the tool resting on the wall's top edge (cov 0.644). What the logs showed (arm state logged at arrival and
+  before each dock): the arm arrives at each stand in the same stowed state (q within 0.02 rad) in passing and failing runs, so it is not
+  the arrival. What differs is the configuration the dock IK picks for column 1 after column 0 (an unseeded IK, 8 baseline runs: the
+  three failures were off the elbow-up branch, shoulder lift -0.79 and -3.52 rad against 2.76, but one pass was too, and the passes
+  carry wrapped wrist joints of 4.1 / 5.9 rad) and the MoveIt octomap, which was the 0.3 m contact patch only (`walls.pcd`) while the
+  physical wall is wider and the space behind it was empty, so the planner let the arm over the wall's top edge. Changes: a fixed
+  `dock_seed_joint_state` (a UR10e-on-lift configuration docked at the wall) seeds the dock IK; the manager checks that the tool reached the
+  approach pose (`verify_approach`, `approach_tolerance_m` 0.05) before it docks, re-primes or jogs back otherwise; the multi-stand passes
+  load `walls_sim.pcd` (the sim wall's whole extent, plus an occupied plane 0.5 m past its sides and z 0 to 2.6 m) into MoveIt.
+  Which of the five commits matters, from 40 runs of `two_panels_plain` over four code states (the batches' code is reconstructed from
+  build and commit times, see the PR): logging only changes nothing (3 of 8 failed, 5 to 24 truncations per run); the seeded IK
+  (commits 1 and 2) took truncations from 5-24 to 0-4 per run but not to zero (8 runs: 7 pass, 1 fail; the failure was a stow, below);
+  the octomap extent and the plane (commits 4 and 5) took them to 0 in all 10 earlier runs on that code (they are before the merge with `origin/main`). The approach check (commit 3) did
+  not show an effect of its own: it fired in 5 of the 8 runs with the seeded IK and the patch-only octomap (the tool 0.56 m short of the approach
+  pose on the first attempts, docked on a later one), and the one run of that batch that failed (a stow, see below) is not one it addresses. Not separated: seed and octomap were never run
+  alone against each other with the same number of runs. The one failed run with the seeded IK (0 truncations, cov 0.644) was the arm's
+  stow after stand 0's last column planning-aborted in 5 ms (`stow attempt 1..6 failed`, `stand 1 not reached (could not stow the arm for the
+  drive)`), a different signature from the truncations; it was not seen in any of the 27 later runs (the wall plane in place). Whether it is the
+  same cause (the arm's start state judged in collision with the patch-only octomap) was not shown.
+
+  Same-session rerun on the final code (this branch merged with `origin/main` b7d5d0c) against a plain `origin/main` build, 8 runs per
+  scenario and code state, loads recorded at start and end of each run (0.2 to 9.2; another job compiled on cores 8 to 11 during the
+  first batch), no suspend in the window (`journalctl`):
+
+  | scenario | `origin/main` | this branch |
+  |---|---|---|
+  | `two_panels_plain` | 6 of 8 pass; failures: run 6 (10 of 10 columns "done" but cov 0.644, 20 truncations, column 0 refused 3 times), run 8 (1 column failed, 9 of 10, 66 truncations, 2 refused jogs, cov 0.932); 8 to 66 truncations in every run | 8 of 8 pass; 0 truncations in 6 runs, 2 in 2 runs; peak force of the runs is within the same range |
+  | `two_panels` (scored with `cov_reach` as `run_scenarios.sh` does) | 8 of 8 pass; 5 to 18 truncations in every run; peaks 304 N and 141 N in two runs, others 20 to 89 N | 8 of 8 pass; 0 truncations in 7 runs, 6 in one; peaks 19 to 88 N |
+
+  In total 14 of 16 baseline runs and 16 of 16 branch runs passed in this session. Honest reading: 2 of 16 against 0 of 16 is not
+  significant on its own (Fisher p about 0.48). The baseline failure rate in this session (2 of 8 on the plain wall) is lower than in the
+  earlier batches on the same code (3 of 8 and 2 of 4), pooled 5 of 16 plain-wall baseline runs (31 per cent), 7 of 20 with the earlier round.
+  What is clear is the truncation count: at least 5 per baseline run (every run, 16 of 16), 0 to 6 per branch run. The scenario table above
+  (two_panels FAIL, cov_reach 0.670) was measured before the reachability and keep-out changes that are now in `origin/main` (I did not isolate which one moved it); `two_panels` passes on both code states
+  in this session, so this table's `two_panels` rows are superseded by 8 of 8 here. `two_panels` was scored on the saved recordings with the wall
+  file of one further run of the same scenario (the batch's own score, `cov_wall` against the default 0.9, reads 0.88 on both code states).
+  Gazebo: its multi-stand failure (1 of 3) was not rerun here. Its pass (`sim_gazebo/scripts/run_multi_stand_pass.sh`) loads the same
+  patch-only `walls.pcd` into MoveIt and runs the same manager (unseeded dock IK before this branch, `dock_seed_joint_state` is empty there), so it
+  probably shares the cause; the failure it had (second stand) is the same place. Not verified, and the two simulators differ in the arm's settling.
 
 ### Multi-stand pass (the manager's `execute_coverage` action)
 
