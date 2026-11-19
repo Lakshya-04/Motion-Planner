@@ -274,6 +274,21 @@ solver branch will refuse many stands RM4D rightly likes; and the selection pass
 (stand, height) per round, so against a real backend bound it with `max_lift_probes`, fewer candidates or a smaller
 `max_rounds`.
 
+### The verified service (`reachability_verified_node`)
+
+`reachability_moveit` ships `reachability_verified_node`: the plain `ReachabilityNode` plus the MoveIt IK and collision
+checks as a `StandVerifier`. It adds `~/plan_verified_stands`, which takes the same `PlanStands` request as `~/plan_stands`
+and answers it with `selectStands` and the verifier, so a stand RM4D promises but IK or the scene refuses is dropped
+and the cover is recomputed. The response carries the IK-confirmed lift bands and a message such as
+`verified: 3 round(s), 12 of 80 RM4D pairs refused by IK or collision`. It needs a running `move_group`
+(`docs/moveit_config.md`), and a request takes minutes on a real wall (about 5 minutes on the one measured, not converged
+at 64 rounds), so use a long client timeout. Parameters of the verifier (`ik_group`, `ik_link`, `collision_group`,
+`arm_mount_offset_z`, `arm_base_x/y`, `lift_max`, `seed_set`, `max_lift_probes`, `jitter_m`, `max_rounds`) are on the node
+`reachability_verified_config`. Without a verifier (the plain `reachability_node`) the service answers with a message and no
+stands. Status: unit-tested through the service with a fake verifier (accepting, and refusing a target everywhere);
+the node itself has not been run against MoveIt, the stand cap and `stand_strategy` do not apply to it, the scene is
+whatever `move_group` holds (stand-relative obstacle posing is not wired), and the manager does not call it yet.
+
 ## Limits and next steps
 
 - **Request validation.** Search grids are checked before they are enumerated: `grid_step` must be finite and
