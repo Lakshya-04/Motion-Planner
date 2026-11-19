@@ -47,6 +47,13 @@ agrees, wall gap 0.803 m, arm deviation 0.0016, F/T change 0.49 N, no drift at t
 - Found on the way and fixed: `manipulation_manager`'s default `base_check_service` was `/reachability_node/plan_stands`, but the
   node is named `reachability` (service `/reachability/plan_stands`); the default now matches. The script still renames the node.
 
+### IK-confirmed stands in a mission
+
+`base_check_service:=/reachability/plan_verified_stands` makes the multi-stand mission ask for stands that IK and collision
+checking confirmed (`reachability_verified_node`, `docs/reachability.md`) instead of RM4D's promise alone. That service takes
+minutes on a wall, so raise `stand_service_timeout_s` (default 60 s, the wait for the stand planner's reply) to match. Only
+the parameter is new and the manager build passes; a mission has not been run this way.
+
 ## Wall docking: standoff and yaw from the fitted plane
 
 For the last metres after `NavigateToStand`. `stand_navigator/wall_docking.py` (ROS-free, `test/test_wall_docking.py`, 21 tests)
