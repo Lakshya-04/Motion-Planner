@@ -169,16 +169,19 @@ request)` (`core/horizontal_stands.hpp`) is the counterpart for a ceiling (tool 
 pointing down). The tool axis is vertical, so the map has no azimuth: a cell depends only on the horizontal
 distance and the height between base and target, and one stand reaches a ring around itself.
 
-- Search grid: the patch footprint (bounding box of the targets) plus `margin`, step `grid_step`; stands go under or
-  over the patch, there is no free side. Ranking per station: fewest unreachable targets, then fewest lift bands,
+- Search grid: the patch footprint (bounding box of the targets) plus max(`margin`, the map's `xy_extent`), step
+  `grid_step`: a station reaches a ring up to `xy_extent` around itself, so a target only reachable at 0.9 m needs
+  stations that far out. Stands go under or over the patch, there is no free side. Ranking per station: fewest unreachable targets, then fewest lift bands,
   then base travel time (with a base model and `from`) or distance to the middle of the patch. Scan order is fixed,
   so the result is deterministic.
 - Lift: `planLiftBands` over `lift_min..lift_max` gives the lift height per stand. A target whose world height no lift
-  position brings into the map's vertical window (`heightWithinLiftReach`) goes to `out_of_lift_range`, which is
+  position brings into the map's vertical window (`heightWithinLiftReach`; the window is `z_min` up to
+  `z_min + nz * resolution`, the map rounds `z_max` up to whole cells) goes to `out_of_lift_range`, which is
   also part of `plan.unreachable`, so "too high for lift plus arm" is told apart from "no stand within horizontal reach".
 - A patch wider than one stand's reach is covered by the same greedy loop as `planStands` (most remaining targets
   per round, `max_stands`, `not_planned` when capped); indices are into the request.
-- Not done: base footprint or obstacle clearance (a stand is any arm base position the map accepts; yaw is 0), the
+- Not done: base footprint or obstacle clearance (a stand is any arm base position the map accepts; with a base model and a start the yaw is the arrival
+  heading, without them 0), the
   set-cover strategy (greedy only), a check that the tool axis really is vertical (an inclined ceiling goes through
   the same map query but is not the case this was written for), a ROS service, use by `manipulation_manager`.
   Tests: `test/core/horizontal_stands_test.cpp` (9: one-stand ceiling, wide patch with several stands, ceiling above
@@ -200,9 +203,9 @@ clearance for the base model; any list of `CandidateStand` works) and returns a 
    textbook bound holds: cost within H(n) <= 1 + ln(n) of the cheapest cover in those costs, so the stand count
    is within (1 + penalty) * H(n) of the fewest stands. Stands made redundant are dropped; each target goes to
    the chosen stand where its margin is highest (ties to the earlier pick).
-3. Open tour from `start` (with a base model: `travelTime`; without one: metres, first stop is the lowest along
-   the wall): nearest neighbour then 2-opt, and the cover's own order as a second 2-opt seed, so the tour is
-   never longer than the cover's order. `time_budget_s` (default 2 s, 0 disables the clock) and
+3. Open tour from `start` (with a base model: `travelTime`; without one: metres, the nearest-neighbour seed starts at
+   the lowest stand along the wall and 2-opt may reorder): nearest neighbour then 2-opt, and the cover's own order as a second 2-opt seed, so the tour is
+   never longer than the cover's order. `time_budget_s` (default 2 s, 0 disables the clock; the clock starts with the 2-opt step, not with scoring) and
    `max_two_opt_passes` bound it; `tour_budget_hit` says it stopped early.
 
 Targets no candidate reaches are never dropped: they come back in `unreachable`, `success` is false with code
@@ -213,16 +216,77 @@ is identical across runs unless the wall-clock budget trips. `rm4d_tool station 
 This overlaps `StandStrategy::SetCover` above, which stays the one `planStands` and the node use (it adds a
 bounded exact search for fewer stands and moves stands to cheaper stations; this one takes caller-supplied
 candidates, weights by margin and returns a coded result). Not done: wiring into `reachability_node` or the
-manager, IK confirmation, a comparison with the exact search on real walls; tested on synthetic generic-arm
+manager, a comparison with the exact search on real walls; tested on synthetic generic-arm
 walls (`global_stands_test`) only, no simulator.
+
+### Confirming stands by IK and collision checking (`StandVerifier`)
+
+RM4D is a prefilter: it ignores self-collision and obstacles and says only that a tool pose is kinematically
+reachable from some base position. `core/stand_verifier.hpp` is the port that confirms it, and an opt-in second
+pass of `selectStands` uses it.
+
+- **Port.** `StandVerifier::verify(stand, lift_height, targets_world)` returns one `TargetVerdict` per target:
+  `reason` (`ok`, `ik_failed`, `in_collision`, `out_of_limits`, `error`) and the joint solution when ok. The
+  scene belongs to the implementation. `FunctionStandVerifier` is the fake for tests (a function of one target).
+  A backend that returns fewer verdicts than targets gets `error` for the rest, never `ok`.
+- **`verifyStand`** takes a stand, targets and per-target lift heights (those RM4D reaches, at most
+  `max_lift_probes`, default 4, picked evenly) and reports per target: `confirmed` (some height solves at the stand
+  itself), the failure that got furthest (in_collision > out_of_limits > ik_failed > error), `lift_margin` (share of
+  heights that solve), `offset_margin` (with `jitter_m` > 0 the best height is retried with the base shifted by
+  +-jitter_m along and across its heading; 1 without), `margin = lift_margin * offset_margin` (greater than 0 exactly
+  when confirmed), the best height and its joints, plus greedy lift bands over the confirmed heights.
+- **Second pass.** `StandSelectionOptions::verifier` (null = RM4D only, as before): `selectStands` verifies the
+  stands its cover chose, drops every (stand, target) pair the verifier refuses, takes the IK margins in place of
+  the RM4D ones for the re-ranking, and reruns the cover and tour until every chosen stand is fully confirmed or
+  `verify.max_rounds` (default 64; a round verifies the chosen stands, so a wall whose every candidate is refused
+  needs about one round per candidate; `verification.converged` is false when the limit stopped it). Each pair is
+  verified once. Targets no candidate confirms land in `unreachable` and `rejected_by_verifier` (code
+  `unreachable_targets`); `verification.refused` lists the pairs RM4D promised and the verifier refused with their
+  reasons, and `verification.optimism()` = refused / verified pairs measures how optimistic RM4D is. Each
+  `SelectedStand` carries its `verification` and its lift bands come from the confirmed heights. Deterministic given a
+  deterministic verifier.
+- **Real implementation.** `reachability_moveit::PortStandVerifier` (package `reachability_moveit`, ROS-free) works
+  over the `motion_planner` `IkPort`, `CollisionPort` and `ScenePort`, so MoveIt (TRAC-IK or KDL, whatever the
+  config sets) works today and any other backend that implements the ports works the same. The stand is
+  expressed by moving the target: world target -> the stand's `base_footprint` -> an IK target for the `arm` group
+  with the lift at 0 (shifted down by the lift height); the collision check runs on the `lift_arm` group with the
+  lift joint set to the height, so lift parts are checked where they are. World boxes and wall points are re-posed into
+  the stand's base frame and pushed through the `ScenePort` whenever the stand changes. A lift outside its travel
+  is `out_of_limits` without a backend call; joint solutions outside the configured limits are `out_of_limits` too
+  (backends that do not enforce limits); extra IK seeds can be tried when the first solution collides.
+  `PortVerifierConfig` holds the group names, the tcp link, the arm base pose in the planning frame at lift 0 (mount
+  x, y and height), limits, seeds and the world geometry.
+- **Not wired.** `planStands` (and so `~/plan_stands` and the manager's `base_check`) is unchanged: it needs a MoveIt
+  backend in `reachability_node`, which is not a small change, and its stations are not candidates in the sense of
+  `selectStands`. The cuRobo client (`ik()` / `check_states`) is not wrapped; it would be a second
+  `StandVerifier` (or a second `IkPort`).
+
+`stand_verify_probe` (in `reachability_moveit`) measures RM4D against IK on a wall: it builds the candidates and
+targets of a `StationRequest`, takes a deterministic sample of the (stand, target, lift height) triples RM4D
+reaches and of those it does not, sends them to MoveIt and prints the agreement, then runs `selectStands` with and
+without the verifier (`ros2 launch reachability_moveit stand_verify_probe.launch.py map_file:=ur10e.rm4d wall_x:=1.4
+extra:=max_triples=100,seed_set=true,run_selection=false`, with the MoveIt demo running).
+
+Measured once (UR10e profile on the telescopic lift, MoveIt demo on mock hardware, TRAC-IK, tcp_link; wall at x = 1.4 m, 25 tool poses y -0.6..0.6 and z 0.5..2.1 with the tool axis into the wall, 77 candidate stands, lift 0..1.5 m in 0.25 m steps; map 3 M samples at 5 cm; no obstacles, self-collision only; samples are a fixed stride through the triples, 102 of each): of the (stand, target, lift height) triples RM4D calls reachable, IK from the backend's default seed confirms 45.1% (46 ok, 51 in collision, 5 IK failed). The same triples with three UR-style folded seeds (`seed_set`, first collision-free solution wins) are confirmed 85.3% (87 ok, 10 in collision, 5 IK failed). So RM4D itself is right about kinematics for about 95% of the triples sampled; most of the single-seed refusals are IK solutions on a branch that hits the lift column, which another seed avoids. Of the triples RM4D calls unreachable, IK finds a collision-free solution for 1 of 102 (1.0%, seeded run). `selectStands` on that wall with the single-seed verifier: RM4D alone picks 1 stand with 0 unreachable; verified, it needed 2 stands, hit the 64-round limit (not converged: 1278 pairs verified, 467 refused = 36.5% optimism, 701 IK batches, about 5 minutes) and left 5 targets rejected by IK. One run each, one wall, one arm, no seed tuning beyond those three seeds, sampled not exhaustive.
+
+Two things this shows for use: give the verifier several IK seeds (`PortVerifierConfig::seeds`), or a single
+solver branch will refuse many stands RM4D rightly likes; and the selection pass costs one verifier batch per
+(stand, height) per round, so against a real backend bound it with `max_lift_probes`, fewer candidates or a smaller
+`max_rounds`.
 
 ## Limits and next steps
 
+- **Request validation.** Search grids are checked before they are enumerated: `grid_step` must be finite and
+  positive, standoff, margin and lift range finite, and a grid may have at most 250000 points (`kMaxGridPoints`),
+  at most 100000 lift heights. `selectStands(request)` answers `invalid_request`, `planHorizontalStands` sets
+  `code = kInvalidRequest` with a message (all targets in `not_planned`); `chooseStation` and
+  `chooseHorizontalStation` return `found = false`. A vertical tool axis is stored at y* = 0 exactly, so inverse
+  queries and forward queries agree for every azimuth.
 - **Sampling density.** Uniform joint sampling leaves cells empty at fine resolution: 3 M samples
   set 11% of a 5 cm map. Use at least ten samples per reachable cell, or a coarser map; the
   saturated-cell count in the build stats shows where more samples add nothing.
-- **Self-collision** is not checked by the built-in chain; plug a collision-aware `ArmModel` in
-  before trusting a map for cluttered arms.
+- **Self-collision** is not checked by the built-in chain; confirm stands with a `StandVerifier` (above) before
+  trusting them, or plug a collision-aware `ArmModel` in.
 - **Joint range assumption.** The reduction needs the first joint to rotate a full turn and the
   last joint to rotate fully (UR family: yes). Check a new arm against brute force.
 - **Done since the first version:** the ROS shell (`reachability_node`, see below: `~/is_reachable`,

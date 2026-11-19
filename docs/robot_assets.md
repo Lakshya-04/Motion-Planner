@@ -28,7 +28,7 @@ lists) can re-run any subset. `--list` prints the names.
 | `srdf` | `motion-planner:build` | `robot.srdf` (groups + structural allowed-collision matrix, per arm family and lift), `lift_limits.yaml` (lift velocity / acceleration from the profile) |
 | `spheres` | `motion-planner-foam` | `vamp/spherized.urdf`, `vamp/sphere_database.json` (FOAM on the arm-only model) |
 | `vamp` | `motion-planner-cricket` | `vamp/rigid.srdf` (`rigid_pairs_srdf.py --hops 2`, `--hops N` to change), `vamp/<Name>.hh` |
-| `curobo` | `motion-planner:gpu` (GPU) | `curobo/<Name>.yml` (fitted spheres + collision matrix) and `curobo/meshed/` |
+| `curobo` | `motion-planner:gpu` (GPU) | `curobo/<Name>.yml` (fitted spheres + collision matrix; links up to `--hops` (2) joints apart are not checked, as for VAMP: without it the forearm / wrist_2 pair made dock-pose plans fail, see `planner_benchmark.md`) and `curobo/meshed/` |
 | `reach` | `motion-planner:build` | `reach/chain.yaml` (`arm_base_link -> tcp_link`), `reach/build_map.sh`, `reach/<Name>.rm4d` (6-DOF map) |
 | `check` | `motion-planner:build` | `check.json`: self-collision sanity on the spheres (below) |
 | `manifest` | host | `manifest.json` |
