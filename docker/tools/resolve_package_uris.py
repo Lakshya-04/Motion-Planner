@@ -30,9 +30,11 @@ def resolve(urdf_in, out_dir):
                 continue
             pkg, _, rel = uri[len('package://'):].partition('/')
             src = pathlib.Path(get_package_share_directory(pkg)) / rel
+            dst = (out / pkg / rel).resolve()
+            if not dst.is_relative_to(out.resolve()):
+                raise ValueError(f"{uri}: the path leaves the output directory ('..' in it)")
             if not src.is_file():
                 raise FileNotFoundError(f'{uri} -> {src} does not exist')
-            dst = out / pkg / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
             mesh.set('filename', f'{pkg}/{rel}')

@@ -57,6 +57,10 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$OUT:/work" -w /work "$FOAM_IMG" 
 else
   [ -f "$OUT/spherized.urdf" ] || { echo "SKIP_FOAM set but $OUT/spherized.urdf is missing" >&2; exit 2; }
 fi
+# FOAM silently writes a URDF without spheres for collision geometry it cannot spherize; Cricket would
+# then build a robot that can never collide (generate_curobo_robot.py has the same guard).
+grep -q '<sphere' "$OUT/spherized.urdf" || {
+  echo "$OUT/spherized.urdf has no <sphere> collision: FOAM found no collision meshes to spherize" >&2; exit 1; }
 if [ -n "${FOAM_ONLY:-}" ]; then echo "wrote $OUT/spherized.urdf"; exit 0; fi
 
 rm -rf "$OUT/templates" && cp -r "$CRICKET_SRC/resources/templates" "$OUT/templates"
