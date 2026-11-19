@@ -261,7 +261,15 @@ pass of `selectStands` uses it.
 `stand_verify_probe` (in `reachability_moveit`) measures RM4D against IK on a wall: it builds the candidates and
 targets of a `StationRequest`, takes a deterministic sample of the (stand, target, lift height) triples RM4D
 reaches and of those it does not, sends them to MoveIt and prints the agreement, then runs `selectStands` with and
-without the verifier. Results below.
+without the verifier (`ros2 launch reachability_moveit stand_verify_probe.launch.py map_file:=ur10e.rm4d wall_x:=1.4
+extra:=max_triples=100,seed_set=true,run_selection=false`, with the MoveIt demo running).
+
+Measured once (UR10e profile on the telescopic lift, MoveIt demo on mock hardware, TRAC-IK, tcp_link; wall at x = 1.4 m, 25 tool poses y -0.6..0.6 and z 0.5..2.1 with the tool axis into the wall, 77 candidate stands, lift 0..1.5 m in 0.25 m steps; map 3 M samples at 5 cm; no obstacles, self-collision only; samples are a fixed stride through the triples, 102 of each): of the (stand, target, lift height) triples RM4D calls reachable, IK from the backend's default seed confirms 45.1% (46 ok, 51 in collision, 5 IK failed). The same triples with three UR-style folded seeds (`seed_set`, first collision-free solution wins) are confirmed 85.3% (87 ok, 10 in collision, 5 IK failed). So RM4D itself is right about kinematics for about 95% of the triples sampled; most of the single-seed refusals are IK solutions on a branch that hits the lift column, which another seed avoids. Of the triples RM4D calls unreachable, IK finds a collision-free solution for 1 of 102 (1.0%, seeded run). `selectStands` on that wall with the single-seed verifier: RM4D alone picks 1 stand with 0 unreachable; verified, it needed 2 stands, hit the 64-round limit (not converged: 1278 pairs verified, 467 refused = 36.5% optimism, 701 IK batches, about 5 minutes) and left 5 targets rejected by IK. One run each, one wall, one arm, no seed tuning beyond those three seeds, sampled not exhaustive.
+
+Two things this shows for use: give the verifier several IK seeds (`PortVerifierConfig::seeds`), or a single
+solver branch will refuse many stands RM4D rightly likes; and the selection pass costs one verifier batch per
+(stand, height) per round, so against a real backend bound it with `max_lift_probes`, fewer candidates or a smaller
+`max_rounds`.
 
 ## Limits and next steps
 
