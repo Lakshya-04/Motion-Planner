@@ -65,6 +65,10 @@ def convert(urdf_in, out_dir):
     for link in tree.getroot().iter('link'):
         for k, coll in enumerate(link.findall('collision')):
             geom = coll.find('geometry')
+            if geom is None:
+                print(f"warning: link '{link.get('name')}' has a <collision> without <geometry>: skipped",
+                      file=sys.stderr)
+                continue
             shape = next((c for c in geom if c.tag in ('box', 'cylinder', 'sphere')), None)
             if shape is None:
                 continue
