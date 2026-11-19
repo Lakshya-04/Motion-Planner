@@ -213,16 +213,63 @@ is identical across runs unless the wall-clock budget trips. `rm4d_tool station 
 This overlaps `StandStrategy::SetCover` above, which stays the one `planStands` and the node use (it adds a
 bounded exact search for fewer stands and moves stands to cheaper stations; this one takes caller-supplied
 candidates, weights by margin and returns a coded result). Not done: wiring into `reachability_node` or the
-manager, IK confirmation, a comparison with the exact search on real walls; tested on synthetic generic-arm
+manager, a comparison with the exact search on real walls; tested on synthetic generic-arm
 walls (`global_stands_test`) only, no simulator.
+
+### Confirming stands by IK and collision checking (`StandVerifier`)
+
+RM4D is a prefilter: it ignores self-collision and obstacles and says only that a tool pose is kinematically
+reachable from some base position. `core/stand_verifier.hpp` is the port that confirms it, and an opt-in second
+pass of `selectStands` uses it.
+
+- **Port.** `StandVerifier::verify(stand, lift_height, targets_world)` returns one `TargetVerdict` per target:
+  `reason` (`ok`, `ik_failed`, `in_collision`, `out_of_limits`, `error`) and the joint solution when ok. The
+  scene belongs to the implementation. `FunctionStandVerifier` is the fake for tests (a function of one target).
+  A backend that returns fewer verdicts than targets gets `error` for the rest, never `ok`.
+- **`verifyStand`** takes a stand, targets and per-target lift heights (those RM4D reaches, at most
+  `max_lift_probes`, default 4, picked evenly) and reports per target: `confirmed` (some height solves at the stand
+  itself), the failure that got furthest (in_collision > out_of_limits > ik_failed > error), `lift_margin` (share of
+  heights that solve), `offset_margin` (with `jitter_m` > 0 the best height is retried with the base shifted by
+  +-jitter_m along and across its heading; 1 without), `margin = lift_margin * offset_margin` (greater than 0 exactly
+  when confirmed), the best height and its joints, plus greedy lift bands over the confirmed heights.
+- **Second pass.** `StandSelectionOptions::verifier` (null = RM4D only, as before): `selectStands` verifies the
+  stands its cover chose, drops every (stand, target) pair the verifier refuses, takes the IK margins in place of
+  the RM4D ones for the re-ranking, and reruns the cover and tour until every chosen stand is fully confirmed or
+  `verify.max_rounds` (default 64; a round verifies the chosen stands, so a wall whose every candidate is refused
+  needs about one round per candidate; `verification.converged` is false when the limit stopped it). Each pair is
+  verified once. Targets no candidate confirms land in `unreachable` and `rejected_by_verifier` (code
+  `unreachable_targets`); `verification.refused` lists the pairs RM4D promised and the verifier refused with their
+  reasons, and `verification.optimism()` = refused / verified pairs measures how optimistic RM4D is. Each
+  `SelectedStand` carries its `verification` and its lift bands come from the confirmed heights. Deterministic given a
+  deterministic verifier.
+- **Real implementation.** `reachability_moveit::PortStandVerifier` (package `reachability_moveit`, ROS-free) works
+  over the `motion_planner` `IkPort`, `CollisionPort` and `ScenePort`, so MoveIt (TRAC-IK or KDL, whatever the
+  config sets) works today and any other backend that implements the ports works the same. The stand is
+  expressed by moving the target: world target -> the stand's `base_footprint` -> an IK target for the `arm` group
+  with the lift at 0 (shifted down by the lift height); the collision check runs on the `lift_arm` group with the
+  lift joint set to the height, so lift parts are checked where they are. World boxes and wall points are re-posed into
+  the stand's base frame and pushed through the `ScenePort` whenever the stand changes. A lift outside its travel
+  is `out_of_limits` without a backend call; joint solutions outside the configured limits are `out_of_limits` too
+  (backends that do not enforce limits); extra IK seeds can be tried when the first solution collides.
+  `PortVerifierConfig` holds the group names, the tcp link, the arm base pose in the planning frame at lift 0 (mount
+  x, y and height), limits, seeds and the world geometry.
+- **Not wired.** `planStands` (and so `~/plan_stands` and the manager's `base_check`) is unchanged: it needs a MoveIt
+  backend in `reachability_node`, which is not a small change, and its stations are not candidates in the sense of
+  `selectStands`. The cuRobo client (`ik()` / `check_states`) is not wrapped; it would be a second
+  `StandVerifier` (or a second `IkPort`).
+
+`stand_verify_probe` (in `reachability_moveit`) measures RM4D against IK on a wall: it builds the candidates and
+targets of a `StationRequest`, takes a deterministic sample of the (stand, target, lift height) triples RM4D
+reaches and of those it does not, sends them to MoveIt and prints the agreement, then runs `selectStands` with and
+without the verifier. Results below.
 
 ## Limits and next steps
 
 - **Sampling density.** Uniform joint sampling leaves cells empty at fine resolution: 3 M samples
   set 11% of a 5 cm map. Use at least ten samples per reachable cell, or a coarser map; the
   saturated-cell count in the build stats shows where more samples add nothing.
-- **Self-collision** is not checked by the built-in chain; plug a collision-aware `ArmModel` in
-  before trusting a map for cluttered arms.
+- **Self-collision** is not checked by the built-in chain; confirm stands with a `StandVerifier` (above) before
+  trusting them, or plug a collision-aware `ArmModel` in.
 - **Joint range assumption.** The reduction needs the first joint to rotate a full turn and the
   last joint to rotate fully (UR family: yes). Check a new arm against brute force.
 - **Done since the first version:** the ROS shell (`reachability_node`, see below: `~/is_reachable`,
