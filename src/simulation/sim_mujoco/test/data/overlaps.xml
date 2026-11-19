@@ -1,0 +1,26 @@
+<!-- Overlapping bodies for the unexpected-contact scan: the tool pad sits in the wall (intended, not listed), `link_a`
+     sits in the wall (link_world) and `link_b` overlaps `link_a` (self). Gravity off, so nothing moves apart in one step. -->
+<mujoco model="overlaps">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 0"/>
+  <worldbody>
+    <geom name="wall" type="box" size="0.5 0.5 0.05" pos="0 0 0.30"/>
+    <body name="carriage" pos="0 0 0">
+      <joint name="slide" type="slide" axis="0 0 1" range="-0.5 0.5"/>
+      <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+      <geom name="pad" type="box" size="0.05 0.05 0.05" pos="0 0 0.3"/>
+      <site name="ft_sensor" size="0.01"/>
+      <site name="tcp_site" pos="0 0 0.05" size="0.01"/>
+    </body>
+    <body name="link_a" pos="2 0 0">
+      <joint name="ja" type="slide" axis="0 0 1" range="-0.5 0.5"/>
+      <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+      <geom name="ga" type="box" size="0.05 0.05 0.05" pos="-2 0 0.3"/>
+    </body>
+    <body name="link_b" pos="4 0 0">
+      <joint name="jb" type="slide" axis="0 0 1" range="-0.5 0.5"/>
+      <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+      <geom name="gb" type="box" size="0.05 0.05 0.05" pos="-2 0 0.3"/>
+    </body>
+  </worldbody>
+</mujoco>

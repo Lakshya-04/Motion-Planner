@@ -418,6 +418,67 @@ Wrench MujocoSim::groundTruthWrench() const
   return out;
 }
 
+void MujocoSim::scanUnexpectedContacts(std::vector<std::string> & new_pairs)
+{
+  auto body_name = [&](int g) {
+      const int b = model_->geom_bodyid[g];
+      const char * bn = mj_id2name(model_, mjOBJ_BODY, b);
+      return std::string(bn ? bn : "?");
+    };
+  for (int i = 0; i < data_->ncon; ++i) {
+    const mjContact & c = data_->contact[i];
+    if (c.exclude != 0 || c.dist >= 0.0) {
+      continue;
+    }
+    const int b1 = model_->geom_bodyid[c.geom1];
+    const int b2 = model_->geom_bodyid[c.geom2];
+    const bool world1 = (b1 == 0);
+    const bool world2 = (b2 == 0);
+    std::string kind;
+    if (!world1 && !world2) {
+      kind = "self";
+    } else if (world1 != world2) {
+      const int robot_body = world1 ? b2 : b1;
+      if (tool_body_[robot_body]) {
+        continue;  // the tool on the wall: the intended contact
+      }
+      kind = "link_world";
+    } else {
+      continue;  // world against world
+    }
+    std::string n1 = body_name(c.geom1);
+    std::string n2 = body_name(c.geom2);
+    if (n2 < n1) {
+      std::swap(n1, n2);
+    }
+    const std::string key = n1 + " <-> " + n2;
+    auto & stat = unexpected_[key];
+    if (stat.steps == 0) {
+      stat.kind = kind;
+      char buf[48];
+      std::snprintf(buf, sizeof buf, " [%s] depth=%.4f", kind.c_str(), -c.dist);
+      new_pairs.push_back(key + buf);
+    }
+    ++stat.steps;
+    stat.depth = std::max(stat.depth, -static_cast<double>(c.dist));
+  }
+}
+
+std::string MujocoSim::unexpectedContactSummary() const
+{
+  if (unexpected_.empty()) {
+    return "none";
+  }
+  std::string out;
+  for (const auto & kv : unexpected_) {
+    char buf[96];
+    std::snprintf(buf, sizeof buf, " [%s] steps=%ld max_depth=%.4f m; ", kv.second.kind.c_str(), kv.second.steps,
+      kv.second.depth);
+    out += kv.first + buf;
+  }
+  return out;
+}
+
 std::string MujocoSim::describeToolContacts() const
 {
   std::string out;
