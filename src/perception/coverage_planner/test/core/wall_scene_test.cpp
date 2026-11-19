@@ -177,6 +177,95 @@ TEST(WallRasterizer, KeepOutIsNoWiderThanTheCellsTheInflatedBoxOverlaps)
   EXPECT_EQ(blocked_y_max, 7);
 }
 
+namespace
+{
+// Blocked cell index ranges {x_min, x_max, y_min, y_max}; x_min > x_max when nothing is blocked.
+std::array<int, 4> blockedRange(const coverage_planner::OccupancyGrid & grid)
+{
+  const int width = static_cast<int>(grid.info.width);
+  std::array<int, 4> r = {width, -1, 1000, -1};
+  for (size_t i = 0; i < grid.data.size(); ++i) {
+    if (grid.data[i] > 50) {
+      const int x = static_cast<int>(i) % width;
+      const int y = static_cast<int>(i) / width;
+      r[0] = std::min(r[0], x);
+      r[1] = std::max(r[1], x);
+      r[2] = std::min(r[2], y);
+      r[3] = std::max(r[3], y);
+    }
+  }
+  return r;
+}
+
+coverage_planner::ToolCoverage noInflation()
+{
+  coverage_planner::ToolCoverage c;
+  c.obstacle_inflation = "uniform";
+  c.obstacle_inflation_radius_m = 0.0;
+  c.sweep_direction = "vertical";
+  return c;
+}
+}  // namespace
+
+TEST(WallRasterizer, EdgesExactlyOnGridLinesBlockOnlyTheCellsInside)
+{
+  // u 0.5..0.6 and v 0.3..0.4 on a 0.1 m grid with no inflation: exactly cell 5 in u and cell 3 in v.
+  auto obstacle = makeCenteredObstacle();
+  obstacle.u_min = 0.5;
+  obstacle.u_max = 0.6;
+  obstacle.v_min = 0.3;
+  obstacle.v_max = 0.4;
+  const auto grid = coverage_planner::rasterizeWallCoverageGrid(
+    makeSyntheticWall(), {obstacle}, noInflation(), 0.1, "map");
+  const auto r = blockedRange(grid);
+  EXPECT_EQ(r[0], 5);
+  EXPECT_EQ(r[1], 5);
+  EXPECT_EQ(r[2], 3);
+  EXPECT_EQ(r[3], 3);
+}
+
+TEST(WallRasterizer, ObstacleOutsideTheWallBlocksNothing)
+{
+  auto obstacle = makeCenteredObstacle();
+  obstacle.u_min = 2.5;   // wall u runs 0..2
+  obstacle.u_max = 3.0;
+  const auto grid = coverage_planner::rasterizeWallCoverageGrid(
+    makeSyntheticWall(), {obstacle}, noInflation(), 0.1, "map");
+  EXPECT_GT(blockedRange(grid)[0], blockedRange(grid)[1]);   // empty range
+  auto left = makeCenteredObstacle();
+  left.u_min = -1.0;
+  left.u_max = -0.5;
+  const auto grid2 = coverage_planner::rasterizeWallCoverageGrid(
+    makeSyntheticWall(), {left}, noInflation(), 0.1, "map");
+  EXPECT_GT(blockedRange(grid2)[0], blockedRange(grid2)[1]);
+}
+
+TEST(WallRasterizer, ObstacleOverTheBorderIsClippedToTheGrid)
+{
+  auto obstacle = makeCenteredObstacle();
+  obstacle.u_min = 1.75;   // wall u_max is 2.0: cells 17..19 only
+  obstacle.u_max = 2.5;
+  const auto grid = coverage_planner::rasterizeWallCoverageGrid(
+    makeSyntheticWall(), {obstacle}, noInflation(), 0.1, "map");
+  const auto r = blockedRange(grid);
+  EXPECT_EQ(r[0], 17);
+  EXPECT_EQ(r[1], 19);
+}
+
+TEST(WallRasterizer, NonFiniteObstacleBoundsAreRejectedNotIgnored)
+{
+  auto obstacle = makeCenteredObstacle();
+  obstacle.u_max = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_THROW(
+    coverage_planner::rasterizeWallCoverageGrid(makeSyntheticWall(), {obstacle}, noInflation(), 0.1, "map"),
+    std::runtime_error);
+  obstacle = makeCenteredObstacle();
+  obstacle.v_min = -std::numeric_limits<double>::infinity();
+  EXPECT_THROW(
+    coverage_planner::rasterizeWallCoverageGrid(makeSyntheticWall(), {obstacle}, noInflation(), 0.1, "map"),
+    std::runtime_error);
+}
+
 TEST(WallRasterizer, PrimaryAxisInflationOnlyExpandsSweepAxis)
 {
   const auto wall = makeSyntheticWall();

@@ -96,8 +96,10 @@ TEST(CoverageOutputJsonSourceTest, SingleCellGapStrokeBecomesAShortStroke)
   const auto plan = src.getCoveragePlan();
   ASSERT_EQ(plan.size(), 2U);
   EXPECT_NEAR(plan[0].poses.front().z, 1.0, 1e-6);    // clamped to the coverage z range
-  EXPECT_NEAR(plan[0].poses.back().z, 1.03, 1e-6);
-  EXPECT_NEAR(plan[1].poses.front().z, 1.27, 1e-6);
+  // half a 0.02 m cell either side of the cell centre: the stroke stays inside the free cell, so it cannot enter
+  // the obstacle's keep-out clearance (a longer stroke could end 1 cm inside it)
+  EXPECT_NEAR(plan[0].poses.back().z, 1.02, 1e-6);
+  EXPECT_NEAR(plan[1].poses.front().z, 1.28, 1e-6);
   EXPECT_NEAR(plan[1].poses.back().z, 1.3, 1e-6);
 }
 
