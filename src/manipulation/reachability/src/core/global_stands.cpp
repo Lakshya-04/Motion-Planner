@@ -95,7 +95,7 @@ std::vector<CandidateStand> makeCandidateStands(const StationRequest & q)
 {
   std::vector<CandidateStand> out;
   const Frame f = wallFrame(q);
-  if (q.targets_world.empty() || q.grid_step <= 0.0 || !f.ok) {return out;}
+  if (q.targets_world.empty() || !f.ok || !stationGridProblem(q).empty()) {return out;}
   double u_lo = 1e18, u_hi = -1e18;
   for (const auto & t : q.targets_world) {
     const double a = (t.translation() - q.wall_point).dot(f.u);
@@ -142,7 +142,9 @@ StandSelection selectStands(
   const auto heights = heightRange(q.lift_min, q.lift_max, q.lift_step);
   if (!f.ok) {return finish(StandSelectionCode::kInvalidRequest, "wall normal is zero or vertical");}
   if (heights.empty()) {return finish(StandSelectionCode::kInvalidRequest, "empty lift range or non-positive lift_step");}
-  if (!(opt.margin_penalty >= 0.0)) {return finish(StandSelectionCode::kInvalidRequest, "margin_penalty must be >= 0");}
+  if (!std::isfinite(opt.margin_penalty) || opt.margin_penalty < 0.0) {
+    return finish(StandSelectionCode::kInvalidRequest, "margin_penalty must be finite and >= 0");
+  }
   if (candidates.empty()) {
     for (size_t t = 0; t < nt; ++t) {res.unreachable.push_back(t);}
     return finish(StandSelectionCode::kNoCandidates, "no candidate stands");
@@ -219,7 +221,7 @@ StandSelection selectStands(
     }
     mine[best].push_back(t);
   }
-  std::vector<size_t> chosen;   // positions into picks, in pick order
+  std::vector<size_t> chosen;   // positions into picks, in pick order (stands that kept a target)
   for (size_t k = 0; k < picks.size(); ++k) {if (!mine[k].empty()) {chosen.push_back(k);}}
   const size_t m = chosen.size();
 
@@ -260,8 +262,9 @@ StandSelection selectStands(
     used[best] = true;
     nn.push_back(best);
   }
+  // The budget is for 2-opt alone: it starts here, so slow scoring or a big cover cannot use it up.
   const bool use_clock = opt.time_budget_s > 0.0;
-  const auto deadline = t0 + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(opt.time_budget_s));
+  const auto deadline = Clock::now() + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(opt.time_budget_s));
   bool converged = twoOpt(legs, &nn, opt, deadline, use_clock);
   std::vector<size_t> seeded = input;   // the cover's own order is a second seed, so the result can never be worse than it
   converged = twoOpt(legs, &seeded, opt, deadline, use_clock) && converged;
@@ -278,7 +281,7 @@ StandSelection selectStands(
     s.standoff = candidates[cand].standoff;
     s.footprint_clearance = candidates[cand].footprint_clearance;
     s.candidate_index = cand;
-    s.pick_index = i;
+    s.pick_index = chosen[i];
     s.targets = mine[chosen[i]];
     std::vector<Pose> subset;
     double msum = 0.0;
@@ -301,6 +304,12 @@ StandSelection selectStands(
   const Map4D & map, const StationRequest & request, const std::optional<Stand> & start,
   const StandSelectionOptions & options)
 {
+  if (const std::string problem = stationGridProblem(request); !problem.empty()) {
+    StandSelection bad;
+    bad.code = StandSelectionCode::kInvalidRequest;
+    bad.message = problem;
+    return bad;
+  }
   return selectStands(map, request, makeCandidateStands(request), start, options);
 }
 
