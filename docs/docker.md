@@ -171,3 +171,15 @@ recorded in [ROADMAP.md](ROADMAP.md) section 15 is 736 colcon tests in 26 packag
 Whether the `gpu`, `full` and `sim` targets and the FOAM / Cricket tool images were built after the
 first build is recorded in the notes of the documents that use them ([curobo_v2_notes.md](curobo_v2_notes.md),
 [vamp_notes.md](vamp_notes.md), [sim_mujoco.md](sim_mujoco.md)); this page makes no claim for them.
+
+## Publishing prebuilt images (manual)
+
+`docker/tools/publish_images.sh` tags and pushes `deps`, `build` and `sim` (and with `--gpu` the `full` image) to
+`ghcr.io/<owner>/motion-planner:<target>`. It is a dry run unless `--push` is given. There is no CI, so publishing is a
+deliberate manual step, done after a full end-to-end workflow test passes. Notes:
+
+- `sim` is built on `gpu`, so it contains the 12 GB torch and cuRobo layers; layers shared with `full` upload once.
+- Push images built from the Dockerfile (`docker build --target <name>`), not a hand-committed container: the
+  `build` image used day to day is a compile-only commit made while the Dockerfile `build` stage was failing two tests.
+- Login needs the `write:packages` scope (`gh auth refresh -s write:packages`), and the package has to be made public
+  once in the GitHub UI for anonymous pulls.

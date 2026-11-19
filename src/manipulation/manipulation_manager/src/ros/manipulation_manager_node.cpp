@@ -213,6 +213,9 @@ public:
     base_check_mode_ = this->declare_parameter<std::string>("base_check", "off");
     base_check_service_ = this->declare_parameter<std::string>(
       "base_check_service", "/reachability/plan_stands");
+    // How long a multi-stand mission waits for the stand planner's reply. 60 s suits ~/plan_stands; with
+    // base_check_service:=/reachability/plan_verified_stands (IK-confirmed stands) a wall takes minutes: raise it.
+    stand_service_timeout_s_ = this->declare_parameter<double>("stand_service_timeout_s", 60.0);
     base_check_lift_min_ = this->declare_parameter<double>("base_check_lift_min_m", 0.0);
     base_check_lift_max_ = this->declare_parameter<double>("base_check_lift_max_m", 0.0);
     // The stow pose is kept this far inside the lift's travel (base_check_lift_min_m .. max_m): a lift sent to its
@@ -890,7 +893,8 @@ private:
       req->start_yaw = start.yaw;
       auto future = client->async_send_request(req);
       if (rclcpp::spin_until_future_complete(
-          shared_from_this(), future, std::chrono::seconds(60)) != rclcpp::FutureReturnCode::SUCCESS)
+          shared_from_this(), future, std::chrono::duration<double>(stand_service_timeout_s_)) !=
+        rclcpp::FutureReturnCode::SUCCESS)
       {
         why = "no reply from " + base_check_service_;
         return false;
@@ -1766,6 +1770,7 @@ private:
 
   std::string frame_id_;
   std::string world_frame_;
+  double stand_service_timeout_s_{60.0};
   std::string arm_base_frame_;
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
