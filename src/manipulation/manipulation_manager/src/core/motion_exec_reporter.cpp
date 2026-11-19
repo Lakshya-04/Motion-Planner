@@ -126,6 +126,7 @@ void MotionExecReporter::logSegmentRecord(
       << " outcome=" << toString(metrics.outcome)
       << " mode=" << metrics.mode_used
       << " planner=" << metrics.planner_used
+      << " fsp_backend=" << (metrics.free_space_backend.empty() ? "-" : metrics.free_space_backend)
       << " frame=" << metrics.frame_id
       << " wp=[" << metrics.start_waypoint_index << "," << metrics.end_waypoint_index << "]"
       << " attempted=" << metrics.attempted_waypoints

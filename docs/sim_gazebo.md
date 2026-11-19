@@ -487,7 +487,7 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
 - Per segment: `segment_exec id=.. label=.. outcome=.. mode=.. planner=.. ...` (`MotionExecReporter`). **`planner=` is not
   proof of cuRobo**: `MotionPlanner` fills it with the legacy planner name (`ompl`) whatever plugin did the work
   (`motion_planner.cpp`, `planner_used = planner_for_segment`), so a cuRobo transition reads `planner=ompl` too.
-  Use `mode=fsp` (a free-space segment) together with the evidence below.
+  The same line now carries `fsp_backend=<name>` (`Planner::name()` of the free-space plugin that produced part of the segment: `curobo`, `moveit`, or `-` for a pure Cartesian segment); that field is the direct evidence. Authored and unit-tested, not yet seen in a sim run.
 - Evidence that cuRobo planned: `nvidia-smi` shows the node's process and its utilisation rises during transitions; the
   trajectory of a transition should look like cuRobo's (dense, 0.025 s interpolation; not checked); and the negative control: stop the node
   (`run_curobo_node.sh stop`) and re-run: transitions the Cartesian attempt cannot do fail with

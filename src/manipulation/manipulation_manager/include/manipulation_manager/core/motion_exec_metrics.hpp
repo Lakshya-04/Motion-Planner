@@ -31,6 +31,7 @@ struct MotionSegmentExecMetrics
   std::string segment_label;
   std::string mode_used;
   std::string planner_used;
+  std::string free_space_backend;  ///< free-space plugin that planned (part of) the segment; empty if none
   std::string frame_id;
 
   size_t start_waypoint_index{0};
