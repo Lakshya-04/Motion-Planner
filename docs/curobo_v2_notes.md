@@ -524,4 +524,12 @@ graph calls succeeded.
   (the planner config is mutable; both are put back) and `enable_graph_attempt=0`, which returns the first graph seed that survives cuRobo's dense validation.
   `PlanResult.route` is `'graph_seed'` then (`'trajopt'` otherwise) and the message says the trajectory is not optimised. Cost: the failed first pass runs
   its 20 attempts (6 to 33 s measured), then the fallback 0.3 to 0.4 s. `seed_fallback=False` restores cuRobo's own behaviour.
+- Node hardening (review fixes): every service handler turns an exception into a failed response (`failure_reason_code` `internal_error`) instead
+  of killing the node; `ik_weights` is validated against the joint count at construction and a zero keeps its place (zero = ignore the joint;
+  the node used to drop zeros and leave a short vector that failed every IK call); `prismatic_joints` naming an unknown joint is an error;
+  `voxelize_points` refuses a cap of 0 or an unsatisfiable cap (it returned one cube of up to 204.8 m); `check_motion` caps the interpolation at
+  100000 states; `PlanJoint` / `PlanPose` responses carry `route` ('trajopt' | 'graph_seed'), which the C++ client maps to
+  `PlanningResult::status` `success_graph_seed` (message: not optimised). `CuroboClientPlanner::collision` checks `joint_values` and a trajectory as two requests
+  (one request also interpolated the line `joint_values -> trajectory[0]`). GPU tests now check that `clear_world()` and a smaller `set_world()` really
+  remove cuboids from cuRobo (they do: the stale-layer behaviour noted for voxels does not apply to cuboids).
 

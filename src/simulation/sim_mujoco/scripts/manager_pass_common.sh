@@ -33,6 +33,8 @@ mp_start() {
 }
 
 mp_stop_all() {
+  # the film recorder too: an early exit or Ctrl-C used to leave it running and the final `wait` blocked on it
+  [ -n "${FILM_PID:-}" ] && kill -INT "$FILM_PID" 2>/dev/null && wait "$FILM_PID" 2>/dev/null
   [ -n "${REC_PID:-}" ] && kill -INT "$REC_PID" 2>/dev/null && wait "$REC_PID" 2>/dev/null
   for p in "${PIDS[@]}"; do kill -INT -- "-$p" 2>/dev/null; done
   sleep 3

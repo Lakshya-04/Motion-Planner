@@ -66,11 +66,16 @@ def voxelize_points(points: np.ndarray, voxel: float = 0.05, max_boxes: int = 20
     pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
     if len(pts) == 0:
         return []
+    if max_boxes <= 0:
+        raise ValueError(f'no room for point-cloud cubes: the obstacle cache has {max_boxes} free slots')
     size = float(voxel)
-    for _ in range(12):
+    for attempt in range(13):      # the voxel size, then 12 doublings
         cells = np.unique(np.floor(pts / size).astype(np.int64), axis=0)
         if len(cells) <= max_boxes:
             break
+        if attempt == 12:
+            raise ValueError(f'{len(cells)} occupied cells at the coarsest voxel size ({size} m) exceed '
+                             f'the {max_boxes} free obstacle slots')
         size *= 2.0
     return [Box(f'pc_{i}', tuple(((c + 0.5) * size).tolist()), (size, size, size)) for i, c in enumerate(cells)]
 
@@ -132,6 +137,32 @@ def ik_weights_from_joint_types(joint_names: Sequence[str], prismatic_joints: Se
     return [float(factor) ** 2 if name in prismatic else 1.0 for name in joint_names]
 
 
+def route_from_source(source: Optional[str]) -> str:
+    """PlanResult.route from cuRobo's `trajectory_source` ('trajopt', or 'graph_fit' and the like for a
+    graph path returned without optimisation). Only a missing/empty source (a cuRobo build that does not
+    report one, where every plan went through the optimiser) or 'trajopt' is 'trajopt'; any other source
+    is 'graph_seed', so an unoptimised path is never labelled optimised."""
+    return 'trajopt' if source in (None, '', 'trajopt') else 'graph_seed'
+
+
+def resolve_ik_weights(joint_names: Sequence[str], ik_weights: Optional[Sequence[float]],
+                       prismatic_joints: Sequence[str] = (), factor: float = PRISMATIC_IK_FACTOR) -> List[float]:
+    """The IK weights the planner uses: `ik_weights` (one per joint; a zero makes IK ignore that joint)
+    when given, else derived from the joint types. A wrong length or a negative entry is an error here,
+    at construction, instead of a failure of every later IK call. Joint names in `prismatic_joints`
+    that the robot does not have are an error too (a typo would silently weigh nothing)."""
+    unknown = sorted(set(prismatic_joints) - set(joint_names))
+    if unknown:
+        raise ValueError(f'prismatic_joints {unknown} are not joints of this robot {list(joint_names)}')
+    if ik_weights is not None and len(ik_weights):
+        if len(ik_weights) != len(joint_names):
+            raise ValueError(f'ik_weights has {len(ik_weights)} entries for {len(joint_names)} joints')
+        if any(w < 0 for w in ik_weights):
+            raise ValueError('ik_weights must not be negative')
+        return [float(w) for w in ik_weights]
+    return ik_weights_from_joint_types(joint_names, prismatic_joints, factor)
+
+
 def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[float],
                      limits: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
                      weights: Optional[Sequence[float]] = None):
@@ -167,6 +198,10 @@ def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[
         if distance < best_distance:
             best, best_distance, best_row = shifted, distance, int(index)
     return None if best is None else (best.tolist(), best_distance, best_row)
+
+
+# upper bound on the states check_motion interpolates (a 1e-9 rad step would build an unbounded list)
+MAX_MOTION_STATES = 100_000
 
 
 class CuroboPlanner:
@@ -220,11 +255,16 @@ class CuroboPlanner:
         self._max_attempts = int(max_attempts)
         self._planner = MotionPlanner(MotionPlannerCfg.create(
             robot=robot, max_goalset=max_goalset, collision_cache=cache, **extra))
+        # IK picks the solution nearest the seed: metres of a prismatic joint must not count as radians.
+        # Resolved (and validated) before the minute-long warmup, which a bad parameter should not cost.
+        try:
+            self._ik_weights = resolve_ik_weights(self.joint_names, ik_weights, prismatic_joints,
+                                                  ik_prismatic_factor)
+        except ValueError:
+            self._planner.destroy()
+            raise
         if warmup:
             self._planner.warmup(enable_graph=True, num_warmup_iterations=3)
-        # IK picks the solution nearest the seed: metres of a prismatic joint must not count as radians.
-        self._ik_weights = (list(ik_weights) if ik_weights else
-                            ik_weights_from_joint_types(self.joint_names, prismatic_joints, ik_prismatic_factor))
         self._world_set = False
         self._boxes: List[Box] = []      # explicit boxes of the current world (kept by set_esdf)
         self._field: Optional[np.ndarray] = None            # current ESDF field (kept by set_world)
@@ -451,9 +491,12 @@ class CuroboPlanner:
         if max_step <= 0:
             raise ValueError('max_step must be positive')
         pts = [np.asarray(q, dtype=np.float64) for q in waypoints]
+        counts = [max(1, int(np.ceil(np.max(np.abs(b - a)) / max_step))) for a, b in zip(pts, pts[1:])]
+        if sum(counts) > MAX_MOTION_STATES:
+            raise ValueError(f'max_step {max_step} would check {sum(counts)} interpolated states '
+                             f'(limit {MAX_MOTION_STATES}): use a larger max_step')
         dense = []
-        for a, b in zip(pts, pts[1:]):
-            n = max(1, int(np.ceil(np.max(np.abs(b - a)) / max_step)))
+        for (a, b), n in zip(zip(pts, pts[1:]), counts):
             dense += [a + (b - a) * k / n for k in range(n)]
         dense.append(pts[-1]) if pts else None
         return all(self.check_states([list(q) for q in dense])) if dense else True
@@ -488,5 +531,5 @@ class CuroboPlanner:
         out.planning_time_s = float(getattr(result, 'total_time', 0.0) or 0.0)
         out.success = True
         out.failure_stage = 'none'
-        out.route = 'trajopt' if getattr(result, 'trajectory_source', 'trajopt') == 'trajopt' else 'graph_seed'
+        out.route = route_from_source(getattr(result, 'trajectory_source', None))
         return out

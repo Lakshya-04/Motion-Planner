@@ -23,8 +23,46 @@ def test_voxelize_only_grows_when_capped():
         assert any(np.all(np.abs(p - np.array(b.center)) <= edge / 2 + 1e-9) for b in boxes)
 
 
+def test_voxelize_with_no_room_is_an_error_not_a_giant_cube():
+    pts = np.random.default_rng(0).uniform(0, 1, size=(50, 3))
+    with pytest.raises(ValueError):
+        voxelize_points(pts, voxel=0.05, max_boxes=0)       # the explicit boxes already fill the cache
+    with pytest.raises(ValueError):
+        voxelize_points(pts, voxel=0.05, max_boxes=-3)
+
+
+def test_voxelize_never_returns_more_than_the_cap_or_an_oversized_cube():
+    # spread over a range no 12 doublings of 0.05 m can cover with one cell per point
+    pts = np.array([[0.0, 0.0, 0.0], [1e6, 0.0, 0.0], [-1e6, 0.0, 0.0]])
+    with pytest.raises(ValueError):
+        voxelize_points(pts, voxel=0.05, max_boxes=1)
+    boxes = voxelize_points(np.random.default_rng(1).uniform(0, 1, size=(500, 3)), voxel=0.05, max_boxes=1)
+    assert len(boxes) == 1 and boxes[0].size[0] <= 0.05 * 2 ** 12    # fits at a size whose cell count was checked
+    assert np.all(np.abs(np.array(boxes[0].center) - 0.5) <= boxes[0].size[0])
+
+
 def test_voxelize_empty():
     assert voxelize_points(np.zeros((0, 3))) == []
+
+
+def test_resolve_ik_weights_validates_length_and_keeps_zeros():
+    from curobo_bridge.planner import resolve_ik_weights
+    names = ['lift', 'a', 'b']
+    assert resolve_ik_weights(names, [36.0, 1.0, 0.0]) == [36.0, 1.0, 0.0]     # zero = ignore the joint
+    assert resolve_ik_weights(names, None, ['lift'], 6.0) == [36.0, 1.0, 1.0]
+    assert resolve_ik_weights(names, []) == [1.0, 1.0, 1.0]
+    with pytest.raises(ValueError, match='3 joints'):
+        resolve_ik_weights(names, [1.0, 1.0])                                  # the old node dropped zeros: 2 for 3
+    with pytest.raises(ValueError, match='negative'):
+        resolve_ik_weights(names, [1.0, -1.0, 1.0])
+    with pytest.raises(ValueError, match='not joints'):
+        resolve_ik_weights(names, None, ['lft'])                               # a typo must not be ignored silently
+
+
+def test_route_is_explicit():
+    from curobo_bridge.planner import route_from_source
+    assert route_from_source('trajopt') == 'trajopt' and route_from_source(None) == 'trajopt'
+    assert route_from_source('graph_fit') == 'graph_seed' and route_from_source('graph_seed') == 'graph_seed'
 
 
 def test_plan_result_duration():
@@ -101,6 +139,42 @@ def test_points_become_obstacles_and_too_many_boxes_are_an_error(planner):
     too_many = [Box(f'b{i}', (2.0, 2.0, 2.0), (0.01, 0.01, 0.01)) for i in range(planner.max_boxes + 1)]
     with pytest.raises(ValueError):
         planner.set_world(too_many)
+    planner.clear_world()
+
+
+def _goal_near(planner):
+    return list(np.array(planner.default_joint_state) + np.array([0.4, -0.2, 0.2, 0.1, 0.0, 0.2, 0.0]))
+
+
+@needs_gpu
+def test_clear_world_really_removes_the_cuboids(planner):
+    """cuRobo's cache keeps the previous voxel layer when a scene omits it (see _voxel_scene); cuboids must
+    not behave the same way: after clear_world a blocking box may not linger."""
+    start = planner.default_joint_state
+    goal = _goal_near(planner)
+    assert planner.check_states([start]) == [True] and planner.plan_joint(start, goal).success
+    planner.set_world([Box('swallow', (0.0, 0.0, 0.4), (3.0, 3.0, 3.0))])
+    assert planner.check_states([start]) == [False]
+    assert not planner.plan_joint(start, goal).success
+    planner.clear_world()
+    assert planner.check_states([start]) == [True]
+    r = planner.plan_joint(start, goal)
+    assert r.success, r.message
+
+
+@needs_gpu
+@pytest.mark.parametrize('blocker_first', [True, False])
+def test_a_smaller_world_drops_the_cuboids_it_omits(planner, blocker_first):
+    start = planner.default_joint_state
+    goal = _goal_near(planner)
+    blocker = Box('swallow', (0.0, 0.0, 0.4), (3.0, 3.0, 3.0))
+    far = Box('far', (3.0, 3.0, 3.0), (0.1, 0.1, 0.1))        # nowhere near the arm
+    planner.set_world([blocker, far] if blocker_first else [far, blocker])
+    assert planner.check_states([start]) == [False]
+    assert planner.set_world([far]) == 1                       # the blocker is no longer in the scene
+    assert planner.check_states([start]) == [True]
+    r = planner.plan_joint(start, goal)
+    assert r.success, r.message
     planner.clear_world()
 
 
@@ -299,3 +373,12 @@ def test_fallback_returns_a_valid_seed_when_trajopt_fails_on_the_real_planner(pl
     assert mp.config.always_run_trajopt and mp.config.run_trajopt_on_graph_seed
     normal = planner.plan_joint(start, goal)
     assert normal.success and normal.route == 'trajopt'
+
+
+def test_check_motion_with_a_tiny_step_is_refused_not_unbounded():
+    from curobo_bridge.planner import CuroboPlanner
+    p = CuroboPlanner.__new__(CuroboPlanner)
+    p.check_states = lambda states: [True] * len(states)
+    with pytest.raises(ValueError, match='max_step'):
+        p.check_motion([[0.0, 0.0], [1.0, 1.0]], max_step=1e-9)
+    assert p.check_motion([[0.0, 0.0], [1.0, 1.0]], max_step=0.1)
