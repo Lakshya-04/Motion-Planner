@@ -169,16 +169,19 @@ request)` (`core/horizontal_stands.hpp`) is the counterpart for a ceiling (tool 
 pointing down). The tool axis is vertical, so the map has no azimuth: a cell depends only on the horizontal
 distance and the height between base and target, and one stand reaches a ring around itself.
 
-- Search grid: the patch footprint (bounding box of the targets) plus `margin`, step `grid_step`; stands go under or
-  over the patch, there is no free side. Ranking per station: fewest unreachable targets, then fewest lift bands,
+- Search grid: the patch footprint (bounding box of the targets) plus max(`margin`, the map's `xy_extent`), step
+  `grid_step`: a station reaches a ring up to `xy_extent` around itself, so a target only reachable at 0.9 m needs
+  stations that far out. Stands go under or over the patch, there is no free side. Ranking per station: fewest unreachable targets, then fewest lift bands,
   then base travel time (with a base model and `from`) or distance to the middle of the patch. Scan order is fixed,
   so the result is deterministic.
 - Lift: `planLiftBands` over `lift_min..lift_max` gives the lift height per stand. A target whose world height no lift
-  position brings into the map's vertical window (`heightWithinLiftReach`) goes to `out_of_lift_range`, which is
+  position brings into the map's vertical window (`heightWithinLiftReach`; the window is `z_min` up to
+  `z_min + nz * resolution`, the map rounds `z_max` up to whole cells) goes to `out_of_lift_range`, which is
   also part of `plan.unreachable`, so "too high for lift plus arm" is told apart from "no stand within horizontal reach".
 - A patch wider than one stand's reach is covered by the same greedy loop as `planStands` (most remaining targets
   per round, `max_stands`, `not_planned` when capped); indices are into the request.
-- Not done: base footprint or obstacle clearance (a stand is any arm base position the map accepts; yaw is 0), the
+- Not done: base footprint or obstacle clearance (a stand is any arm base position the map accepts; with a base model and a start the yaw is the arrival
+  heading, without them 0), the
   set-cover strategy (greedy only), a check that the tool axis really is vertical (an inclined ceiling goes through
   the same map query but is not the case this was written for), a ROS service, use by `manipulation_manager`.
   Tests: `test/core/horizontal_stands_test.cpp` (9: one-stand ceiling, wide patch with several stands, ceiling above
@@ -200,9 +203,9 @@ clearance for the base model; any list of `CandidateStand` works) and returns a 
    textbook bound holds: cost within H(n) <= 1 + ln(n) of the cheapest cover in those costs, so the stand count
    is within (1 + penalty) * H(n) of the fewest stands. Stands made redundant are dropped; each target goes to
    the chosen stand where its margin is highest (ties to the earlier pick).
-3. Open tour from `start` (with a base model: `travelTime`; without one: metres, first stop is the lowest along
-   the wall): nearest neighbour then 2-opt, and the cover's own order as a second 2-opt seed, so the tour is
-   never longer than the cover's order. `time_budget_s` (default 2 s, 0 disables the clock) and
+3. Open tour from `start` (with a base model: `travelTime`; without one: metres, the nearest-neighbour seed starts at
+   the lowest stand along the wall and 2-opt may reorder): nearest neighbour then 2-opt, and the cover's own order as a second 2-opt seed, so the tour is
+   never longer than the cover's order. `time_budget_s` (default 2 s, 0 disables the clock; the clock starts with the 2-opt step, not with scoring) and
    `max_two_opt_passes` bound it; `tour_budget_hit` says it stopped early.
 
 Targets no candidate reaches are never dropped: they come back in `unreachable`, `success` is false with code
@@ -218,6 +221,12 @@ walls (`global_stands_test`) only, no simulator.
 
 ## Limits and next steps
 
+- **Request validation.** Search grids are checked before they are enumerated: `grid_step` must be finite and
+  positive, standoff, margin and lift range finite, and a grid may have at most 250000 points (`kMaxGridPoints`),
+  at most 100000 lift heights. `selectStands(request)` answers `invalid_request`, `planHorizontalStands` sets
+  `code = kInvalidRequest` with a message (all targets in `not_planned`); `chooseStation` and
+  `chooseHorizontalStation` return `found = false`. A vertical tool axis is stored at y* = 0 exactly, so inverse
+  queries and forward queries agree for every azimuth.
 - **Sampling density.** Uniform joint sampling leaves cells empty at fine resolution: 3 M samples
   set 11% of a 5 cm map. Use at least ten samples per reachable cell, or a coarser map; the
   saturated-cell count in the build stats shows where more samples add nothing.
