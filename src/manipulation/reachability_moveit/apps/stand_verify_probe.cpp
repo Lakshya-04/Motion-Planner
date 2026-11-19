@@ -7,6 +7,7 @@
 // (PortStandVerifier over MoveItPlanningBackend), and prints how many RM4D confirms. It also samples the
 // triples RM4D rejects, to see how pessimistic it is, and runs selectStands with and without the verifier.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -62,14 +63,17 @@ int main(int argc, char ** argv)
   const auto heights = heightRange(req.lift_min, req.lift_max, req.lift_step);
   std::printf("targets %zu, candidate stands %zu, lift heights %zu\n", req.targets_world.size(), candidates.size(), heights.size());
 
-  auto backend = std::make_shared<motion_planner::MoveItPlanningBackend>();
+  // Two backends: each keeps one MoveGroupInterface, and rebuilding it on every group switch (arm for IK,
+  // lift_arm for collision) costs about 0.3 s per call.
+  auto ik_backend = std::make_shared<motion_planner::MoveItPlanningBackend>();
+  auto col_backend = std::make_shared<motion_planner::MoveItPlanningBackend>();
   reachability_moveit::PortVerifierConfig cfg;
   cfg.ik_group = P("ik_group", std::string("arm"));
   cfg.ik_link = P("ik_link", std::string("tcp_link"));
   cfg.collision_group = P("collision_group", std::string("lift_arm"));
   cfg.arm_base_in_plan.translation() = Eigen::Vector3d(P("arm_base_x", 0.0), P("arm_base_y", 0.0), mount_z);
   cfg.lift_max = lift_max;
-  auto verifier = std::make_shared<reachability_moveit::PortStandVerifier>(cfg, backend, backend);
+  auto verifier = std::make_shared<reachability_moveit::PortStandVerifier>(cfg, ik_backend, col_backend);
 
   // Triples (candidate, target, height) by what RM4D says.
   struct Triple {size_t c, t; double h;};
@@ -90,6 +94,7 @@ int main(int argc, char ** argv)
       return out;
     };
   auto run = [&](const char * label, const std::vector<Triple> & all) {
+      const auto t0 = std::chrono::steady_clock::now();
       const auto picked = sample(all);
       std::map<std::string, size_t> counts;
       for (const auto & tr : picked) {
@@ -99,6 +104,7 @@ int main(int argc, char ** argv)
       std::printf("%s: %zu triples in total, %zu sampled:", label, all.size(), picked.size());
       for (const auto & [k, n] : counts) {std::printf("  %s %zu", k.c_str(), n);}
       const size_t ok = counts["ok"];
+      std::printf(" (%.1f s)", std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
       std::printf("  -> IK confirms %.1f%%\n", picked.empty() ? 0.0 : 100.0 * static_cast<double>(ok) / static_cast<double>(picked.size()));
     };
   run("RM4D reachable    ", promised);
