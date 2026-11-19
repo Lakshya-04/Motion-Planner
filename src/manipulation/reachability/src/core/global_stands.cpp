@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <map>
 #include <numeric>
 
 namespace reachability
@@ -121,9 +122,16 @@ std::vector<CandidateStand> makeCandidateStands(const StationRequest & q)
   return out;
 }
 
-StandSelection selectStands(
+namespace
+{
+using PairMargins = std::map<std::pair<size_t, size_t>, double>;   // (candidate, target) -> margin; 0 blocks
+}
+
+namespace
+{
+StandSelection selectOnce(
   const Map4D & map, const StationRequest & q, const std::vector<CandidateStand> & candidates,
-  const std::optional<Stand> & start_in, const StandSelectionOptions & opt)
+  const std::optional<Stand> & start_in, const StandSelectionOptions & opt, const PairMargins & overrides)
 {
   const auto t0 = Clock::now();
   StandSelection res;
@@ -165,6 +173,11 @@ StandSelection selectStands(
       const auto n_ok = static_cast<size_t>(std::count(reach[t].begin(), reach[t].end(), true));
       if (n_ok == 0) {continue;}
       margin[c][t] = static_cast<double>(n_ok) / static_cast<double>(heights.size());
+      const auto ov = overrides.find({c, t});
+      if (ov != overrides.end()) {
+        margin[c][t] = ov->second;   // the verifier's margin; 0 = refused, so not covered from here
+        if (margin[c][t] <= 0.0) {continue;}
+      }
       sum += margin[c][t];
       ++cover_count[c];
       coverable[t] = true;
@@ -298,6 +311,107 @@ StandSelection selectStands(
         std::to_string(res.unreachable.size()) + " of " + std::to_string(nt) + " targets are reachable from no candidate stand");
   }
   return finish(StandSelectionCode::kOk, "ok");
+}
+
+bool vv_all_cached(const SelectedStand & st, const std::map<std::pair<size_t, size_t>, TargetReport> & cache)
+{
+  for (const size_t t : st.targets) {
+    if (!cache.count({st.candidate_index, t})) {return false;}
+  }
+  return true;
+}
+}  // namespace
+
+StandSelection selectStands(
+  const Map4D & map, const StationRequest & q, const std::vector<CandidateStand> & candidates,
+  const std::optional<Stand> & start, const StandSelectionOptions & opt)
+{
+  if (!opt.verifier) {return selectOnce(map, q, candidates, start, opt, {});}
+
+  // Verification pass: confirm every chosen stand's targets, block what is refused, re-rank by the IK
+  // margins, recompute the cover. Each round verifies at least one new pair, so it ends.
+  const auto heights = heightRange(q.lift_min, q.lift_max, q.lift_step);
+  PairMargins overrides;
+  std::map<std::pair<size_t, size_t>, TargetReport> cache;
+  VerificationSummary sum;
+  sum.enabled = true;
+  StandSelection res;
+  const size_t max_rounds = std::max<size_t>(1, opt.verify.max_rounds);
+  for (size_t round = 1; round <= max_rounds; ++round) {
+    res = selectOnce(map, q, candidates, start, opt, overrides);
+    sum.rounds = round;
+    bool fresh = false;
+    for (auto & st : res.stands) {
+      std::vector<size_t> todo;
+      std::vector<std::vector<double>> hs;
+      const auto reach = reachableByHeight(map, q.targets_world, st.stand.arm_xy.x(), st.stand.arm_xy.y(), heights,
+          q.arm_mount_offset_z);
+      for (const size_t t : st.targets) {
+        if (cache.count({st.candidate_index, t})) {continue;}
+        std::vector<double> ok;
+        for (size_t k = 0; k < heights.size(); ++k) {if (reach[t][k]) {ok.push_back(heights[k]);}}
+        todo.push_back(t);
+        hs.push_back(std::move(ok));
+      }
+      if (todo.empty()) {continue;}
+      fresh = true;
+      const auto v = verifyStand(*opt.verifier, st.stand, q.targets_world, todo, hs, opt.verify);
+      sum.verifier_calls += v.verifier_calls;
+      for (const auto & r : v.targets) {
+        cache[{st.candidate_index, r.target}] = r;
+        ++sum.verified_pairs;
+        if (r.confirmed) {
+          ++sum.confirmed_pairs;
+          overrides[{st.candidate_index, r.target}] = r.margin;
+        } else {
+          overrides[{st.candidate_index, r.target}] = 0.0;
+          sum.refused.push_back({st.candidate_index, r.target, r.reason});
+        }
+      }
+    }
+    if (!fresh) {break;}
+    if (round == max_rounds) {sum.converged = false;}
+  }
+  if (!sum.converged) {
+    // The last cover was never fully verified: re-run it so the result is consistent with what is known.
+    res = selectOnce(map, q, candidates, start, opt, overrides);
+  }
+  // Report: per stand, the verified targets only (confirmed), IK margins and the confirmed lift bands.
+  for (auto & st : res.stands) {
+    std::vector<size_t> verified_targets;
+    StandVerification vv;
+    vv.stand = st.stand;
+    for (const size_t t : st.targets) {
+      const auto it = cache.find({st.candidate_index, t});
+      if (it != cache.end() && it->second.confirmed) {vv.targets.push_back(it->second);}
+    }
+    // Rebuild the aggregate from the cache: the bands over the confirmed targets at their best heights.
+    vv.confirmed = vv.targets.size();
+    vv.coverage = st.targets.empty() ? 1.0 : static_cast<double>(vv.confirmed) / static_cast<double>(st.targets.size());
+    double msum = 0.0;
+    std::map<double, std::vector<size_t>> at;
+    for (const auto & r : vv.targets) {msum += r.margin; at[r.best_height].push_back(r.target);}
+    vv.mean_margin = vv.confirmed ? msum / static_cast<double>(vv.confirmed) : 0.0;
+    for (const auto & [h, ts] : at) {vv.bands.push_back({h, ts});}
+    st.verified = vv_all_cached(st, cache);
+    st.verification = std::move(vv);
+    if (st.verification.confirmed > 0) {
+      st.mean_margin = st.verification.mean_margin;
+      st.lift_bands.bands = st.verification.bands;   // the bands IK confirmed, not the RM4D ones
+      st.lift_bands.unreachable.clear();
+    }
+  }
+  for (const size_t t : res.unreachable) {
+    for (const auto & r : sum.refused) {
+      if (r.target == t) {res.rejected_by_verifier.push_back(t); break;}
+    }
+  }
+  res.verification = std::move(sum);
+  if (!res.unreachable.empty() && !res.rejected_by_verifier.empty()) {
+    res.message += "; " + std::to_string(res.rejected_by_verifier.size()) +
+      " of them reachable by RM4D but refused by IK / collision checking";
+  }
+  return res;
 }
 
 StandSelection selectStands(
