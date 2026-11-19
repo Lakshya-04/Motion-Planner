@@ -106,6 +106,15 @@ mp_record() {
   fi
 }
 
+# Arm collisions the pass score does not see (docs/sim_mujoco.md): the sim logs UNEXPECTED_CONTACT for a new penetrating
+# body pair (self collision, an arm link on the wall or an obstacle; the tool on the wall is not listed).
+mp_report_contacts() {
+  local n
+  n=$(grep -c "UNEXPECTED_CONTACT t=" "$OUT/sim_launch.log" 2>/dev/null || true)
+  echo "unexpected contacts (new body pairs): ${n:-0}"
+  grep -h "UNEXPECTED_CONTACT t=" "$OUT/sim_launch.log" 2>/dev/null | cut -c1-200 | head -10
+}
+
 mp_run_and_score() {
   # ready_pose.py is an unplanned joint-space move to the contact FREE pose 3 cm in front of the wall; a non-contact
   # pass sets MP_SKIP_READY=1 and lets the manager plan the first move from the stowed pose instead
@@ -129,5 +138,6 @@ mp_run_and_score() {
     sc=$?
     echo "score exit code $sc"
   fi
+  mp_report_contacts
   if [ $rc -ne 0 ]; then MP_EXIT=$rc; else MP_EXIT=$sc; fi
 }

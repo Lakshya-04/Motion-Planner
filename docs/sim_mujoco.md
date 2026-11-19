@@ -604,6 +604,20 @@ in-band 0.45. The unchanged manager pass (base at the origin, `run_manager_pass.
 earlier run with 3 lost the first column, coverage 0.68), and the F/T peak was 34 N in another run (the scorer limit passed).
 A wall needing several stands: see the multi-stand pass below.
 
+### What the score does not check, and the collision monitor
+
+`score_run` counts the tool point entering an obstacle's footprint (a geometric check on the recorded TCP path). It does
+not look at the arm: self collision, and an arm link touching the wall or an obstacle, were not measured, so an all-pass
+score said nothing about them. The MuJoCo model does contain collision geoms for every link (pairs within `ignore_hops`
+revolute joints are excluded), so such contacts exist physically but nothing reported them.
+
+`MujocoSim::scanUnexpectedContacts` now runs every control step and logs
+`UNEXPECTED_CONTACT t=.. <bodyA> <-> <bodyB> [self|link_world] depth=..` the first time a body pair penetrates
+(`self`: robot body against robot body, the tool included; `link_world`: a non-tool robot body against the wall or an
+obstacle). The tool on the wall is the intended contact and is not listed. On shutdown the sim logs
+`UNEXPECTED_CONTACT_SUMMARY` with steps and deepest penetration per pair (`none` if clean). Check a run with
+`grep UNEXPECTED_CONTACT <out>/sim_launch.log`. Unit-tested on two small models; not yet read from a full pass.
+
 ### Scenario set (obstacles on the wall)
 
 `scripts/run_scenarios.sh [-n RUNS] [-l] [scenario ...]` runs named walls through the manager pass and prints one row per run;

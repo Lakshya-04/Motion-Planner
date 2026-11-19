@@ -211,3 +211,37 @@ TEST(MujocoSimDepth, RangeNoiseIsAppliedAlongTheRay)
   EXPECT_NEAR(sum / n, 0.0, 0.002);
   EXPECT_NEAR(std::sqrt(sum2 / n), 0.005, 0.0015);
 }
+
+TEST(MujocoSim, UnexpectedContactsListSelfAndLinkOnWorldButNotTheTool)
+{
+  MujocoSim sim(std::string(SIM_MUJOCO_TEST_DATA) + "/overlaps.xml", {"slide"});
+  sim.advance(0.002);
+  std::vector<std::string> fresh;
+  sim.scanUnexpectedContacts(fresh);
+  bool self = false;
+  bool link_world = false;
+  for (const auto & s : fresh) {
+    EXPECT_EQ(s.find("carriage"), std::string::npos) << "the tool on the wall is the intended contact: " << s;
+    self = self || (s.find("link_a <-> link_b [self]") != std::string::npos);
+    link_world = link_world || (s.find("link_a <-> world [link_world]") != std::string::npos);
+  }
+  EXPECT_TRUE(self);
+  EXPECT_TRUE(link_world);
+  // a second scan counts again but does not report the same pair twice
+  fresh.clear();
+  sim.scanUnexpectedContacts(fresh);
+  EXPECT_TRUE(fresh.empty());
+  EXPECT_NE(sim.unexpectedContactSummary().find("steps=2"), std::string::npos);
+}
+
+TEST(MujocoSim, NoUnexpectedContactsWhenOnlyTheToolTouches)
+{
+  MujocoSim sim(kModel, {"slide"});
+  sim.setJointPositions({0.2});
+  sim.setCommand(0, 0.5, 0.0);
+  sim.advance(1.0);  // the pad is pressed into the wall
+  std::vector<std::string> fresh;
+  sim.scanUnexpectedContacts(fresh);
+  EXPECT_TRUE(fresh.empty());
+  EXPECT_EQ(sim.unexpectedContactSummary(), "none");
+}
