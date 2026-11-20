@@ -427,8 +427,10 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    plan for each (`fsp_backend=curobo`, 10 to 13 s of planning), but every one of those ended `partially_completed` at EXECUTION
    (150 to 500 ms into the move), and the retry was planned by MoveIt/OMPL (`fsp_backend=ompl`, 35 ms) and completed; the stow was
    planned by OMPL after cuRobo found no path. So the workflow completes with cuRobo configured as the free-space planner, but
-   no cuRobo trajectory has yet executed to completion on the sim arm. Why they stop early is not isolated (the controller log
-   shows nothing but the TOTG warning). The second stand's cuRobo world load also timed out once (`cuRobo planner call timed out`, 10 s attempt
+   no cuRobo trajectory has yet executed to completion on the sim arm. Cause found afterwards: the cuRobo adapter never set `PlanningResult::waypoints_completed`
+   (OMPL sets 1 for a joint target), so the manager read each successful cuRobo plan as 0 of 1 waypoints done and labelled it
+   `partially_completed`, which started the retry; fixed in this change (a successful cuRobo plan counts as one waypoint). Whether the
+   cuRobo trajectories themselves executed correctly (the 150 to 500 ms executions are short) is not shown; rerun to see. The second stand's cuRobo world load also timed out once (`cuRobo planner call timed out`, 10 s attempt
    limit while the node was busy), so stand 1 planned against a stale or empty cuRobo world.
 
    Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
