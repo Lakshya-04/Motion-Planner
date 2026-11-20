@@ -85,15 +85,33 @@ runs the checks locally before opening a pull request. The commands are collecte
 
 ## Commits and pull requests
 
-- One concern per pull request, branched from `main`; small commits with a message that says what changed
-  and why. Imperative subject, an area prefix is welcome (`reachability: ...`, `docs: ...`).
+The conventions follow what large open-source projects do (the Linux kernel's patch guide, Conventional Commits,
+Keep a Changelog, the ROS 2 and MoveIt contribution guides).
+
+- **Linear history.** `main` is never force-pushed and has no merge commits. Pull requests are merged with
+  **squash**, so one pull request is one commit on `main` (the commit message is the pull request's title and
+  description). Keep a branch current with `git rebase origin/main`, not by merging `main` into it.
+- **One theme per pull request**, branched from `main`: a feature or fix together with its tests, docs and
+  CHANGELOG entry. Do not open a pull request for a one-line follow-up or a documentation-only finding that
+  belongs to work still in flight; add it to that branch. Review size: a pull request a reviewer can read in
+  one sitting; split by theme, not by file.
+- **Commit subjects use [Conventional Commits](https://www.conventionalcommits.org/):** `type(scope): subject`,
+  with type one of `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `build`, `chore`; scope is the package or
+  area (`reachability`, `sim_mujoco`, `curobo`, `docker`). Imperative mood, no trailing full stop, 72
+  characters or fewer. A `!` after the type (or a `BREAKING CHANGE:` line in the body) marks an incompatible
+  change.
+- **The body says why**, not only what: the problem, the approach, what was measured (with the host load for
+  timings), and what is not verified. Wrap at 72 columns. Reference issues and pull requests by number.
+- Prefer commits that build and pass their own tests, so `git bisect` stays usable.
+- Public history is not rewritten. The only exception so far is the one-time consolidation on 2026-11-20 (561
+  commits into 15 milestones with identical content); the trees are unchanged.
 - **No AI attribution** in commits or pull request text: no `Co-Authored-By` lines for tools, no
   "generated with" lines.
 - **No company or earlier-project names** in code, docs, commit messages or test data. Describe a design
   by what it does; cite public papers and open-source projects by name.
 - Do not commit generated artefacts (`build/`, `install/`, `log/`, reachability maps, robot assets under
   `robots/`) or secrets. `.claude/` stays out of the repository.
-- Update the docs and [CHANGELOG.md](CHANGELOG.md) (under `Unreleased`) with the change, and tick or edit
+- Update the docs and [CHANGELOG.md](CHANGELOG.md) (under `Unreleased`, Keep a Changelog sections) with the change, and tick or edit
   the matching item in [docs/ROADMAP.md](docs/ROADMAP.md) with its evidence.
 - In the pull request: what changed, how you tested it (which of the checks above), and what you did not
   verify.
