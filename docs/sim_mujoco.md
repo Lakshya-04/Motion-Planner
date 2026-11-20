@@ -419,6 +419,18 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    not; not confirmed (a `check_motion` on the docked pose would show it). Consequence: a docked-to-stow plan by cuRobo does not
    exist, so the manager waits out its timeout; a MoveIt fallback for failed free-space segments is what a pass needs.
 
+   **Fourth run, with `free_space_fallback: moveit_ompl` (PR #141) in `planning_curobo.yaml`: the pass passes.** MuJoCo,
+   `two_panels_plain`, two stands, one run, 2026-11-20, node with `--max-boxes 3000`, default per-call timeout 60 s: manager
+   `10 done, 0 partial, 0 failed`, wall coverage 1.0 (2790 of 2790 cells), scorer `passed: true`, peak force 72.4 N (the pass's
+   force trace in-band fraction 0.35, RMS error 3.7 N; the live feedback read 32.2 N at the end; where the 72.4 N occurred was not checked), collision monitor: one `UNEXPECTED_CONTACT` at t = 0.008 (the known `lift_carriage_link <-> lift_stage_2_link`
+   depth 0 at start). **What cuRobo did in it, honestly:** of the 12 free-space segments, cuRobo handled 6 and produced a
+   plan for each (`fsp_backend=curobo`, 10 to 13 s of planning), but every one of those ended `partially_completed` at EXECUTION
+   (150 to 500 ms into the move), and the retry was planned by MoveIt/OMPL (`fsp_backend=ompl`, 35 ms) and completed; the stow was
+   planned by OMPL after cuRobo found no path. So the workflow completes with cuRobo configured as the free-space planner, but
+   no cuRobo trajectory has yet executed to completion on the sim arm. Why they stop early is not isolated (the controller log
+   shows nothing but the TOTG warning). The second stand's cuRobo world load also timed out once (`cuRobo planner call timed out`, 10 s attempt
+   limit while the node was busy), so stand 1 planned against a stale or empty cuRobo world.
+
    Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
    pose, `route=trajopt`, success), so the robot model is not the problem; the collision message came with the wall loaded. The
    `prime_continuity` segments planned fine (`path_fraction=1`) and then ended `partial_completion` at execution (a zero-length

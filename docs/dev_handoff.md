@@ -29,8 +29,11 @@ when something here changes.
    state inside cuRobo's activation distance of the 0.05 m wall voxels; not confirmed. See `docs/sim_mujoco.md`. Later the same day: the refusals were the
    bridge's `--max-boxes 256` coarsening the wall to 0.2 m slabs (use 3000); with that, stand 0 runs under cuRobo, but cuRobo
    finds no docked-to-stow path even in an empty world (low lift + arm swung out, likely sphere-model collision), so the stow
-   never finishes. Next: `check_motion` on the docked pose, the cuRobo robot spheres for low lift, and a MoveIt fallback for
-   failed free-space segments; only then a film and a Gazebo pass.
+   never finishes. `check_motion` confirms it: the docked arm pose is invalid at lift 0.0 and 0.01 and valid from 0.05. With
+   `free_space_fallback: moveit_ompl` (#141) the two-stand pass PASSES end to end (10 of 10 columns, coverage 1.0), but
+   MoveIt/OMPL did the work for the segments cuRobo planned (its trajectories stop `partially_completed` at execution; cause not
+   isolated) and for the stow. Next: why cuRobo trajectories stop early at execution, the cuRobo robot spheres at low lift, and the
+   per-stand world load timing out; then a film and a Gazebo pass.
 3. **Verified stand selection is slow** (about 5 minutes on one wall, not converged at 64 rounds);
    the manager and `~/plan_stands` do not use verified stands yet.
 4. **Dockerfile layer cache:** any `package.xml` change invalidates the dependency layers and the
