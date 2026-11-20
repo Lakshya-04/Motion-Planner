@@ -174,8 +174,17 @@ executor reports and never stops the arm.
 `tool_actuation_node` is the thin wrapper (not started by the manager): `~/window` (Float64MultiArray `[on_s, end_s]`),
 `~/trajectory_time`, `~/paused`, `~/speed_ratio`, `~/cancel`, `~/fault`, echo topic (`echo_topic`, default
 `/tool/valve_state`, empty for none) in; `valve_topic` (`/tool/valve`) and `~/status` out. The valve is closed at start
-and on node shutdown. Not yet done: the manager does not publish the window or trajectory time, and nothing has run
-against a real valve.
+and on node shutdown.
+
+Feeding it from the manager (opt-in, `contact: false` only): `tool_actuation_feed:=true` (and `tool_actuation_node`,
+default `tool_actuation`) wraps the execution port in `ToolFeedExecutionPort`
+(`core/execution/tool_feed_execution_port.hpp`, `tool_feed_execution_port_test`). During a spray stroke the trajectory is
+the tool window: the manager publishes `[0, last time_from_start]` to `<node>/window`, then the trajectory time to
+`<node>/trajectory_time` at 50 Hz, the end time on success and `<node>/cancel` on failure or exception. The manager stops
+opening the valve itself (it only sends "off" around the stroke as a backstop), so start `tool_actuation_node` with the
+same `valve_topic`. Limits: the trajectory time is the elapsed wall time since the execution call, not the controller's
+reported progress; the manager node wiring is built but not run against the node or a sim, and pauses are column-boundary
+only so `~/paused` is not fed. No echo in the sim, nothing has run against a real valve.
 
 ## Non-contact column in the manager
 

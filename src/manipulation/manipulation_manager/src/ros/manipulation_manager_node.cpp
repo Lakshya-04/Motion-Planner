@@ -39,6 +39,7 @@
 #include "reachability_msgs/srv/plan_stands.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float64.hpp"
+#include "std_msgs/msg/float64_multi_array.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "tf2/time.h"
 #include "tf2_ros/buffer.h"
@@ -52,6 +53,7 @@
 #include "ros_adapters/rclcpp_logger.hpp"
 
 #include "manipulation_manager/ros/execution/retiming_wiring.hpp"
+#include "manipulation_manager/core/execution/tool_feed_execution_port.hpp"
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/coverage_task.hpp"
 #include "manipulation_manager/core/column_ordering.hpp"
@@ -139,6 +141,42 @@ namespace
 // axis. WallDirection::outwardNormalQuaternion() gives it for any wall direction; for the default
 // +y wall it equals the constant coverage_pass_demo_node.cpp uses.
 }  // namespace
+
+/// Feeds `tool_actuation_node` over its topics (`<node>/window`, `<node>/trajectory_time`, `<node>/cancel`).
+class TopicToolWindowSink : public manipulation_manager::ToolWindowSink
+{
+public:
+  TopicToolWindowSink(rclcpp::Node & node, const std::string & executor_node)
+  {
+    const auto qos = rclcpp::QoS(10).reliable();
+    window_ = node.create_publisher<std_msgs::msg::Float64MultiArray>("/" + executor_node + "/window", qos);
+    time_ = node.create_publisher<std_msgs::msg::Float64>("/" + executor_node + "/trajectory_time", qos);
+    cancel_ = node.create_publisher<std_msgs::msg::Bool>("/" + executor_node + "/cancel", qos);
+  }
+  void startWindow(double on_s, double end_s) override
+  {
+    std_msgs::msg::Float64MultiArray m;
+    m.data = {on_s, end_s};
+    window_->publish(m);
+  }
+  void trajectoryTime(double t) override
+  {
+    std_msgs::msg::Float64 m;
+    m.data = t;
+    time_->publish(m);
+  }
+  void cancel() override
+  {
+    std_msgs::msg::Bool m;
+    m.data = true;
+    cancel_->publish(m);
+  }
+
+private:
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr window_;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr time_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr cancel_;
+};
 
 class ManipulationManagerNode : public rclcpp::Node
 {
@@ -378,7 +416,18 @@ public:
     }
     execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
       shared_from_this(), "/" + controller_name_ + "/follow_joint_trajectory");
-    manager_.setExecutionPort(wrapWithRetiming(shared_from_this(), execution_adapter_, planning_group_));
+    // Opt-in: the tool actuation executor (tool_actuation_node) owns the valve during a spray stroke. The
+    // manager then publishes the stroke's window and trajectory time to it and no longer opens the valve itself.
+    std::shared_ptr<manipulation_manager::ExecutionPort> exec_port = execution_adapter_;
+    if (this->declare_parameter<bool>("tool_actuation_feed", false) && !contact_) {
+      tool_feed_ = std::make_shared<manipulation_manager::ToolFeedExecutionPort>(
+        execution_adapter_,
+        std::make_shared<TopicToolWindowSink>(
+          *this, this->declare_parameter<std::string>("tool_actuation_node", "tool_actuation")));
+      exec_port = tool_feed_;
+      RCLCPP_INFO(this->get_logger(), "tool actuation feed on: the executor node drives the valve during a stroke");
+    }
+    manager_.setExecutionPort(wrapWithRetiming(shared_from_this(), exec_port, planning_group_));
     if (!contact_) {
       valve_.update(true);   // force the first command out: the valve is explicitly closed at start
       setValve(false);
@@ -408,7 +457,11 @@ public:
   /// Opens or closes the spray valve; only a change is published.
   void setValve(bool open)
   {
-    if (!valve_.update(open)) {
+    if (tool_feed_) {
+      // The executor opens the valve from the stroke's trajectory time; here only "off" goes out (always, as a
+      // backstop that does not depend on the gate's state).
+      if (open) {return;}
+    } else if (!valve_.update(open)) {
       return;
     }
     std_msgs::msg::Bool msg;
@@ -1803,8 +1856,10 @@ private:
       stroke_seg.waypoint_indices.push_back(i);
     }
     setValve(steps.valve);
+    if (tool_feed_) {tool_feed_->arm(steps.valve);}   // this trajectory is the tool window
     const auto stroke_exec = manager_.executeMotionSegments(
       frame_id_, {stroke_seg}, waypoints, planning_group_);
+    if (tool_feed_) {tool_feed_->arm(false);}
     setValve(false);
     RCLCPP_INFO(
       this->get_logger(), "%s: spray success=%d completed=%zu", intent.label.c_str(),
@@ -1899,6 +1954,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr force_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr valve_pub_;
   ValveGate valve_;
+  std::shared_ptr<manipulation_manager::ToolFeedExecutionPort> tool_feed_;   // null unless tool_actuation_feed
   bool contact_{true};
   double spray_extra_standoff_{0.0};
 
