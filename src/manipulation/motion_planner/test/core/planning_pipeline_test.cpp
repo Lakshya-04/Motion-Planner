@@ -237,6 +237,8 @@ TEST(PlanningPipelineTest, FreeSpaceFallbackPlansWhenThePrimaryFails)
   EXPECT_TRUE(r.planning_result.success);
   EXPECT_EQ(f.calls.free_space, 2) << "primary, then the fallback";
   EXPECT_EQ(r.free_space_backend, "free") << "the backend that planned, not the configured primary";
+  EXPECT_NE(r.planning_result.message.find("fallback free after primary [fake_failure]"), std::string::npos)
+    << r.planning_result.message;
 }
 
 TEST(PlanningPipelineTest, UnavailableFreeSpaceFallbackIsAnError)

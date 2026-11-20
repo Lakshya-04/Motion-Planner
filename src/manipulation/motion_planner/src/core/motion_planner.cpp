@@ -429,6 +429,10 @@ MotionPlanner::SegmentPlanResult MotionPlanner::planSegmentWithStartState(
     total_planning_time_ms += planning_result.planning_time_ms;
     if (active_planner == free_space_planner_.get()) {
       free_space_backend = free_space_planner_->name();
+      if (planning_result.success && planning_result.message.rfind("fallback ", 0) == 0) {
+        logger_->info(
+          "free-space segment '" + routing.label + "' planned by the fallback: " + planning_result.message);
+      }
       if (!planning_result.success) {
         // the segment metrics carry only the reason code; the message says why (cuRobo: "call timed out",
         // "service is not available", "no collision-free trajectory", ...)

@@ -39,8 +39,8 @@ public:
     }
     last_used_ = secondary_->name();
     second.planning_time_ms += result.planning_time_ms;
-    second.message = "fallback " + secondary_->name() + " after " + primary_->name() + " (" +
-      result.failure_reason_code + ")" + (second.message.empty() ? "" : ": " + second.message);
+    second.message = "fallback " + secondary_->name() + " after " + primary_->name() + " [" +
+      result.failure_reason_code + "] " + result.message + (second.message.empty() ? "" : "; " + second.message);
     return second;
   }
 

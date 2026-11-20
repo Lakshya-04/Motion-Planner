@@ -438,7 +438,18 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    answer in time while busy) and were planned by OMPL, and 5 more segments were planned by OMPL (a segment goes to cuRobo only when
    the Cartesian attempt falls short). Open: the cuRobo executions are all 0.5 s, far shorter than the OMPL moves for the same segment
    kind (4 to 8 s), so what those trajectories actually moved is not shown (the next segment, dock, completed from where the arm was);
-   cuRobo takes 11 s per plan on this GPU; the node's world was refused loads while busy. The second stand's cuRobo world load also timed out once (`cuRobo planner call timed out`, 10 s attempt
+   cuRobo takes 11 s per plan on this GPU; the node's world was refused loads while busy.
+
+   **Sixth run (new logging, PR #146): passes** (10 of 10 columns, coverage 1.0, peak 46.8 N). The segment lines now carry the planned
+   trajectory (`traj_pts`, `traj_s`). Answer to the 0.5 s question: the five stand-0 approaches were cuRobo plans of 16 to 21 points,
+   0.375 to 0.5 s long (dt 0.025 s), each a 0.1 m step of the tool along the wall (TCP y 0.809, 0.708, 0.606, 0.506, 0.407; the
+   next logged pose is within 3 mm of each target), so they executed to the pose they were planned for. The same step planned
+   by OMPL takes 5.5 to 7 s (57 to 70 points). So cuRobo moves are about 14 times faster in the sim than the MoveIt-retimed ones, which also means
+   they run far above the speeds the MoveIt retiming allows: not checked against the real arm's limits, do not run on hardware
+   before they are. Cost: 12 to 14 s of planning per cuRobo segment against 35 to 75 ms for OMPL, so per segment cuRobo is slower
+   overall here. This run had no cuRobo failure on stand 0; the stand-1 approaches, `prime_continuity` of stand 1 and the stow
+   went to OMPL (whether cuRobo was tried and failed first, or not tried, is not logged in this run: the fallback was silent; since the change
+   that follows, a fallback is logged at INFO with the primary's reason code and message). The second stand's cuRobo world load also timed out once (`cuRobo planner call timed out`, 10 s attempt
    limit while the node was busy), so stand 1 planned against a stale or empty cuRobo world.
 
    Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
