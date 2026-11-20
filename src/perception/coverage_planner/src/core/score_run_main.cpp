@@ -4,7 +4,10 @@
 //             [--spray-standoff 0.3 --spray-half-angle 20 [--spray-sigma 0.25] [--max-thickness-cov 0]]
 //             [--keepout-margin 0.07] [--obstacle-margin 0] [--obstacle-tol 0.003] [--max-obstacle-contacts N]
 //             [--min-coverage 0.95] [--max-rms 0] [--max-peak 0] [--min-in-band 0]
-// Prints the scorecard as JSON. Exit code 0 = passed, 1 = failed a limit, 2 = bad input.
+//             [--mode contact|non_contact|spray]  (per-mode default limits; explicit flags override)
+//             [--segments segments.json] [--result-out result.json] [--report-out card.json]
+// Prints the scorecard as JSON; --result-out writes the verify-result contract (passed, coverage_percent,
+// failed_segment_ids, report_path, source, failures). Exit code 0 = passed, 1 = failed a limit, 2 = bad input.
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -50,15 +53,35 @@ int main(int argc, char ** argv)
         std::stod(a["--spray-standoff"]), num("--spray-half-angle", 20.0), num("--spray-sigma", 0.25));
     }
     coverage_planner::ScorecardLimits l;
+    if (a.count("--mode")) {
+      const auto mode = coverage_planner::runModeFromString(a["--mode"]);
+      l = coverage_planner::limitsForMode(mode);
+      if (mode != coverage_planner::RunMode::Contact && contact) {
+        throw std::runtime_error("--mode " + a["--mode"] + " needs --no-contact");
+      }
+    }
     l.max_thickness_cov = num("--max-thickness-cov", l.max_thickness_cov);
     l.min_covered_fraction = num("--min-coverage", l.min_covered_fraction);
     l.max_force_rms_error_n = num("--max-rms", l.max_force_rms_error_n);
     l.max_force_peak_n = num("--max-peak", l.max_force_peak_n);
     l.min_in_band_fraction = num("--min-in-band", l.min_in_band_fraction);
     if (a.count("--max-obstacle-contacts")) {l.max_obstacle_contacts = std::stoi(a["--max-obstacle-contacts"]);}
-    const auto card = coverage_planner::scoreRun(wall, obstacles, samples, o, l);
-    std::cout << coverage_planner::scorecardToJson(card).dump(2) << "\n";
-    return card.passed ? 0 : 1;
+    std::vector<coverage_planner::SegmentWindow> segments;
+    if (a.count("--segments")) {
+      std::ifstream sf(a["--segments"]);
+      if (!sf) {throw std::runtime_error("cannot read " + a["--segments"]);}
+      segments = coverage_planner::segmentsFromJson(nlohmann::json::parse(sf));
+    }
+    coverage_planner::RunScorecard card;
+    const auto result = coverage_planner::verifyFromTelemetry(
+      wall, obstacles, samples, segments, o, l, a.count("--report-out") ? a["--report-out"] : "", &card);
+    const auto card_json = coverage_planner::scorecardToJson(card).dump(2);
+    std::cout << card_json << "\n";
+    if (a.count("--report-out")) {std::ofstream(a["--report-out"]) << card_json << "\n";}
+    if (a.count("--result-out")) {
+      std::ofstream(a["--result-out"]) << coverage_planner::verifyResultToJson(result).dump(2) << "\n";
+    }
+    return result.passed ? 0 : 1;
   } catch (const std::exception & e) {
     std::cerr << "score_run: " << e.what() << "\n";
     return 2;

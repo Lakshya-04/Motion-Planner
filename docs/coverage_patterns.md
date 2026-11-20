@@ -143,6 +143,17 @@ metres, newtons pressing on the wall, 0/1 valve); the wall JSON is `{"origin": [
 "u_range": [min,max], "v_range": [min,max]}` in the same frame as the positions, with `u` and `v` orthonormal and the
 normal `u x v`. It takes any recording, a simulator run or a hardware log.
 
+Per-mode limits and the verify-result contract (`coverage_planner/core/verify_result.hpp`). `limitsForMode` gives
+starting thresholds: contact (coverage 0.95, force peak 60 N, the tool profile's `overload_abort_n`, in-band 0.8),
+non-contact (coverage 0.95, any force above 5 N fails the run) and spray (non-contact plus thickness CoV 0.5). They are
+chosen numbers, not fitted to hardware; every flag overrides them. `verifyFromTelemetry` folds the card into
+`VerifyResult {passed, coverage_percent, failed_segment_ids, report_path, source}`. A segment is a time window of the
+recording (a wall column); it fails when the tool never worked in it, its force peak exceeds the mode's limit, or (contact)
+its in-band fraction is under the minimum. Coverage is a whole-run figure and is not attributed to segments. `score_run
+--mode contact|non_contact|spray [--segments segments.json] [--result-out result.json] [--report-out card.json]` writes
+the contract (`segments.json` is `[{"id": 0, "t_start": 0.0, "t_end": 2.1}, ...]`). `source` is `telemetry` (v1); a
+perception-derived v2 is not implemented. "No controller switch under load" has no signal in the recording and is not checked.
+
 Obstacles on the wall: the wall JSON may carry `"obstacles": [{"id": 0, "u": [min,max], "v": [min,max], "height_m": 0.04}]`
 (u, v in the wall's coordinates, `height_m` how far the obstacle stands off the wall, against `u x v`; 0 for a window
 hole). `score_run` then (1) leaves the obstacle out of the coverage target, grown by `--keepout-margin M` (use the

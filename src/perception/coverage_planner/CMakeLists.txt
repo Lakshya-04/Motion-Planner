@@ -34,6 +34,7 @@ add_library(coverage_planner_core
   src/core/coverage_verification.cpp
   src/core/run_scorecard.cpp
   src/core/run_scorecard_io.cpp
+  src/core/verify_result.cpp
   src/core/tool_profile_loading.cpp
   src/core/contact_spacing.cpp
 )
@@ -180,6 +181,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_run_scorecard test/core/run_scorecard_test.cpp)
   target_link_libraries(test_run_scorecard coverage_planner_core)
+
+  ament_add_gtest(test_verify_result test/core/verify_result_test.cpp)
+  target_link_libraries(test_verify_result coverage_planner_core)
 
   ament_add_gtest(test_run_scorecard_io test/core/run_scorecard_io_test.cpp)
   target_link_libraries(test_run_scorecard_io coverage_planner_core)

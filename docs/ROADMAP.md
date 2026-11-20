@@ -295,8 +295,8 @@ here were dropped. Placement is the milestone that should carry it.
 - [x] **Weighted IK on the 7-DOF group**: prismatic joints weighted (1 m of lift about 6 rad) and TRAC-IK Speed for `lift_arm` (PR #5 fixes)
 
 **Scorecard and verification (M2)**
-- [ ] Numeric pass/fail thresholds per mode (for example any contact above 5 N fails a non-contact run; force, standoff, coverage, no controller switch under load)
-- [ ] One verify-result contract (passed, coverage percent, failed segment ids, report path): v1 from execution telemetry, v2 from perception
+- [~] Numeric pass/fail thresholds per mode: `limitsForMode` (contact: coverage 0.95, peak 60 N, in-band 0.8; non-contact: any force above 5 N fails; spray: plus thickness CoV 0.5) in `coverage_planner/core/verify_result.hpp`, gtests, `score_run --mode`. Chosen starting values, not fitted to hardware. Not done: standoff check, "no controller switch under load" (no signal in the recording)
+- [~] One verify-result contract: `VerifyResult` (passed, coverage percent, failed segment ids, report path, source) from execution telemetry (`verifyFromTelemetry`, `score_run --result-out`), gtests; segments are time windows, coverage is not attributed to segments. Not done: v2 from perception, wiring the manager to write it after a run
 - [ ] Post-work verification from perception: severity raster on the wall plane, 0-100 score, initial vs final pair, targeted re-work from the score map (ship end to end or not at all)
 - [ ] Observability bundle: per-goal trajectory CSV, force trace, BT log, per-mission rosbag; test-only wrench-inject topic
 - [ ] Golden exact-waypoint tests for the coverage planner before any algorithm change; table of mode-derived coverage parameters (the content of the shipped tool profiles); tool-profile loader invariants as hard errors
