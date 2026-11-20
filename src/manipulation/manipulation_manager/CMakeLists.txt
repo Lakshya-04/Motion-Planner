@@ -247,6 +247,13 @@ if(BUILD_TESTING)
     target_link_libraries(mission_ledger_test nlohmann_json::nlohmann_json)
   endif()
 
+  ament_add_gtest(mission_verify_test test/mission_verify_test.cpp)
+  if(TARGET mission_verify_test)
+    target_include_directories(mission_verify_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(mission_verify_test nlohmann_json::nlohmann_json)
+    ament_target_dependencies(mission_verify_test coverage_task_msgs)
+  endif()
+
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)
     set(ament_cmake_copyright_FOUND TRUE)
