@@ -46,6 +46,10 @@ struct MotionSegmentExecMetrics
 
   uint64_t planning_time_ms{0};
   uint64_t execution_time_ms{0};
+  /// The planned trajectory handed to the executor: point count and its duration (time_from_start of the last
+  /// point, 0 when the planner gave no timing). Lets a short execution be told from a truncated one.
+  size_t planned_points{0};
+  double planned_duration_s{0.0};
 
   bool fallback_used{false};
   bool mode_switch_used{false};

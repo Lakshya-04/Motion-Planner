@@ -588,6 +588,9 @@ MotionExec ManipulationManager::executeMotionSegments(
     metrics.bridge_count = bridge_count;
     metrics.planning_time_ms = total_planning_time_ms;
     metrics.execution_time_ms = total_execution_time_ms;
+    metrics.planned_points = planning_result.trajectory.points.size();
+    metrics.planned_duration_s = planning_result.trajectory.points.empty() ?
+      0.0 : planning_result.trajectory.points.back().time_from_start_sec;
     metrics.completed_waypoints = exec.waypoints_completed;
     metrics.path_fraction = planning_result.path_fraction;
     metrics.completion_ratio = (metrics.attempted_waypoints > 0) ?

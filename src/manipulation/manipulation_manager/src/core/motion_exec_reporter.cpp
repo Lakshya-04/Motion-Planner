@@ -138,7 +138,9 @@ void MotionExecReporter::logSegmentRecord(
       << " planning_ms=" << metrics.planning_time_ms
       << " execution_ms=" << metrics.execution_time_ms
       << " fallback=" << (metrics.fallback_used ? "true" : "false")
-      << " mode_switch=" << (metrics.mode_switch_used ? "true" : "false");
+      << " mode_switch=" << (metrics.mode_switch_used ? "true" : "false")
+      << " traj_pts=" << metrics.planned_points
+      << " traj_s=" << metrics.planned_duration_s;
   logger.info(oss.str());
 }
 
