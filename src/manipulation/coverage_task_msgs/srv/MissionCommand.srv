@@ -1,0 +1,8 @@
+# One typed command for the running mission. Pause takes effect at the next column boundary, resume releases
+# a pause (or withdraws one that has not reached a boundary). `status` changes nothing and returns the state.
+string command              # "pause" | "resume" | "status"
+---
+bool accepted               # the command applied (status is always accepted; an unknown command is not)
+string state                # IDLE | ACTIVE | PAUSED | STOPPED | RECOVERY
+bool pause_pending          # a pause was requested and has not reached a column boundary yet
+string message
