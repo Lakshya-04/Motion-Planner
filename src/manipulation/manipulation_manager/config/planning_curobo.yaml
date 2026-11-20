@@ -17,6 +17,8 @@ planning:
   # only when the Cartesian attempt falls short, and it also uses it as the bridge across a jump or
   # collision inside a contact segment (motion_planner.cpp, MotionPlanner::plan).
   free_space: curobo
+  # When cuRobo is unavailable, times out or finds no path, MoveIt/OMPL plans the segment (fsp_backend= tells which one did).
+  free_space_fallback: moveit_ompl
 
   # Contact seams (press, stroke, retract) stay on the MoveIt Cartesian planner: cuRobo has no
   # Cartesian path, no wall-contact handling and no pose-based collision input.

@@ -28,6 +28,7 @@ mechanism behind rule 4 of [architecture.md](architecture.md) ("selected by conf
 planning:
   ik:          moveit_ik            # IkPlugin
   free_space:  moveit_ompl          # PlannerPlugin, used for "fsp" segments and as fallback
+  free_space_fallback: ''           # optional second free-space plugin, tried when free_space fails
   cartesian:   moveit_cartesian     # PlannerPlugin, used for "cartesian" segments, tried first for fsp
   collision:   moveit_collision     # CollisionPlugin
   scene:       moveit_scene         # ScenePlugin, optional (empty = none)
@@ -42,6 +43,10 @@ planning:
 - Every key is optional; a missing key keeps the default shown above (the MoveIt backend,
   Cartesian first and OMPL as fallback, exactly what the manager did before). Unknown keys are an
   error. The same map is accepted under a `pipeline:` key, as in the architecture example.
+- `free_space_fallback` (optional, empty = none) names a second planner plugin that plans a free-space request when `free_space`
+  does not succeed (cuRobo unavailable, timed out, or no path): the request goes to it unchanged, a failed fallback keeps the
+  primary's failure reason, and the `fsp_backend=` log field names the backend that produced the plan. `planning_curobo.yaml` sets
+  it to `moveit_ompl`. Unit-tested with fakes; not yet seen in a sim pass.
 - `segments` maps a segment kind to a **role** (`cartesian` or `free_space`), and beats the
   segment's own `mode_hint` and label routing. `contact` is a request with `allow_target_contact`,
   `transition` is any other. `free_space` keeps the existing rule that Cartesian is tried first
