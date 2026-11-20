@@ -16,6 +16,8 @@
 # Needs a sourced ROS environment with sim_mujoco, reachability, stand_navigator, ft_conditioner,
 # compliant_trajectory_controller, coverage_planner, manipulation_manager, coverage_task_msgs and
 # mobile_manipulator_moveit_config. Extra arguments go to `ros2 launch manipulation_manager`.
+# MANAGER_PASS_PLANNING_CONFIG=/path/planning_curobo.yaml: the manager builds its planners from that file (planning_config
+# parameter, written into manager.yaml; unset = the packaged planning.yaml). Needs the cuRobo node: docs/sim_*.md.
 set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
 SHARE=$PKG/share/sim_mujoco
@@ -114,6 +116,7 @@ manipulation_manager:
     base_check_lift_max_m: 1.5
     base_check_arm_mount_z_m: 1.17
 ${MULTI_STAND_MANAGER_EXTRA:-}
+${MANAGER_PASS_PLANNING_CONFIG:+    planning_config: $MANAGER_PASS_PLANNING_CONFIG}
 YAML
 
 python3 "$PKG/lib/sim_mujoco/record_run.py" --record "$REC" --timeout 3000 --frame odom --wall-x "$WALL_X" \

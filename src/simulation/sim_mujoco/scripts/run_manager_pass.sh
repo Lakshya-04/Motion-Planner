@@ -10,6 +10,8 @@
 # MANAGER_PASS_DATA=dir takes the three wall files (smoke_wall_scene.json, wall_pass_coverage_scene.json, walls.pcd)
 # from there instead of the stock smoke wall (run_scenarios.sh writes them with make_scenario_scene.py);
 # MANAGER_PASS_REC_ARGS goes to record_run.py (--wall-y .. .. --scene .. for a wall that is not the stock one).
+# MANAGER_PASS_PLANNING_CONFIG=/path/planning_curobo.yaml: the manager builds its planners from that file (planning_config
+# parameter, written into manager.yaml; unset = the packaged planning.yaml). Needs the cuRobo node: docs/sim_*.md.
 set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
 SHARE=$PKG/share/sim_mujoco
