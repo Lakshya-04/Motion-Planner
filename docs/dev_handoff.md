@@ -26,8 +26,11 @@ when something here changes.
    the node answers, the wall loads per stand (`source_frame:=odom`), the manager seeds the first segment's start state
    (`seed_start_from_live_state`), cuRobo is reached (`fsp_backend=curobo`) but refuses the stand approaches with `Start or End
    state in collision` (stow-to-stow with an empty world succeeds), and the manager's recovery loops. Likely the approach end
-   state inside cuRobo's activation distance of the 0.05 m wall voxels; not confirmed. See `docs/sim_mujoco.md`. Next: lower the
-   cuRobo voxel size / keep the standoff out of the world, rerun; only then a film and a Gazebo pass.
+   state inside cuRobo's activation distance of the 0.05 m wall voxels; not confirmed. See `docs/sim_mujoco.md`. Later the same day: the refusals were the
+   bridge's `--max-boxes 256` coarsening the wall to 0.2 m slabs (use 3000); with that, stand 0 runs under cuRobo, but cuRobo
+   finds no docked-to-stow path even in an empty world (low lift + arm swung out, likely sphere-model collision), so the stow
+   never finishes. Next: `check_motion` on the docked pose, the cuRobo robot spheres for low lift, and a MoveIt fallback for
+   failed free-space segments; only then a film and a Gazebo pass.
 3. **Verified stand selection is slow** (about 5 minutes on one wall, not converged at 64 rounds);
    the manager and `~/plan_stands` do not use verified stands yet.
 4. **Dockerfile layer cache:** any `package.xml` change invalidates the dependency layers and the
