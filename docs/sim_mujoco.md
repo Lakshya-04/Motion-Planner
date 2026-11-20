@@ -404,6 +404,14 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    12 s each on the 4 GB GPU shared with the sim): cuRobo's service did not answer within `wait_for_service_sec` (5 s) while the
    node was busy; not investigated further, run stopped by me, not a pass. Use `--max-boxes 3000` (or more) for a wall pass.
 
+   **Third run (per-call timeout raised from 60 s to 300 s in a copy of `planning_curobo.yaml`):** the 60 s failures were that
+   timeout. Stand 0 ran all its columns (6 done, 0 failed, peak 27.8 N; approaches planned by cuRobo took 9 to 22 s each), then the
+   stow to stand 1 was still waiting on cuRobo when the pass's own time limit (50 min) stopped the manager. Final score
+   1/1 fail: coverage 0.644 < 0.9 (one stand of two), peak 188.9 N. So cuRobo is slow on this host (GPU shared with the sim, 4 GB;
+   the stow, a long lift-and-arm move, took longer than 300 s or hung: not isolated), and a multi-stand pass with cuRobo as the
+   only free-space planner does not finish in the time budget. The pass also aborted `record_run.py` at shutdown (core dump,
+   the known shutdown crash). Not a pass; next: time a stow in isolation with `plan_joint` on the node (empty world, then with the wall).
+
    Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
    pose, `route=trajopt`, success), so the robot model is not the problem; the collision message came with the wall loaded. The
    `prime_continuity` segments planned fine (`path_fraction=1`) and then ended `partial_completion` at execution (a zero-length
