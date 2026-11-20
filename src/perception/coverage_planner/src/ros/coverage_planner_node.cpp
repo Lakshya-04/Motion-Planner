@@ -33,6 +33,8 @@ CoveragePlannerNode::CoveragePlannerNode(const rclcpp::NodeOptions & options)
   components_in_sweep_order_ = this->get_parameter("components_in_sweep_order").as_bool();
   fill_gaps_ = this->get_parameter("fill_gaps").as_bool();
   min_stroke_length_m_ = this->get_parameter("min_stroke_length_m").as_double();
+  edge_zone_m_ = this->get_parameter("edge_zone_m").as_double();
+  edge_spacing_scale_ = this->get_parameter("edge_spacing_scale").as_double();
   decomposition_ = this->get_parameter("decomposition").as_string();
   map_frame_ = this->get_parameter("map_frame").as_string();
   map_topic_ = this->get_parameter("map_topic").as_string();
@@ -100,6 +102,8 @@ void CoveragePlannerNode::declareParameters()
   this->declare_parameter("components_in_sweep_order", true);  // panels left to right, not largest first
   this->declare_parameter("fill_gaps", true);                  // short strokes beside obstacle keep-outs
   this->declare_parameter("min_stroke_length_m", 0.02);        // shortest gap-fill stroke
+  this->declare_parameter("edge_zone_m", 0.0);                 // adaptive stepover zone at the stepover-axis ends (0 = off)
+  this->declare_parameter("edge_spacing_scale", 1.0);          // stepover factor inside the zone, (0, 1]
   this->declare_parameter("decomposition", "columns");         // "columns" | "cells"
 
   // Frame and topic
@@ -165,6 +169,8 @@ CoveragePlannerParams CoveragePlannerNode::buildPlannerParams(
   params.components_in_sweep_order = components_in_sweep_order_;
   params.fill_gaps = fill_gaps_;
   params.min_stroke_length_m = min_stroke_length_m_;
+  params.edge_zone_m = edge_zone_m_;
+  params.edge_spacing_scale = edge_spacing_scale_;
   params.decomposition = decomposition_;
 
   return params;

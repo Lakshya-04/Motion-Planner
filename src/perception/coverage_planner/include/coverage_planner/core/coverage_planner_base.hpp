@@ -77,6 +77,13 @@ struct CoveragePlannerParams
   /// "cells": boustrophedon cell decomposition -- the component is split where the free span of a sweep
   /// line splits or merges, and each cell is swept as one serpentine block before the next cell.
   std::string decomposition{"columns"};
+
+  /// Adaptive stepover near the range ends (contact tools, see contact_spacing.hpp): strips within
+  /// `edge_zone_m` of either end of the stepover axis advance by step * edge_spacing_scale (scale in
+  /// (0, 1]). 0 / 1.0 = uniform, identical to the old behaviour. Obstacle edges do not open a zone.
+  /// Boustrophedon "columns" and "cells" decompositions and the sweepline planner.
+  double edge_zone_m{0.0};
+  double edge_spacing_scale{1.0};
 };
 
 /**

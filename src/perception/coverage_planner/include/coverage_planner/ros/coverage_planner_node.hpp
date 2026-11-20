@@ -95,6 +95,8 @@ private:
   bool components_in_sweep_order_;
   bool fill_gaps_;
   double min_stroke_length_m_;
+  double edge_zone_m_;
+  double edge_spacing_scale_;
   std::string decomposition_;
   std::string map_frame_;
   std::string map_topic_;

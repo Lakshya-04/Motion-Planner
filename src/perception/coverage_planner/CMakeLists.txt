@@ -164,6 +164,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_coverage_patterns test/core/coverage_patterns_test.cpp)
   target_link_libraries(test_coverage_patterns coverage_planner_core)
 
+  ament_add_gtest(test_edge_spacing_planner test/core/edge_spacing_planner_test.cpp)
+  target_link_libraries(test_edge_spacing_planner coverage_planner_core)
+
   ament_add_gtest(test_sweepline_planner test/core/sweepline_planner_test.cpp)
   target_link_libraries(test_sweepline_planner coverage_planner_core)
 

@@ -123,9 +123,12 @@ An explicit `swath_m` node parameter switches the model off (the user chose the 
 `contactStripOffsets` (`coverage_planner/core/contact_spacing.hpp`): strip centres over a range, spacing times
 `edge_spacing_scale` where a strip starts within `edge_zone_m` of the range ends or of a listed obstacle edge.
 Spacing never exceeds the uniform one. Limits: the model is static and quasi-flat (a fitted gain, not a contact
-mechanics solver); the boustrophedon and sweepline planners still take one uniform step, so edge adaptation is
-not yet applied to a generated path (the function places and scores strips, `test_contact_spacing`). Shipped
-profiles are unchanged.
+mechanics solver); the boustrophedon (columns and cells) and sweepline planners apply the same rule on their grid through
+`CoveragePlannerParams::edge_zone_m` / `edge_spacing_scale` (`stripCellPositions`; node parameters of the same
+names, default 0 / 1.0 = uniform, plans unchanged; `test_edge_spacing_planner`). Only the two ends of the stepover
+axis (of a cell, for the cell decomposition) open a zone there; obstacle edges are not passed to the planners, and
+the tool profile's values are not yet copied into the planner parameters automatically. Shipped profiles are
+unchanged.
 
 ### Deposition and thickness uniformity
 
