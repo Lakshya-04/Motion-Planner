@@ -59,6 +59,8 @@ void applyToolOverrides(ToolCoverageProfile & tool, const ToolOverrides & o)
   if (o.obstacle_inflation_radius_m) {
     tool.coverage.obstacle_inflation_radius_m = *o.obstacle_inflation_radius_m;
   }
+  if (o.edge_zone_m) {tool.coverage.edge_zone_m = *o.edge_zone_m;}
+  if (o.edge_spacing_scale) {tool.coverage.edge_spacing_scale = *o.edge_spacing_scale;}
   if (o.double_pass && *o.double_pass) {
     tool.coverage.passes = {PassVariant{}, PassVariant{0.0, true}};
   }

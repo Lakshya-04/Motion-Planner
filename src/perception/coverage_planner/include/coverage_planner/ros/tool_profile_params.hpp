@@ -78,7 +78,8 @@ inline ToolCoverageProfile loadToolCoverageProfileFromParams(rclcpp::Node & node
   for (const char * param :
     {"contact", "standoff_m", "tool_normal_policy", "max_edge_tilt_deg", "tool_frame_yaw_deg",
       "swath_m", "overlap_pct", "sweep_direction", "enable_boundary_pass", "boundary_offset_m",
-      "obstacle_inflation", "obstacle_inflation_radius_m", "double_pass"})
+      "obstacle_inflation", "obstacle_inflation_radius_m", "edge_zone_m", "edge_spacing_scale",
+      "double_pass"})
   {
     declareOptionalParameter(node, param);
   }
@@ -96,6 +97,8 @@ inline ToolCoverageProfile loadToolCoverageProfileFromParams(rclcpp::Node & node
   o.boundary_offset_m = optionalDouble(node, "boundary_offset_m");
   o.obstacle_inflation = optionalString(node, "obstacle_inflation");
   o.obstacle_inflation_radius_m = optionalDouble(node, "obstacle_inflation_radius_m");
+  o.edge_zone_m = optionalDouble(node, "edge_zone_m");
+  o.edge_spacing_scale = optionalDouble(node, "edge_spacing_scale");
   o.double_pass = optionalBool(node, "double_pass");
 
   ToolCoverageProfile tool = toCoverageProfile(ros_adapters::loadToolProfile(file, name));
