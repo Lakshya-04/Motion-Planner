@@ -361,7 +361,7 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    ```bash
    export ROS_DOMAIN_ID=7          # any value, the same in the sim container
    docker/tools/run_curobo_node.sh start --ws "$PWD" \
-       --robot "$PWD/build/robot_assets/ur10e_telescopic/lift_arm.yml" --max-boxes 256
+       --robot "$PWD/build/robot_assets/ur10e_telescopic/lift_arm.yml" --max-boxes 3000
    ```
 
    Add `--esdf-dims 2,2,2 --esdf-voxel 0.04 --esdf-center 0.9,0,1.2` to reserve an ESDF grid (not used by the pass).
@@ -395,7 +395,16 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    arm at the dock pose is inside the wall's voxel margin (the cloud is voxelised at 0.05 m) or the cloud is posed slightly
    wrong; the same cloud was fine for the single-stand pass because cuRobo was barely used there. Two bugs found and fixed on
    the way: the loader's TF lookup did not wait (the buffer was not told a thread spins the node: `setUsingDedicatedThread`), and a
-   sim container run as root cannot reach the node (see the root/user note below). Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
+   sim container run as root cannot reach the node (see the root/user note below). **Second run, same day (cause found for the refusals):** the node had been started with `--max-boxes 256`. The wall is a
+   plane of about 2,500 occupied 0.05 m voxels, and the bridge doubles the voxel size until the cell count fits the slots
+   (`voxelize_points`: 0.05, 0.1, 0.2 m), so cuRobo saw a 0.2 m thick slab and the 0.1 m standoff of every approach was inside
+   it. With `--max-boxes 3000` there were 0 `in collision` messages, the stand-0 columns ran (cuRobo planned
+   `wall_column_9_approach` in 11 s, `fsp_backend=curobo`, all other segments Cartesian on MoveIt), peak force 20.9 N. The pass then
+   stalled at the stow after stand 0 (`unavailable` at precheck on 17 stow attempts, the node still up; cuRobo plans took 9 to
+   12 s each on the 4 GB GPU shared with the sim): cuRobo's service did not answer within `wait_for_service_sec` (5 s) while the
+   node was busy; not investigated further, run stopped by me, not a pass. Use `--max-boxes 3000` (or more) for a wall pass.
+
+   Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
    pose, `route=trajopt`, success), so the robot model is not the problem; the collision message came with the wall loaded. The
    `prime_continuity` segments planned fine (`path_fraction=1`) and then ended `partial_completion` at execution (a zero-length
    move, ratio 0; 47 repeats in the loop), which is a separate thing from the refused approaches. The sim wall is a one-point-thick
