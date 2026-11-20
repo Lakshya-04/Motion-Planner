@@ -5,6 +5,8 @@ Thanks for helping. This page is the working agreement; the design rules are in
 [docs/ROADMAP.md](docs/ROADMAP.md) (pick an unchecked item, or open an issue first for anything large).
 By contributing you agree your work is licensed under the Apache License 2.0 ([LICENSE](LICENSE)).
 
+Please also read the [code of conduct](CODE_OF_CONDUCT.md); report security problems as described in the [security policy](SECURITY.md).
+
 ## Repository layout
 
 ```
