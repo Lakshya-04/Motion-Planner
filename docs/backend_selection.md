@@ -63,10 +63,31 @@ planning:
 | `moveit_ik` | Ik | motion_planner_moveit | params `ik_extra_seeds`, `ik_seed_perturbation` |
 | `moveit_collision` | Collision | motion_planner_moveit | |
 | `moveit_scene` | Scene | motion_planner_moveit | param `octomap_resolution` |
-| `curobo` | Planner | curobo_planner | needs the cuRobo node (GPU); params `node_name`, `wait_for_service_sec`, `timeout_sec` (default 45 s), `base_frame` |
+| `curobo` | Planner | curobo_planner | needs the cuRobo node (GPU); params `node_name`, `wait_for_service_sec`, `timeout_sec` (default 45 s), `base_frame`, joint limit params (below) |
 | `curobo_ik`, `curobo_collision`, `curobo_scene` | Ik, Collision, Scene | curobo_planner | share the client of `curobo` |
 | `vamp` | Planner | vamp_planner | params `robot`, `max_iterations`, `range`, `point_radius`, `nominal_joint_speed`, `simplify`, `require_world`, `base_frame` |
 | `vamp_collision`, `vamp_scene` | Collision, Scene | vamp_planner | share the planner of `vamp` for the same robot (a `base_frame` param on any of them applies to the shared planner) |
+
+### cuRobo: joint limits
+
+cuRobo times its trajectories with the limits of its own robot yml, which are not the MoveIt `joint_limits.yaml` the controller side
+uses (in one sim pass they ran about 14x faster than the same move retimed by MoveIt). With limits configured, the `curobo` plugin
+checks each returned trajectory (`curobo_planner/joint_limit_guard.hpp`) and either slows it down or refuses it. Without any of
+these params the trajectory is returned as cuRobo timed it (unchanged behaviour; `planning_curobo.yaml` sets them).
+
+| Param | Meaning |
+|---|---|
+| `joint_limits_file` | MoveIt `joint_limits.yaml` (reads `max_velocity` / `max_acceleration` where `has_*_limits` is true), a path or `package://<pkg>/<path>` |
+| `joint_limits` | inline `name:max_velocity:max_acceleration,...`; adds to or overrides the file's entries |
+| `limit_safety_factor` | fraction of each limit that may be used, in (0, 1], default 0.9 |
+| `limit_mode` | `retime` (default: scale the time axis) or `reject` |
+| `limit_use_file_scaling` | multiply the file's limits by its `default_velocity/acceleration_scaling_factor`, as MoveIt does (default false) |
+
+Failure codes: `limit_violation` (reject mode), `limit_missing` (a trajectory joint has no limit: an error, not "unlimited"),
+`limits_invalid`, `invalid_trajectory`; all at stage `planning`. A bad param (unreadable file, unknown mode, malformed entry) makes
+the plugin's `initialize` fail with `invalid_param`. Limits apply to the `curobo` planner plugin only. Velocity and acceleration only
+(no jerk); speed is taken from finite differences of the positions, so a coarse trajectory under-reads its peaks. Gtests with
+hand-made trajectories and a stub node; not run against the real node or in a sim.
 
 ### cuRobo: base frame, world size and timeouts
 

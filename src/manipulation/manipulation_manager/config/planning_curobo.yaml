@@ -42,3 +42,14 @@ planning:
       wait_for_service_sec: 5      # a call with no node answers `unavailable` after this long
       timeout_sec: 60              # per call. The node warms up (kernel compile, 40-60 s) before it
                                    # offers its services, so a plan call is not the one that pays for it.
+      # cuRobo times its trajectories with the limits of its robot yml, not with MoveIt's. In the
+      # MuJoCo two-stand pass they ran about 14x faster than the same move retimed by MoveIt. The
+      # plugin therefore checks every trajectory against the description's joint_limits.yaml (same
+      # file the controller side uses): a faster one is stretched in time (limit_mode: retime) or
+      # refused with failure_reason_code limit_violation (limit_mode: reject). A joint of the
+      # trajectory without a limit there is an error (limit_missing). Remove both joint_limits keys
+      # to get cuRobo's own timing back.
+      joint_limits_file: package://mobile_manipulator_moveit_config/config/joint_limits.yaml
+      limit_mode: retime
+      limit_safety_factor: 0.9     # use at most 90 % of each limit
+      limit_use_file_scaling: true # also apply default_velocity/acceleration_scaling_factor, as MoveIt does
