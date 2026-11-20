@@ -384,9 +384,19 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    same cloud (`frame_id:=base_link`, `offset_z:=-0.31`: the cloud is in base_footprint, the node plans in base_link
    0.31 m higher). The log is `curobo_world.log` in the output directory. Authored and compiled, not run. Single-stand
    passes as wired in `mp_world_model`; the MuJoCo multi-stand script (`run_multi_stand_pass.sh`) now also pushes the wall to
-   cuRobo at every stand arrival with `source_frame:=odom` when the variable is set (written, syntax-checked, NOT yet run;
-   the manager's `seed_start_from_live_state:=true` gives cuRobo the first segment's start joint state from `/joint_states`; with the
-   variable set the multi-stand pass has still not been run). For a multi-stand pass the loader can take the cloud in the fixed frame the multi-stand script
+   cuRobo at every stand arrival with `source_frame:=odom` when the variable is set (first multi-stand cuRobo run 2026-11-20, MuJoCo, `two_panels_plain`, one run, NOT a pass: see below).
+   `run_multi_stand_pass.sh` also sets the manager's `seed_start_from_live_state: true` when a planning config is given, so the
+   first segment of each call has a start joint state.
+
+   **Result of that run (honest):** the node answered, the wall cloud loaded (`cuRobo world set`), `prime_continuity` and the
+   stand approach segments reached cuRobo (`fsp_backend=curobo`), but cuRobo refused them: the node log repeats
+   `Start or End state in collision`, the approach plans failed `no_path` at planning, and the manager's recovery loop (dock,
+   fail, jog back, again) ran 30 minutes with 0 columns done and 3 failed before I stopped it. Likely cause, not isolated: the
+   arm at the dock pose is inside the wall's voxel margin (the cloud is voxelised at 0.05 m) or the cloud is posed slightly
+   wrong; the same cloud was fine for the single-stand pass because cuRobo was barely used there. Two bugs found and fixed on
+   the way: the loader's TF lookup did not wait (the buffer was not told a thread spins the node: `setUsingDedicatedThread`), and a
+   sim container run as root cannot reach the node (see the root/user note below). Next step: lower the cloud's voxel size or
+   leave the dock-side margin out of the cuRobo world, and check the loaded cloud's pose against the MoveIt octomap. For a multi-stand pass the loader can take the cloud in the fixed frame the multi-stand script
    uses and look its pose up from TF at each call: `ros2 run curobo_planner curobo_world_loader --ros-args -p
    point_cloud_path:=<walls.pcd> -p frame_id:=base_link -p source_frame:=odom` (compiled, not run; the multi-stand
    scripts do not call it yet, so a multi-stand pass still plans with an empty cuRobo world).
