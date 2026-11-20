@@ -229,6 +229,13 @@ if(BUILD_TESTING)
     target_link_libraries(retiming_execution_port_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
+  ament_add_gtest(tool_feed_execution_port_test test/tool_feed_execution_port_test.cpp)
+  if(TARGET tool_feed_execution_port_test)
+    target_link_libraries(tool_feed_execution_port_test ${PROJECT_NAME}_core core_types::core_types)
+    find_package(Threads REQUIRED)
+    target_link_libraries(tool_feed_execution_port_test Threads::Threads)
+  endif()
+
   ament_add_gtest(tool_actuation_test test/tool_actuation_test.cpp)
   if(TARGET tool_actuation_test)
     target_include_directories(tool_actuation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

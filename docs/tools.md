@@ -123,9 +123,12 @@ An explicit `swath_m` node parameter switches the model off (the user chose the 
 `contactStripOffsets` (`coverage_planner/core/contact_spacing.hpp`): strip centres over a range, spacing times
 `edge_spacing_scale` where a strip starts within `edge_zone_m` of the range ends or of a listed obstacle edge.
 Spacing never exceeds the uniform one. Limits: the model is static and quasi-flat (a fitted gain, not a contact
-mechanics solver); the boustrophedon and sweepline planners still take one uniform step, so edge adaptation is
-not yet applied to a generated path (the function places and scores strips, `test_contact_spacing`). Shipped
-profiles are unchanged.
+mechanics solver); the boustrophedon (columns and cells) and sweepline planners apply the same rule on their grid through
+`CoveragePlannerParams::edge_zone_m` / `edge_spacing_scale` (`stripCellPositions`; node parameters of the same
+names, default 0 / 1.0 = uniform, plans unchanged; `test_edge_spacing_planner`). Only the two ends of the stepover
+axis (of a cell, for the cell decomposition) open a zone there; obstacle edges are not passed to the planners, and
+the tool profile's values are not yet copied into the planner parameters automatically. Shipped profiles are
+unchanged.
 
 ### Deposition and thickness uniformity
 
@@ -171,8 +174,17 @@ executor reports and never stops the arm.
 `tool_actuation_node` is the thin wrapper (not started by the manager): `~/window` (Float64MultiArray `[on_s, end_s]`),
 `~/trajectory_time`, `~/paused`, `~/speed_ratio`, `~/cancel`, `~/fault`, echo topic (`echo_topic`, default
 `/tool/valve_state`, empty for none) in; `valve_topic` (`/tool/valve`) and `~/status` out. The valve is closed at start
-and on node shutdown. Not yet done: the manager does not publish the window or trajectory time, and nothing has run
-against a real valve.
+and on node shutdown.
+
+Feeding it from the manager (opt-in, `contact: false` only): `tool_actuation_feed:=true` (and `tool_actuation_node`,
+default `tool_actuation`) wraps the execution port in `ToolFeedExecutionPort`
+(`core/execution/tool_feed_execution_port.hpp`, `tool_feed_execution_port_test`). During a spray stroke the trajectory is
+the tool window: the manager publishes `[0, last time_from_start]` to `<node>/window`, then the trajectory time to
+`<node>/trajectory_time` at 50 Hz, the end time on success and `<node>/cancel` on failure or exception. The manager stops
+opening the valve itself (it only sends "off" around the stroke as a backstop), so start `tool_actuation_node` with the
+same `valve_topic`. Limits: the trajectory time is the elapsed wall time since the execution call, not the controller's
+reported progress; the manager node wiring is built but not run against the node or a sim, and pauses are column-boundary
+only so `~/paused` is not fed. No echo in the sim, nothing has run against a real valve.
 
 ## Non-contact column in the manager
 

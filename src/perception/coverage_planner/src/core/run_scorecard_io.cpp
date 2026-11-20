@@ -131,4 +131,33 @@ nlohmann::json scorecardToJson(const RunScorecard & c)
   return j;
 }
 
+std::vector<SegmentWindow> segmentsFromJson(const nlohmann::json & j)
+{
+  if (!j.is_array()) {throw std::runtime_error("segments: expected an array");}
+  std::vector<SegmentWindow> out;
+  for (const auto & e : j) {
+    if (!e.is_object() || !e.contains("id") || !e.contains("t_start") || !e.contains("t_end")) {
+      throw std::runtime_error("segments: each entry needs id, t_start and t_end");
+    }
+    SegmentWindow w;
+    w.id = e.at("id").get<uint32_t>();
+    w.t_start_s = e.at("t_start").get<double>();
+    w.t_end_s = e.at("t_end").get<double>();
+    if (w.t_end_s < w.t_start_s) {throw std::runtime_error("segments: t_end before t_start");}
+    out.push_back(w);
+  }
+  return out;
+}
+
+nlohmann::json verifyResultToJson(const VerifyResult & r)
+{
+  return {
+    {"passed", r.passed},
+    {"coverage_percent", r.coverage_percent},
+    {"failed_segment_ids", r.failed_segment_ids},
+    {"report_path", r.report_path},
+    {"source", r.source},
+    {"failures", r.failures}};
+}
+
 }  // namespace coverage_planner

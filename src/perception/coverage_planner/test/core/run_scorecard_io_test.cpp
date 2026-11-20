@@ -94,3 +94,19 @@ TEST(RunScorecardIo, CardJsonCarriesTheNumbers)
   EXPECT_DOUBLE_EQ(j.at("coverage").at("covered_fraction").get<double>(), 0.5);
   EXPECT_EQ(j.at("failures").size(), 1U);
 }
+
+TEST(RunScorecardIo, SegmentsAndVerifyResultJson)
+{
+  const auto segs = segmentsFromJson(nlohmann::json::parse(R"([{"id":2,"t_start":0.0,"t_end":1.5}])"));
+  ASSERT_EQ(segs.size(), 1U);
+  EXPECT_EQ(segs[0].id, 2U);
+  EXPECT_THROW(segmentsFromJson(nlohmann::json::parse(R"([{"id":1,"t_start":2.0,"t_end":1.0}])")), std::runtime_error);
+  EXPECT_THROW(segmentsFromJson(nlohmann::json::parse(R"([{"id":1}])")), std::runtime_error);
+  VerifyResult r;
+  r.passed = false; r.coverage_percent = 91.5; r.failed_segment_ids = {3, 7}; r.report_path = "c.json";
+  const auto j = verifyResultToJson(r);
+  EXPECT_EQ(j.at("failed_segment_ids").size(), 2U);
+  EXPECT_DOUBLE_EQ(j.at("coverage_percent").get<double>(), 91.5);
+  EXPECT_EQ(j.at("report_path").get<std::string>(), "c.json");
+  EXPECT_EQ(j.at("source").get<std::string>(), "telemetry");
+}

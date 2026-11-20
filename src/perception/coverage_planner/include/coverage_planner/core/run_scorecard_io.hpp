@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include "coverage_planner/core/run_scorecard.hpp"
+#include "coverage_planner/core/verify_result.hpp"
 
 namespace coverage_planner
 {
@@ -33,5 +34,13 @@ WallPlane wallFromJson(const nlohmann::json & j);
 std::vector<ObstacleRegion> obstaclesFromJson(const nlohmann::json & j, uint32_t wall_id);
 
 nlohmann::json scorecardToJson(const RunScorecard & card);
+
+/// `[{"id": 0, "t_start": 0.0, "t_end": 2.1}, ...]`.
+/// @throws std::runtime_error for an entry with a missing field or t_end < t_start.
+std::vector<SegmentWindow> segmentsFromJson(const nlohmann::json & j);
+
+/// The verify-result contract as JSON: passed, coverage_percent, failed_segment_ids, report_path,
+/// source, failures.
+nlohmann::json verifyResultToJson(const VerifyResult & result);
 
 }  // namespace coverage_planner
