@@ -430,7 +430,15 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    no cuRobo trajectory has yet executed to completion on the sim arm. Cause found afterwards: the cuRobo adapter never set `PlanningResult::waypoints_completed`
    (OMPL sets 1 for a joint target), so the manager read each successful cuRobo plan as 0 of 1 waypoints done and labelled it
    `partially_completed`, which started the retry; fixed in this change (a successful cuRobo plan counts as one waypoint). Whether the
-   cuRobo trajectories themselves executed correctly (the 150 to 500 ms executions are short) is not shown; rerun to see. The second stand's cuRobo world load also timed out once (`cuRobo planner call timed out`, 10 s attempt
+   cuRobo trajectories themselves executed correctly (the 150 to 500 ms executions are short) is not shown; rerun to see.
+
+   **Fifth run (after that fix, same setup): passes again** (10 of 10 columns, coverage 1.0, peak 48.2 N, in-band 0.33, RMS 4.6 N, 2
+   collision-monitor lines). Now 4 approaches and `prime_continuity` completed WITH `fsp_backend=curobo` (planning 11.0 to 12.0 s each,
+   execution 0.50 s each, `outcome=completed`), 2 approaches and the stow came back `unavailable` from cuRobo (the node did not
+   answer in time while busy) and were planned by OMPL, and 5 more segments were planned by OMPL (a segment goes to cuRobo only when
+   the Cartesian attempt falls short). Open: the cuRobo executions are all 0.5 s, far shorter than the OMPL moves for the same segment
+   kind (4 to 8 s), so what those trajectories actually moved is not shown (the next segment, dock, completed from where the arm was);
+   cuRobo takes 11 s per plan on this GPU; the node's world was refused loads while busy. The second stand's cuRobo world load also timed out once (`cuRobo planner call timed out`, 10 s attempt
    limit while the node was busy), so stand 1 planned against a stale or empty cuRobo world.
 
    Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
