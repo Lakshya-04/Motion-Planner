@@ -456,6 +456,21 @@ approaches, 10 to 16 s each), 6 free-space segments by OMPL (cuRobo `unavailable
    that follows, a fallback is logged at INFO with the primary's reason code and message). The second stand's cuRobo world load also timed out once (`cuRobo planner call timed out`, 10 s attempt
    limit while the node was busy), so stand 1 planned against a stale or empty cuRobo world.
 
+   **Speed limits (fix after that finding, authored and unit-tested, not run in the sim):** cuRobo's limits come from its robot
+   yml, not from the MoveIt `joint_limits.yaml` the controller side uses. The `curobo` plugin now checks every trajectory it
+   returns against per-joint velocity and acceleration limits (`curobo_planner/joint_limit_guard.hpp`, ROS-free): speed and
+   acceleration are finite differences of the positions over the trajectory's time stamps, and a trajectory above
+   `limit * limit_safety_factor` is either stretched in time (`limit_mode: retime`, the default once limits are given; the path is
+   unchanged, v scales by 1/s and a by 1/s^2) or refused with `failure_reason_code: limit_violation` (`limit_mode: reject`); a joint of
+   the trajectory with no limit is `limit_missing`, not unlimited. `planning_curobo.yaml` sets `joint_limits_file:
+   package://mobile_manipulator_moveit_config/config/joint_limits.yaml` (the description's file, found through the ament index at
+   start-up; the plugin fails to initialise if it cannot be read), `limit_safety_factor: 0.9` and `limit_use_file_scaling: true`
+   (multiply by the file's 0.5 default scaling factors, as MoveIt's retiming does), so a 0.1 m tool step should now take seconds,
+   like the MoveIt-retimed ones, instead of 0.4 s. That last claim is not measured: the 14x comparison above is the only measurement
+   and no pass was rerun. Limits are velocity and acceleration only (no jerk), the guard stretches the whole trajectory by one factor
+   (not time-optimal), and it only runs inside the plugin: a trajectory that reaches a controller by another path is not checked.
+   Leaving the three `joint_limits*` keys out restores cuRobo's own timing, which must not go to a real arm unchecked.
+
    Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
    pose, `route=trajopt`, success), so the robot model is not the problem; the collision message came with the wall loaded. The
    `prime_continuity` segments planned fine (`path_fraction=1`) and then ended `partial_completion` at execution (a zero-length
