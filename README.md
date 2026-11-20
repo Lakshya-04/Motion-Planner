@@ -20,7 +20,7 @@ The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/
   coverage 1.0, peak force 46.8 to 72.4 N. How much cuRobo did, honestly: it planned the stand-0 approach moves (12 to 16 s each on
   this 4 GB laptop GPU, executed in 0.4 to 0.7 s); MoveIt/OMPL planned the stow and the second stand, either because cuRobo
   could not (no path from the docked pose to the stow, even in an empty world: its robot model treats low lift with the arm swung out as
-  in collision) or did not answer in time. A `free_space_fallback` makes that automatic and logged. See [the pass below](#cuRobo-in-a-two-stand-pass-mujoco).
+  in collision) or did not answer in time. A `free_space_fallback` makes that automatic and logged. See [the pass below](#curobo-in-a-two-stand-pass-mujoco).
 - **Gazebo two-stand passes currently fail** (0 of 10 columns in two runs on 2026-11-21, with and without cuRobo: MoveIt reports an invalid
   dock goal and a start state out of bounds). Earlier Gazebo runs of the same script completed one stand; the regression is not isolated yet.
 - Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md); the day-by-day handoff: [docs/dev_handoff.md](docs/dev_handoff.md).
