@@ -334,6 +334,125 @@ A spray pass is filmed the same way (`MANAGER_PASS_FILM=1 SPRAY_PASS_LAUNCH_ARGS
 the wall (`--standoff`, `--half-angle` set their size; the sim has no spray, this is the scorer's model). The result is in
 [Spray pass](#spray-pass-non-contact-tool).
 
+## Running a pass with cuRobo as the planner
+
+First run 2026-11-20 (single-stand pass, `run_manager_pass.sh`, MuJoCo, one run): the node came up, the wall cloud loaded, the manager logged `free_space=curobo`, and the pass passed (4 of 4 columns, coverage 1.0, peak 19.9 N). The only free-space segment of a single-stand pass is `prime_continuity` (a move to the current state); it reached cuRobo (`fsp_backend=curobo`) and was refused `invalid_request` at precheck (no start joint state in the request, most likely: MoveIt fills in the current state, cuRobo needs one), after which every segment was Cartesian on MoveIt. So that pass barely exercises cuRobo; a multi-stand pass (approach, stow, between-stand moves) is the real test and needs the cloud posed per stand (`source_frame`, not wired into those scripts yet). It makes cuRobo v0.9.0 the free-space planner of the manager in a
+MuJoCo pass; contact seams stay on MoveIt Cartesian. The selection file is
+`manipulation_manager/config/planning_curobo.yaml` (`free_space: curobo`, everything else as the default `planning.yaml`;
+each choice is explained in the file: IK and collision stay MoveIt because the manager's planners do not call the selected
+plugins and cuRobo's collision input is joint-space only, no `scene` plugin because the manager does not feed it).
+
+Two containers, one host: the cuRobo node runs in `motion-planner:full` (GPU, `--network host`), the sim and the manager in
+the image you already use for the pass (`docs/sim_mujoco.md` Build). They find each other through DDS, so both need the same `ROS_DOMAIN_ID`
+(and the same RMW, and the same IPC namespace if Fast DDS shared memory is on: add `--ipc host` to both, or set
+`CUROBO_DOCKER_ARGS=--ipc host`). The manager container needs `curobo_planner` and `curobo_bridge_msgs` built (they are
+in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_planner_plugins`); the node container needs
+`curobo_bridge` and `curobo_bridge_msgs` in an install space.
+
+1. Generate the 7-joint robot config (lift + UR10e, joint order of the manager's `lift_arm` group; GPU, a few minutes):
+
+   ```bash
+   docker/tools/generate_curobo_7dof.sh --out "$PWD/build/robot_assets/ur10e_telescopic"
+   # -> build/robot_assets/ur10e_telescopic/lift_arm.yml  (absolute paths inside: do not move the directory)
+   ```
+
+2. Start the node (waits for `cuRobo ready` and the six services, then returns; the container keeps running):
+
+   ```bash
+   export ROS_DOMAIN_ID=7          # any value, the same in the sim container
+   docker/tools/run_curobo_node.sh start --ws "$PWD" \
+       --robot "$PWD/build/robot_assets/ur10e_telescopic/lift_arm.yml" --max-boxes 256
+   ```
+
+   Add `--esdf-dims 2,2,2 --esdf-voxel 0.04 --esdf-center 0.9,0,1.2` to reserve an ESDF grid (not used by the pass).
+   `docker/tools/run_curobo_node.sh status|logs|stop` manage it.
+
+3. Start the pass with the env var, in the sim container with the same `ROS_DOMAIN_ID`. The path must be readable
+   there (the installed share or the repo mount):
+
+   ```bash
+   export ROS_DOMAIN_ID=7
+   MANAGER_PASS_PLANNING_CONFIG=$(ros2 pkg prefix manipulation_manager)/share/manipulation_manager/config/planning_curobo.yaml \
+       src/simulation/sim_mujoco/scripts/run_manager_pass.sh
+   ```
+
+   `run_multi_stand_pass.sh, run_sensed_pass.sh and run_spray_pass.sh (the latter through `manager_pass_common.sh`)` takes the same variable. The variable adds `planning_config: <path>` to the `manager.yaml` the script writes
+   into its output directory (the launch's `params_file`), so with the variable unset nothing changes.
+
+   Without `MANAGER_PASS_CUROBO_WORLD=1` cuRobo plans with an empty world (it cannot see the wall). With it set,
+   `mp_world_model` (MuJoCo) and `gz_world_model` (Gazebo) also run `ros2 run curobo_planner curobo_world_loader` for the
+   same cloud (`frame_id:=base_link`, `offset_z:=-0.31`: the cloud is in base_footprint, the node plans in base_link
+   0.31 m higher). The log is `curobo_world.log` in the output directory. Authored and compiled, not run. Single-stand
+   passes as wired in `mp_world_model`; the MuJoCo multi-stand script (`run_multi_stand_pass.sh`) now also pushes the wall to
+   cuRobo at every stand arrival with `source_frame:=odom` when the variable is set (written, syntax-checked, NOT yet run;
+   cuRobo requests also still lack a start joint state, so expect `invalid_request` from the continuity check). For a multi-stand pass the loader can take the cloud in the fixed frame the multi-stand script
+   uses and look its pose up from TF at each call: `ros2 run curobo_planner curobo_world_loader --ros-args -p
+   point_cloud_path:=<walls.pcd> -p frame_id:=base_link -p source_frame:=odom` (compiled, not run; the multi-stand
+   scripts do not call it yet, so a multi-stand pass still plans with an empty cuRobo world).
+
+   Run the sim container as the same user as the node container (the images' `dev`, uid 1000; do not pass `-u root`).
+   With a root sim container and a non-root node every request to the node was lost without an error (Fast DDS shared
+   memory does not cross users): the cuRobo world update just timed out. Both with `--network host --ipc host`.
+
+4. `docker/tools/run_curobo_node.sh stop` afterwards.
+
+The MuJoCo scripts do not publish `/clock` (the manager runs with `use_sim_time:=false`), which does not matter for the node.
+
+### Log lines that show it
+
+- Node container (`run_curobo_node.sh logs`): `cuRobo ready: 7 joints, tool ['tcp_link']`. If instead
+  `cuRobo planner unavailable: ...` appears, the services answer `unavailable`.
+- `manager.log` at start-up: `planning backends from <path>/planning_curobo.yaml: cartesian=moveit_cartesian free_space=curobo ik=moveit_ik collision=moveit_collision`
+  (`manipulation_manager_node.cpp`, `buildPlanners`). A bad selection stops the node with
+  `planning backend '<plugin>' (<role>) failed: [<code>] <message> (config <path>)`.
+- Per segment: `segment_exec id=.. label=.. outcome=.. mode=.. planner=.. ...` (`MotionExecReporter`). **`planner=` is not
+  proof of cuRobo**: `MotionPlanner` fills it with the legacy planner name (`ompl`) whatever plugin did the work
+  (`motion_planner.cpp`, `planner_used = planner_for_segment`), so a cuRobo transition reads `planner=ompl` too.
+  The same line now carries `fsp_backend=<name>` (`Planner::name()` of the free-space plugin that produced part of the segment: `curobo`, `moveit`, or `-` for a pure Cartesian segment); that field is the direct evidence. Authored and unit-tested, not yet seen in a sim run.
+- Evidence that cuRobo planned: `nvidia-smi` shows the node's process and its utilisation rises during transitions; the
+  trajectory of a transition should look like cuRobo's (dense, 0.025 s interpolation; not checked); and the negative control: stop the node
+  (`run_curobo_node.sh stop`) and re-run: transitions the Cartesian attempt cannot do fail with
+  `cuRobo planner service is not available` (`failure_reason_code: unavailable`, within `wait_for_service_sec` = 5 s each).
+  The node logs nothing per call, so there is no call counter; if one is wanted, a log line in `ros_node.py` is a one-line change.
+
+### Checklist for the run
+
+- [ ] `cuRobo ready` in the node log; six services under `/curobo_planner` (`ros2 service list`) seen from the sim container.
+- [ ] Manager start-up line names `free_space=curobo`; no `[unavailable]`/`[unknown_plugin]` error.
+- [ ] Contact segments (`press`, `stroke`, `retract` labels) are `mode=cartesian`, completion as in the plain-MoveIt run.
+- [ ] Transition segments (`mode=fsp`) succeed; compare time and path against the MoveIt run (same seed and scene).
+- [ ] How often cuRobo was actually reached: transitions are tried as Cartesian first, so only those the Cartesian attempt
+      falls short on (and jump or collision bridges inside contact segments) go to cuRobo. Expect few; if none, the
+      pass proves nothing about cuRobo. The negative control above shows which ones.
+- [ ] With the node stopped: those segments fail as `unavailable`, the manager does not hang (each call waits at most 5 s).
+- [ ] Score of the pass unchanged (coverage, force) against the MoveIt-only run.
+- [ ] Joint order: a plan from cuRobo has 7 positions in `lift_joint, arm_shoulder_pan_joint .. arm_wrist_3_joint` order.
+
+### Risks found by reading the code
+
+- **cuRobo plans in an empty world.** The scene plugin is not selected and the manager does not feed the `ScenePlugin`
+  (`docs/backend_selection.md`, Limitations); nothing calls `setWorld` / `updateWorldGeometry` of the client. The wall in
+  MoveIt's octomap and any later scene update are invisible to cuRobo, which also checks only against its own robot
+  spheres (self-collision). A cuRobo transition can therefore pass through the wall. Keep transitions short and in free air,
+  or feed the world by hand (`ros2 service call /curobo_planner/set_world ...`) before the run. Syncing it with the manager's
+  scene updates needs a manager change (another PR) and is not authored here.
+- **Frame.** The node works in the robot base frame of the generated URDF (`base_link`, `lift_arm` chain); pose goals are
+  sent as given by the manager, whose `frame_id` is `base_footprint`. The client only checks a world update's frame when
+  `Options::base_frame` is set (it is not set from the YAML), and rejects a differing frame (test `RejectsAWorldInAnotherFrame`).
+  Whether `base_footprint` and `base_link` coincide for this profile was not checked; joint goals are not affected, pose goals are.
+- **One planner per process.** One cuRobo node, one planner; the manager's plugin shares one client. Do not start a second
+  node or run the GPU tests/benchmarks at the same time on a 4 GB card.
+- **First-call compile.** CUDA/Warp kernels compile in the node's start-up warm-up (about 40 to 60 s cold, shorter with the
+  `~/.cache/motion-planner-curobo` cache), before the services exist; `run_curobo_node.sh` waits for it. A plan call is not
+  expected to pay it, but a first plan with new shapes may be slower than later ones; `timeout_sec` is 60 s against the
+  manager's own segment timeouts (not checked against them).
+- **Cartesian-first.** `free_space` keeps "Cartesian first, free-space planner on shortfall", and `curobo` also serves as the
+  bridge inside contact segments; "contact seams stay on Cartesian" holds for the seam itself, not for a bridge around a jump.
+- **Plan-only pose goals.** cuRobo takes a joint goal or exactly one pose goal and no Cartesian path; the lift is in its
+  joint set (limits 0 to 1.5 m, lift velocity from the profile is not in the config: time scaling not checked).
+- **Same network, two containers.** Mismatched `ROS_DOMAIN_ID`, RMW or SHM settings show up as `service is not available`.
+- Not verified: everything above was read from source; nothing was built or run.
+
 ## Not modelled / limits
 
 - Wheels, wheel-ground contact and slip (`base_motion:=true` moves the base kinematically as a planar velocity
@@ -581,13 +700,48 @@ What the runs showed:
   is unchanged. `protrusion` goes to 0.983, `window` to 1.000 (the previous coverage-components fix had already taken it from 0.793).
 - Obstacle contacts counted only the tool point; an elbow or the wiper body hitting a protrusion is not seen yet (the MuJoCo plugin
   does not publish contact pairs). `cov_wall` is below 1 by design: it includes the 0.07 m clearance ring the planner keeps out of.
-- Open: the multi-stand pass fails about every second run on stand 1. In the failed runs the manager's `approach` of columns 1 to 3 fails
-  six times in a row with `CartesianPlanner: collision truncation at link pair 'arm_upper_arm_link' <-> 'lift_carriage_link'` (or
-  `arm_forearm_link <-> arm_wrist_2_link`) and "collision recovery found no jump-safe configuration", then `recovery jog refused: the good
-  state is too far away`; in the `two_panels` run 2 the tool sat for about 300 s at z 1.53 m, x 1.037 m (above the wall, pressing with 25
-  to 45 N) before the stand's columns ran. The same stand and the same plan pass in other runs, with 11 instead of 71 truncation
-  warnings. This is the arm's pose choice at the second stand (IK seed, OMPL randomness), not a timing effect: host load was 5 to 15 in the
-  failed runs. The collision matrix and margins were not touched; I did not find the cause.
+- Second stand of the multi-stand pass (was open, fixed on this branch, PR #110): on `origin/main` the stand-1 `approach` of columns
+  1 to 3 was refused six times in a row with `CartesianPlanner: collision truncation at link pair 'arm_upper_arm_link' <->
+  'lift_carriage_link'` (or `arm_forearm_link <-> arm_wrist_2_link`), then `recovery jog refused: the good state is too far away`, or a
+  stroke was "successful" with the tool resting on the wall's top edge (cov 0.644). What the logs showed (arm state logged at arrival and
+  before each dock): the arm arrives at each stand in the same stowed state (q within 0.02 rad) in passing and failing runs, so it is not
+  the arrival. What differs is the configuration the dock IK picks for column 1 after column 0 (an unseeded IK, 8 baseline runs: the
+  three failures were off the elbow-up branch, shoulder lift -0.79 and -3.52 rad against 2.76, but one pass was too, and the passes
+  carry wrapped wrist joints of 4.1 / 5.9 rad) and the MoveIt octomap, which was the 0.3 m contact patch only (`walls.pcd`) while the
+  physical wall is wider and the space behind it was empty, so the planner let the arm over the wall's top edge. Changes: a fixed
+  `dock_seed_joint_state` (a UR10e-on-lift configuration docked at the wall) seeds the dock IK; the manager checks that the tool reached the
+  approach pose (`verify_approach`, `approach_tolerance_m` 0.05) before it docks, re-primes or jogs back otherwise; the multi-stand passes
+  load `walls_sim.pcd` (the sim wall's whole extent, plus an occupied plane 0.5 m past its sides and z 0 to 2.6 m) into MoveIt.
+  Which of the five commits matters, from 40 runs of `two_panels_plain` over four code states (the batches' code is reconstructed from
+  build and commit times, see the PR): logging only changes nothing (3 of 8 failed, 5 to 24 truncations per run); the seeded IK
+  (commits 1 and 2) took truncations from 5-24 to 0-4 per run but not to zero (8 runs: 7 pass, 1 fail; the failure was a stow, below);
+  the octomap extent and the plane (commits 4 and 5) took them to 0 in all 10 earlier runs on that code (they are before the merge with `origin/main`). The approach check (commit 3) did
+  not show an effect of its own: it fired in 5 of the 8 runs with the seeded IK and the patch-only octomap (the tool 0.56 m short of the approach
+  pose on the first attempts, docked on a later one), and the one run of that batch that failed (a stow, see below) is not one it addresses. Not separated: seed and octomap were never run
+  alone against each other with the same number of runs. The one failed run with the seeded IK (0 truncations, cov 0.644) was the arm's
+  stow after stand 0's last column planning-aborted in 5 ms (`stow attempt 1..6 failed`, `stand 1 not reached (could not stow the arm for the
+  drive)`), a different signature from the truncations; it was not seen in any of the 27 later runs (the wall plane in place). Whether it is the
+  same cause (the arm's start state judged in collision with the patch-only octomap) was not shown.
+
+  Same-session rerun on the final code (this branch merged with `origin/main` b7d5d0c) against a plain `origin/main` build, 8 runs per
+  scenario and code state, loads recorded at start and end of each run (0.2 to 9.2; another job compiled on cores 8 to 11 during the
+  first batch), no suspend in the window (`journalctl`):
+
+  | scenario | `origin/main` | this branch |
+  |---|---|---|
+  | `two_panels_plain` | 6 of 8 pass; failures: run 6 (10 of 10 columns "done" but cov 0.644, 20 truncations, column 0 refused 3 times), run 8 (1 column failed, 9 of 10, 66 truncations, 2 refused jogs, cov 0.932); 8 to 66 truncations in every run | 8 of 8 pass; 0 truncations in 6 runs, 2 in 2 runs; peak force of the runs is within the same range |
+  | `two_panels` (scored with `cov_reach` as `run_scenarios.sh` does) | 8 of 8 pass; 5 to 18 truncations in every run; peaks 304 N and 141 N in two runs, others 20 to 89 N | 8 of 8 pass; 0 truncations in 7 runs, 6 in one; peaks 19 to 88 N |
+
+  In total 14 of 16 baseline runs and 16 of 16 branch runs passed in this session. Honest reading: 2 of 16 against 0 of 16 is not
+  significant on its own (Fisher p about 0.48). The baseline failure rate in this session (2 of 8 on the plain wall) is lower than in the
+  earlier batches on the same code (3 of 8 and 2 of 4), pooled 5 of 16 plain-wall baseline runs (31 per cent), 7 of 20 with the earlier round.
+  What is clear is the truncation count: at least 5 per baseline run (every run, 16 of 16), 0 to 6 per branch run. The scenario table above
+  (two_panels FAIL, cov_reach 0.670) was measured before the reachability and keep-out changes that are now in `origin/main` (I did not isolate which one moved it); `two_panels` passes on both code states
+  in this session, so this table's `two_panels` rows are superseded by 8 of 8 here. `two_panels` was scored on the saved recordings with the wall
+  file of one further run of the same scenario (the batch's own score, `cov_wall` against the default 0.9, reads 0.88 on both code states).
+  Gazebo: its multi-stand failure (1 of 3) was not rerun here. Its pass (`sim_gazebo/scripts/run_multi_stand_pass.sh`) loads the same
+  patch-only `walls.pcd` into MoveIt and runs the same manager (unseeded dock IK before this branch, `dock_seed_joint_state` is empty there), so it
+  probably shares the cause; the failure it had (second stand) is the same place. Not verified, and the two simulators differ in the arm's settling.
 
 ### Multi-stand pass (the manager's `execute_coverage` action)
 

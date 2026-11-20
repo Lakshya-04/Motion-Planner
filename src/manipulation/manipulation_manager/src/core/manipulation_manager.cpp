@@ -393,6 +393,7 @@ MotionExec ManipulationManager::executeMotionSegments(
     uint64_t total_execution_time_ms = 0;
     std::string mode_used;
     std::string planner_used;
+    std::string free_space_backend;
     bool fallback_used = false;
     bool mode_switch_used = false;
     int bridge_count = 0;
@@ -434,6 +435,7 @@ MotionExec ManipulationManager::executeMotionSegments(
       total_planning_time_ms += planning_result.planning_time_ms;
       mode_used = plan_result.mode_used;
       planner_used = plan_result.planner_used;
+      free_space_backend = plan_result.free_space_backend;
       fallback_used = plan_result.fallback_used;
       mode_switch_used = plan_result.mode_switch_used;
       bridge_count = plan_result.bridge_count;
@@ -569,6 +571,7 @@ MotionExec ManipulationManager::executeMotionSegments(
 
     metrics.mode_used = mode_used;
     metrics.planner_used = planner_used;
+    metrics.free_space_backend = free_space_backend;
     metrics.fallback_used = fallback_used;
     metrics.mode_switch_used = mode_switch_used;
     metrics.bridge_count = bridge_count;

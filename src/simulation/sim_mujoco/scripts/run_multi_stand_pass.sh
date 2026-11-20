@@ -7,6 +7,8 @@
 # at x = 0.98 + MULTI_STAND_WALL_DX (shift_wall_scene.py). Run, record in odom and score like run_stand_pass.sh.
 #   MULTI_STAND_SCENARIO=name      a wall from make_scenario_scene.py (size, position and obstacles) instead of the DX/DY/WIDTH ones
 #   MULTI_STAND_COVERAGE_EXTRA     more ros arguments of the coverage demo (-p obstacle_inflation_radius_m:=0.07)
+#   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
+#                                  configuration docked at the wall, [] chains the seeds from the previous dock
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented), e.g. `stand_nav_timeout_s: 2.0` to make
@@ -14,6 +16,8 @@
 # Needs a sourced ROS environment with sim_mujoco, reachability, stand_navigator, ft_conditioner,
 # compliant_trajectory_controller, coverage_planner, manipulation_manager, coverage_task_msgs and
 # mobile_manipulator_moveit_config. Extra arguments go to `ros2 launch manipulation_manager`.
+# MANAGER_PASS_PLANNING_CONFIG=/path/planning_curobo.yaml: the manager builds its planners from that file (planning_config
+# parameter, written into manager.yaml; unset = the packaged planning.yaml). Needs the cuRobo node: docs/sim_*.md.
 set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
 SHARE=$PKG/share/sim_mujoco
@@ -84,6 +88,13 @@ kill -INT $DEMO 2>/dev/null
 if [ ! -s "$COV" ]; then echo "no coverage plan produced (see $OUT/coverage_demo.log)"; exit 3; fi
 
 # 2. manager parameters: an action server, the plan stays in odom
+# MANAGER_PASS_CUROBO_WORLD=1: every stand arrival also pushes the wall into the cuRobo node's world, posed from TF
+# (source_frame odom -> base_link), so cuRobo sees the wall relative to the base at each stand.
+CUROBO_ARRIVAL=""
+if [ -n "${MANAGER_PASS_CUROBO_WORLD:-}" ]; then
+  CUROBO_ARRIVAL="; ros2 run curobo_planner curobo_world_loader --ros-args -p point_cloud_path:=$OUT/data/walls_sim.pcd -p frame_id:=base_link -p source_frame:=odom >> $OUT/curobo_world.log 2>&1"
+fi
+
 cat > "$OUT/manager.yaml" <<YAML
 manipulation_manager:
   ros__parameters:
@@ -99,9 +110,10 @@ manipulation_manager:
     coverage_eef_speed_mps: ${MULTI_STAND_SPEED:-0.01}
     dock_at_stroke_start: true
     stand_max_span_m: ${MULTI_STAND_MAX_SPAN:-0.5}
-    stand_arrival_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1'
+    stand_arrival_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls_sim.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1${CUROBO_ARRIVAL}'
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
+    dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MULTI_STAND_PRESS:-0.0015}
@@ -111,6 +123,7 @@ manipulation_manager:
     base_check_lift_max_m: 1.5
     base_check_arm_mount_z_m: 1.17
 ${MULTI_STAND_MANAGER_EXTRA:-}
+${MANAGER_PASS_PLANNING_CONFIG:+    planning_config: $MANAGER_PASS_PLANNING_CONFIG}
 YAML
 
 python3 "$PKG/lib/sim_mujoco/record_run.py" --record "$REC" --timeout 3000 --frame odom --wall-x "$WALL_X" \
@@ -123,9 +136,10 @@ if [ -n "${MULTI_STAND_FILM:-}" ]; then
 fi
 sleep 25   # sim, controllers and move_group up
 
-# 3. the wall into MoveIt's scene (world frame; TF places it relative to base_footprint)
+# 3. the wall into MoveIt's scene (world frame; TF places it relative to base_footprint): walls_sim.pcd, the sim wall's
+#    whole extent (walls.pcd is the contact patch only, MoveIt would not know the wall's margin the arm can land on)
 timeout 120 ros2 run motion_planner_moveit world_model_loader_node --ros-args \
-  -p point_cloud_path:=$OUT/data/walls.pcd -p frame_id:=odom -p octomap_resolution:=0.01 \
+  -p point_cloud_path:=$OUT/data/walls_sim.pcd -p frame_id:=odom -p octomap_resolution:=0.01 \
   > "$OUT/world_model.log" 2>&1
 
 # 4. the manager as an action server, one goal

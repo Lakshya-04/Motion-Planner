@@ -11,6 +11,7 @@
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 
+#include <cstdio>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -190,6 +191,22 @@ public:
     dock_standoff_ = this->declare_parameter<double>("dock_standoff_m", 0.12);
     // OMPL is randomised; from a base that turned side-on to the wall a dock sometimes needs more tries.
     dock_attempts_ = this->declare_parameter<int>("dock_attempts", 3);
+    // The pose goal of a dock is sampled by move_group with a random IK, so which arm branch (shoulder, elbow, wrist
+    // winding) the dock lands on changes from run to run, and some branches leave the next columns of the stand in
+    // self-collision. true: the goal configuration is solved here by an IK seeded with the previous docked
+    // configuration (the stowed pose before the first dock) and handed to the planner as a joint goal; the pose goal
+    // stays as the fallback of the later attempts.
+    dock_ik_seeded_ = this->declare_parameter<bool>("dock_ik_seeded", true);
+    // true: after an approach segment the tool must be within approach_tolerance_m of the approach pose, otherwise the
+    // attempt counts as failed (and the arm is jogged back / the continuity re-primed) instead of docking from where
+    // the arm happens to be.
+    verify_approach_ = this->declare_parameter<bool>("verify_approach", true);
+    approach_tolerance_m_ = this->declare_parameter<double>("approach_tolerance_m", 0.05);
+    // The seed of that IK: a configuration of the arm docked at the wall (planning group order, lift first). Every
+    // dock is then solved from the same seed, so the lift / shoulder / wrist branch does not creep from one column to
+    // the next (a chain of seeds drifted into upper arm <-> lift carriage self-collision at the last column of a
+    // stand). Empty: the seed is the previous docked configuration, the stowed pose before the first dock.
+    dock_seed_ = this->declare_parameter<std::vector<double>>("dock_seed_joint_state", std::vector<double>{});
     // The free-space move of a dock stops this far short of the dock pose and a short straight move closes the
     // gap (0 = plan straight to the dock pose). Planning to a pose a few cm from the wall fails or times out
     // when the tool mount clips the wall voxels on the way in; see docs/sim_mujoco.md.
@@ -819,6 +836,7 @@ private:
         }
       } else if (machine.state() == TaskState::kRunningColumns) {
         setState("priming", -1);
+        logArmState("arrival");
         primeContinuityFromLiveState();
         last_good_state_ = travel_state_;   // the stowed arm: where a jog goes back to
         arm_stuck_ = false;
@@ -1246,6 +1264,68 @@ private:
     return true;
   }
 
+  /// The joint configuration for `pose` (frame_id_) from an IK seeded with the previous docked configuration, the
+  /// last good one otherwise. Empty when the IK has no solution or is not available.
+  std::vector<double> seededDockIk(const core_types::Pose & pose)
+  {
+    const auto ik = pipeline_.ik();
+    const auto & seed = !dock_seed_.empty() ? dock_seed_ :
+      (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
+    if (!ik || seed.empty()) {
+      return {};
+    }
+    motion_planner::IkRequest req;
+    req.frame_id = frame_id_;
+    req.planning_group = planning_group_;
+    req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
+    req.joint_seed = seed;
+    const auto res = ik->ik(req);
+    if (!res.success || res.joint_solution.size() != seed.size()) {
+      RCLCPP_WARN(this->get_logger(), "seeded dock IK: no solution (%s), the planner samples its own", res.message.c_str());
+      return {};
+    }
+    std::string txt;
+    char buf[32];
+    for (const double v : res.joint_solution) {
+      std::snprintf(buf, sizeof(buf), "%s%.4f", txt.empty() ? "" : ", ", v);
+      txt += buf;
+    }
+    RCLCPP_INFO(this->get_logger(), "DOCKGOAL seeded IK q=[%s]", txt.c_str());
+    return res.joint_solution;
+  }
+
+  /// True when the tool frame is within `tol` of `pose` (both in frame_id_); `err` is the distance. An unknown tool
+  /// frame counts as near: the check must not block a run that has no tcp_link.
+  bool tcpNear(const core_types::Pose & pose, double tol, double & err)
+  {
+    FrameTransform tcp;
+    if (!lookup(frame_id_, "tcp_link", tcp)) {
+      err = 0.0;
+      return true;
+    }
+    err = std::sqrt(
+      std::pow(tcp.t[0] - pose.x, 2) + std::pow(tcp.t[1] - pose.y, 2) + std::pow(tcp.t[2] - pose.z, 2));
+    return err <= tol;
+  }
+
+  /// One diagnostic line: the planning group's live joint values (lift first) with a tag, for comparing runs.
+  void logArmState(const std::string & tag)
+  {
+    const auto q = readCurrentJointState(shared_from_this(), group_joint_names_);
+    std::string txt;
+    char buf[32];
+    for (const double v : q) {
+      std::snprintf(buf, sizeof(buf), "%s%.4f", txt.empty() ? "" : ", ", v);
+      txt += buf;
+    }
+    FrameTransform tcp;
+    const std::string wf = world_frame_.empty() ? frame_id_ : world_frame_;
+    const bool have_tcp = lookup(wf, "tcp_link", tcp);
+    RCLCPP_INFO(
+      this->get_logger(), "ARMSTATE %s stand %zu: q=[%s] tcp_in_%s=(%.3f, %.3f, %.3f)", tag.c_str(), stand_index_,
+      txt.c_str(), wf.c_str(), have_tcp ? tcp.t[0] : 0.0, have_tcp ? tcp.t[1] : 0.0, have_tcp ? tcp.t[2] : 0.0);
+  }
+
   /// A trivial joint-space "move to where the arm already is" segment -- its only purpose is
   /// getting a genuinely live joint state into ManipulationManager's own continuity tracking
   /// before the first real segment, see this file's own readCurrentJointState() comment for why.
@@ -1430,6 +1510,7 @@ private:
         world_frame_.c_str(), intent.poses.front().x, intent.poses.front().y, intent.poses.front().z,
         frame_id_.c_str());
     }
+    logArmState("before_dock_" + intent.label);
     const auto & rep = intent.poses.front();
     // Docking in the middle of the column is the original behaviour; at the stroke's first pose the
     // contact path starts from the arm configuration it docked in (no IK branch jump at the start).
@@ -1459,13 +1540,26 @@ private:
     // retries for exactly this reason (a genuine failure to find any path is worth one more
     // attempt before giving up); dock deserves the same tolerance.
     MotionExec dock_exec;
+    const core_types::Pose first_goal = dock_approach_extra_m_ > 0.0 ?
+      wall_dir.approachPose(standoff_pose, dock_approach_extra_m_) : standoff_pose;
     const auto dock_round = [&]() {
+    // the first goal (the approach pose, or the dock pose without an approach) as a joint goal on the branch of
+    // the previous dock; every second attempt falls back to the pose goal the planner samples itself
+    std::vector<double> goal_q;
+    if (dock_ik_seeded_) {
+      goal_q = seededDockIk(first_goal);
+    }
     for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
+      const bool use_q = !goal_q.empty() && attempt % 2 == 0;
       if (dock_approach_extra_m_ > 0.0) {
         MotionSegmentSpec approach_seg = dock_seg;
         approach_seg.label = intent.label + "_approach";
+        if (use_q) {
+          approach_seg.target_joint_state = goal_q;
+        }
         const auto approach_exec = manager_.executeMotionSegments(
-          frame_id_, {approach_seg}, {wall_dir.approachPose(standoff_pose, dock_approach_extra_m_)},
+          frame_id_, {approach_seg}, use_q ? std::vector<core_types::Pose>{} :
+          std::vector<core_types::Pose>{first_goal},
           planning_group_);
         if (!approach_exec.success) {
           RCLCPP_WARN(
@@ -1473,9 +1567,32 @@ private:
             attempt + 1);
           continue;
         }
+        // "completed" only says the trajectory ran: an arm that did not move (the first plan after a drive that
+        // is a no-op) or that rests on the wall's top edge half way stops short of the pose, and the dock from
+        // there starts a Cartesian path from the wrong place and ends on another branch. Check where the tool is.
+        if (verify_approach_) {
+          waitFor(0.5, false);
+          double err = 0.0;
+          if (!tcpNear(first_goal, approach_tolerance_m_, err)) {
+            RCLCPP_WARN(
+              this->get_logger(), "%s: approach attempt %d ended %.3f m from the approach pose, not docking from there",
+              intent.label.c_str(), attempt + 1, err);
+            logArmState("approach_short_" + intent.label);
+            if (!recoverArm("approach")) {
+              primeContinuityFromLiveState();
+            }
+            continue;
+          }
+        }
       }
-      dock_exec = manager_.executeMotionSegments(
-        frame_id_, {dock_seg}, {standoff_pose}, planning_group_);
+      if (dock_approach_extra_m_ > 0.0 || !use_q) {
+        dock_exec = manager_.executeMotionSegments(
+          frame_id_, {dock_seg}, {standoff_pose}, planning_group_);
+      } else {
+        MotionSegmentSpec q_seg = dock_seg;
+        q_seg.target_joint_state = goal_q;
+        dock_exec = manager_.executeMotionSegments(frame_id_, {q_seg}, {}, planning_group_);
+      }
       if (dock_exec.success) {
         break;
       }
@@ -1502,6 +1619,8 @@ private:
       return ColumnOutcome::kFailed;
     }
     markGoodState();
+    dock_branch_seed_ = last_good_state_;
+    logArmState("docked_" + intent.label);
     if (!contact_) {
       return runSprayStroke(intent, wall_dir, standoff_pose);
     }
@@ -1785,6 +1904,11 @@ private:
   double coverage_eef_speed_{0.02};
   double dock_standoff_{0.0};
   int dock_attempts_{3};
+  bool dock_ik_seeded_{true};
+  bool verify_approach_{true};
+  double approach_tolerance_m_{0.05};
+  std::vector<double> dock_seed_;
+  std::vector<double> dock_branch_seed_;   ///< the last docked configuration: the IK seed of the next dock
   double travel_lift_margin_{0.01};
   double dock_approach_extra_m_{0.0};
   std::string base_check_mode_{"off"};
