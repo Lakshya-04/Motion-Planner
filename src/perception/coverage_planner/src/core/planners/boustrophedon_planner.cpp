@@ -1,4 +1,5 @@
 #include "coverage_planner/core/boustrophedon_planner.hpp"
+#include "coverage_planner/core/contact_spacing.hpp"
 #include <chrono>
 #include <Eigen/Dense>
 #include <algorithm>
@@ -738,14 +739,13 @@ void BoustrophedonPlanner::generateCellSweeps(
   const auto cell_columns = [&](const Cell & c) {
     std::vector<int> cols;
     const int n = static_cast<int>(c.spans.size());
-    if (ascending) {
-      for (int k = 0; k < n; k += step_cells) {
-        cols.push_back(c.a0 + k);
-      }
-    } else {
-      for (int k = n - 1; k >= 0; k -= step_cells) {
-        cols.push_back(c.a0 + k);
-      }
+    // Zones are measured from the two ends of the cell along the stepover axis.
+    for (int k : stripCellPositions(
+        0, n - 1, ascending, step_cells,
+        static_cast<int>(std::lround(params.edge_zone_m / map.info.resolution)),
+        params.edge_spacing_scale))
+    {
+      cols.push_back(c.a0 + k);
     }
     return cols;
   };
@@ -995,8 +995,11 @@ void BoustrophedonPlanner::generateHorizontalSweeps(
   int connectors_accepted = 0;
   int connectors_rejected = 0;
 
-  for (int y = y_start; (start_from_top && y <= y_end) || (!start_from_top && y >= y_end);
-       y += y_direction * step_cells) {
+  const std::vector<int> ys = stripCellPositions(
+    min_y, max_y, start_from_top, step_cells,
+    static_cast<int>(std::lround(params.edge_zone_m / map.info.resolution)), params.edge_spacing_scale);
+  for (size_t yi = 0; yi < ys.size(); ++yi) {
+    const int y = ys[yi];
     sweep_count++;
     int sweep_start = left_to_right ? min_x : max_x;
     int sweep_end = left_to_right ? max_x : min_x;
@@ -1106,7 +1109,7 @@ void BoustrophedonPlanner::generateHorizontalSweeps(
     }
 
     // Add connector waypoints to next strip if enabled and not last sweep
-    const int next_y = y + y_direction * step_cells;
+    const int next_y = yi + 1 < ys.size() ? ys[yi + 1] : y + y_direction * step_cells;
     const bool has_next_sweep =
       (start_from_top && next_y <= y_end) || (!start_from_top && next_y >= y_end);
 
@@ -1175,8 +1178,11 @@ void BoustrophedonPlanner::generateVerticalSweeps(
   int connectors_accepted = 0;
   int connectors_rejected = 0;
 
-  for (int x = x_start; (start_from_left && x <= x_end) || (!start_from_left && x >= x_end);
-       x += x_direction * step_cells) {
+  const std::vector<int> xs = stripCellPositions(
+    min_x, max_x, start_from_left, step_cells,
+    static_cast<int>(std::lround(params.edge_zone_m / map.info.resolution)), params.edge_spacing_scale);
+  for (size_t xi = 0; xi < xs.size(); ++xi) {
+    const int x = xs[xi];
     int sweep_start = bottom_to_top ? max_y : min_y;
     int sweep_end = bottom_to_top ? min_y : max_y;
     int direction = (sweep_end > sweep_start) ? 1 : -1;
@@ -1271,7 +1277,7 @@ void BoustrophedonPlanner::generateVerticalSweeps(
     }
 
     // Add connector waypoints to next strip if enabled and not last sweep
-    const int next_x = x + x_direction * step_cells;
+    const int next_x = xi + 1 < xs.size() ? xs[xi + 1] : x + x_direction * step_cells;
     const bool has_next_sweep =
       (start_from_left && next_x <= x_end) || (!start_from_left && next_x >= x_end);
 

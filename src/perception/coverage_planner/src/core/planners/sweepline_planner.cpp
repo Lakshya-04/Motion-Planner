@@ -1,5 +1,7 @@
 #include "coverage_planner/core/sweepline_planner.hpp"
 
+#include "coverage_planner/core/contact_spacing.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -215,9 +217,9 @@ CoveragePlannerResult SweeplinePlanner::generatePath(
   if (p_max - p_min < 2 * half) {
     slices.push_back((p_min + p_max) / 2);
   } else {
-    for (int p = p_min + half; p <= p_max - half; p += step) {
-      slices.push_back(p);
-    }
+    const int zone = static_cast<int>(std::lround(params.edge_zone_m / res));
+    slices = stripCellPositions(
+      p_min + half, p_max - half, true, step, zone, params.edge_spacing_scale);
     const int last_edge = p_max - half;
     if (params.ensure_coverage_within_boundary) {
       if (slices.back() < last_edge) {
