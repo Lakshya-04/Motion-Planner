@@ -637,4 +637,11 @@ void MotionPlanner::resetContinuity()
   previous_end_joint_state_.clear();
 }
 
+void MotionPlanner::seedContinuity(const std::vector<double> & joint_state)
+{
+  if (!has_previous_segment_) {
+    previous_end_joint_state_ = joint_state;
+  }
+}
+
 }  // namespace motion_planner
