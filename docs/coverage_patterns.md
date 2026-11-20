@@ -50,6 +50,16 @@ by `CoverageVerifier`): `two_panels` 0.46 (largest only) -> 0.92 (all components
 
 Not done yet: exact cell ordering by a routing solver, and spiral.
 
+## Does the arm reach the plan? Columns, approach and retract
+
+A planner's column is one stroke line; the arm also has to get to it and away. `buildColumnSequence` / `planColumnStands` in the
+reachability module check the approach pose, the contact pose, the strokes and the retract of each column against the RM4D map per
+stand, score each pose against the workspace edge (reach limit, near-singular stretch or fold), and choose stands so that a column
+is not broken between stands unless no stand does it whole; `analyzeColumnCoverage` reports whole / split / unreachable columns, the
+covered share of the plan points and the pose that limits each failing one (`docs/reachability.md`, "Column pose sequences").
+Strokes the planner itself splits (an obstacle cuts a stroke line: `num_obstacle_splits`, `gap_fill` strokes) arrive as separate
+strokes or segments and are separate columns to this check; it does not merge them and the planners are unchanged. RM4D-level estimate, no sim run.
+
 ## Wall patterns
 
 Patterns come from an earlier coverage workflow (vertical strokes, panelled horizontal rows,

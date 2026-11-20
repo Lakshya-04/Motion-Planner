@@ -44,6 +44,7 @@ adds an orientation constraint (tool normal to the wall); query with the constra
 | Versioned binary map file with a robot fingerprint (a map for another robot is rejected) | `core/io.hpp` |
 | `scripts/urdf_to_chain.py`: URDF -> chain YAML (folds fixed joints, records axes and limits) | `scripts/` |
 | `rm4d_tool build / info / bands` | `apps/rm4d_tool.cpp` |
+| Column pose sequences: approach, contact, strokes, retract checked against the map per stand and lift height; per-pose score (`scorePose`), singular value and joint-limit margin of a verifier's solution; stands that keep columns whole (`planColumnStands`); the "how much can we do" analysis and its JSON; `column_reach_tool` | `core/column_sequence.hpp`, `pose_quality.hpp`, `column_stands.hpp`, `column_analysis.hpp`, `apps/column_reach_tool.cpp` |
 
 Backends other than the built-in chain (Pinocchio, VAMP, cuRobo, MoveIt, with self-collision)
 implement `ArmModel`; none is written yet, so the built-in chain only checks joint limits.
@@ -300,6 +301,61 @@ at 64 rounds), so use a long client timeout. Parameters of the verifier (`ik_gro
 stands. Status: unit-tested through the service with a fake verifier (accepting, and refusing a target everywhere);
 the node itself has not been run against MoveIt, the stand cap and `stand_strategy` do not apply to it, the scene is
 whatever `move_group` holds (stand-relative obstacle posing is not wired), and the manager does not call it yet.
+
+## Column pose sequences: approach, contact, retract, margins, splits
+
+A column of a wall plan is more than its stroke poses. The manager docks at an approach pose (the dock pose pulled back by
+`dock_approach_extra_m`), closes to the dock pose (`dock_standoff_m` from the plan surface), presses, strokes and retracts.
+A column whose strokes are in reach but whose approach is not cannot be run, so `buildColumnSequence` makes the sequence
+(approach, contact when `press_depth_m > 0`, strokes, retract; `SequenceParams`, the wall normal pointing into the free side as in
+`StationRequest`) and `evaluateColumn` checks all of it against the map for one stand and one lift height (the lift is locked while
+a column runs; the best of the offered heights is taken: a height where everything is usable, else usable end poses and the most
+usable strokes). Per (stand, column) the answer is **whole** (every pose usable), **split** (approach and retract fine, only some
+strokes usable: the column would be broken into pieces) or **unreachable** (no stroke usable, or an end pose is not). The pose that
+limits it is reported with its role and reason.
+
+**Margins.** The map stores a sample count per cell, not a manipulability index. `scorePose` turns it into a score in [0, 1]:
+the smaller of `min(count, count_ref) / count_ref` and the share of the 8 neighbouring cells (one step in x*, y*, z, theta) that are
+reachable, so a pose near the edge of the workspace (arm stretched or folded: the reach limit and the usual singular configurations)
+scores low. `MarginConfig::min_score` (default 0.15) makes such a pose not usable even though its cell is reachable. This is an
+estimate: counts depend on the sampler and the build's sample count, so `count_ref` and `min_score` have to be tuned against the map in
+use; nothing here was calibrated against a real arm. When a `StandVerifier` returns a joint solution, `minSingularValue` (6 x dof
+Jacobian by finite differences of `ArmModel::evaluate`, any dof, unscaled: metres and radians share one matrix) and
+`jointLimitMargin` (share of the range to the nearest limit, continuous joints ignored) can be held against
+`min_singular_value` / `min_limit_margin` (off by default) in `confirmColumnWithVerifier`.
+
+**Stands that keep columns whole.** `planColumnStands(map, station, columns, start, options)`: every candidate stand of
+`makeCandidateStands` is evaluated per column; a weighted greedy cover over *whole* columns picks the stands (cost 1 +
+`margin_penalty` * (1 - mean margin)), redundant stands are dropped, the stands are ordered by `travelTime` (with a base model) or
+distance. Only the columns no candidate does whole are cut: into the fewest pieces by greedy cover, each piece with its own approach
+and retract built from its own strokes, preferring stands already chosen, and every split is listed with its pieces
+(`allow_splits = false` leaves them out, `skipped_to_avoid_split`). One lift height per column visit: a column taller than the lift
+plus arm window is cut only as far as one height reaches, the rest is reported as not covered. `stands_if_splitting_allowed`
+is the stand count when strokes may be taken one by one (end poses ignored), i.e. the price of keeping columns whole. An optional
+verifier re-checks each chosen (stand, column) and the totals follow; a refused column is reported, not moved to another stand.
+
+**How much can we do.** `analyzeColumnCoverage` runs that and `toJson` writes: per stand (position, lift heights, columns whole or
+as pieces, points covered, travel) and overall (columns whole / split / unreachable, covered fraction of plan points, stands, the
+splitting-allowed stand count), and for every column that is not whole its pieces and the limiting pose
+(`approach`, `contact`, `stroke` with its index, `retract`; `out_of_reach`, `low_margin`, `refused`, `singular`, `joint_limit`).
+`plan.json` format and example: the header of `apps/column_reach_tool.cpp`:
+
+```
+column_reach_tool map.rm4d plan.json [--out report.json] [--base-profile profile.yaml] [--start-x X --start-y Y --start-yaw A]
+```
+
+**Manager hook.** `manipulation_manager/core/column_reach_port.hpp` defines `ColumnReachabilityPort` (columns in, a verdict per column
+out) without depending on this package. `CoverageFeasibilityAnalyzer::setColumnReachability(port)` makes the analyzer send every
+contact column to it before any IK: an unreachable column is excluded whole (reason `approach_out_of_reach`, ...), a split one loses its
+unusable strokes (`stroke_low_margin`), and the verdicts come back in `FeasibilityReport::column_reach`. Nothing implements the port
+over this module yet and `manipulation_manager_node.cpp` does not set one: the node author adds the adapter (build a
+`ColumnPoseSequence` per column from `dock_standoff_m`, `dock_approach_extra_m`, the contact overshoot, call `evaluateColumn` or
+`planColumnStands`).
+
+Status: gtests with a synthetic map and fake verifiers (approach unreachable with reachable strokes, retract, low-margin pose,
+singular joint solution, split versus whole, totals and JSON, verifier downgrade, analyzer hook). All of it is RM4D-level (no IK,
+no collision, no obstacles) unless the verifier is given; the thresholds are starting values; no real arm map, sim run or hardware
+run was involved, and the node does not use it yet.
 
 ## Limits and next steps
 
