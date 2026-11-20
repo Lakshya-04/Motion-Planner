@@ -491,6 +491,28 @@ The multi-stand script now also pushes the wall to the node at every stand arriv
   at least the first stand. Not isolated (suspects: the whole-wall octomap and approach-pose check merged for MuJoCo, the lift joint a hair below its
   limit in the start state).
 
+### Gazebo two-stand pass: findings and fixes of 2026-11-21
+
+Same-session runs of `run_multi_stand_pass.sh` (two stands, ten columns, no cuRobo), one run each, host load 1 to 3:
+
+| code | columns done / failed | score |
+|---|---|---|
+| commit before the second-stand fix (#110) | 9 / 1 | peak force 583.9 N in the feedback; the pass itself ended `SUCCEEDED` with 1 failed column |
+| main with the seeded dock IK (no Gazebo changes) | 0 / 10 | coverage 0.0 |
+| main, seeded dock IK off for Gazebo (`dock_ik_seeded: false`) | 4 / 6 | coverage 0.42, peak 39.7 N |
+| main, seeded dock IK off and the live start state clamped into the joint bounds (this change) | 6 / 4 | coverage 0.66, peak force 68.6 N in the feedback, 1820 N in the scored contact trace |
+
+- **Cause of the regression:** the seeded dock IK (a joint goal on the previous dock's branch, added for the second-stand fix in MuJoCo) gives a configuration
+  MoveIt calls an invalid goal in Gazebo, and the arm ends in poses from which later plans fail; with it off the Gazebo script uses the planner's pose goal
+  as before. MuJoCo keeps it on (`dock_ik_seeded` defaults to true; `MULTI_STAND_DOCK_IK_SEEDED=true` turns it back on in the Gazebo script).
+- **Second cause:** `Joint 'lift_joint' from the starting state is outside bounds by -2e-14` (a rounding error, 0.00000000000002 m below the lift's lower limit): MoveIt's
+  `CheckStartStateBounds` rejects such a start state and every plan then fails in milliseconds. `OmplPlanner` already clamped an explicit start state; it now also
+  clamps the live state it takes when none is given.
+- **Still failing:** 4 columns (the two stand-1 columns' approach and the stow among them), 19 start-out-of-bounds errors remain in the run with magnitudes of 1e-16 to
+  2e-14 even with the clamp, so some request path still sends an unclamped start state (not found; the only caller of `MoveGroupInterface::plan` is `OmplPlanner`);
+  force peaks of 1820 N in the scored trace (583.9 N before the second-stand fix) are an unrelated problem of the Gazebo contact model that this pass shows and
+  does not explain. The Gazebo two-stand pass is therefore still failing; the numbers above are single runs.
+
 ### Log lines that show it
 
 - Node container (`run_curobo_node.sh logs`): `cuRobo ready: 7 joints, tool ['tcp_link']`. If instead

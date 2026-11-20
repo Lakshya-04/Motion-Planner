@@ -100,6 +100,7 @@ manipulation_manager:
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
     dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]}
+    dock_ik_seeded: ${MULTI_STAND_DOCK_IK_SEEDED:-false}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MULTI_STAND_PRESS:-0.005}
