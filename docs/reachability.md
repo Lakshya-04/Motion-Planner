@@ -3,7 +3,7 @@
 Answers, for a given robot arm: **can the tool reach this pose** (forward query) and **where
 should the base be so that it can** (inverse query), from one compact precomputed map.
 Package: [`src/manipulation/reachability`](../src/manipulation/reachability) (ROS-free core,
-28 tests). Implemented here from the paper's idea; the other pieces below describe how it fits. Method: **RM4D**, Rudorfer, *"RM4D: A Combined Reachability and
+28 tests plus `redundancy_test`). Implemented here from the paper's idea; the other pieces below describe how it fits. Method: **RM4D**, Rudorfer, *"RM4D: A Combined Reachability and
 Inverse Reachability Map for Common 6-/7-Axis Robot Arms by Dimensionality Reduction to 4D"*,
 ICRA 2025, [arXiv:2410.06968](https://arxiv.org/abs/2410.06968) (project page
 mrudorfer.github.io/rm4d). Per the paper's abstract, the map is far more compact and builds
@@ -23,7 +23,7 @@ assumptions are only partly satisfied.
 | Use | How |
 |---|---|
 | **Base stationing** | inverse query for the coverage poses of a wall region gives candidate base poses; pick stations that cover the most poses ([cleaning / stationing work in the roadmap]) |
-| **Lift band design** | build the map for the **6-DOF arm only**; the lift shifts pz, so the map tells which wall rows each lift height covers. Choose the fewest bands, then index the lift between bands with it locked (see [design_principles.md](design_principles.md) section 4) |
+| **Lift band design** | build the map for the **arm only** (6 or 7 joints, see "Redundant arms"); the lift shifts pz, so the map tells which wall rows each lift height covers. Choose the fewest bands, then index the lift between bands with it locked (see [design_principles.md](design_principles.md) section 4) |
 | **Feasibility pre-filter** | reject unreachable coverage waypoints in microseconds before IK / planning (the manager's coverage feasibility analyzer) |
 | **Recovery targets** | prefer known-state targets that are reachable from the current station ([learned_recovery.md](learned_recovery.md)) |
 | **Arm / lift selection** | compare candidate arms and lift strokes on the same wall layout before buying hardware |
@@ -61,6 +61,38 @@ rm4d_tool bands ur10e.rm4d --wall-x 0.8 --z-min 0.1 --z-max 3.0 --lift-max 1.5 -
 Measured on this machine (8 threads): 3 million samples in 0.5 s. UR10e, a 3 m wall 0.8 m in
 front of the base: **2 bands** (lift 0.95 m covers 25 of 30 targets, 1.45 m the other 5). The same
 wall 3 m away: all targets unreachable. Generic arm: 3 bands.
+
+## Redundant arms (7 or more joints)
+
+The builder, the chain model and the file format take any number of revolute joints; the joint count
+comes from the chain (`urdf_to_chain.py` on the profile's arm, one entry per `joints.arm`), nothing in the
+map depends on six. A 7-axis arm reaches a tool pose with a one-parameter family of configurations (the
+elbow swivel), so a map has to say what "reachable" means for it. Policy, stored in the map header:
+
+- **Union (default).** Joints are sampled uniformly over their limits, so a cell is set when **some**
+  null-space value reaches it. The map answers "is there any arm configuration (within joint limits)
+  that puts the tool here". This is also exactly what a 6-DOF map is (no freedom to choose), and for a 6-DOF
+  chain the sampling is unchanged: a gtest replays the previous builder and compares every cell for a seed.
+- **Restricted (`BuildOptions::redundancy`).** One joint (`joint`, usually joint 3, the upper-arm roll of
+  the 7-axis arms) is drawn only from `values` (+- `tolerance`), the others uniformly. The map then
+  answers "reachable with that joint near one of these values", which is the right question when the
+  controller or IK keeps the elbow near a preferred setting. `rm4d_tool build chain.yaml out.rm4d
+  --redundant-joint 3 --redundant-values -0.5,0,0.5 --redundant-tol 0.05` (joint index is 1-based on the
+  command line).
+- **Header.** Map format version 2 stores the arm's joint count and a text describing the policy
+  (`rm4d_tool info` prints it; `MapInfo` / `loadMap(path, fingerprint, &info)` in C++). Version 1 files
+  still load and report "not recorded".
+
+Limits, stated plainly: the union is optimistic for a planner that holds the swivel fixed, and a cell
+says nothing about how many elbow angles reach it beyond the sample count; joint 3 is a proxy for the
+null-space parameter, not the swivel angle itself (they coincide only for a spherical shoulder with no
+offsets, which none of the shipped arms has exactly); restricting one joint does not guarantee the
+remaining six can realise the pose away from singularities; the 4D reduction still assumes joint 1 and the
+tool-axis joint rotate fully (Gen3 and xArm 7 do; iiwa 7 and the Panda family stop short of a full turn, which the
+paper reports as a small accuracy loss). Self-collision and obstacles are not in the map, as before. Tested on
+a Panda-kinematics chain at 0.1 m resolution (`redundancy_test`: fresh samples reachable, out-of-reach poses
+not, inverse query finds the true base, restricted map smaller than the union and consistent with it);
+not compared against IK or a simulator, and no stand plan has been run with a 7-DOF map.
 
 ## Base-aware stationing
 

@@ -56,6 +56,19 @@ dependency, licence not read: **unverified**), `joint_state_publisher_gui`.
 
 Licences for these four are as verified on 2026-11-15 and recorded in the roadmap.
 
+## Read for published parameters, not used or vendored
+
+The 7-DOF arm macros (`urdf/arms/{fr3,iiwa7,kinova_gen3,xarm7}_arm.xacro`) contain joint frames, limits and
+velocities written as numbers from these public descriptions, which were read on 2026-11-21; no source file,
+mesh or package is copied, built against or required at run time.
+
+| Source | Licence | Used for |
+|---|---|---|
+| [franka_description](https://github.com/frankarobotics/franka_description) `robots/fr3/kinematics.yaml`, `joint_limits.yaml` | Apache-2.0 | FR3 and Panda joint frames, FR3 limits |
+| [ros2_kortex](https://github.com/Kinovarobotics/ros2_kortex) `gen3_macro.xacro` | BSD-style (BSD-3 text; GitHub shows no SPDX id) | Gen3 7-DOF joint frames, limits |
+| [xarm_ros2](https://github.com/xArm-Developer/xarm_ros2) `xarm7_default_kinematics.yaml`, `xarm7.urdf.xacro`, `xarm7/joint_limits.yaml` | BSD-3-Clause | xArm 7 joint frames, limits |
+| [iiwa_ros2](https://github.com/ICube-Robotics/iiwa_ros2) `iiwa.urdf.xacro` (iiwa14) | Apache-2.0 | axis pattern only; iiwa 7 lengths and limits are from the KUKA datasheet |
+
 ## Notices
 
 There is no `NOTICE` file because nothing is redistributed in source or binary form by this repository. A
