@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "core_types/pose.hpp"
+#include "manipulation_manager/core/column_reach_port.hpp"
 #include "manipulation_manager/core/coverage_source.hpp"
 #include "manipulation_manager/core/motion_segment_spec.hpp"
 #include "motion_planner/core/planners/planner.hpp"
@@ -41,7 +42,15 @@ struct FeasibilityExcludedPoint
 {
   size_t global_index{0};      ///< Index into the analyzer's combined waypoint_poses output.
   std::string segment_label;   ///< Which CoverageSegmentIntent this point belongs to.
-  std::string reason;          ///< "ik_failed" | "collision_detected" | "isolated_point".
+  std::string reason;          ///< "ik_failed" | "collision_detected" | "isolated_point", or with a column
+                               ///< reachability port "<pose>_<why>" ("approach_out_of_reach", "stroke_low_margin").
+};
+
+/// The column reachability verdict of one contact intent (only with a port set).
+struct ColumnReachEntry
+{
+  std::string segment_label;
+  ColumnReachVerdict verdict;
 };
 
 /**
@@ -53,6 +62,7 @@ struct FeasibilityReport
   std::vector<MotionSegmentSpec> segments;             ///< Feasible + pass-through segments, in order.
   std::vector<core_types::Pose> waypoint_poses;    ///< Combined global pose array segments index into.
   std::vector<FeasibilityExcludedPoint> excluded_points; ///< Points that didn't make it into any segment.
+  std::vector<ColumnReachEntry> column_reach;  ///< One per contact intent when a port is set, else empty.
 };
 
 /**
@@ -77,6 +87,14 @@ public:
    * @param[in] frame_id Reference frame the intents' poses are expressed in.
    * @param[in] planning_group MoveIt planning group to check feasibility for.
    */
+  /**
+   * @brief Optional reach check of whole columns (approach, contact, strokes, retract) before any IK.
+   * @details With a port set, every "cartesian" intent with requires_contact is one column. A column the port calls
+   *          unreachable is excluded as a whole (no IK), a split one loses its unusable strokes; the reason names the
+   *          limiting pose. The verdicts are in FeasibilityReport::column_reach. Non-owning; nullptr switches it off.
+   */
+  void setColumnReachability(ColumnReachabilityPort * port) {column_reach_ = port;}
+
   FeasibilityReport analyze(
     const std::vector<CoverageSegmentIntent> & intents,
     const std::string & frame_id,
@@ -88,6 +106,7 @@ private:
   static constexpr size_t kMinFeasibleRunLength = 2;
 
   Planner & planner_;
+  ColumnReachabilityPort * column_reach_{nullptr};
 };
 
 }  // namespace manipulation_manager

@@ -47,6 +47,18 @@ agrees, wall gap 0.803 m, arm deviation 0.0016, F/T change 0.49 N, no drift at t
 - Found on the way and fixed: `manipulation_manager`'s default `base_check_service` was `/reachability_node/plan_stands`, but the
   node is named `reachability` (service `/reachability/plan_stands`); the default now matches. The script still renames the node.
 
+### Whole columns, approach and retract (analysis, not yet in the loop)
+
+`assignColumnsToStands` gives a column to the stand that reaches most of its poses, so a column whose poses are split between stands
+runs once, from the better stand, and may come out partial. The reachability module now has the layer that avoids this before the
+mission: `planColumnStands` (`docs/reachability.md`, "Column pose sequences") picks stands over *whole* columns, where a column
+counts as whole only if the approach (`dock_approach_extra_m`, `dock_standoff_m`), the contact pose, every stroke and the retract
+are usable at one lift height with a margin from the map, and reports each unavoidable split with its pieces and each failing column
+with the limiting pose. `analyzeColumnCoverage` plus `column_reach_tool` give the numbers (columns whole / split / unreachable,
+covered fraction, stands). The manager does not call it: `manipulation_manager_node.cpp` still uses `plan_stands` and
+`assignColumnsToStands`; the hook is `CoverageFeasibilityAnalyzer::setColumnReachability` (`ColumnReachabilityPort`), unset by
+default. Not verified in a sim; RM4D estimates only.
+
 ### IK-confirmed stands in a mission
 
 `base_check_service:=/reachability/plan_verified_stands` makes the multi-stand mission ask for stands that IK and collision

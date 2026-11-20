@@ -267,5 +267,98 @@ TEST(CoverageFeasibilityAnalyzerTest, SeedContinuityCarriesAcrossIntentBoundarie
   EXPECT_EQ(planner.seeds_seen[3], (std::vector<double>{2.0, 0.0}));  // strip_b point 1, seeded by call 2.
 }
 
+/// Scripted column port: returns the verdicts it was given, in order, and records the inputs.
+class FakeColumnPort : public ColumnReachabilityPort
+{
+public:
+  std::vector<ColumnReachVerdict> check(const std::vector<ColumnReachInput> & columns) override
+  {
+    inputs = columns;
+    return verdicts;
+  }
+  std::vector<ColumnReachVerdict> verdicts;
+  std::vector<ColumnReachInput> inputs;
+};
+
+CoverageSegmentIntent contactStrip(const std::string & label, size_t n)
+{
+  CoverageSegmentIntent intent;
+  intent.label = label;
+  intent.mode_hint = "cartesian";
+  intent.requires_contact = true;
+  intent.poses.resize(n);
+  return intent;
+}
+
+TEST(CoverageFeasibilityAnalyzerTest, UnreachableColumnIsExcludedWithoutIkAndNamesTheLimitingPose)
+{
+  FakePlanner planner;
+  FakeColumnPort port;
+  ColumnReachVerdict v;
+  v.status = ColumnReachStatus::kUnreachable;
+  v.limiting_pose = "approach";
+  v.limiting_reason = "out_of_reach";
+  port.verdicts = {v, ColumnReachVerdict{}};
+
+  CoverageFeasibilityAnalyzer analyzer(planner);
+  analyzer.setColumnReachability(&port);
+  CoverageSegmentIntent fsp;   // not a column: never sent to the port
+  fsp.label = "connector";
+  fsp.mode_hint = "fsp";
+  fsp.poses.resize(1);
+  const auto report = analyzer.analyze(
+    {contactStrip("col_a", 3), fsp, contactStrip("col_b", 3)}, "base_link", "arm_7dof");
+
+  ASSERT_EQ(port.inputs.size(), 2u);
+  EXPECT_EQ(port.inputs[0].label, "col_a");
+  EXPECT_EQ(port.inputs[1].label, "col_b");
+  EXPECT_EQ(planner.ik_call_count, 3u);   // col_b only: col_a was ruled out before any IK
+  ASSERT_EQ(report.excluded_points.size(), 3u);
+  for (const auto & e : report.excluded_points) {
+    EXPECT_EQ(e.segment_label, "col_a");
+    EXPECT_EQ(e.reason, "approach_out_of_reach");
+  }
+  ASSERT_EQ(report.column_reach.size(), 2u);
+  EXPECT_EQ(report.column_reach[0].verdict.status, ColumnReachStatus::kUnreachable);
+  ASSERT_EQ(report.segments.size(), 2u);   // the fsp pass-through and col_b
+}
+
+TEST(CoverageFeasibilityAnalyzerTest, SplitColumnLosesOnlyItsUnusableStrokes)
+{
+  FakePlanner planner;
+  FakeColumnPort port;
+  ColumnReachVerdict v;
+  v.status = ColumnReachStatus::kSplit;
+  v.stroke_usable = {true, true, false, true, true};
+  v.limiting_pose = "stroke";
+  v.limiting_reason = "low_margin";
+  v.limiting_stroke = 2;
+  port.verdicts = {v};
+
+  CoverageFeasibilityAnalyzer analyzer(planner);
+  analyzer.setColumnReachability(&port);
+  const auto report = analyzer.analyze({contactStrip("col", 5)}, "base_link", "arm_7dof");
+
+  EXPECT_EQ(planner.ik_call_count, 4u);
+  ASSERT_EQ(report.excluded_points.size(), 1u);
+  EXPECT_EQ(report.excluded_points[0].global_index, 2u);
+  EXPECT_EQ(report.excluded_points[0].reason, "stroke_low_margin");
+  ASSERT_EQ(report.segments.size(), 2u);
+  EXPECT_EQ(report.segments[0].waypoint_indices, (std::vector<size_t>{0, 1}));
+  EXPECT_EQ(report.segments[1].waypoint_indices, (std::vector<size_t>{3, 4}));
+}
+
+TEST(CoverageFeasibilityAnalyzerTest, NoPortOrAnEmptyAnswerChangesNothing)
+{
+  FakePlanner planner;
+  FakeColumnPort port;   // no verdicts: "cannot answer"
+  CoverageFeasibilityAnalyzer analyzer(planner);
+  analyzer.setColumnReachability(&port);
+  const auto report = analyzer.analyze({contactStrip("col", 3)}, "base_link", "arm_7dof");
+  EXPECT_EQ(report.segments.size(), 1u);
+  EXPECT_TRUE(report.excluded_points.empty());
+  EXPECT_TRUE(report.column_reach.empty());
+}
+
 }  // namespace
 }  // namespace manipulation_manager

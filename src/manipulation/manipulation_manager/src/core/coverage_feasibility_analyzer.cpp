@@ -49,7 +49,32 @@ FeasibilityReport CoverageFeasibilityAnalyzer::analyze(
   // starting guess for whatever intent comes next, not a guarantee.
   std::vector<double> seed;
 
-  for (const auto & intent : intents) {
+  // Column reach check (optional): one batch for every contact column, before any IK.
+  std::vector<const ColumnReachVerdict *> reach_of(intents.size(), nullptr);
+  std::vector<ColumnReachVerdict> verdicts;
+  if (column_reach_) {
+    std::vector<ColumnReachInput> inputs;
+    std::vector<size_t> which;
+    for (size_t i = 0; i < intents.size(); ++i) {
+      if (toLowerCopy(intents[i].mode_hint) == "cartesian" && intents[i].requires_contact &&
+        !intents[i].poses.empty())
+      {
+        inputs.push_back({intents[i].label, intents[i].poses});
+        which.push_back(i);
+      }
+    }
+    verdicts = inputs.empty() ? std::vector<ColumnReachVerdict>{} : column_reach_->check(inputs);
+    if (verdicts.size() == which.size()) {
+      for (size_t k = 0; k < which.size(); ++k) {
+        reach_of[which[k]] = &verdicts[k];
+        report.column_reach.push_back({intents[which[k]].label, verdicts[k]});
+      }
+    }
+  }
+
+  for (size_t intent_index = 0; intent_index < intents.size(); ++intent_index) {
+    const auto & intent = intents[intent_index];
+    const ColumnReachVerdict * reach = reach_of[intent_index];
     const size_t segment_start_global_index = report.waypoint_poses.size();
     for (const auto & pose : intent.poses) {
       report.waypoint_poses.push_back(pose);
@@ -96,6 +121,16 @@ FeasibilityReport CoverageFeasibilityAnalyzer::analyze(
 
     for (size_t i = 0; i < intent.poses.size(); ++i) {
       const size_t global_index = segment_start_global_index + i;
+
+      // The map has already ruled this pose (or its column's approach / retract) out: no IK for it.
+      if (reach && (reach->status == ColumnReachStatus::kUnreachable || !reach->strokeUsable(i))) {
+        flushRun();
+        const bool whole_column = reach->status == ColumnReachStatus::kUnreachable;
+        const std::string pose = whole_column && !reach->limiting_pose.empty() ? reach->limiting_pose : "stroke";
+        const std::string why = reach->limiting_reason.empty() ? "out_of_reach" : reach->limiting_reason;
+        report.excluded_points.push_back({global_index, intent.label, pose + "_" + why});
+        continue;
+      }
 
       IkRequest ik_request;
       ik_request.frame_id = frame_id;
