@@ -272,6 +272,7 @@ public:
     // How long a multi-stand mission waits for the stand planner's reply. 60 s suits ~/plan_stands; with
     // base_check_service:=/reachability/plan_verified_stands (IK-confirmed stands) a wall takes minutes: raise it.
     stand_service_timeout_s_ = this->declare_parameter<double>("stand_service_timeout_s", 60.0);
+    seed_start_from_live_state_ = this->declare_parameter<bool>("seed_start_from_live_state", false);
     base_check_lift_min_ = this->declare_parameter<double>("base_check_lift_min_m", 0.0);
     base_check_lift_max_ = this->declare_parameter<double>("base_check_lift_max_m", 0.0);
     // The stow pose is kept this far inside the lift's travel (base_check_lift_min_m .. max_m): a lift sent to its
@@ -1324,6 +1325,12 @@ private:
       return false;
     }
     manager_.setMotionPlanner(pipeline_.makeMotionPlanner());
+    // seed_start_from_live_state: the first segment of each call starts from /joint_states instead of the planner's own
+    // idea of the current state. Needed with the cuRobo backend (it needs an explicit start); off by default.
+    if (seed_start_from_live_state_) {
+      manager_.setStartStateProvider(
+        [this]() {return readCurrentJointState(shared_from_this(), group_joint_names_);});
+    }
     RCLCPP_INFO(
       this->get_logger(), "planning backends from %s: cartesian=%s free_space=%s ik=%s collision=%s",
       config_path.c_str(), selection.cartesian.c_str(), selection.free_space.c_str(),
@@ -1961,6 +1968,7 @@ private:
   std::string frame_id_;
   std::string world_frame_;
   double stand_service_timeout_s_{60.0};
+  bool seed_start_from_live_state_{false};
   std::string arm_base_frame_;
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::unique_ptr<tf2_ros::TransformListener> tf_listener_;

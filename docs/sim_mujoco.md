@@ -385,7 +385,8 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    0.31 m higher). The log is `curobo_world.log` in the output directory. Authored and compiled, not run. Single-stand
    passes as wired in `mp_world_model`; the MuJoCo multi-stand script (`run_multi_stand_pass.sh`) now also pushes the wall to
    cuRobo at every stand arrival with `source_frame:=odom` when the variable is set (written, syntax-checked, NOT yet run;
-   cuRobo requests also still lack a start joint state, so expect `invalid_request` from the continuity check). For a multi-stand pass the loader can take the cloud in the fixed frame the multi-stand script
+   the manager's `seed_start_from_live_state:=true` gives cuRobo the first segment's start joint state from `/joint_states`; with the
+   variable set the multi-stand pass has still not been run). For a multi-stand pass the loader can take the cloud in the fixed frame the multi-stand script
    uses and look its pose up from TF at each call: `ros2 run curobo_planner curobo_world_loader --ros-args -p
    point_cloud_path:=<walls.pcd> -p frame_id:=base_link -p source_frame:=odom` (compiled, not run; the multi-stand
    scripts do not call it yet, so a multi-stand pass still plans with an empty cuRobo world).
