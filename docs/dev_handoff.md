@@ -56,6 +56,12 @@ queued container jobs only on GO, caps each job's memory and cores, and pauses (
 containers it started. State lives in `$HOSTWATCH_DIR` (default `~/.cache/hostwatch`); queue files
 are `queue/*.job` (bash: NAME, MEM_MB, CPUS, MAXRUN_MIN, WAIT_FILE, CMD).
 
+`slots.sh` says what may start right now (it calls `memwatch.sh` and counts the running containers). Run it before every
+container and start only what it answers YES to. Limits it enforces: one simulation container (about 3 GB, cores 0-7); one
+cuRobo node (GPU, about 2.5 GB, one GPU job at a time); one colcon build/test container (one worker, `-j2`,
+`--memory=3800m`), a second only with 7000 MB available; git, gh, docs and downloads always. Each start must leave 1500 MB
+free. Do not keep scratch files in `/tmp`: a reboot clears it.
+
 ## Docker images
 
 `deps` (dependencies from `package.xml` via rosdep), `build` (workspace built, tests run in the
