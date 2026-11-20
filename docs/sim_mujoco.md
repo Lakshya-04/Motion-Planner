@@ -361,7 +361,7 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    ```bash
    export ROS_DOMAIN_ID=7          # any value, the same in the sim container
    docker/tools/run_curobo_node.sh start --ws "$PWD" \
-       --robot "$PWD/build/robot_assets/ur10e_telescopic/lift_arm.yml" --max-boxes 256
+       --robot "$PWD/build/robot_assets/ur10e_telescopic/lift_arm.yml" --max-boxes 3000
    ```
 
    Add `--esdf-dims 2,2,2 --esdf-voxel 0.04 --esdf-center 0.9,0,1.2` to reserve an ESDF grid (not used by the pass).
@@ -384,8 +384,82 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    same cloud (`frame_id:=base_link`, `offset_z:=-0.31`: the cloud is in base_footprint, the node plans in base_link
    0.31 m higher). The log is `curobo_world.log` in the output directory. Authored and compiled, not run. Single-stand
    passes as wired in `mp_world_model`; the MuJoCo multi-stand script (`run_multi_stand_pass.sh`) now also pushes the wall to
-   cuRobo at every stand arrival with `source_frame:=odom` when the variable is set (written, syntax-checked, NOT yet run;
-   cuRobo requests also still lack a start joint state, so expect `invalid_request` from the continuity check). For a multi-stand pass the loader can take the cloud in the fixed frame the multi-stand script
+   cuRobo at every stand arrival with `source_frame:=odom` when the variable is set (first multi-stand cuRobo run 2026-11-20, MuJoCo, `two_panels_plain`, one run, NOT a pass: see below).
+   `run_multi_stand_pass.sh` also sets the manager's `seed_start_from_live_state: true` when a planning config is given, so the
+   first segment of each call has a start joint state.
+
+   **Result of that run (honest):** the node answered, the wall cloud loaded (`cuRobo world set`), `prime_continuity` and the
+   stand approach segments reached cuRobo (`fsp_backend=curobo`), but cuRobo refused them: the node log repeats
+   `Start or End state in collision`, the approach plans failed `no_path` at planning, and the manager's recovery loop (dock,
+   fail, jog back, again) ran 30 minutes with 0 columns done and 3 failed before I stopped it. Likely cause, not isolated: the
+   arm at the dock pose is inside the wall's voxel margin (the cloud is voxelised at 0.05 m) or the cloud is posed slightly
+   wrong; the same cloud was fine for the single-stand pass because cuRobo was barely used there. Two bugs found and fixed on
+   the way: the loader's TF lookup did not wait (the buffer was not told a thread spins the node: `setUsingDedicatedThread`), and a
+   sim container run as root cannot reach the node (see the root/user note below). **Second run, same day (cause found for the refusals):** the node had been started with `--max-boxes 256`. The wall is a
+   plane of about 2,500 occupied 0.05 m voxels, and the bridge doubles the voxel size until the cell count fits the slots
+   (`voxelize_points`: 0.05, 0.1, 0.2 m), so cuRobo saw a 0.2 m thick slab and the 0.1 m standoff of every approach was inside
+   it. With `--max-boxes 3000` there were 0 `in collision` messages, the stand-0 columns ran (cuRobo planned
+   `wall_column_9_approach` in 11 s, `fsp_backend=curobo`, all other segments Cartesian on MoveIt), peak force 20.9 N. The pass then
+   stalled at the stow after stand 0 (`unavailable` at precheck on 17 stow attempts, the node still up; cuRobo plans took 9 to
+   12 s each on the 4 GB GPU shared with the sim): cuRobo's service did not answer within `wait_for_service_sec` (5 s) while the
+   node was busy; not investigated further, run stopped by me, not a pass. Use `--max-boxes 3000` (or more) for a wall pass.
+
+   **Third run (per-call timeout raised from 60 s to 300 s in a copy of `planning_curobo.yaml`):** the 60 s failures were that
+   timeout. Stand 0 ran all its columns (6 done, 0 failed, peak 27.8 N; approaches planned by cuRobo took 9 to 22 s each), then the
+   stow to stand 1 was still waiting on cuRobo when the pass's own time limit (50 min) stopped the manager. Final score
+   1/1 fail: coverage 0.644 < 0.9 (one stand of two), peak 188.9 N. So cuRobo is slow on this host (GPU shared with the sim, 4 GB;
+   the stow, a long lift-and-arm move, took longer than 300 s or hung: not isolated), and a multi-stand pass with cuRobo as the
+   only free-space planner does not finish in the time budget. The pass also aborted `record_run.py` at shutdown (core dump,
+   the known shutdown crash). Not a pass; stow timed in isolation with `plan_joint` (empty world, node with `--max-boxes 3000`, same GPU, sim stopped):
+   docked pose (lift 0.0 or 0.01, arm as logged at `docked_wall_column_9`) to stow: `no_path` after 37 to 40 s, three
+   variants (also stow to docked at lift 0.01, and a half-way arm pose at lift 0.01 to stow). Moves from the stow pose succeed in
+   2.7 to 2.9 s (`trajopt`): lift only, pan only, shoulder only, pan + shoulder, and the whole docked ARM configuration with the
+   lift left at 0.4. So the failure follows the low lift with the arm swung out, not the size of the move and not the wall:
+   cuRobo's sphere model most likely treats those configurations as in collision (with the base or itself) although MuJoCo does
+   not; not confirmed (a `check_motion` on the docked pose would show it). Consequence: a docked-to-stow plan by cuRobo does not
+   exist, so the manager waits out its timeout; a MoveIt fallback for failed free-space segments is what a pass needs.
+
+   **Fourth run, with `free_space_fallback: moveit_ompl` (PR #141) in `planning_curobo.yaml`: the pass passes.** MuJoCo,
+   `two_panels_plain`, two stands, one run, 2026-11-20, node with `--max-boxes 3000`, default per-call timeout 60 s: manager
+   `10 done, 0 partial, 0 failed`, wall coverage 1.0 (2790 of 2790 cells), scorer `passed: true`, peak force 72.4 N (the pass's
+   force trace in-band fraction 0.35, RMS error 3.7 N; the live feedback read 32.2 N at the end; where the 72.4 N occurred was not checked), collision monitor: one `UNEXPECTED_CONTACT` at t = 0.008 (the known `lift_carriage_link <-> lift_stage_2_link`
+   depth 0 at start). **What cuRobo did in it, honestly:** of the 12 free-space segments, cuRobo handled 6 and produced a
+   plan for each (`fsp_backend=curobo`, 10 to 13 s of planning), but every one of those ended `partially_completed` at EXECUTION
+   (150 to 500 ms into the move), and the retry was planned by MoveIt/OMPL (`fsp_backend=ompl`, 35 ms) and completed; the stow was
+   planned by OMPL after cuRobo found no path. So the workflow completes with cuRobo configured as the free-space planner, but
+   no cuRobo trajectory has yet executed to completion on the sim arm. Cause found afterwards: the cuRobo adapter never set `PlanningResult::waypoints_completed`
+   (OMPL sets 1 for a joint target), so the manager read each successful cuRobo plan as 0 of 1 waypoints done and labelled it
+   `partially_completed`, which started the retry; fixed in this change (a successful cuRobo plan counts as one waypoint). Whether the
+   cuRobo trajectories themselves executed correctly (the 150 to 500 ms executions are short) is not shown; rerun to see.
+
+   **Fifth run (after that fix, same setup): passes again** (10 of 10 columns, coverage 1.0, peak 48.2 N, in-band 0.33, RMS 4.6 N, 2
+   collision-monitor lines). Now 4 approaches and `prime_continuity` completed WITH `fsp_backend=curobo` (planning 11.0 to 12.0 s each,
+   execution 0.50 s each, `outcome=completed`), 2 approaches and the stow came back `unavailable` from cuRobo (the node did not
+   answer in time while busy) and were planned by OMPL, and 5 more segments were planned by OMPL (a segment goes to cuRobo only when
+   the Cartesian attempt falls short). Open: the cuRobo executions are all 0.5 s, far shorter than the OMPL moves for the same segment
+   kind (4 to 8 s), so what those trajectories actually moved is not shown (the next segment, dock, completed from where the arm was);
+   cuRobo takes 11 s per plan on this GPU; the node's world was refused loads while busy.
+
+   **Sixth run (new logging, PR #146): passes** (10 of 10 columns, coverage 1.0, peak 46.8 N). The segment lines now carry the planned
+   trajectory (`traj_pts`, `traj_s`). Answer to the 0.5 s question: the five stand-0 approaches were cuRobo plans of 16 to 21 points,
+   0.375 to 0.5 s long (dt 0.025 s), each a 0.1 m step of the tool along the wall (TCP y 0.809, 0.708, 0.606, 0.506, 0.407; the
+   next logged pose is within 3 mm of each target), so they executed to the pose they were planned for. The same step planned
+   by OMPL takes 5.5 to 7 s (57 to 70 points). So cuRobo moves are about 14 times faster in the sim than the MoveIt-retimed ones, which also means
+   they run far above the speeds the MoveIt retiming allows: not checked against the real arm's limits, do not run on hardware
+   before they are. Cost: 12 to 14 s of planning per cuRobo segment against 35 to 75 ms for OMPL, so per segment cuRobo is slower
+   overall here. This run had no cuRobo failure on stand 0; the stand-1 approaches, `prime_continuity` of stand 1 and the stow
+   went to OMPL (whether cuRobo was tried and failed first, or not tried, is not logged in this run: the fallback was silent; since the change
+   that follows, a fallback is logged at INFO with the primary's reason code and message). The second stand's cuRobo world load also timed out once (`cuRobo planner call timed out`, 10 s attempt
+   limit while the node was busy), so stand 1 planned against a stale or empty cuRobo world.
+
+   Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
+   pose, `route=trajopt`, success), so the robot model is not the problem; the collision message came with the wall loaded. The
+   `prime_continuity` segments planned fine (`path_fraction=1`) and then ended `partial_completion` at execution (a zero-length
+   move, ratio 0; 47 repeats in the loop), which is a separate thing from the refused approaches. The sim wall is a one-point-thick
+   plane at x = 0.98 m in odom (`walls_sim.pcd`), and the approach target stands 0.1 m off it, so the likely culprit is the
+   approach end state sitting inside cuRobo's collision activation distance of a voxel at 0.05 m, not a wrongly posed cloud. Not
+   confirmed. Next step: lower the cloud's voxel size or
+   leave the dock-side margin out of the cuRobo world, and check the loaded cloud's pose against the MoveIt octomap. For a multi-stand pass the loader can take the cloud in the fixed frame the multi-stand script
    uses and look its pose up from TF at each call: `ros2 run curobo_planner curobo_world_loader --ros-args -p
    point_cloud_path:=<walls.pcd> -p frame_id:=base_link -p source_frame:=odom` (compiled, not run; the multi-stand
    scripts do not call it yet, so a multi-stand pass still plans with an empty cuRobo world).

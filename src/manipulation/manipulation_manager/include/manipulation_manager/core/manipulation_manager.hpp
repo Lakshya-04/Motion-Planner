@@ -143,6 +143,12 @@ public:
   using SegmentProgressCallback = std::function<void (const MotionSegmentExecMetrics &)>;
   void setSegmentProgressCallback(SegmentProgressCallback callback);
 
+  /// Optional: where the arm is right now. When set, every executeMotionSegments() call seeds its first segment's
+  /// start state from it (needed by planners that take an explicit start, such as cuRobo). Unset (default): the
+  /// first segment plans from the planner's own current state, as before.
+  using StartStateProvider = std::function<std::vector<double>()>;
+  void setStartStateProvider(StartStateProvider provider);
+
   /**
    * @brief Invoked once per segment right after a successful plan (before
    *        its execute() call), with the raw trajectory and its per-chunk
@@ -266,6 +272,7 @@ private:
   std::shared_ptr<core_types::Logger> logger_{std::make_shared<core_types::NullLogger>()};
   std::shared_ptr<ExecutionPort> execution_port_;  ///< No default -- inject before use.
   SegmentProgressCallback segment_progress_callback_;
+  StartStateProvider start_state_provider_;
   SegmentPlannedCallback segment_planned_callback_;
   CancelRequestedCallback cancel_requested_callback_;
   bool pipelining_enabled_{false};

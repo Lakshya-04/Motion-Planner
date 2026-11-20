@@ -140,6 +140,11 @@ void ManipulationManager::setMotionPlanner(
   motion_planner_->setLogger(logger_);
 }
 
+void ManipulationManager::setStartStateProvider(StartStateProvider provider)
+{
+  start_state_provider_ = std::move(provider);
+}
+
 void ManipulationManager::setSegmentProgressCallback(SegmentProgressCallback callback)
 {
   segment_progress_callback_ = std::move(callback);
@@ -291,6 +296,12 @@ MotionExec ManipulationManager::executeMotionSegments(
   // that never injected a MotionPlanner (e.g. the empty-mission precheck
   // path) doesn't need one just to get that far.
   motion_planner_->resetContinuity();
+  if (start_state_provider_) {
+    const auto live = start_state_provider_();
+    if (!live.empty()) {
+      motion_planner_->seedContinuity(live);
+    }
+  }
 
   const auto order = segment_ordering_policy_->buildExecutionOrder(segments.size());
 
@@ -577,6 +588,9 @@ MotionExec ManipulationManager::executeMotionSegments(
     metrics.bridge_count = bridge_count;
     metrics.planning_time_ms = total_planning_time_ms;
     metrics.execution_time_ms = total_execution_time_ms;
+    metrics.planned_points = planning_result.trajectory.points.size();
+    metrics.planned_duration_s = planning_result.trajectory.points.empty() ?
+      0.0 : planning_result.trajectory.points.back().time_from_start_sec;
     metrics.completed_waypoints = exec.waypoints_completed;
     metrics.path_fraction = planning_result.path_fraction;
     metrics.completion_ratio = (metrics.attempted_waypoints > 0) ?

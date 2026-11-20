@@ -124,6 +124,7 @@ manipulation_manager:
     base_check_arm_mount_z_m: 1.17
 ${MULTI_STAND_MANAGER_EXTRA:-}
 ${MANAGER_PASS_PLANNING_CONFIG:+    planning_config: $MANAGER_PASS_PLANNING_CONFIG}
+${MANAGER_PASS_PLANNING_CONFIG:+    seed_start_from_live_state: true}
 YAML
 
 python3 "$PKG/lib/sim_mujoco/record_run.py" --record "$REC" --timeout 3000 --frame odom --wall-x "$WALL_X" \
