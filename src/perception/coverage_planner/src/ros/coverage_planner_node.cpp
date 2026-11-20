@@ -1,6 +1,9 @@
 #include "coverage_planner/ros/conversions.hpp"
+
 #include "coverage_planner/ros/coverage_planner_node.hpp"
+#include "coverage_planner/core/contact_spacing.hpp"
 #include <chrono>
+#include <tuple>
 #include <sstream>
 #include "coverage_planner/core/coverage_planner_base.hpp"
 #include "ros_adapters/rclcpp_logger.hpp"
@@ -169,8 +172,8 @@ CoveragePlannerParams CoveragePlannerNode::buildPlannerParams(
   params.components_in_sweep_order = components_in_sweep_order_;
   params.fill_gaps = fill_gaps_;
   params.min_stroke_length_m = min_stroke_length_m_;
-  params.edge_zone_m = edge_zone_m_;
-  params.edge_spacing_scale = edge_spacing_scale_;
+  std::tie(params.edge_zone_m, params.edge_spacing_scale) = resolveEdgeSpacing(
+    request->edge_zone_m, request->edge_spacing_scale, edge_zone_m_, edge_spacing_scale_);
   params.decomposition = decomposition_;
 
   return params;

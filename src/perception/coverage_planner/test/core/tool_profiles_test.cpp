@@ -135,6 +135,19 @@ TEST(ToolOverridesTest, DoublePassForcesTwoPassesAndInflationFallsBackToHalfSwat
   EXPECT_NEAR(t.coverage.obstacle_inflation_radius_m, toolSwath(t) / 2.0, 1e-12);
 }
 
+TEST(ToolOverridesTest, EdgeSpacingFromTheProfileAndFromOverrides)
+{
+  const auto base = shipped("contact_wiper");
+  EXPECT_DOUBLE_EQ(base.coverage.edge_zone_m, 0.0);          // shipped profiles stay uniform
+  EXPECT_DOUBLE_EQ(base.coverage.edge_spacing_scale, 1.0);
+  ToolOverrides o;
+  o.edge_zone_m = 0.15;
+  o.edge_spacing_scale = 0.6;
+  const auto t = shipped("contact_wiper", o);
+  EXPECT_DOUBLE_EQ(t.coverage.edge_zone_m, 0.15);
+  EXPECT_DOUBLE_EQ(t.coverage.edge_spacing_scale, 0.6);
+}
+
 TEST(ToolSwathTest, RejectsNonPositiveStandoffForASprayTool)
 {
   auto t = shipped("spray_gun");

@@ -224,3 +224,39 @@ TEST(ContactSpacing, ShippedContactWiperIsUnchanged)
   EXPECT_NEAR(toolLineSpacing(t), 0.16, 1e-12);
   EXPECT_EQ(contactStripOffsets(t, 0.1, 1.9).size(), contactStripOffsets(0.1, 1.9, 0.16, 0.0, 1.0).size());
 }
+
+TEST(ObstacleEdgeCells, FindsTheStepoverExtentOfEveryBlockedRegion)
+{
+  // a in [0, 19], b in [0, 9]; two blocks: a 4..6 (b 2..3) and a 12..12 (b 5..8)
+  const auto blocked = [](int a, int b) {
+      return (a >= 4 && a <= 6 && b >= 2 && b <= 3) || (a == 12 && b >= 5 && b <= 8);
+    };
+  EXPECT_EQ(obstacleEdgeCells(0, 19, 0, 9, blocked), (std::vector<int>{4, 6, 12}));
+  EXPECT_TRUE(obstacleEdgeCells(0, 19, 0, 9, [](int, int) {return false;}).empty());
+  EXPECT_TRUE(obstacleEdgeCells(5, 4, 0, 9, blocked).empty());
+  // a region is cut at the box: only a in [5, 19] looks at the first block's cells 5..6
+  EXPECT_EQ(obstacleEdgeCells(5, 19, 0, 9, blocked), (std::vector<int>{5, 6, 12}));
+}
+
+TEST(StripCellPositions, ObstacleEdgesOpenAZoneBothWays)
+{
+  // step 4, fine step 2, zone 3 cells, edge at 20 (range ends are far enough not to matter there)
+  const auto up = stripCellPositions(0, 40, true, 4, 3, 0.5, {20});
+  const std::vector<int> expect_up = {0, 2, 4, 8, 12, 16, 20, 22, 24, 28, 32, 36, 40};
+  EXPECT_EQ(up, expect_up);
+  const auto down = stripCellPositions(0, 40, false, 4, 3, 0.5, {20});
+  const std::vector<int> expect_down = {40, 38, 36, 32, 28, 24, 20, 18, 16, 12, 8, 4, 0};
+  EXPECT_EQ(down, expect_down);
+  // no edges, no zone: the old uniform loop
+  EXPECT_EQ(stripCellPositions(0, 20, true, 4, 0, 0.5, {10}), (std::vector<int>{0, 4, 8, 12, 16, 20}));
+}
+
+TEST(ResolveEdgeSpacing, RequestWinsOnlyWhenItIsSet)
+{
+  using P = std::pair<double, double>;
+  EXPECT_EQ(resolveEdgeSpacing(0.15, 0.6, 0.0, 1.0), (P{0.15, 0.6}));
+  EXPECT_EQ(resolveEdgeSpacing(0.0, 0.0, 0.3, 0.5), (P{0.3, 0.5}));   // unset request: the node's
+  EXPECT_EQ(resolveEdgeSpacing(0.15, 1.0, 0.3, 0.5), (P{0.15, 0.5}));  // scale 1 (a profile default) is unset
+  EXPECT_EQ(resolveEdgeSpacing(0.0, 0.0, 0.0, 1.0), (P{0.0, 1.0}));
+  EXPECT_EQ(resolveEdgeSpacing(0.0, 0.0, 0.2, 7.0), (P{0.2, 1.0}));   // clamped
+}

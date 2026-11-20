@@ -126,9 +126,15 @@ Spacing never exceeds the uniform one. Limits: the model is static and quasi-fla
 mechanics solver); the boustrophedon (columns and cells) and sweepline planners apply the same rule on their grid through
 `CoveragePlannerParams::edge_zone_m` / `edge_spacing_scale` (`stripCellPositions`; node parameters of the same
 names, default 0 / 1.0 = uniform, plans unchanged; `test_edge_spacing_planner`). Only the two ends of the stepover
-axis (of a cell, for the cell decomposition) open a zone there; obstacle edges are not passed to the planners, and
-the tool profile's values are not yet copied into the planner parameters automatically. Shipped profiles are
-unchanged.
+axis (of a cell, for the cell decomposition) open a zone there. In the sweepline planner and in the boustrophedon column
+sweeps the borders of every obstacle (the lowest and highest stepover position of each blocked region inside the free
+span, `obstacleEdgeCells`) open the same zone; the cell decomposition already ends its cells at obstacle borders, so
+its zones sit there without extra input. Both values are in the tool profile and in `ToolOverrides` / node parameters of
+the same names (`edge_zone_m`, `edge_spacing_scale`); `wall_coverage_service_node` and `wall_coverage_demo_node` copy the
+profile's values into the new `edge_zone_m` / `edge_spacing_scale` fields of `GenerateCoveragePath` (zone <= 0 or scale
+outside (0, 1) = use the planner node's parameter, `resolveEdgeSpacing`). Shipped profiles are unchanged (uniform). Not
+verified: the effect on a real wall's coverage or on a run, only that the generated strip positions are finer near the
+obstacle borders (`test_edge_spacing_planner`).
 
 ### Deposition and thickness uniformity
 

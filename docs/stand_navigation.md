@@ -120,11 +120,21 @@ manager runs with `world_frame: odom`; the recorder logs the tool point in odom 
 
 Feedback (on each state change): `state` (`planning_stands`, `navigating`, `stowing`, `priming`, `docking`, `pressing`,
 `stroking`, `retracting`, `done`, `canceled`), `stand_index` / `stand_count`, `column`, `columns_done`, `columns_failed`
-(failed + partial), `peak_force_n` (largest magnitude of the conditioned wrench, `force_topic` parameter, counted only while
+(failed + partial), `mission_state` (the mission FSM state, `IDLE`/`ACTIVE`/`PAUSED`/`STOPPED`/`RECOVERY`, as the `mission_command` service reports it), `peak_force_n` (largest magnitude of the conditioned wrench, `force_topic` parameter, counted only while
 the tool is pressing or stroking; -1 when not read). Result: `success`, `message`, `columns_done` / `_partial` / `_failed`,
 `stands[]` (`StandOutcome`: `reached`, message, the columns of that stand by outcome), `peak_force_n`. A run that ran to its end
 is `succeeded` with `success` telling whether every column was done; `aborted` is for a run that could not start (plan not
 loadable, no stand); `canceled` for a cancel. One goal at a time (a second is rejected).
+
+**Verify result.** With the parameter `verify_result_path` set, the manager writes a JSON file when a task ends (also a canceled or
+not-started one), with the keys of coverage_planner's `VerifyResult` (`passed`, `coverage_percent`, `failed_segment_ids`,
+`report_path`, `source: "manager"`, `failures`) plus `coverage_basis: "columns"` and `peak_force_n`. What it can compute: the share of the
+requested columns that finished done (`coverage_percent`; this is NOT the geometric coverage, the manager has no tool-position
+telemetry or wall model: `score_run` on a recording gives that), the columns that ended partial or failed as `failed_segment_ids`,
+and, when `verify_max_peak_n` > 0 and the force topic is read, columns and the run whose force peak passed it. `passed` needs a
+loaded, not canceled run in which every column and stand succeeded and no peak limit was broken; `report_path` is the mission
+ledger path (`ledger_path`) when set. Not computed: standoff, in-band fraction, thickness, obstacle contacts, controller switch
+under load. `core/mission_verify.hpp`, gtests; not run in a sim.
 
 **The loop** (`multi_stand`): `plan_stands` for the plan's poses (world frame, start = the arm base from TF) -> each column
 goes to the stand that reaches most of its poses (`assignColumnsToStands`, ties to the earlier stand; a column no stand reaches

@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <functional>
+#include <utility>
 #include <vector>
 
 #include "coverage_planner/core/tool_coverage_profile.hpp"
@@ -38,10 +40,26 @@ std::vector<double> contactStripOffsets(
 /// the uniform loop `lo, lo+step, ... <= hi` (mirrored when descending), no last strip is forced at the
 /// far end. Otherwise a strip within `zone_cells` of either end advances by
 /// max(1, floor(step_cells * edge_scale)) cells.
-/// Empty for hi < lo.
+/// Empty for hi < lo. `edge_cells` (obstacle borders along the same axis, see `obstacleEdgeCells`)
+/// open the same zone: a strip within `zone_cells` of one also advances by the fine step.
 /// @throws std::invalid_argument for step_cells < 1 or scale outside (0, 1].
 std::vector<int> stripCellPositions(
-  int lo, int hi, bool ascending, int step_cells, int zone_cells, double edge_scale);
+  int lo, int hi, bool ascending, int step_cells, int zone_cells, double edge_scale,
+  const std::vector<int> & edge_cells = {});
+
+/// Positions along the stepover axis where obstacles begin and end: the lowest and highest `a` of
+/// every 4-connected blocked region inside a in [a_lo, a_hi], b in [b_lo, b_hi] (a is the stepover
+/// axis, b runs along a strip). Sorted, unique. Regions that run through a box border are cut at it.
+std::vector<int> obstacleEdgeCells(
+  int a_lo, int a_hi, int b_lo, int b_hi, const std::function<bool(int a, int b)> & blocked);
+
+/// Edge spacing a planner call uses: the request's value when it is set, else the node's.
+/// A request zone <= 0 means "not set" (a default-constructed request field is 0), and so does a scale
+/// outside (0, 1) (0 is unset; 1 is uniform, which a tool profile's default also is, so it must not
+/// override a node parameter).
+/// @return {zone_m, scale}; an invalid scale (> 1) is clamped to 1 (uniform).
+std::pair<double, double> resolveEdgeSpacing(
+  double request_zone_m, double request_scale, double node_zone_m, double node_scale);
 
 /// Same, taking spacing and zone from the tool profile (toolLineSpacing, coverage.edge_*).
 std::vector<double> contactStripOffsets(

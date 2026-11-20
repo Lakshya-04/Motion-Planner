@@ -35,6 +35,7 @@
 #include "geometry_msgs/msg/wrench_stamped.hpp"
 #include "coverage_task_msgs/action/execute_coverage.hpp"
 #include "coverage_task_msgs/srv/mission_command.hpp"
+#include "manipulation_manager/core/mission_verify.hpp"
 #include "stand_navigator_msgs/action/navigate_to_stand.hpp"
 #include "reachability_msgs/srv/plan_stands.hpp"
 #include "std_msgs/msg/bool.hpp"
@@ -362,6 +363,9 @@ public:
     // Mission ledger ("" = off) and the contact-overload limit (0 = off; above it a column is skipped, not retried).
     ledger_ = MissionLedger(this->declare_parameter<std::string>("ledger_path", ""));
     contact_overload_n_ = this->declare_parameter<double>("contact_overload_n", 0.0);
+    // Verify result written when a task ends ("" = off); max_peak 0 = no force limit in it.
+    verify_result_path_ = this->declare_parameter<std::string>("verify_result_path", "");
+    verify_max_peak_n_ = this->declare_parameter<double>("verify_max_peak_n", 0.0);
     mission_command_sub_ = this->create_subscription<std_msgs::msg::String>(
       "mission_command", 10, [this](const std_msgs::msg::String::SharedPtr msg) {
         if (msg->data == "pause") {
@@ -622,6 +626,7 @@ private:
     fb->columns_done = static_cast<uint32_t>(tracker_.done().size());
     fb->columns_failed = static_cast<uint32_t>(tracker_.partial().size() + tracker_.failed().size());
     fb->peak_force_n = peak_force_;
+    fb->mission_state = toString(mission_fsm_.state());
     feedback_sink_(fb);
   }
 
@@ -643,8 +648,38 @@ private:
     RCLCPP_WARN(this->get_logger(), "task canceled: motion stopped, admittance off, force target 0");
   }
 
-  /// Runs one task: loads the plan, then either the whole plan from here or, multi-stand, the stands in order.
+  /// Runs one task (executeTaskImpl) and then writes the verify result when `verify_result_path` is set.
   TaskResult executeTask(const TaskRequest & req)
+  {
+    column_peaks_.clear();
+    const TaskResult out = executeTaskImpl(req);
+    if (!verify_result_path_.empty()) {
+      MissionVerifyInput in;
+      in.loaded = out.loaded;
+      in.canceled = out.canceled;
+      in.tracker_success = tracker_.success();
+      in.done = tracker_.done();
+      in.partial = tracker_.partial();
+      in.failed = tracker_.failed();
+      in.peak_force_n = peak_force_;
+      in.column_peaks_n = column_peaks_;
+      in.max_peak_force_n = verify_max_peak_n_;
+      in.message = out.message;
+      in.report_path = ledger_.path();
+      const auto result = buildMissionVerify(in);
+      if (writeMissionVerify(verify_result_path_, missionVerifyToJson(result, in))) {
+        RCLCPP_INFO(
+          this->get_logger(), "verify result (%s, columns %.0f%%) written to %s",
+          result.passed ? "passed" : "failed", result.coverage_percent, verify_result_path_.c_str());
+      } else {
+        RCLCPP_ERROR(this->get_logger(), "cannot write the verify result to %s", verify_result_path_.c_str());
+      }
+    }
+    return out;
+  }
+
+  /// Runs one task: loads the plan, then either the whole plan from here or, multi-stand, the stands in order.
+  TaskResult executeTaskImpl(const TaskRequest & req)
   {
     TaskResult out;
     cancel_requested_ = false;
@@ -1485,6 +1520,7 @@ private:
       column_reason_ = SkipReason::kPlanFailed;
       outcome = runColumn(world_intent, column);
     }
+    column_peaks_[column] = column_peak_;
     if (outcome == ColumnOutcome::kFailed && !stop()) {
       RCLCPP_ERROR(this->get_logger(), "column %zu failed, skipped", column);
     }
@@ -1940,6 +1976,9 @@ private:
   MissionFsm mission_fsm_;
   double contact_overload_n_{0.0};
   double column_peak_{0.0};
+  std::map<size_t, double> column_peaks_;
+  std::string verify_result_path_;
+  double verify_max_peak_n_{0.0};
   SkipReason column_reason_{SkipReason::kPlanFailed};
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mission_command_sub_;
   rclcpp::Service<MissionCommandSrv>::SharedPtr mission_command_srv_;

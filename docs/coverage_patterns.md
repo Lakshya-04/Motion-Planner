@@ -152,7 +152,7 @@ recording (a wall column); it fails when the tool never worked in it, its force 
 its in-band fraction is under the minimum. Coverage is a whole-run figure and is not attributed to segments. `score_run
 --mode contact|non_contact|spray [--segments segments.json] [--result-out result.json] [--report-out card.json]` writes
 the contract (`segments.json` is `[{"id": 0, "t_start": 0.0, "t_end": 2.1}, ...]`). `source` is `telemetry` (v1); a
-perception-derived v2 is not implemented. "No controller switch under load" has no signal in the recording and is not checked.
+perception-derived v2 is not implemented. The manager can write the same keys at the end of a mission from what it knows (columns done, force peak; `verify_result_path`, `docs/stand_navigation.md`), with `source: manager` and `coverage_percent` counting columns, not area. "No controller switch under load" has no signal in the recording and is not checked.
 
 Obstacles on the wall: the wall JSON may carry `"obstacles": [{"id": 0, "u": [min,max], "v": [min,max], "height_m": 0.04}]`
 (u, v in the wall's coordinates, `height_m` how far the obstacle stands off the wall, against `u x v`; 0 for a window
