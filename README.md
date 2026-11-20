@@ -7,14 +7,23 @@ tool (contact like a mop, non-contact like a spray gun), in simulation first and
 
 **Status in one line:** the building blocks exist and are tested, and both simulators now run the pipeline
 end to end in headless one-command passes (coverage planner, manager, MoveIt, compliant controller, recorded
-and scored). Nothing here has run on hardware, and the base does not yet move between stands in those passes.
+and scored), including multi-stand passes where the base drives between stands. Nothing here has run on hardware.
 The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
-**Where it stands (2026-11-18):** single-stand wall passes in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
-Multi-stand passes are not: runs fail at the second stand about half the time in MuJoCo (2 of 4 runs failed) and 1 of 3 in Gazebo, causes not yet found,
-see [Obstacle scenarios](#obstacle-scenarios-mujoco). Planning backends are MoveIt/OMPL, VAMP and cuRobo v2 (the pin is the 0.8.0 line; the
-newer cuRoboV2-Fast, v0.9.0, is being evaluated). cuRobo and VAMP are tested standalone and through their ROS clients, but no simulator pass has yet
-used them as the planner. Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md).
+**Where it stands (2026-11-21):**
+- **Single-stand wall passes** in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
+- **Two-stand passes in MuJoCo** now pass. Same-session batches of 8 runs each: plain wall 6 of 8 before the second-stand fix and 8 of 8
+  after, the rib scenario `two_panels` 8 of 8 both times (scored on the reachable wall). That 6/8 vs 8/8 gap is not statistically
+  significant on its own; the clear differences are fewer truncated plans (at least 5 per run before, 0 to 6 after) and lower
+  peak forces. Peaks are still 47 to 88 N against a 10 N target on these passes (a 10 N hold works in the single-stand test).
+- **cuRobo v0.9.0 (cuRoboV2-Fast) as the free-space planner** now completes a two-stand MuJoCo pass: four runs, all 10 of 10 columns,
+  coverage 1.0, peak force 46.8 to 72.4 N. How much cuRobo did, honestly: it planned the stand-0 approach moves (12 to 16 s each on
+  this 4 GB laptop GPU, executed in 0.4 to 0.7 s); MoveIt/OMPL planned the stow and the second stand, either because cuRobo
+  could not (no path from the docked pose to the stow, even in an empty world: its robot model treats low lift with the arm swung out as
+  in collision) or did not answer in time. A `free_space_fallback` makes that automatic and logged. See [the pass below](#curobo-in-a-two-stand-pass-mujoco).
+- **Gazebo two-stand passes currently fail** (0 of 10 columns in two runs on 2026-11-21, with and without cuRobo: MoveIt reports an invalid
+  dock goal and a start state out of bounds). Earlier Gazebo runs of the same script completed one stand; the regression is not isolated yet.
+- Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md); the day-by-day handoff: [docs/dev_handoff.md](docs/dev_handoff.md).
 
 ```
 sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware) -> base stands
@@ -86,6 +95,24 @@ loaded, which also gives the arm collision geometry; that run scored 0.58 covera
 |---|---|
 | ![gazebo seed](docs/media/gazebo_spray_seed.png) | ![gazebo stroke](docs/media/gazebo_spray_stroke.png) |
 
+### cuRobo in a two-stand pass (MuJoCo)
+
+`run_multi_stand_pass.sh` on `two_panels_plain` (a free base, two stands, ten columns), with cuRobo v0.9.0 selected as the free-space planner
+(`planning_curobo.yaml`, MoveIt/OMPL as the fallback) and the wall pushed to the cuRobo node at every stand. The video is the run at 12x
+(1128 s of simulated time), with the contact force trace and a close-up of the tool; [mp4](docs/media/multi_stand_curobo.mp4).
+
+![A two-stand MuJoCo pass with cuRobo as the free-space planner](docs/media/multi_stand_curobo.gif)
+
+Scored result of that run: 10 columns done, 0 partial, 0 failed; coverage 100 % (2790 of 2790 cells); peak force 69.3 N (target 10 N);
+RMS force error 5.1 N; 33 % of the contact samples in the 1.5 N band; one collision-monitor line (a lift link pair at depth 0 in the first
+10 ms). Planner use in the run: cuRobo planned 7 segments (the priming move and 6 stand-0 approaches: 10 to 16 s of planning each, 0.4 to
+0.7 s of motion), MoveIt/OMPL planned the other 6 free-space segments (including the stow and the second stand), 4 to 50 s of motion each, because
+cuRobo's service did not answer for the stow (`unavailable`). Three earlier runs with the same setup also passed (peaks 46.8, 48.2, 72.4 N).
+Before those, three runs failed or stalled and each led to a fix (a 256-box cache that turned the wall into 20 cm slabs, a missing waypoint
+count that made every cuRobo plan look partial, the dock-to-stow move cuRobo cannot plan); the story and the commands:
+[docs/sim_mujoco.md](docs/sim_mujoco.md#running-a-pass-with-curobo-as-the-planner). The cuRobo moves are about 14 times faster than the
+MoveIt-retimed ones in the sim, far above what the MoveIt retiming allows, and have not been checked against the real arm's limits: do not run them on hardware as they are.
+
 ### Obstacle scenarios (MuJoCo)
 
 `run_scenarios.sh` runs named walls through the manager pass (UR10e, each scenario twice). One filmed run per scenario is shown; the
@@ -105,6 +132,11 @@ The single-stand scenarios pass, with peaks near 20 N against a 10 N target. The
 including on a plain wall, so it is not the obstacle: the approach to the first columns is refused six times in a row by collision truncation
 and recovery finds no safe configuration. The cause is not isolated (the arm's pose at the second stand is the suspect). Several host loads were
 10 to 14 during these runs, recorded per run in the docs. No hardware was involved.
+
+**Update, 2026-11-20 (same-session batches of 8, MuJoCo):** after the second-stand fix `two_panels_plain` passed 8 of 8 (6 of 8 on the code before it) and `two_panels` 8 of 8 on
+both code states, scored on the reachable wall. The `two_panels` row above (0 of 2, coverage 0.670) was measured before the reachability and keep-out changes that
+are now in; the 0.88 wall coverage the pass script prints for `two_panels` is the whole-wall figure, not the reachable-wall one the scenario judges. Details:
+[docs/sim_mujoco.md](docs/sim_mujoco.md#scenario-set-obstacles-on-the-wall).
 
 ## Simulators
 
@@ -146,6 +178,7 @@ Sources: `src/simulation/sim_mujoco/scripts/`, `src/simulation/sim_gazebo/script
 - Wall coverage planning from a scene file: `ros2 launch coverage_planner wall_coverage_demo.launch.py`
 - Reachability map building and stand planning (`rm4d_tool`, `reachability_node`): [docs/reachability.md](docs/reachability.md)
 - The simulated wall passes above, and the smoke and contact tests of each simulator
+- A two-stand pass with cuRobo as the free-space planner: [docs/sim_mujoco.md](docs/sim_mujoco.md#running-a-pass-with-curobo-as-the-planner)
 
 ## Documentation
 

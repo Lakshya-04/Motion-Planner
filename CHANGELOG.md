@@ -166,6 +166,32 @@ anything verified on hardware.
 - Hardware parameter template, hardware bring-up guide, release checklist and a single "run all checks" section
   in `docs/docker.md`.
 
+### Since #61 (pull requests #62 to #147, 2026-11-16 to 2026-11-21)
+
+Added
+- Passes and sensing: depth-sensor wall detection, the sensed-wall and spray passes, the manager task action and stand loop, failure recovery,
+  tool-actuation safety, obstacle scenarios and the scenario gallery, the wall docking servo, planar patches, live octomap, the mission ledger,
+  payload identification, simulator noise models, the JTAC force limiter.
+- Stands: set-cover and global stand selection, horizontal-wall reach, IK and collision confirmation of RM4D stands (`planStandsVerified`,
+  `~/plan_verified_stands`, `reachability_verified_node`, a configurable stand-service timeout).
+- Planning backends: cuRobo pinned to v0.9.0 (cuRoboV2-Fast), the cuRobo world loader (`curobo_world_loader`, TF-posed per stand), opt-in
+  `seed_start_from_live_state`, `free_space_fallback` (`FallbackPlanner`, cuRobo with MoveIt/OMPL behind it), logging of the free-space failure message and of the
+  planned trajectory size, a planner benchmark.
+- Evaluation: verify-result contract with numeric limits (`VerifyResult`, `score_run --mode`), adaptive edge spacing in the sweepline and boustrophedon planners, the
+  `mission_command` pause/resume/status service, `ToolFeedExecutionPort`, a MuJoCo unexpected-contact monitor, a behaviour-tree evaluation.
+- Tools: `docker/tools/publish_images.sh`, `docker/tools/hostwatch/` (memory watchdog, job runner, `slots.sh`).
+- Docs: `CONTRIBUTING.md` conventions (linear history, squash merges, Conventional Commits), the development handoff, the cuRobo-in-a-pass story in `docs/sim_mujoco.md`.
+
+Fixed
+- Multi-stand second stand (seeded dock IK, approach-pose check, whole-wall octomap): plain wall 6 of 8 before, 8 of 8 after in same-session batches (not significant on its
+  own; truncated plans and peak force clearly lower).
+- cuRobo adapter: a successful plan counts as one waypoint done (every cuRobo plan was labelled partial before); the world loader waits for TF.
+
+Verified in simulation (MuJoCo, one pass each unless stated): a two-stand pass with cuRobo as the free-space planner, four runs, 10 of 10 columns, coverage 1.0.
+Failing: the Gazebo two-stand pass (0 of 10 columns in two runs on 2026-11-21, with and without cuRobo); cuRobo cannot plan the docked-to-stow move.
+
+The history up to 2026-11-20 was consolidated from 561 commits into 15 milestone commits with identical content (the pull request numbers above are kept in the messages).
+
 ### Changed (first block)
 - TRAC-IK with `Distance` is the default MoveIt IK solver.
 - Docs that said "planned" or "not done" for things that now exist were brought in line with the code
