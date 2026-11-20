@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <string>
+
 namespace manipulation_manager
 {
 
@@ -103,5 +105,36 @@ private:
   MissionState state_{MissionState::kIdle};
   bool pause_requested_{false};
 };
+
+/// Result of one typed mission command (mirrors coverage_task_msgs/srv/MissionCommand).
+struct MissionCommandReply
+{
+  bool accepted{false};
+  std::string state;
+  bool pause_pending{false};
+  std::string message;
+};
+
+/// Apply "pause", "resume" or "status" to the FSM. An unknown command changes nothing and is not accepted.
+inline MissionCommandReply applyMissionCommand(MissionFsm & fsm, const std::string & command)
+{
+  MissionCommandReply r;
+  if (command == "pause") {
+    r.accepted = fsm.requestPause();
+    r.message = r.accepted ? "pause requested, takes effect at the next column boundary" :
+      "pause ignored: the mission is not active";
+  } else if (command == "resume") {
+    r.accepted = fsm.resume();
+    r.message = r.accepted ? "resumed" : "resume ignored: nothing is paused or pending";
+  } else if (command == "status") {
+    r.accepted = true;
+    r.message = "status";
+  } else {
+    r.message = "unknown command '" + command + "' (pause | resume | status)";
+  }
+  r.state = toString(fsm.state());
+  r.pause_pending = fsm.pauseRequested();
+  return r;
+}
 
 }  // namespace manipulation_manager

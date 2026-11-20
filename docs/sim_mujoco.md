@@ -884,6 +884,8 @@ one segment); the stand is kept for information only, since stands are planned a
 - Pause and resume: `ros2 topic pub --once /manipulation_manager/mission_command std_msgs/msg/String "{data: pause}"` (or
   `resume`). A pause takes effect at the next column boundary (the mission FSM, `core/mission_fsm.hpp`: IDLE, ACTIVE, PAUSED,
   STOPPED, RECOVERY); the stroke in flight is not interrupted. Cancel is unchanged and works while paused.
+  The typed form: `ros2 service call /manipulation_manager/mission_command coverage_task_msgs/srv/MissionCommand "{command: status}"`
+  (`pause`, `resume`, `status`); the reply carries `accepted`, the FSM `state` and `pause_pending`. Not yet run in a sim pass.
 
 Acceptance test (kill mid-wall, restart, only unfinished segments rerun): start `run_multi_stand_pass.sh` with
 `MULTI_STAND_MANAGER_EXTRA` set to `ledger_path: /tmp/mission.json`, kill the manager (`pkill -f manipulation_manager_node`)

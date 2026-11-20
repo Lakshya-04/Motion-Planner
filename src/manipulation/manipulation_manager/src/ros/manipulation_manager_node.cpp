@@ -34,6 +34,7 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/wrench_stamped.hpp"
 #include "coverage_task_msgs/action/execute_coverage.hpp"
+#include "coverage_task_msgs/srv/mission_command.hpp"
 #include "stand_navigator_msgs/action/navigate_to_stand.hpp"
 #include "reachability_msgs/srv/plan_stands.hpp"
 #include "std_msgs/msg/bool.hpp"
@@ -330,6 +331,18 @@ public:
           RCLCPP_INFO(this->get_logger(), "mission: resume %s", mission_fsm_.resume() ? "accepted" : "ignored");
         }
       });
+    // Typed counterpart of the mission_command topic (which stays): pause / resume / status with the FSM state back.
+    mission_command_srv_ = this->create_service<MissionCommandSrv>(
+      "mission_command", [this](
+        const std::shared_ptr<MissionCommandSrv::Request> req, std::shared_ptr<MissionCommandSrv::Response> res) {
+        const auto r = applyMissionCommand(mission_fsm_, req->command);
+        res->accepted = r.accepted;
+        res->state = r.state;
+        res->pause_pending = r.pause_pending;
+        res->message = r.message;
+        RCLCPP_INFO(this->get_logger(), "mission command '%s': %s (%s)", req->command.c_str(),
+          r.accepted ? "accepted" : "rejected", r.state.c_str());
+      });
     nav_client_ = rclcpp_action::create_client<NavigateToStand>(this, "navigate_to_stand");
     action_server_ = rclcpp_action::create_server<ExecuteCoverage>(
       this, "execute_coverage",
@@ -448,6 +461,7 @@ public:
 
 private:
   using ExecuteCoverage = coverage_task_msgs::action::ExecuteCoverage;
+  using MissionCommandSrv = coverage_task_msgs::srv::MissionCommand;
   using GoalHandle = rclcpp_action::ServerGoalHandle<ExecuteCoverage>;
   using NavigateToStand = stand_navigator_msgs::action::NavigateToStand;
 
@@ -1866,6 +1880,7 @@ private:
   double column_peak_{0.0};
   SkipReason column_reason_{SkipReason::kPlanFailed};
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mission_command_sub_;
+  rclcpp::Service<MissionCommandSrv>::SharedPtr mission_command_srv_;
   std::string state_{"idle"};
   size_t stand_index_{0};
   size_t stand_count_{1};

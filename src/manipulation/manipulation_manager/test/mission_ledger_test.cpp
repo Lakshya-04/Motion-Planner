@@ -197,3 +197,50 @@ TEST(MissionFsm, StopFromAnyStateAndRecovery)
   EXPECT_FALSE(f.resume());
   EXPECT_TRUE(f.start());
 }
+
+TEST(MissionCommand, PauseResumeStatusThroughTheTypedReply)
+{
+  MissionFsm f;
+  auto r = applyMissionCommand(f, "status");
+  EXPECT_TRUE(r.accepted);
+  EXPECT_EQ(r.state, "IDLE");
+  EXPECT_FALSE(r.pause_pending);
+
+  EXPECT_FALSE(applyMissionCommand(f, "pause").accepted);   // idle: nothing to pause
+  f.start();
+  r = applyMissionCommand(f, "pause");
+  EXPECT_TRUE(r.accepted);
+  EXPECT_EQ(r.state, "ACTIVE");
+  EXPECT_TRUE(r.pause_pending);                              // mid-column, not yet paused
+
+  f.atBoundary();
+  r = applyMissionCommand(f, "status");
+  EXPECT_EQ(r.state, "PAUSED");
+
+  r = applyMissionCommand(f, "resume");
+  EXPECT_TRUE(r.accepted);
+  EXPECT_EQ(r.state, "ACTIVE");
+  EXPECT_FALSE(applyMissionCommand(f, "resume").accepted);   // nothing left to release
+}
+
+TEST(MissionCommand, UnknownCommandChangesNothing)
+{
+  MissionFsm f;
+  f.start();
+  const auto r = applyMissionCommand(f, "abort");
+  EXPECT_FALSE(r.accepted);
+  EXPECT_EQ(r.state, "ACTIVE");
+  EXPECT_FALSE(f.pauseRequested());
+  EXPECT_NE(r.message.find("unknown"), std::string::npos);
+}
+
+TEST(MissionCommand, PendingPauseIsWithdrawnByResume)
+{
+  MissionFsm f;
+  f.start();
+  applyMissionCommand(f, "pause");
+  const auto r = applyMissionCommand(f, "resume");
+  EXPECT_TRUE(r.accepted);
+  EXPECT_FALSE(r.pause_pending);
+  EXPECT_FALSE(f.atBoundary());
+}
