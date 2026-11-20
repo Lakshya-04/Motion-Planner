@@ -88,6 +88,13 @@ kill -INT $DEMO 2>/dev/null
 if [ ! -s "$COV" ]; then echo "no coverage plan produced (see $OUT/coverage_demo.log)"; exit 3; fi
 
 # 2. manager parameters: an action server, the plan stays in odom
+# MANAGER_PASS_CUROBO_WORLD=1: every stand arrival also pushes the wall into the cuRobo node's world, posed from TF
+# (source_frame odom -> base_link), so cuRobo sees the wall relative to the base at each stand.
+CUROBO_ARRIVAL=""
+if [ -n "${MANAGER_PASS_CUROBO_WORLD:-}" ]; then
+  CUROBO_ARRIVAL="; ros2 run curobo_planner curobo_world_loader --ros-args -p point_cloud_path:=$OUT/data/walls_sim.pcd -p frame_id:=base_link -p source_frame:=odom >> $OUT/curobo_world.log 2>&1"
+fi
+
 cat > "$OUT/manager.yaml" <<YAML
 manipulation_manager:
   ros__parameters:
@@ -103,7 +110,7 @@ manipulation_manager:
     coverage_eef_speed_mps: ${MULTI_STAND_SPEED:-0.01}
     dock_at_stroke_start: true
     stand_max_span_m: ${MULTI_STAND_MAX_SPAN:-0.5}
-    stand_arrival_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls_sim.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1'
+    stand_arrival_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls_sim.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1${CUROBO_ARRIVAL}'
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
     dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]}
