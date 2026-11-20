@@ -265,9 +265,9 @@ pass of `selectStands` uses it.
   `max_rounds` (8). What no stand confirms is `rejected_by_verifier`, never covered, and `refused` lists every
   (stand, target, reason). With a base model the travel legs are recomputed for the final order. Without a verifier it is
   `planStands`. Tested with fake verifiers (`stands_verified_test`: accepting verifier changes nothing, a refused stand is
-  replaced, targets refused everywhere are reported, everything refused terminates, set cover, travel). Not wired:
-  `~/plan_stands`, `~/plan_verified_stands` (still `selectStands`) and the manager's `base_check` do not call it, and it
-  has not run against MoveIt. A refused stand is avoided as a point (radius 5 cm by default), not as a region, so a
+  replaced, targets refused everywhere are reported, everything refused terminates, set cover, travel). Wired behind
+  `~/plan_stands` as opt-in (below); `~/plan_verified_stands` is still `selectStands` and the manager's `base_check` does not
+  call it, and it has not run against MoveIt. A refused stand is avoided as a point (radius 5 cm by default), not as a region, so a
   verifier that refuses a whole neighbourhood needs several rounds.
 - **cuRobo verifier: not built.** The bridge (`curobo_bridge_msgs`) has `SolveIk` and `CheckMotion` (state validity)
   but no batched IK, no way to fix the lift height of the 7-joint group, and a world loaded separately (`SetWorld`).
@@ -287,6 +287,45 @@ solver branch will refuse many stands RM4D rightly likes; and the selection pass
 (stand, height) per round, so against a real backend bound it with `max_lift_probes`, fewer candidates or a smaller
 `max_rounds`.
 
+#### Where the verified cost goes, and what bounds it
+
+No profile was taken against MoveIt (that needs the live demo); the cost model below is read from the code and from the
+measured counts above (1278 pairs, 701 batches, about 5 minutes, so roughly 0.4 s a batch of a few poses). Per
+(stand, target) pair the cost is one IK-plus-collision probe per lift height tried (up to `max_lift_probes`), and `selectStands`
+repeats the pass once per round, one new stand per round when whole stands are refused. The RM4D recomputation per round
+(CPU, no IK) is cheap by comparison. What the code now does about it:
+
+- **Verdict cache across rounds (already there, now tested).** `selectStands` keeps a verdict per (candidate stand, target) pair,
+  so a later round sends only pairs it has not seen; `SelectStandsCost.EveryPairIsVerifiedAtMostOnceAcrossRounds` fails if a pair
+  is ever sent twice. A pair confirmed in one round is never re-sent. `planStandsVerified` needs no cache: a stand that
+  refused or only partly confirmed its targets goes on the avoid list, so the same stand is not planned again.
+- **Rounds that learn nothing stop.** A round that sends no new pair ends `selectStands`; a round that plans nothing and
+  refuses nothing ends `planStandsVerified`. The RM4D reachability query of a stand is no longer computed when all its pairs
+  are already cached.
+- **`VerifyOptions::stop_at_first_ok`** (node parameter `stop_at_first_ok`, default true on `reachability_verified_node`,
+  false in the core): a target's lift heights are probed lowest first and probing stops at the first height that solves, so a
+  confirmed pair costs its position in the probe list instead of all of them. The confirmed set and each target's best
+  height (the lowest ok one) are the same as with full probing; refused targets still cost every height. The price: the
+  margin of a confirmed target becomes 1 / (heights tried), a lowest-first ordinal rather than the share of ok heights, and
+  with `jitter_m` > 0 the offset probes run at that first ok height only. The ranking among stands therefore can differ
+  in `selectStands`, which weighs margins; the gtests below compare covered and rejected targets, not stand identity there.
+- **`VerifyOptions::max_verifier_calls`** (node parameter, 0 = unlimited): a hard bound on batches. When reached the run stops
+  verifying, reports `converged = false` (`budget_hit` in the summary), and in `planStandsVerified` the targets of
+  stands not yet verified go to `not_planned`, never reported as covered.
+- `verifier_poses` next to `verifier_calls` in `StandVerification`, `VerificationSummary` and `VerifiedStandPlan`: poses sent are
+  the IK cost, batches only the call overhead.
+
+Measured with counting fake verifiers in `stands_verified_test` (one run; the fake refuses a neighbourhood of the preferred
+stand and every lift height under 0.2 m; a call-count measure, not wall time, and the fake costs nothing per pose):
+`planStandsVerified` 72 poses in 12 batches without `stop_at_first_ok` against 60 poses in 10 batches with it (-17% poses), same stands,
+same targets, same refusals, same lift-band heights; `selectStands` (several rounds because a stand is refused) 720 poses
+against 399 (-45%), same covered and rejected targets. The two gains differ because they depend on how many probe heights a
+pair has and how early the first one solves; they are properties of this fake, not predictions for a real wall.
+Wall-clock gain on a real backend is expected to follow the pose count but was not measured. Not done: refusing a
+whole neighbourhood of a refused stand at once (needs a policy; today a refused stand is avoided as a point, so a
+verifier that refuses a region still costs about one round per candidate), batching several stands per verifier call, and
+a measured run on the MoveIt demo.
+
 ### The verified service (`reachability_verified_node`)
 
 `reachability_moveit` ships `reachability_verified_node`: the plain `ReachabilityNode` plus the MoveIt IK and collision
@@ -298,7 +337,17 @@ and the cover is recomputed. The response carries the IK-confirmed lift bands an
 at 64 rounds), so use a long client timeout. Parameters of the verifier (`ik_group`, `ik_link`, `collision_group`,
 `arm_mount_offset_z`, `arm_base_x/y`, `lift_max`, `seed_set`, `max_lift_probes`, `jitter_m`, `max_rounds`) are on the node
 `reachability_verified_config`. Without a verifier (the plain `reachability_node`) the service answers with a message and no
-stands. Status: unit-tested through the service with a fake verifier (accepting, and refusing a target everywhere);
+stands. Cost bounds: `stop_at_first_ok` (default true here) and `max_verifier_calls` (default 0 = none), see "Where the
+verified cost goes".
+
+**Verified or not in `~/plan_stands`.** `PlanStands.srv` has a `bool verified` (default false = RM4D only, exactly as
+before) and the node a parameter `verify_by_default` (default false; true verifies requests that leave the flag false). A
+verified `~/plan_stands` request runs `planStandsVerified`, so the request's `max_stands`, the node's `stand_strategy` and
+`max_rounds` apply (unlike `~/plan_verified_stands`, which runs `selectStands` with its tour). Targets no stand confirms
+land in `unreachable` (the message counts them separately), `success` is false for them, and the message reports rounds, verifier
+batches and refusals. The flag on a node without a verifier answers `success = false` and says so; it never falls back
+silently. Tested through the service with fake verifiers (default path never calls the verifier; flag; flag without verifier;
+a target refused everywhere; the parameter). Status: unit-tested through the service with a fake verifier (accepting, and refusing a target everywhere);
 the node itself has not been run against MoveIt, the stand cap and `stand_strategy` do not apply to it, the scene is
 whatever `move_group` holds (stand-relative obstacle posing is not wired), and the manager does not call it yet.
 
