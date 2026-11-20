@@ -410,7 +410,14 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    1/1 fail: coverage 0.644 < 0.9 (one stand of two), peak 188.9 N. So cuRobo is slow on this host (GPU shared with the sim, 4 GB;
    the stow, a long lift-and-arm move, took longer than 300 s or hung: not isolated), and a multi-stand pass with cuRobo as the
    only free-space planner does not finish in the time budget. The pass also aborted `record_run.py` at shutdown (core dump,
-   the known shutdown crash). Not a pass; next: time a stow in isolation with `plan_joint` on the node (empty world, then with the wall).
+   the known shutdown crash). Not a pass; stow timed in isolation with `plan_joint` (empty world, node with `--max-boxes 3000`, same GPU, sim stopped):
+   docked pose (lift 0.0 or 0.01, arm as logged at `docked_wall_column_9`) to stow: `no_path` after 37 to 40 s, three
+   variants (also stow to docked at lift 0.01, and a half-way arm pose at lift 0.01 to stow). Moves from the stow pose succeed in
+   2.7 to 2.9 s (`trajopt`): lift only, pan only, shoulder only, pan + shoulder, and the whole docked ARM configuration with the
+   lift left at 0.4. So the failure follows the low lift with the arm swung out, not the size of the move and not the wall:
+   cuRobo's sphere model most likely treats those configurations as in collision (with the base or itself) although MuJoCo does
+   not; not confirmed (a `check_motion` on the docked pose would show it). Consequence: a docked-to-stow plan by cuRobo does not
+   exist, so the manager waits out its timeout; a MoveIt fallback for failed free-space segments is what a pass needs.
 
    Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
    pose, `route=trajopt`, success), so the robot model is not the problem; the collision message came with the wall loaded. The
