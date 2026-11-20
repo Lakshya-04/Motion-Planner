@@ -196,6 +196,8 @@ Fixed
   own; truncated plans and peak force clearly lower).
 - cuRobo adapter: a successful plan counts as one waypoint done (every cuRobo plan was labelled partial before); the world loader waits for TF.
 
+Gazebo two-stand pass: the seeded dock IK is off in the Gazebo script and `OmplPlanner` clamps the live start state into the joint bounds (a lift 2e-14 m below its limit failed every plan): 0 of 10 columns before, 6 of 10 after (one run; still failing, see docs/sim_gazebo.md).
+
 Verified in simulation (MuJoCo, one pass each unless stated): a two-stand pass with cuRobo as the free-space planner, four runs, 10 of 10 columns, coverage 1.0.
 Failing: the Gazebo two-stand pass (0 of 10 columns in two runs on 2026-11-21, with and without cuRobo); cuRobo cannot plan the docked-to-stow move.
 
