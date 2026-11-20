@@ -430,7 +430,7 @@ the spray with a different wall x, and a run with a wall that the tool tip reall
 
 ## Running a pass with cuRobo as the planner
 
-Authored, **not run** (no sim pass has used cuRobo yet). It makes cuRobo v0.9.0 the free-space planner of the manager in a
+Run twice on 2026-11-21 in the multi-stand pass: **no usable result** (see below). It makes cuRobo v0.9.0 the free-space planner of the manager in a
 Gazebo pass; contact seams stay on MoveIt Cartesian. The selection file is
 `manipulation_manager/config/planning_curobo.yaml` (`free_space: curobo`, everything else as the default `planning.yaml`;
 each choice is explained in the file: IK and collision stay MoveIt because the manager's planners do not call the selected
@@ -476,6 +476,20 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
 4. `docker/tools/run_curobo_node.sh stop` afterwards.
 
 `gz_pass_common.sh` is unchanged: it does not write the manager parameters, each pass script does.
+
+### What the first Gazebo runs showed (2026-11-21)
+
+The multi-stand script now also pushes the wall to the node at every stand arrival (`MANAGER_PASS_CUROBO_WORLD=1`, `source_frame:=odom`) and sets
+`seed_start_from_live_state` and the dock seed, as the MuJoCo script does. Three findings, none a pass:
+- With the sim container on the default user (root in this image) and the node on uid 1000, every cuRobo call timed out; a second try with the sim as
+  uid 1000 left the manager without a goal. Forcing UDP transport for both (`FASTDDS_BUILTIN_TRANSPORTS=UDPv4` in both containers) fixed discovery:
+  the wall loaded in under a second.
+- With cuRobo, the first approach "completed" through cuRobo but the tool stayed at the stow pose; the OMPL retry ended 0.83 m short of the approach pose.
+- **The same pass without cuRobo fails too** (control run, default planning config, 0 of 10 columns, coverage 0): `move_group` reports
+  `Invalid goal state` for the dock goal and `Start state out of bounds`, and 140 approach plans fail. Adding the MuJoCo dock seed did not change it
+  (0 done, 6 failed within the first stand). So the Gazebo multi-stand pass is broken independently of cuRobo; the earlier runs recorded below completed
+  at least the first stand. Not isolated (suspects: the whole-wall octomap and approach-pose check merged for MuJoCo, the lift joint a hair below its
+  limit in the start state).
 
 ### Log lines that show it
 

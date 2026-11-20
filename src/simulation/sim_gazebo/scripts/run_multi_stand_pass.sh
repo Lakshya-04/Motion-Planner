@@ -73,6 +73,13 @@ gz_coverage $OUT/data/wall_pass_coverage_scene.json \
   "-p swath_m:=${MULTI_STAND_SWATH:-0.14} -p overlap_pct:=${MULTI_STAND_OVERLAP:-15.0}" || exit $?
 
 # 2. manager parameters: an action server, the plan stays in odom
+# MANAGER_PASS_CUROBO_WORLD=1: every stand arrival also pushes the wall into the cuRobo node's world, posed from TF
+# (source_frame odom -> base_link); the cuRobo node must run with --max-boxes 3000 (the wall is ~2500 voxels).
+CUROBO_ARRIVAL=""
+if [ -n "${MANAGER_PASS_CUROBO_WORLD:-}" ]; then
+  CUROBO_ARRIVAL="; ros2 run curobo_planner curobo_world_loader --ros-args -p point_cloud_path:=$OUT/data/walls.pcd -p frame_id:=base_link -p source_frame:=odom >> $OUT/curobo_world.log 2>&1"
+fi
+
 cat > "$OUT/manager.yaml" <<YAML
 manipulation_manager:
   ros__parameters:
@@ -89,9 +96,10 @@ manipulation_manager:
     coverage_eef_speed_mps: ${MULTI_STAND_SPEED:-0.01}
     dock_at_stroke_start: true
     stand_max_span_m: ${MULTI_STAND_MAX_SPAN:-0.5}
-    stand_arrival_command: 'python3 -u $PKG/lib/sim_gazebo/wait_arm_settled.py --timeout ${MULTI_STAND_SETTLE_TIMEOUT:-90} >> $OUT/settle.log 2>&1; ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1'
+    stand_arrival_command: 'python3 -u $PKG/lib/sim_gazebo/wait_arm_settled.py --timeout ${MULTI_STAND_SETTLE_TIMEOUT:-90} >> $OUT/settle.log 2>&1; ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1${CUROBO_ARRIVAL}'
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
+    dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MULTI_STAND_PRESS:-0.005}
@@ -102,6 +110,7 @@ manipulation_manager:
     base_check_arm_mount_z_m: 1.17
 ${MULTI_STAND_MANAGER_EXTRA:-}
 ${MANAGER_PASS_PLANNING_CONFIG:+    planning_config: $MANAGER_PASS_PLANNING_CONFIG}
+${MANAGER_PASS_PLANNING_CONFIG:+    seed_start_from_live_state: true}
 YAML
 
 python3 "$PKG/lib/sim_gazebo/record_run.py" --record "$REC" --timeout 3600 --frame odom --wall-x "$WALL_X" \

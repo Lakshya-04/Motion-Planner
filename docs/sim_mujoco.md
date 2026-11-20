@@ -440,6 +440,10 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    kind (4 to 8 s), so what those trajectories actually moved is not shown (the next segment, dock, completed from where the arm was);
    cuRobo takes 11 s per plan on this GPU; the node's world was refused loads while busy.
 
+   **Filmed run (the video in the README):** `MULTI_STAND_FILM=1 MULTI_STAND_LAUNCH_ARGS="out_dir:=..."` with the same setup, then `render_run.py stills` and `video --max-speed 12`
+and `encode`: 10 of 10 columns, coverage 1.0 (2790/2790), peak 69.3 N, in-band 0.33, RMS 5.1 N, 1126 s simulated; 7 segments planned by cuRobo (priming plus 6
+approaches, 10 to 16 s each), 6 free-space segments by OMPL (cuRobo `unavailable` for the stow).
+
    **Sixth run (new logging, PR #146): passes** (10 of 10 columns, coverage 1.0, peak 46.8 N). The segment lines now carry the planned
    trajectory (`traj_pts`, `traj_s`). Answer to the 0.5 s question: the five stand-0 approaches were cuRobo plans of 16 to 21 points,
    0.375 to 0.5 s long (dt 0.025 s), each a 0.1 m step of the tool along the wall (TCP y 0.809, 0.708, 0.606, 0.506, 0.407; the
