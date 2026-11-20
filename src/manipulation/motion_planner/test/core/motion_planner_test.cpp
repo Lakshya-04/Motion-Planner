@@ -646,14 +646,11 @@ TEST(MotionPlannerTest, PlanSegmentWithStartStateIsSafeUnderConcurrentCalls)
   EXPECT_TRUE(result_b.planning_result.success);
 }
 
-}  // namespace
-}  // namespace motion_planner
-
 TEST(MotionPlannerTest, SeedContinuityGivesTheFirstSegmentAStartStateOnce)
 {
   auto fsp = std::make_unique<ScriptedPlanner>("fsp", true, 1.0);
   auto * fsp_ptr = fsp.get();
-  MotionPlanner planner(std::make_unique<ScriptedPlanner>("cart", true, 1.0), std::move(fsp));
+  MotionPlanner planner(std::make_unique<ScriptedPlanner>("cart", false, 0.0), std::move(fsp));
 
   SegmentRoutingSpec routing;
   routing.label = "prime";
@@ -681,3 +678,6 @@ TEST(MotionPlannerTest, SeedContinuityGivesTheFirstSegmentAStartStateOnce)
   planner.planSegment(request, routing);
   EXPECT_TRUE(fsp_ptr->last_start_joint_state.empty());
 }
+
+}  // namespace
+}  // namespace motion_planner
