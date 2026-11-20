@@ -395,7 +395,13 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    arm at the dock pose is inside the wall's voxel margin (the cloud is voxelised at 0.05 m) or the cloud is posed slightly
    wrong; the same cloud was fine for the single-stand pass because cuRobo was barely used there. Two bugs found and fixed on
    the way: the loader's TF lookup did not wait (the buffer was not told a thread spins the node: `setUsingDedicatedThread`), and a
-   sim container run as root cannot reach the node (see the root/user note below). Next step: lower the cloud's voxel size or
+   sim container run as root cannot reach the node (see the root/user note below). Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
+   pose, `route=trajopt`, success), so the robot model is not the problem; the collision message came with the wall loaded. The
+   `prime_continuity` segments planned fine (`path_fraction=1`) and then ended `partial_completion` at execution (a zero-length
+   move, ratio 0; 47 repeats in the loop), which is a separate thing from the refused approaches. The sim wall is a one-point-thick
+   plane at x = 0.98 m in odom (`walls_sim.pcd`), and the approach target stands 0.1 m off it, so the likely culprit is the
+   approach end state sitting inside cuRobo's collision activation distance of a voxel at 0.05 m, not a wrongly posed cloud. Not
+   confirmed. Next step: lower the cloud's voxel size or
    leave the dock-side margin out of the cuRobo world, and check the loaded cloud's pose against the MoveIt octomap. For a multi-stand pass the loader can take the cloud in the fixed frame the multi-stand script
    uses and look its pose up from TF at each call: `ros2 run curobo_planner curobo_world_loader --ros-args -p
    point_cloud_path:=<walls.pcd> -p frame_id:=base_link -p source_frame:=odom` (compiled, not run; the multi-stand
