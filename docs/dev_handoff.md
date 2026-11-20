@@ -5,23 +5,29 @@ change of hands. Kept honest: numbers come with the conditions they were measure
 included. `docs/ROADMAP.md` is the plan; this file is the "where are we right now" page. Update it
 when something here changes.
 
-## Current state (2026-11-19)
+## Current state (2026-11-20)
 
 - Pipeline (perception, scene, coverage, stands, planning, control) runs end to end in MuJoCo and
   Gazebo. Backends: MoveIt/OMPL, VAMP, cuRobo v0.9.0 (cuRoboV2-Fast, commit 42498cf4).
 - Stand candidates from the RM4D reachability map are confirmed with IK and collision checks
   (`reachability_moveit`, `stand_verify_probe`, `docs/reachability.md`).
+- Merged 2026-11-20 (ROADMAP items, all software-only, none run in a sim): verify-result contract and thresholds (#128),
+  adaptive edge spacing (#129), mission_command pause/resume/status service (#130), tool-actuation executor feed (#131),
+  `planStandsVerified` (#132). The cuRobo-backed stand verifier was skipped (needs bridge changes and the GPU).
 - IK default is TRAC-IK `Distance` (`ik:=trac_ik|kdl|pick_ik`).
 
 ## Open problems
 
-1. **Multi-stand second stand fails about half the time** in older runs (MuJoCo 3 of 8 failed at the
-   base measurement, Gazebo 1 of 3). A later batch passed 8 of 8; which change made the difference
-   is not yet pinned down. Work: PR "Multi-stand: second stand fails about every other run".
-2. **cuRobo cannot see the wall in a sim pass.** The manager never feeds the scene to the cuRobo
-   client, and `planner_used` in the logs is always `ompl`. `curobo_world_loader` (curobo_planner)
-   pushes the wall cloud to the cuRobo node in the base frame; wiring it into the pass scripts and
-   logging the planner actually used are still to do. Until then no run is a cuRobo run.
+1. **Multi-stand second stand (PR #110, merged 2026-11-20):** same-session 8-run batches: plain wall 6/8
+   before, 8/8 after; `two_panels` 8/8 both (scored on reachable wall; the script's own wall-coverage score reads it as 0.88).
+   The pass-rate gap is not significant (Fisher p about 0.48); truncated plans (5+ down to 0-6 per run) and peak force
+   (304/141 N down to 88 N) are the clearer signs. Not isolated: which commit mattered; Gazebo not rerun.
+2. **cuRobo as the free-space planner in a multi-stand pass does NOT work yet.** Wired and run once in MuJoCo (2026-11-20):
+   the node answers, the wall loads per stand (`source_frame:=odom`), the manager seeds the first segment's start state
+   (`seed_start_from_live_state`), cuRobo is reached (`fsp_backend=curobo`) but refuses the stand approaches with `Start or End
+   state in collision` (stow-to-stow with an empty world succeeds), and the manager's recovery loops. Likely the approach end
+   state inside cuRobo's activation distance of the 0.05 m wall voxels; not confirmed. See `docs/sim_mujoco.md`. Next: lower the
+   cuRobo voxel size / keep the standoff out of the world, rerun; only then a film and a Gazebo pass.
 3. **Verified stand selection is slow** (about 5 minutes on one wall, not converged at 64 rounds);
    the manager and `~/plan_stands` do not use verified stands yet.
 4. **Dockerfile layer cache:** any `package.xml` change invalidates the dependency layers and the
