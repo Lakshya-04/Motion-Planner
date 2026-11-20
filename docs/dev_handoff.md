@@ -34,8 +34,10 @@ when something here changes.
    MoveIt/OMPL did the work for the segments cuRobo planned (its trajectories stop `partially_completed` at execution; cause not
    isolated) and for the stow. Next: why cuRobo trajectories stop early at execution, the cuRobo robot spheres at low lift, and the
    per-stand world load timing out; then a film and a Gazebo pass.
-3. **Verified stand selection is slow** (about 5 minutes on one wall, not converged at 64 rounds);
-   the manager and `~/plan_stands` do not use verified stands yet.
+3. **Verified stand selection is slow** (about 5 minutes on one wall, not converged at 64 rounds, measured before the cost
+   work). Since then: `stop_at_first_ok` and `max_verifier_calls` cut and bound the IK probes, `~/plan_stands` can verify
+   (`verified` request flag, `verify_by_default`; `docs/reachability.md`). Call-count reductions are tested with fakes;
+   not re-measured on MoveIt. The manager does not use verified stands yet.
 4. **Dockerfile layer cache:** any `package.xml` change invalidates the dependency layers and the
    12 GB torch layer is rebuilt. Fix: make the GPU layers independent of `COPY src` manifests.
 5. The Dockerfile `build` stage runs `mp-build test`; two tests failed there only because of the
