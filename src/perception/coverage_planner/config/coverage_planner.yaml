@@ -22,6 +22,8 @@ coverage_planner_node:
     components_in_sweep_order: true # Plan components along the stepover axis, not largest first
     fill_gaps: true                 # Short strokes for free cells beside obstacle keep-outs / far edges
     min_stroke_length_m: 0.02       # Shortest gap-fill stroke (m)
+    edge_zone_m: 0.0                # Adaptive stepover: zone at the stepover-axis ends (m), 0 = uniform
+    edge_spacing_scale: 1.0         # Stepover factor inside the zone, in (0, 1]
     decomposition: "columns"        # "columns" | "cells" (boustrophedon cell decomposition)
 
     # Map configuration

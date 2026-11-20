@@ -34,6 +34,30 @@ std::vector<double> contactStripOffsets(
   return out;
 }
 
+std::vector<int> stripCellPositions(
+  int lo, int hi, bool ascending, int step_cells, int zone_cells, double edge_scale)
+{
+  if (step_cells < 1 || !(edge_scale > 0.0 && edge_scale <= 1.0)) {
+    throw std::invalid_argument("stripCellPositions: invalid step or scale");
+  }
+  if (hi < lo) {return {};}
+  const bool adaptive = zone_cells > 0 && edge_scale < 1.0;
+  const int fine = std::max(1, static_cast<int>(step_cells * edge_scale));
+  std::vector<int> out;
+  if (ascending) {
+    for (int x = lo; x <= hi;) {
+      out.push_back(x);
+      x += (adaptive && (x - lo < zone_cells || hi - x < zone_cells)) ? fine : step_cells;
+    }
+  } else {
+    for (int x = hi; x >= lo;) {
+      out.push_back(x);
+      x -= (adaptive && (x - lo < zone_cells || hi - x < zone_cells)) ? fine : step_cells;
+    }
+  }
+  return out;
+}
+
 std::vector<double> contactStripOffsets(
   const ToolCoverageProfile & tool, double lo, double hi, const std::vector<double> & edges)
 {
