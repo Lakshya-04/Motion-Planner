@@ -74,10 +74,13 @@ def test_urdf_matches_profile(name):
     assert chain == p.joints
     arm_joints = [robot.joint_map[j] for j in p.arm_joints]
     assert len(arm_joints) == p.arm_dof
-    assert all(j.type == 'revolute' for j in arm_joints)
+    # ur_description models the UR3/UR3e last joint as continuous (no position limits)
+    assert all(j.type in ('revolute', 'continuous') for j in arm_joints)
     assert robot.joint_map[p.lift_joint].type == 'prismatic'
     for j in arm_joints:
-        assert j.limit.lower < j.limit.upper and j.limit.velocity > 0
+        if j.type == 'revolute':
+            assert j.limit.lower < j.limit.upper
+        assert j.limit is not None and j.limit.velocity > 0
 
 
 @pytest.mark.parametrize('name', PROFILES)
@@ -273,9 +276,14 @@ def test_reachability_chain_joint_count_comes_from_the_profile(name, tmp_path):
     assert len(chain['joints']) == p.arm_dof
     robot = URDF.from_xml_string(urdf.read_text())
     for entry, joint in zip(chain['joints'], p.arm_joints):
-        limit = robot.joint_map[joint].limit
-        assert entry['lower'] == pytest.approx(limit.lower)
-        assert entry['upper'] == pytest.approx(limit.upper)
+        jt = robot.joint_map[joint]
+        if jt.type == 'continuous':
+            # no position limits in the URDF: the chain builder bounds a continuous joint to one turn
+            assert entry['lower'] == pytest.approx(-3.141592653589793)
+            assert entry['upper'] == pytest.approx(3.141592653589793)
+        else:
+            assert entry['lower'] == pytest.approx(jt.limit.lower)
+            assert entry['upper'] == pytest.approx(jt.limit.upper)
 
 
 def test_gen3_zero_pose_height_is_the_sum_of_the_user_guide_segments():
