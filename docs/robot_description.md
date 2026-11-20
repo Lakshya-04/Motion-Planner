@@ -1,11 +1,11 @@
 # Robot description (`mobile_manipulator_description`)
 
 A generic mobile-manipulator model: **base + lift + N-DOF arm + tool = 1 + N actuated DOF**
-(7 for the 6-DOF arms, 8 for the 7-DOF one). Every part is swappable behind a small contract, so
+(7 for a 6-DOF arm, 8 for a 7-DOF one). Every part is swappable behind a small contract, so
 the same planners, reachability maps and controllers run on any combination. Starter
 configuration: a **telescopic lift** and a **UR10e** arm. A dependency-free generic 6-DOF arm
-and a 7-DOF Panda-like arm (primitives, published kinematics and limits, no vendor meshes) ship
-for tests and CI, so the stack is exercised on two DOF counts.
+and primitives-only 7-DOF arms (Panda, FR3, iiwa 7, Gen3, xArm 7; published kinematics and limits,
+no vendor meshes) ship for tests and CI, so the stack is exercised on 6 and 7 joints; see [Arms](#arms).
 
 Package: [`src/description/mobile_manipulator_description`](../src/description/mobile_manipulator_description).
 
@@ -21,6 +21,8 @@ urdf/
   arms/arm.xacro                  arm selector + the arm contract
   arms/generic_6dof_arm.xacro     reference 6-DOF arm, primitives only
   arms/panda_arm.xacro            7-DOF Franka Panda-like arm, primitives only
+  arms/serial_arm_common.xacro    shared link / joint macros of the arms below (cylinders on the chain)
+  arms/{fr3,iiwa7,kinova_gen3,xarm7}_arm.xacro   7-DOF arms from published tables, primitives only
   arms/ur_arm.xacro               UR family via ur_description (not bundled)
   tools/generic_tool.xacro        tool mount + TCP
 srdf/mobile_manipulator.srdf.xacro   groups as chains (names from the profile): arm (N), lift_arm (1 + N), tool
@@ -79,7 +81,7 @@ block), the Python loader (`mobile_manipulator_description.load_profile(name_or_
 
 ## Adding an arm
 
-1. `urdf/arms/<name>.xacro`: a macro `<name>_arm(parent *origin prefix)` that follows the contract
+1. `urdf/arms/<name>.xacro`: a macro (for a primitives-only serial arm, build it from `serial_arm_common.xacro` like `fr3_arm.xacro`) `<name>_arm(parent *origin prefix)` that follows the contract
    above (any number N of revolute joints). Include it from `mobile_manipulator.urdf.xacro` and add
    one branch for it in `arms/arm.xacro`.
 2. `config/profiles/<name>_telescopic.yaml`: copy a shipped profile, set `robot.xacro_args.arm`,
@@ -95,12 +97,48 @@ The swap tests (`test/test_arm_swap.py`, and `test_moveit_swap.py` in the MoveIt
 the new profile as soon as its name is in their profile lists. The ros2_control and SRDF blocks
 support up to 12 arm joints.
 
+## Arms
+
+All arms are primitives (cylinders along the kinematic chain) with the published joint frames and
+limits; no vendor mesh or description package is bundled or required (the `ur*` family is the one
+exception and uses `ur_description` from apt). Joint names are `arm_joint1..arm_joint7` for the
+7-DOF arms, the UR names for UR. "Status" says what was checked: **kinematics checked** means the
+joint frames and limits were compared with the vendor's public description (read, not copied; no
+code or mesh is used, ADR 0002) and a test pins the zero-pose geometry; **not on hardware** applies to
+every row, nothing here has driven a real arm.
+
+| `arm:=` | Arm | DOF | Source of the parameters | Status |
+|---|---|---|---|---|
+| `generic_6dof` | reference arm, UR-like proportions | 6 | ours | tests and CI |
+| `ur3e`, `ur5e`, `ur10e`, `ur16e`, `ur20` (also `ur3`, `ur5`, `ur10`, `ur30`) | Universal Robots | 6 | `ur_description` (BSD-3, installed by the image), per `ur_type` | UR10e verified in the image; the other profiles (`ur3e_telescopic` ...) render the same macro and are in the swap tests, but only where `ur_description` is installed (skipped in a plain checkout) |
+| `panda` | Franka Emika Panda | 7 | published Craig DH table and limits (d1 0.333, d3 0.316, d5 0.384, a4 0.0825, a5 -0.0825, a7 0.088, flange 0.107) | kinematics checked against franka_description `kinematics.yaml`; limits are the older Panda ones |
+| `fr3` | Franka Research 3 | 7 | same DH table; limits, velocities and torques from franka_description `robots/fr3/joint_limits.yaml` (Apache-2.0) | kinematics checked; no hardware |
+| `iiwa7` | KUKA LBR iiwa 7 R800 | 7 | datasheet link lengths (0.34 / 0.40 / 0.40 / 0.126 m), axes z, y, z, -y, z, y, z as in the `iiwa_ros2` iiwa14 description; limits +-170 / 120 / 170 / 120 / 170 / 120 / 175 deg | geometry from the datasheet; velocity and torque rows not cross-checked against a vendor description of the 7 kg arm (the available one is the iiwa14) |
+| `kinova_gen3` | Kinova Gen3 7-DOF (no vision module, no gripper) | 7 | `gen3_macro.xacro` of `ros2_kortex` (BSD-3) = the Gen3 user-guide DH table | kinematics checked. The four joints that are continuous on the real arm (1, 3, 5, 7) are modelled revolute +-2 pi |
+| `xarm7` | UFactory xArm 7 | 7 | `xarm7_default_kinematics.yaml`, `xarm7.urdf.xacro` and `joint_limits.yaml` of `xarm_ros2` (BSD-3) | kinematics checked. Effort limits are the vendor's peak-torque figures |
+
+Profiles: `<arm>_telescopic.yaml` for each row (`panda_telescopic`, `fr3_telescopic`, `iiwa7_telescopic`,
+`kinova_gen3_telescopic`, `xarm7_telescopic`, `ur3e_telescopic`, `ur5e_telescopic`, `ur10e_telescopic`,
+`ur16e_telescopic`, `ur20_telescopic`, `generic_6dof_telescopic`). The home pose of each new arm is a
+moderate ready posture chosen by hand (Gen3: the vendor's Home action) and **has not been checked for
+self-collision in a simulator**; run `robot_assets.py check` for the arm before trusting it. The
+default `tcp_xyz` of the new profiles is a nominal gripper-class offset (0.10 to 0.17 m), edit it. A lift
+payload of 150 kg says nothing about whether a small arm such as the xArm 7 or a UR3e makes sense on it.
+The four new 7-DOF arms share the `arm7` MoveIt controller family (same joint names); velocity limits come
+from the URDF, only the accelerations are set in `config/arm7/joint_limits.yaml` (a guess, not a vendor
+figure). `hardware:=real` drivers for `fr3` and `xarm7` are listed in `config/hardware_drivers.yaml` (not
+run); `iiwa7` and `kinova_gen3` have none, so `real` fails loudly for them.
+
+What is not covered: meshes, inertias (placeholder 2 kg per link), joint friction, cable limits, the
+vendors' own collision models, and the redundancy of a 7-DOF arm in IK (the null space is left to the
+IK solver; for the reachability map see [reachability.md](reachability.md), "Redundant arms").
+
 ## Bases
 
 `urdf/base/base.xacro` is the selector (`base:=<name>`, same pattern as `arms/arm.xacro`). Every
 base is built from primitives (a body box, cylinder wheels, sphere casters) from published
 dimensions; no vendor mesh or URDF is bundled. Wheels, steering modules and casters are fixed
-links, so the planning chain (lift + six arm joints) is the same for every base; the vehicle
+links, so the planning chain (lift + the profile's arm joints) is the same for every base; the vehicle
 controller drives the base through `cmd_vel`. Each macro exposes its dimensions as parameters.
 
 | `base:=` | Vehicle | Drive | Strafe | Body L x W (m) | Top of base (m) | Wheel r / track / wheelbase (m) | v / w max (m/s, rad/s) | Mass (kg) |
@@ -214,7 +252,7 @@ python3 -m pytest src/description/mobile_manipulator_description/test
 - `hardware:=real` selects a vendor ros2_control driver from the arm (`config/hardware_drivers.yaml`, not vendored; `hardware_bringup.md` section 0a).
 - `hardware:=mock` adds a ros2_control block (mock components); add real and sim backends as
   further branches of that one xacro.
-- The Panda-like arm uses cylinders along the real segments, so its collision geometry is an
+- The 7-DOF arms use cylinders along the real segments, so their collision geometry is an
   approximation; check it before relying on tight clearances.
 - Verified here with `check_urdf` and the contract tests for the generic arm, the Panda-like arm and UR10e (rendered
   with the Humble xacro). Loaded into MoveIt and planned with on Jazzy, see [moveit_config.md](moveit_config.md).

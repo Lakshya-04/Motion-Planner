@@ -75,7 +75,7 @@ runs the checks locally before opening a pull request. The commands are collecte
 
 | To add | Start here |
 |---|---|
-| An arm | [docs/robot_description.md](docs/robot_description.md), "Adding an arm": xacro macro, profile YAML, ACM, MoveIt controller configs; swap tests pick it up from their profile lists |
+| An arm (6 or 7+ joints) | [docs/robot_description.md](docs/robot_description.md), "Adding an arm" and the arm table: xacro macro (primitives, published parameters, cite the source), profile YAML, ACM, MoveIt controller family; swap tests pick it up from their profile lists (`PROFILES` / `SEVEN_DOF` in `test_arm_swap.py`); a redundant arm needs a map policy ([docs/reachability.md](docs/reachability.md), "Redundant arms") |
 | A base | same doc, "Swapping parts" and "Bases": a `<name>_base` macro, one branch in `urdf/base/base.xacro`, a `base:` section in the profile |
 | A lift | same doc, "Lift variants": keep the three lift outputs, add one branch in `lift/lift.xacro`; recipe for a chain / column lift |
 | Per-robot planner assets (spheres, cuRobo config, VAMP header, reach map) | [docs/robot_assets.md](docs/robot_assets.md): one command from the profile |

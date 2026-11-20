@@ -100,6 +100,9 @@ without code, when we can implement it.
 
 - [x] Profiles as the single source of truth (13 profiles), Python and C++ loaders, profile-driven group and joint names
 - [x] Arms: ur10e, generic_6dof, 7-DOF Panda-like; N-DOF contract
+- [~] More arms (primitives only, published parameters, `docs/robot_description.md` arm table): FR3, KUKA iiwa 7, Kinova Gen3, xArm 7 (7-DOF) and UR3e / UR5e / UR16e / UR20 profiles; swap tests (description side) and chain-joint-count test pass for every profile. Not done: any hardware, vendor meshes, home poses checked for self-collision in a simulator, the MoveIt FK/IK swap test for the new arms not run in this change, the UR profiles only tested where `ur_description` is installed, iiwa 7 velocity/torque not cross-checked with a vendor description
+- [~] 7-DOF reachability map: joint count from the chain, redundancy policy (union over the null space, or one joint restricted to a value set) stored in the map header (format v2), 6-DOF maps unchanged (gtest). Not done: the swivel angle as the parameter (joint 3 is a proxy), IK / simulator comparison, stand planning on a 7-DOF map, a node parameter to pass the policy (the tool builds the map)
+- [ ] More bases (a Jackal / Dingo-class diff base, a Tiago / Fetch-class omni base) and a column / fixed-height lift variant: skipped in the N-DOF change, each is a base or lift macro plus profile following the existing pattern
 - [x] Lifts: telescopic, scissor, fixed, none; recipe for a column lift
 - [x] Bases: ranger_mini, scout, scout_mini, husky, mpo_500, mir100, two turtlebot3, generic (omni / diff / skid / 4ws)
 - [x] One command from a profile to every per-robot asset (spheres, cuRobo config, VAMP header, ACM, reach map, manifest)
