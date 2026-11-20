@@ -422,8 +422,7 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    **Fourth run, with `free_space_fallback: moveit_ompl` (PR #141) in `planning_curobo.yaml`: the pass passes.** MuJoCo,
    `two_panels_plain`, two stands, one run, 2026-11-20, node with `--max-boxes 3000`, default per-call timeout 60 s: manager
    `10 done, 0 partial, 0 failed`, wall coverage 1.0 (2790 of 2790 cells), scorer `passed: true`, peak force 72.4 N (the pass's
-   force trace in-band fraction 0.35, RMS error 3.7 N; the stand-0 peaks seen during the run were 27 to 32 N, the 72 N is
-   one transient), collision monitor: one `UNEXPECTED_CONTACT` at t = 0.008 (the known `lift_carriage_link <-> lift_stage_2_link`
+   force trace in-band fraction 0.35, RMS error 3.7 N; the live feedback read 32.2 N at the end; where the 72.4 N occurred was not checked), collision monitor: one `UNEXPECTED_CONTACT` at t = 0.008 (the known `lift_carriage_link <-> lift_stage_2_link`
    depth 0 at start). **What cuRobo did in it, honestly:** of the 12 free-space segments, cuRobo handled 6 and produced a
    plan for each (`fsp_backend=curobo`, 10 to 13 s of planning), but every one of those ended `partially_completed` at EXECUTION
    (150 to 500 ms into the move), and the retry was planned by MoveIt/OMPL (`fsp_backend=ompl`, 35 ms) and completed; the stow was
