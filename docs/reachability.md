@@ -256,10 +256,22 @@ pass of `selectStands` uses it.
   (backends that do not enforce limits); extra IK seeds can be tried when the first solution collides.
   `PortVerifierConfig` holds the group names, the tcp link, the arm base pose in the planning frame at lift 0 (mount
   x, y and height), limits, seeds and the world geometry.
-- **Not wired.** `planStands` (and so `~/plan_stands` and the manager's `base_check`) is unchanged: it needs a MoveIt
-  backend in `reachability_node`, which is not a small change, and its stations are not candidates in the sense of
-  `selectStands`. The cuRobo client (`ik()` / `check_states`) is not wrapped; it would be a second
-  `StandVerifier` (or a second `IkPort`).
+- **`planStands` with confirmation.** `planStandsVerified(map, request, start, max_stands, strategy, cover, options)`
+  (`core/stands.hpp`) runs `planStands` (greedy or set cover), verifies every stand's targets with the same
+  `verifyStand` (heights from RM4D), keeps the confirmed ones (lift bands become the confirmed bands) and puts the
+  refused targets back into a pool. The next round plans only the pool with the refusing stands avoided
+  (`StationRequest::avoid_stations` / `avoid_radius`, honoured by `chooseStation` and the set-cover grid), up to
+  `max_rounds` (8). What no stand confirms is `rejected_by_verifier`, never covered, and `refused` lists every
+  (stand, target, reason). With a base model the travel legs are recomputed for the final order. Without a verifier it is
+  `planStands`. Tested with fake verifiers (`stands_verified_test`: accepting verifier changes nothing, a refused stand is
+  replaced, targets refused everywhere are reported, everything refused terminates, set cover, travel). Not wired:
+  `~/plan_stands`, `~/plan_verified_stands` (still `selectStands`) and the manager's `base_check` do not call it, and it
+  has not run against MoveIt. A refused stand is avoided as a point (radius 5 cm by default), not as a region, so a
+  verifier that refuses a whole neighbourhood needs several rounds.
+- **cuRobo verifier: not built.** The bridge (`curobo_bridge_msgs`) has `SolveIk` and `CheckMotion` (state validity)
+  but no batched IK, no way to fix the lift height of the 7-joint group, and a world loaded separately (`SetWorld`).
+  A cuRobo `StandVerifier` (or `IkPort` + `CollisionPort` + `ScenePort` over the bridge) therefore needs bridge changes
+  and measurements on the GPU image, which cannot be checked here without the GPU job. Left open.
 
 `stand_verify_probe` (in `reachability_moveit`) measures RM4D against IK on a wall: it builds the candidates and
 targets of a `StationRequest`, takes a deterministic sample of the (stand, target, lift height) triples RM4D
