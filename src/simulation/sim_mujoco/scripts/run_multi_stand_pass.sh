@@ -14,6 +14,11 @@
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented), e.g. `stand_nav_timeout_s: 2.0` to make
 #                                  the navigation fail and watch the skip
+#   MP_PROFILE=<name>              another robot profile (STAND_PROFILE, if set, still wins; default ur10e_telescopic): the wall x
+#                                  and z band, the tool roll, the reachability map's arm, the dock seed (UR10e only: [] elsewhere,
+#                                  MULTI_STAND_DOCK_SEED overrides) and the arm mount height follow the profile
+#                                  (profile_reach.py, docs/sim_mujoco.md "Running another robot profile"; unconfirmed in a sim)
+#   MANAGER_PASS_SCORE_ARGS / MULTI_STAND_SCORE_ARGS  extra score_run arguments
 # Needs a sourced ROS environment with sim_mujoco, reachability, stand_navigator, ft_conditioner,
 # compliant_trajectory_controller, coverage_planner, manipulation_manager, coverage_task_msgs and
 # mobile_manipulator_moveit_config. Extra arguments go to `ros2 launch manipulation_manager`.
@@ -23,7 +28,17 @@ set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
 SHARE=$PKG/share/sim_mujoco
 DESC=$(ros2 pkg prefix mobile_manipulator_description)/share/mobile_manipulator_description
-PROFILE=$DESC/config/profiles/${STAND_PROFILE:-ur10e_telescopic}.yaml
+STAND_PROFILE=${STAND_PROFILE:-${MP_PROFILE:-ur10e_telescopic}}
+MP_PROFILE=$STAND_PROFILE
+export MP_PROFILE
+PROFILE=$DESC/config/profiles/$STAND_PROFILE.yaml
+# stock wall and UR10e values, replaced by profile_reach.py for another profile
+MP_WALL_DX=0.0; MP_WALL_DZ=0.0; MP_Z_LO=1.0; MP_Z_HI=1.3; MP_TOOL_YAW=-90.0; MP_ARM=ur10e; MP_ARM_MOUNT_Z=1.17; MP_LIFT_STROKE=1.5
+MP_TCP_XYZ=; DOCK_SEED='[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]'
+if [ "$STAND_PROFILE" != ur10e_telescopic ]; then
+  eval "$(python3 "$PKG/lib/sim_mujoco/profile_reach.py" --profile "$PROFILE" --shell)" || exit 2
+  DOCK_SEED='[]'   # the default seed is a UR10e-on-lift configuration
+fi
 OUT=${MULTI_STAND_OUT:-/tmp/multi_stand_pass}
 DX=${MULTI_STAND_WALL_DX:-0.0}
 DY=${MULTI_STAND_WALL_DY:-0.3}
@@ -35,22 +50,25 @@ REC=$OUT/run.csv
 
 # MULTI_STAND_SCENARIO=name takes the wall and its obstacles from make_scenario_scene.py (it sets DX, DY and WIDTH)
 if [ -n "${MULTI_STAND_SCENARIO:-}" ]; then
+  [ "$STAND_PROFILE" != ur10e_telescopic ] && { echo "MULTI_STAND_SCENARIO walls are placed for ur10e_telescopic; not shifted for $STAND_PROFILE"; exit 2; }
   eval "$(python3 "$PKG/lib/sim_mujoco/make_scenario_scene.py" "$SHARE/data" "$OUT/data" "$MULTI_STAND_SCENARIO")" || exit 2
 else
-  python3 "$PKG/lib/sim_mujoco/shift_wall_scene.py" "$SHARE/data" "$OUT/data" "$DX" "$DY" "$WIDTH" || exit 2
+  python3 "$PKG/lib/sim_mujoco/shift_wall_scene.py" "$SHARE/data" "$OUT/data" "$(python3 -c "print(round($DX + $MP_WALL_DX, 3))")" "$DY" "$WIDTH" "$MP_WALL_DZ" || exit 2
 fi
-WALL_X=$(python3 -c "print(0.98 + $DX)")
+WALL_X=$(python3 -c "print(round(0.98 + $DX + $MP_WALL_DX, 3))")
 WALL_Y0=$(python3 -c "print($DY)")
 WALL_Y1=$(python3 -c "print($WIDTH + $DY)")
 
 MAP=${STAND_MAP:-}
 if [ -z "$MAP" ]; then
-  MAP=$OUT/ur10e.rm4d
+  MAP=$OUT/$MP_ARM.rm4d
   RE=$(ros2 pkg prefix reachability)
-  xacro "$DESC/urdf/mobile_manipulator.urdf.xacro" arm:=ur10e -o "$OUT/robot.urdf" || exit 2
+  XACRO_EXTRA=()
+  [ -n "$MP_TCP_XYZ" ] && XACRO_EXTRA=(tcp_xyz:="$MP_TCP_XYZ" lift_stroke:=$MP_LIFT_STROKE)   # another profile's tool offset and stroke
+  xacro "$DESC/urdf/mobile_manipulator.urdf.xacro" arm:=$MP_ARM ${XACRO_EXTRA[@]+"${XACRO_EXTRA[@]}"} -o "$OUT/robot.urdf" || exit 2
   python3 "$RE/lib/reachability/urdf_to_chain.py" "$OUT/robot.urdf" --base arm_base_link --tip tcp_link \
-    -o "$OUT/ur10e_chain.yaml" || exit 2
-  "$RE/lib/reachability/rm4d_tool" build "$OUT/ur10e_chain.yaml" "$MAP" --samples 3000000 --resolution 0.05 \
+    -o "$OUT/${MP_ARM}_chain.yaml" || exit 2
+  "$RE/lib/reachability/rm4d_tool" build "$OUT/${MP_ARM}_chain.yaml" "$MAP" --samples 3000000 --resolution 0.05 \
     --extent 2.0 --zmin -1.8 --zmax 2.0 > "$OUT/map_build.log" 2>&1 || { cat "$OUT/map_build.log"; exit 2; }
 fi
 
@@ -67,7 +85,7 @@ stop_all() {
 }
 trap stop_all EXIT
 
-start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=${STAND_PROFILE:-ur10e_telescopic} controller:=jtac \
+start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$STAND_PROFILE controller:=jtac \
   conditioner:=true payload_mass_kg:=0.5 move_group:=true base_motion:=true scene:=$OUT/data/smoke_wall_scene.json \
   ${MULTI_STAND_LAUNCH_ARGS:-}
 # the demo rasterizes the obstacle clearance into the grid itself; the service node would add its own 0.3 m default
@@ -81,7 +99,7 @@ rm -f "$COV"
 sleep 3
 timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args \
   -p wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json -p output_json:=$COV \
-  -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${MULTI_STAND_TOOL_YAW:--90.0} \
+  -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${MULTI_STAND_TOOL_YAW:-$MP_TOOL_YAW} \
   -p swath_m:=${MULTI_STAND_SWATH:-0.14} -p overlap_pct:=${MULTI_STAND_OVERLAP:-15.0} ${MULTI_STAND_COVERAGE_EXTRA:-} > "$OUT/coverage_demo.log" 2>&1 &
 DEMO=$!
 for _ in $(seq 100); do [ -s "$COV" ] && break; sleep 0.5; done
@@ -106,15 +124,15 @@ manipulation_manager:
     wall_direction: [1.0, 0.0, 0.0]
     z_offset_m: 0.0
     coverage_z_step_m: 0.05
-    coverage_z_min_m: 1.0
-    coverage_z_max_m: 1.3
+    coverage_z_min_m: $MP_Z_LO
+    coverage_z_max_m: $MP_Z_HI
     coverage_eef_speed_mps: ${MULTI_STAND_SPEED:-0.01}
     dock_at_stroke_start: true
     stand_max_span_m: ${MULTI_STAND_MAX_SPAN:-0.5}
     stand_arrival_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls_sim.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1${CUROBO_ARRIVAL}'
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
-    dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]}
+    dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-$DOCK_SEED}
     dock_ik_continuity: ${MULTI_STAND_DOCK_IK_CONTINUITY:-false}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
@@ -122,15 +140,15 @@ manipulation_manager:
     target_force_n: ${MULTI_STAND_TARGET:-10.0}
     base_check: "off"
     base_check_service: /reachability_node/plan_stands
-    base_check_lift_max_m: 1.5
-    base_check_arm_mount_z_m: 1.17
+    base_check_lift_max_m: $MP_LIFT_STROKE
+    base_check_arm_mount_z_m: $MP_ARM_MOUNT_Z
 ${MULTI_STAND_MANAGER_EXTRA:-}
 ${MANAGER_PASS_PLANNING_CONFIG:+    planning_config: $MANAGER_PASS_PLANNING_CONFIG}
 ${MANAGER_PASS_PLANNING_CONFIG:+    seed_start_from_live_state: true}
 YAML
 
 python3 "$PKG/lib/sim_mujoco/record_run.py" --record "$REC" --timeout 3000 --frame odom --wall-x "$WALL_X" \
-  --wall-y $WALL_Y0 $WALL_Y1 --wall-z 1.0 1.3 --scene "$OUT/data/wall_pass_coverage_scene.json" > "$OUT/record.log" 2>&1 &
+  --wall-y $WALL_Y0 $WALL_Y1 --wall-z $MP_Z_LO $MP_Z_HI --scene "$OUT/data/wall_pass_coverage_scene.json" > "$OUT/record.log" 2>&1 &
 REC_PID=$!
 # MULTI_STAND_FILM=1: also store the joint states for render_run.py (launch with out_dir:=... in MULTI_STAND_LAUNCH_ARGS)
 if [ -n "${MULTI_STAND_FILM:-}" ]; then
@@ -164,7 +182,7 @@ cat "$OUT/record.log"
 SC=0
 if [ -f "$REC" ]; then
   ros2 run coverage_planner score_run --samples "$REC" --wall "$REC.wall.json" --target-force "${MULTI_STAND_TARGET:-10}" \
-    --band 1.5 --swath ${MULTI_STAND_SWATH:-0.14} --min-coverage "${MULTI_STAND_MIN_COVERAGE:-0.9}" ${MULTI_STAND_SCORE_ARGS:-}
+    --band 1.5 --swath ${MULTI_STAND_SWATH:-0.14} --min-coverage "${MULTI_STAND_MIN_COVERAGE:-0.9}" ${MANAGER_PASS_SCORE_ARGS:-} ${MULTI_STAND_SCORE_ARGS:-}
   SC=$?
   echo "score exit code $SC"
 fi

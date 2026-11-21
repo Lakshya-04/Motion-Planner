@@ -56,7 +56,7 @@ ros2 launch coverage_planner wall_coverage_service.launch.py     # defaults to t
 ros2 launch coverage_planner wall_coverage_demo.launch.py wall_scene_json:=/path/to/wall_scene.json show_rviz:=true
 ```
 
-Tools come from `config/tool_profiles.yaml` (`tool_profiles_file`, `tool_name`, default `contact_wiper`; per-field overrides allowed); see docs/tools.md.
+Tools come from `config/tool_profiles.yaml` (`tool_profiles_file`, `tool_name`, default `contact_wiper`; per-field overrides allowed); see docs/tools.md. A tool's fixed tilt (`geometry.tilt_deg` / `tilt_axis`) is applied by the lift before the edge tilt and projected into the swath; both default to off.
 
 `scripts/example_client.py`, `publish_3m_2m_wall.py` and `sample_map_publisher.py` exercise the service
 and publish test grids.

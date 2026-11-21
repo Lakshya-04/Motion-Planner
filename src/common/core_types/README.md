@@ -114,3 +114,14 @@ Types + ports only, per §2.3's guardrail -- no feature logic, no ROS deps, no d
 (`geometry_msgs`/`trajectory_msgs` ↔ these types) and concrete port implementations
 (`RclcppLogger`) live one layer up, in `ros_adapters` -- see that package for the ROS side of
 `Pose`/`Trajectory`/`Logger`.
+
+## Tool calibration and footprint headers
+
+- `pivot_calibration.hpp`: TCP position from a pivot; also holds the shared `detail::solveAugmented` solver.
+- `plane_touch_calibration.hpp`: `planeTouchCalibration` (tip offset and plane from touches, observability
+  and condition checks) and `fitToolTilt` (tilt from a measured normal; roll unobservable; no force-only
+  estimate). Simulation-tested only.
+- `tool_footprint.hpp`: `tiltedSwathAcrossStroke`, the swath of a tilted pad across the stroke.
+- `tool_profile.hpp`: `ToolGeometry` documents the contact-frame convention and carries `tilt_deg` / `tilt_axis`.
+
+The calibration record with JSON and the validity gate is in the `tool_calibration` package.

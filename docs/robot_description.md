@@ -129,6 +129,10 @@ from the URDF, only the accelerations are set in `config/arm7/joint_limits.yaml`
 figure). `hardware:=real` drivers for `fr3` and `xarm7` are listed in `config/hardware_drivers.yaml` (not
 run); `iiwa7` and `kinova_gen3` have none, so `real` fails loudly for them.
 
+The 7-DOF `home` postures are unchecked, and the MuJoCo pass scripts no longer depend on them: with `MP_PROFILE` set to
+one of these profiles they derive the pre-contact pose by planning (`ready_pose.py --pose`, wall placement from
+`profile_reach.py`; docs/sim_mujoco.md, "Running another robot profile"). That path has not been run in a simulator.
+
 What is not covered: meshes, inertias (placeholder 2 kg per link), joint friction, cable limits, the
 vendors' own collision models, and the redundancy of a 7-DOF arm in IK (the null space is left to the
 IK solver; for the reachability map see [reachability.md](reachability.md), "Redundant arms").

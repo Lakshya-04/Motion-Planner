@@ -233,7 +233,16 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
     if unknown:
         raise TypeError(f'unknown options {sorted(unknown)}')
     opt.update(options)
+    # gravcomp: True/False (all bodies before the F/T site) or a list of link names to compensate.
+    gc = opt['gravcomp']
+    if isinstance(gc, (str, list, tuple, set, frozenset)):
+        gravcomp_all, gravcomp_links = False, frozenset([gc] if isinstance(gc, str) else gc)
+    else:
+        gravcomp_all, gravcomp_links = bool(gc), frozenset()
     robot = UrdfRobot(urdf_text)
+    unknown_links = gravcomp_links - set(robot.links)
+    if unknown_links:
+        raise ValueError(f'gravcomp names unknown links {sorted(unknown_links)}')
     out = pathlib.Path(out_dir)
     (out / 'meshes').mkdir(parents=True, exist_ok=True)
     home = dict(home or {})
@@ -293,8 +302,9 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
         if joint is not None:
             body.set('pos', _fmt(joint.pos))
             body.set('quat', _fmt(quat_from_rpy(*joint.rpy)))
-        if opt['gravcomp'] and not in_tool:
+        if gravcomp_all and not in_tool or link_name in gravcomp_links:
             # Everything beyond the F/T site keeps its real weight so the sensor reads it.
+            # A list of link names compensates exactly those bodies (even beyond the F/T site).
             body.set('gravcomp', '1')
         if link.inertial and link.inertial['mass'] > 0:
             i = link.inertial

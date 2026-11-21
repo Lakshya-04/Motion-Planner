@@ -311,3 +311,39 @@ def test_depth_sensor_model_compiles_and_a_ray_hits_only_the_scene(tmp_path):
     dist = mujoco.mj_ray(m, d, d.site_xpos[site], d.site_xmat[site].reshape(3, 3)[:, 0], groups, 1, -1, geomid)
     assert dist == pytest.approx(1.0, abs=1e-6)
     assert m.geom(geomid[0]).name == 'wall'
+
+
+# ---------------------------------------------------------------- per-body gravcomp
+BASELINE_SHA = 'b370f1d0536f31b82be7f461e484bdffc3e16d9c1dc05d0f2e8bb9f81961e218'
+
+
+def _gravcomp_bodies(path):
+    return {b.get('name') for b in ET.parse(path).getroot().iter('body') if b.get('gravcomp') == '1'}
+
+
+def test_gravcomp_default_unchanged_and_bool_forms(tmp_path, mjcf):
+    default = _gravcomp_bodies(mjcf)
+    assert 'link1' in default and 'tool_mount_link' not in default and 'tcp_link' not in default
+    on = urdf_to_mjcf(URDF.read_text(), tmp_path / 'on', urdf_dir=DATA, home=HOME,
+                      commanded=COMMANDED, gravcomp=True)
+    assert on.read_bytes() == mjcf.read_bytes()
+    off = urdf_to_mjcf(URDF.read_text(), tmp_path / 'off', urdf_dir=DATA, home=HOME,
+                       commanded=COMMANDED, gravcomp=False)
+    assert _gravcomp_bodies(off) == set()
+
+
+def test_gravcomp_per_link_list_selects_exactly_those(tmp_path):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME,
+                        commanded=COMMANDED, gravcomp=['link1'])
+    assert _gravcomp_bodies(path) == {'link1'}
+
+
+def test_gravcomp_unknown_link_rejected(tmp_path):
+    with pytest.raises(ValueError, match='unknown links'):
+        urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, gravcomp=['nope'])
+
+
+def test_gravcomp_default_output_byte_identical_to_pre_change(mjcf):
+    # sha256 of the default robot.xml generated before the per-link option existed.
+    import hashlib
+    assert hashlib.sha256(mjcf.read_bytes()).hexdigest() == BASELINE_SHA
