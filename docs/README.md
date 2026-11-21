@@ -31,6 +31,7 @@
 | [hardware_bringup.md](hardware_bringup.md) | Commissioning procedure for the force path on a real arm and sensor (sign and frame checks, payload identification, limits, slow first contact), abort thresholds, what the simulations do not model; nothing verified on hardware. Parameter template: [`hardware_template.yaml`](../src/control/compliant_trajectory_controller/config/hardware_template.yaml) |
 | [calibration.md](calibration.md) | Calibration procedures in one place: F/T sign and bias, tool TCP (pivot calibration), payload services, wall plane, base-to-wall; nothing verified on hardware |
 | [release_checklist.md](release_checklist.md) | Public scan (names, paths, secrets), licence and version checks before a release; the maintainer decisions left open |
+| [teleop.md](teleop.md) | Teleoperation groundwork: AUTO / TELEOP / HOLD modes, jog shaping and limiting around MoveIt Servo and JTAC; status |
 | [docker.md](docker.md) | Reproducible Docker environment: targets (including `sim` and `sim-gazebo`), dependency lists, GPU, VAMP SIMD build |
 | [adr/](adr/) | Decision records (modular pipeline, upstream backends, core/ros split, C++ standard) |
 

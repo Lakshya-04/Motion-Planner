@@ -178,6 +178,8 @@ anything verified on hardware.
 
 ### Since #61 (pull requests #62 to #147, 2026-11-16 to 2026-11-21)
 
+Added (teleoperation groundwork, host-tested only): `force_core::ContactFreeGate`; new ROS-free package `teleop_core` (`TeleopModeManager`, `JogShaper`, `JogLimiter`), no node yet; the MuJoCo generator option `gravcomp` also accepts a list of link names (default output byte-identical). See docs/teleop.md.
+
 Added
 - Passes and sensing: depth-sensor wall detection, the sensed-wall and spray passes, the manager task action and stand loop, failure recovery,
   tool-actuation safety, obstacle scenarios and the scenario gallery, the wall docking servo, planar patches, live octomap, the mission ledger,
