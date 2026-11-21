@@ -508,8 +508,8 @@ grid generator, `stationGrid`.
   the surface type. Nothing here handles curvature yet (the grid, the work-plane clearance and the span are planar).
 - **Limits.** Obstacles are 2D (heights are not modelled); the stand stays on the free side of the work plane except
   through the work span (the search does not go behind a wall end); the arm and tool are not checked against an
-  adjacent wall; there is no navigation-feasibility (connectivity) check, so a free stand may not be reachable by the
-  base; yaw samples are 24 fixed steps. Tested with hand-made maps (`test/core/plane_stands_test.cpp`: 13 tests, ceiling,
+  adjacent wall; the stand search itself has no navigation-feasibility (connectivity) check, so a free stand may not be
+  reachable by the base (the [Base placement optimiser](#base-placement-optimiser) section adds one); yaw samples are 24 fixed steps. Tested with hand-made maps (`test/core/plane_stands_test.cpp`: 13 tests, ceiling,
   floor, inside corner, wall end, narrow alcove, determinism); not run in any simulation or on hardware.
 
 ## Base placement optimiser
