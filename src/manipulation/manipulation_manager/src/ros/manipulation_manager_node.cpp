@@ -65,6 +65,7 @@
 #include "manipulation_manager/core/manipulation_manager.hpp"
 #include "manipulation_manager/core/mission_fsm.hpp"
 #include "manipulation_manager/core/mission_ledger.hpp"
+#include "manipulation_manager/core/dock_ik_selector.hpp"
 #include "manipulation_manager/core/recovery_jog.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
 #include "manipulation_manager/core/joint_names.hpp"
@@ -243,6 +244,30 @@ public:
     // true: after an approach segment the tool must be within approach_tolerance_m of the approach pose, otherwise the
     // attempt counts as failed (and the arm is jogged back / the continuity re-primed) instead of docking from where
     // the arm happens to be.
+    // true: the dock joint goal is chosen among IK solutions from several seeds (the previous dock, the live state,
+    // dock_seed_joint_state): the one closest to the previous dock (the live state before the first) wins, a solution
+    // on another branch (sign of a dock_ik_branch_joints joint flips) or with the dock_ik_wrist_joint outside
+    // [dock_ik_wrist_min_rad, dock_ik_wrist_max_rad] is dropped. None left: the seeded IK above as before. Off by default.
+    dock_ik_continuity_ = this->declare_parameter<bool>("dock_ik_continuity", false);
+    {
+      const auto to_idx = [](const std::vector<int64_t> & v) {
+          std::vector<size_t> out;
+          for (const auto i : v) {
+            if (i >= 0) {
+              out.push_back(static_cast<size_t>(i));
+            }
+          }
+          return out;
+        };
+      dock_ik_sel_.linear_joints = to_idx(
+        this->declare_parameter<std::vector<int64_t>>("dock_ik_linear_joints", std::vector<int64_t>{0}));
+      dock_ik_sel_.branch_joints = to_idx(
+        this->declare_parameter<std::vector<int64_t>>("dock_ik_branch_joints", std::vector<int64_t>{2}));
+      dock_ik_sel_.wrist_joint = static_cast<int>(this->declare_parameter<int>("dock_ik_wrist_joint", 6));
+      dock_ik_sel_.wrist_min_rad = this->declare_parameter<double>("dock_ik_wrist_min_rad", -3.2);
+      dock_ik_sel_.wrist_max_rad = this->declare_parameter<double>("dock_ik_wrist_max_rad", 3.2);
+      dock_ik_sel_.max_dq_rad = this->declare_parameter<double>("dock_ik_max_dq_rad", 3.2);
+    }
     verify_approach_ = this->declare_parameter<bool>("verify_approach", true);
     approach_tolerance_m_ = this->declare_parameter<double>("approach_tolerance_m", 0.05);
     // The seed of that IK: a configuration of the arm docked at the wall (planning group order, lift first). Every
@@ -1491,6 +1516,33 @@ private:
     req.frame_id = frame_id_;
     req.planning_group = planning_group_;
     req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
+    if (dock_ik_continuity_) {
+      const auto live = readCurrentJointState(shared_from_this(), group_joint_names_);
+      const std::vector<double> & ref = !dock_branch_seed_.empty() ? dock_branch_seed_ : live;
+      const auto choice = selectDockIk(
+        [&](const std::vector<double> & sd) -> std::optional<std::vector<double>> {
+          auto r = req;
+          r.joint_seed = sd;
+          const auto res = ik->ik(r);
+          if (!res.success) {
+            return std::nullopt;
+          }
+          return res.joint_solution;
+        },
+        {dock_branch_seed_, live, dock_seed_}, ref, dock_ik_sel_);
+      if (choice.ok) {
+        RCLCPP_INFO(
+          this->get_logger(),
+          "DOCKGOAL continuity: seed %zu of %zu candidates, max dq %.3f rad (dropped: branch %zu, wrist %zu, jump %zu)",
+          choice.seed_index, choice.candidates, choice.cost, choice.rejected_branch, choice.rejected_wrist,
+          choice.rejected_cost);
+        return choice.q;
+      }
+      RCLCPP_WARN(
+        this->get_logger(),
+        "DOCKGOAL continuity: no acceptable solution (%zu candidates; branch %zu, wrist %zu, jump %zu), seeded IK as before",
+        choice.candidates, choice.rejected_branch, choice.rejected_wrist, choice.rejected_cost);
+    }
     req.joint_seed = seed;
     const auto res = ik->ik(req);
     if (!res.success || res.joint_solution.size() != seed.size()) {
@@ -1760,7 +1812,7 @@ private:
     // the first goal (the approach pose, or the dock pose without an approach) as a joint goal on the branch of
     // the previous dock; every second attempt falls back to the pose goal the planner samples itself
     std::vector<double> goal_q;
-    if (dock_ik_seeded_) {
+    if (dock_ik_seeded_ || dock_ik_continuity_) {
       goal_q = seededDockIk(first_goal);
     }
     for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
@@ -2127,6 +2179,8 @@ private:
   double dock_standoff_{0.0};
   int dock_attempts_{3};
   bool dock_ik_seeded_{true};
+  bool dock_ik_continuity_{false};
+  DockIkSelectorParams dock_ik_sel_;
   bool verify_approach_{true};
   double approach_tolerance_m_{0.05};
   std::vector<double> dock_seed_;

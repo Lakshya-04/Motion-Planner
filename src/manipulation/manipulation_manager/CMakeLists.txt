@@ -240,6 +240,11 @@ if(BUILD_TESTING)
     target_include_directories(recovery_jog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   endif()
 
+  ament_add_gtest(dock_ik_selector_test test/dock_ik_selector_test.cpp)
+  if(TARGET dock_ik_selector_test)
+    target_include_directories(dock_ik_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
   ament_add_gtest(column_ordering_test test/column_ordering_test.cpp)
   if(TARGET column_ordering_test)
     target_include_directories(column_ordering_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
