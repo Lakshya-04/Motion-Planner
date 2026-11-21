@@ -58,7 +58,7 @@ class ContactTest(Smoke):
         self.truth_by_stamp = {}
         self.cond_last = None
         self.record = False
-        self.run_rows = []   # (t_s, x, y, z, |Fz|, valve) of the whole run, tool point in base_footprint
+        self.run_rows = []   # (t_s, x, y, z, tilt_deg, |Fz|, valve) of the whole run, tool point in base_footprint
         self.valve = 0       # last /tool/valve state (std_msgs/Bool); the `active` column of the recording
         self.record_frame = 'base_footprint'   # frame of the recorded tool point (record_run.py --frame)
         self.create_subscription(Bool, '/tool/valve', self._valve_cb,
@@ -96,7 +96,12 @@ class ContactTest(Smoke):
         pos = None
         try:
             tf = self.tf_buffer.lookup_transform(self.record_frame, 'tcp_link', rclpy.time.Time())
-            pos = (tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z)
+            q = tf.transform.rotation
+            # the tool axis (tcp_link +Z, pointing at the work) against the wall's inward normal, +x of the frame the
+            # wall is in (see write_recording): R[0][2] = 2(xz + wy) is the x component of that axis
+            cos_tilt = max(-1.0, min(1.0, 2.0 * (q.x * q.z + q.w * q.y)))
+            pos = (tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z,
+                   math.degrees(math.acos(cos_tilt)))
         except Exception:  # noqa: BLE001  (no transform yet: skip the row)
             pass
         with self.lock:
@@ -113,9 +118,9 @@ class ContactTest(Smoke):
             rows = list(self.run_rows)
         t0 = rows[0][0] if rows else 0.0
         with open(path, 'w') as f:
-            f.write('t,x,y,z,force,active\n')
-            for t, x, y, z, fz, valve in rows:
-                f.write(f'{t - t0:.4f},{x:.5f},{y:.5f},{z:.5f},{fz:.4f},{valve}\n')
+            f.write('t,x,y,z,force,active,tilt_deg\n')
+            for t, x, y, z, tilt, fz, valve in rows:
+                f.write(f'{t - t0:.4f},{x:.5f},{y:.5f},{z:.5f},{fz:.4f},{valve},{tilt:.3f}\n')
         wall = {'origin': [wall_x, 0.0, 0.0], 'u': [0, 1, 0], 'v': [0, 0, 1],
                 'u_range': list(wall_range_y), 'v_range': list(wall_range_z)}
         if obstacles:

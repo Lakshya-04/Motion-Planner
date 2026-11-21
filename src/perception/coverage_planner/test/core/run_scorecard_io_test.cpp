@@ -110,3 +110,15 @@ TEST(RunScorecardIo, SegmentsAndVerifyResultJson)
   EXPECT_EQ(j.at("report_path").get<std::string>(), "c.json");
   EXPECT_EQ(j.at("source").get<std::string>(), "telemetry");
 }
+
+TEST(RunScorecardIo, SevenColumnCsvCarriesTheTilt)
+{
+  std::istringstream in("t,x,y,z,force,active,tilt_deg\n0.0,1,2,3,4.5,1,12.5\n");
+  const auto s = parseRunCsv(in);
+  ASSERT_EQ(s.size(), 1U);
+  EXPECT_DOUBLE_EQ(s[0].tilt_deg, 12.5);
+  std::istringstream old("t,x,y,z,force,active\n0.0,1,2,3,4.5,1\n");
+  EXPECT_DOUBLE_EQ(parseRunCsv(old)[0].tilt_deg, -1.0);
+  std::istringstream mixed("t,x,y,z,force,active,tilt_deg\n0.0,1,2,3,4.5,1\n");
+  EXPECT_THROW(parseRunCsv(mixed), std::runtime_error);
+}

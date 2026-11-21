@@ -3,6 +3,7 @@
 //             [--target-force 10] [--band 1] [--engaged-force 1]
 //             [--spray-standoff 0.3 --spray-half-angle 20 [--spray-sigma 0.25] [--max-thickness-cov 0]]
 //             [--keepout-margin 0.07] [--obstacle-margin 0] [--obstacle-tol 0.003] [--max-obstacle-contacts N]
+//             [--max-wall-gap 0.01] [--max-tilt 10] [--nominal-tilt 0] [--max-bad-pose 0.05]  (tool on the wall and square to it; needs tilt_deg)
 //             [--min-coverage 0.95] [--max-rms 0] [--max-peak 0] [--min-in-band 0]
 //             [--mode contact|non_contact|spray]  (per-mode default limits; explicit flags override)
 //             [--segments segments.json] [--result-out result.json] [--report-out card.json]
@@ -48,6 +49,9 @@ int main(int argc, char ** argv)
     o.keepout_margin_m = num("--keepout-margin", o.keepout_margin_m);
     o.obstacle_margin_m = num("--obstacle-margin", o.obstacle_margin_m);
     o.obstacle_contact_tol_m = num("--obstacle-tol", o.obstacle_contact_tol_m);
+    o.max_wall_gap_m = num("--max-wall-gap", o.max_wall_gap_m);
+    o.max_tilt_deg = num("--max-tilt", o.max_tilt_deg);
+    o.nominal_tilt_deg = num("--nominal-tilt", o.nominal_tilt_deg);
     if (!contact && a.count("--spray-standoff")) {
       o.spray = coverage_planner::SprayFootprint::fromCone(
         std::stod(a["--spray-standoff"]), num("--spray-half-angle", 20.0), num("--spray-sigma", 0.25));
@@ -65,6 +69,7 @@ int main(int argc, char ** argv)
     l.max_force_rms_error_n = num("--max-rms", l.max_force_rms_error_n);
     l.max_force_peak_n = num("--max-peak", l.max_force_peak_n);
     l.min_in_band_fraction = num("--min-in-band", l.min_in_band_fraction);
+    l.max_bad_pose_fraction = num("--max-bad-pose", l.max_bad_pose_fraction);
     if (a.count("--max-obstacle-contacts")) {l.max_obstacle_contacts = std::stoi(a["--max-obstacle-contacts"]);}
     std::vector<coverage_planner::SegmentWindow> segments;
     if (a.count("--segments")) {
