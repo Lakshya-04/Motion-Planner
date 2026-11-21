@@ -262,7 +262,7 @@ public:
       dock_ik_sel_.linear_joints = to_idx(
         this->declare_parameter<std::vector<int64_t>>("dock_ik_linear_joints", std::vector<int64_t>{0}));
       dock_ik_sel_.branch_joints = to_idx(
-        this->declare_parameter<std::vector<int64_t>>("dock_ik_branch_joints", std::vector<int64_t>{2}));
+        this->declare_parameter<std::vector<int64_t>>("dock_ik_branch_joints", std::vector<int64_t>{1, 3}));
       dock_ik_sel_.wrist_joint = static_cast<int>(this->declare_parameter<int>("dock_ik_wrist_joint", 6));
       dock_ik_sel_.wrist_min_rad = this->declare_parameter<double>("dock_ik_wrist_min_rad", -3.2);
       dock_ik_sel_.wrist_max_rad = this->declare_parameter<double>("dock_ik_wrist_max_rad", 3.2);
