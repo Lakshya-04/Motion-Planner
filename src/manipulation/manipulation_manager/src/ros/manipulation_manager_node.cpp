@@ -50,6 +50,7 @@
 #include "core_types/pose.hpp"
 #include "motion_planner/core/motion_planner.hpp"
 #include "motion_planner/core/planning_pipeline.hpp"
+#include "motion_planner/core/scene_port.hpp"
 #include "motion_planner/ros/planning_config.hpp"
 #include "mobile_manipulator_profile/profile.hpp"
 #include "reachability/core/io.hpp"
@@ -2039,6 +2040,11 @@ private:
     contact_seg.target_eef_speed = intent.target_eef_speed;
     contact_seg.min_path_fraction = 0.05;
     contact_seg.allow_target_contact = true;
+    // The planner lifts the tool-vs-wall collision for the contact link only when it is told which object the wall is:
+    // until now nothing set this, so the exclusion never applied, which went unnoticed while the planner's tool had no
+    // geometry near the TCP. The tool now carries its contact pad (generic_tool.xacro) and touches the wall by design;
+    // the wall-penetration bound on the TCP stays the safety limit of the contact path.
+    contact_seg.target_collision_object_id = motion_planner::kWallOctomapCollisionObjectId;
     contact_seg.max_wall_penetration = max_wall_penetration_;
     contact_seg.wall_reference_pose.x = rep.x;
     contact_seg.wall_reference_pose.y = rep.y;
@@ -2154,8 +2160,9 @@ private:
           intent.label.c_str(), force_now_, speed * 1000.0, waited);
       }
     }
-    setAdmittanceEngaged(false);
-
+    // The admittance stays engaged through the retract and is released only once the tool is off the wall: switching
+    // it off while the pad is pressed on the wall lets the arm jump to its reference (88 to 233 N spikes on the xArm 7
+    // in about half the runs, even after the force had decayed and the reference had been backed off).
     setState("retracting");
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
@@ -2164,6 +2171,7 @@ private:
     retract_seg.min_path_fraction = 0.99;  // see dock_seg's own comment above for why
     const auto retract_exec = manager_.executeMotionSegments(
       frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
+    setAdmittanceEngaged(false);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
       const auto retract_again = [&]() {

@@ -718,23 +718,36 @@ What this shows:
   holds in all three runs, but whether the end-of-column force spike occurs depends on the run (probably on which arm
   configuration the dock lands on); it is not understood or fixed, and the tool's 60 N overload threshold is not enforced
   on this path. The two-stand UR10e pass had a 49 N peak and one 3 s episode of tilt just over 10 degrees (10.85) at the second stand.
-- End-of-column force spike (cause and fix, xArm 7, MuJoCo): at the end of a column the force target goes to 0 and the
-  admittance is switched off. The tool lags its reference along the wall (friction and the admittance's own time constant:
-  still creeping up the wall at about 9 mm/s when the stroke is reported done), and switching the admittance off lets it jump
-  to the reference with the pad on the wall: z +6 mm in 0.1 s, tilt rising to 4 degrees, 88 to 175 N. Waiting for the force to
-  decay alone made it worse (peaks 231 to 248 N in three runs: the admittance had retreated further before the snap);
-  `unload_m: 0.01` alone reduced it (137 to 175 N in three runs). The manager now backs the reference off the wall
-  (`unload_m`, default 0.01 m) and releases the admittance only when the force is below `unload_release_force_n` (2 N) and the
-  tool speed has stayed below `unload_release_speed_mps` (1 mm/s) for 0.3 s, at most `unload_timeout_s` (4 s) after it starts
-  waiting (then it releases anyway and says so in the log together with the force and the speed). With this, three xArm 7
-  runs: run 1 peak 21.2 N, run 3 peak 18.1 N with tilt at most 1.3 degrees and gap under 0.7 mm; run 2 failed three columns
-  for a different reason (below). The tool speed at release was 0.8 to 4 mm/s and the 4 s timeout ended most waits, so the
-  speed criterion is mostly the timeout in practice and a longer or smarter settle may still be worth trying.
-- A tilted pad edge can still graze the wall before the manager starts (run 2 above: tilt 67 degrees, gap 29 mm, 102 N,
-  before the first manager event, and the arm state was damaged for the rest of the run). Likely cause, not yet fixed: the
-  planner's tool (`generic_tool.xacro`) is a 0.1 m mount cylinder with a bare TCP frame at 0.165 m and no pad, while the simulator
-  adds a 3 cm radius pad disc at the TCP, so the planner thinks the tool ends 6.5 cm short of it. The contact gaps seen (23
-  to 29 mm at tilts of 54 to 67 degrees) are what a 3 cm radius pad gives: gap = 0.03 sin(tilt) = 24 and 28 mm.
+- End-of-column force spike (xArm 7, MuJoCo), what was tried and measured. At the end of a column the force target goes to 0
+  and the admittance was switched off while the pad was still pressed on the wall. The tool lags its reference along the wall
+  (still creeping at about 9 mm/s when the stroke is reported done), so switching off lets it jump to the reference with the
+  pad on the wall: z +6 mm in 0.1 s, tilt to 4 degrees, 88 to 233 N. Peak force per run (three runs per variant unless noted):
+
+  | Variant | Peaks |
+  |---|---|
+  | switch off after a fixed 1.5 s (before) | 16.9, 159, 22.9 N |
+  | wait for the force to decay below 2 N, then switch off | 231, 240, 248 N (worse: the admittance had retreated further before the snap) |
+  | `unload_m: 0.01` (reference backed off the wall) | 137, 175, 167 N |
+  | decay and tool-speed wait with `unload_m` 0.01 (4 s timeout) | 21, 102 (a wall graze before the manager started), 18 N; with the pad in the planner 116, 233, 22 N |
+  | **retract first with the admittance engaged, switch off only once the tool is off the wall** | **23.2, 73.3, 19.2 N** |
+
+  The last variant is the shipped one (`unload_m` default 0.01 m, `unload_release_force_n` 2 N and `unload_release_speed_mps`
+  1 mm/s with a 4 s timeout, then the retract, then the release; the force and tool speed at each wait are logged). Two of
+  the three runs have no force above 40 N; the third has one moderate spike (46 to 73 N) at the handover of every column, so
+  the end-of-column handover is much better and still not clean. The tool speed rarely settled below 1 mm/s, so the timeout does
+  much of the waiting in practice. UR10e with the same build: 4 of 4, peak 20.0 N.
+- The tool pad in the planner (`generic_tool.xacro`): the planner's tool used to be a 0.1 m mount cylinder with a bare TCP frame
+  at 0.165 m and no pad, while the simulator adds a 3 cm radius, 1 cm thick pad disc at the TCP, so MoveIt believed the tool
+  ended 6.5 cm short of the TCP and a tilted pad edge reached the wall before it expected it (gaps of 23 to 29 mm at tilts of
+  54 to 67 degrees are what `0.03 sin(tilt)` gives). The URDF tool now carries the same pad (collision `tool_pad`,
+  `pad_radius` argument, 0 removes it) and the simulator generator uses it instead of adding a second one. With the pad in the
+  planner three things that had never mattered had to be fixed before a contact path could plan: the manager now names the wall
+  octomap (`target_collision_object_id`) on its press and contact segments (nothing set it, so the planner's contact exclusion
+  was dead code); the exclusion's link defaults to the parent of the TCP frame, the link that carries the pad (`contact_link`
+  was never set either, and the TCP frame has no geometry); and the planner's validity callback applies the exclusion to its
+  own copy of the ACM (the exclusion was pushed only to the `move_group` process while the callback checks the planner's
+  own mirror of the scene). The exclusion lifts the whole tool link for contact segments, not only the pad; the wall-penetration
+  bound on the TCP stays the safety limit of the contact path.
 - One run per variant is not a distribution: the xArm 7 result is a first working run, not a reliability figure. Not
   checked: other 7-DOF arms, multi-stand, the unconfirmed tool yaw of -90 degrees, the guessed wall distance.
 

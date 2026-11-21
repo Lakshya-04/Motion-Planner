@@ -93,7 +93,7 @@ class UrdfLink:
             self.collisions.append({
                 'pos': _floats(org.get('xyz') if org is not None else None),
                 'rpy': _floats(org.get('rpy') if org is not None else None),
-                'kind': geo.tag, 'attrib': dict(geo.attrib)})
+                'kind': geo.tag, 'attrib': dict(geo.attrib), 'name': col.get('name')})
 
 
 class UrdfJoint:
@@ -271,7 +271,7 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
         for k, c in enumerate(link.collisions):
             a = c['attrib']
             common = dict(pos=_fmt(c['pos']), quat=_fmt(quat_from_rpy(*c['rpy'])),
-                          name=f'{link.name}_col{k}')
+                          name=c.get('name') or f'{link.name}_col{k}')
             kind = c['kind']
             if kind == 'box':
                 geom = ET.SubElement(body, 'geom', type='box',
@@ -342,7 +342,10 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
         add_geoms(body, link)
         if link_name == ft_link:
             ET.SubElement(body, 'site', name='ft_sensor', size='0.01', group='4')
-            if opt['tool_pad_radius'] > 0:
+            # a tool that already carries its pad as a URDF collision named tool_pad (generic_tool.xacro does, so that the
+            # planners see the same pad as the simulator) is not given a second one: two identical geoms double the contact
+            urdf_pad = any(c.get('name') == 'tool_pad' for c in link.collisions)
+            if opt['tool_pad_radius'] > 0 and not urdf_pad:
                 # The TCP frame sits ahead of the tool body; a thin pad there makes the wall touch
                 # happen at the point coverage poses target.
                 tcp = robot.joint_by_child.get(tcp_link)
