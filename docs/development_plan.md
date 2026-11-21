@@ -146,6 +146,37 @@ confounded by friction and needs validation on a real pad); plane-relative stand
 contact-depth drift, not compensated. Proof: inject a tip offset, a tilt, a mass error and a bias into the MuJoCo model and
 require recovery (1.5 mm, 0.5 degrees, 1 %), with a seed sweep, published in the scorecard.
 
+## 12. Repository split: six submodules, one assembly repository
+
+Goal: reusable parts become independent repositories others can take alone, without this repository growing with every
+robot, arm, simulator asset and backend. Cut along the real dependency graph (computed from every `package.xml`, test and
+launch dependencies included), not by folder. Six repositories plus this one as the assembly layer:
+
+| Repository | Packages | Why a unit |
+|---|---|---|
+| `mp-core` | `core_types`, `ros_adapters`, `force_core`, `scene_model`, `tool_calibration`, `diff_ik_core`, `safety_monitor` | ROS-free libraries, depend on nothing in the stack; the easiest parts to reuse |
+| `mp-description` | `mobile_manipulator_description`, `mobile_manipulator_profile` | robot model and profiles (arms, lifts, bases, tools); grows with every robot, meshes and assets |
+| `mp-control` | `compliant_trajectory_controller`, `ft_bridge_hardware`, `ft_conditioner` | controllers and F/T handling; hardware-facing, own release cadence |
+| `mp-coverage` | `coverage_planner`, `coverage_planner_msgs`, `wall_detector`, `robot_self_filter` | surface to coverage plan; useful without any arm |
+| `mp-planning` | `motion_planner`, `motion_planner_moveit`, `vamp_planner`, `curobo_bridge`, `curobo_bridge_msgs`, `curobo_planner`, `reachability`, `reachability_moveit`, `reachability_msgs`, `stand_navigator`, `stand_navigator_msgs`, `scene_adapters`, `mobile_manipulator_moveit_config` | planners, reachability and base placement, MoveIt config |
+| `mp-sim` | `sim_mujoco`, `sim_gazebo`, `sim_isaac` | heavy assets and simulator plugins |
+
+This repository keeps the mission layer (`manipulation_manager`, `coverage_task_msgs`, the behaviour tree), `docker/`, `docs/`,
+the module manifest and the end-to-end and integration tests: it is the part that composes the others.
+
+Dependency order (checked, no cycles): core, then description, then control and coverage, then planning, then the mission layer,
+then sim. Four couplings had to be moved to get there: `scene_model` into core (the planners and coverage both use it),
+`scene_adapters` with the planners (it adapts a scene to planner geometry), `mobile_manipulator_moveit_config` with the
+planners (it launches the controllers, which depend on the description). One edge points upward on purpose
+(`mobile_manipulator_moveit_config` launches `robot_self_filter` from `mp-coverage`).
+
+Costs, stated plainly: a change that touches several repositories is several pull requests, so the "few large PRs" rule now applies
+per repository; submodule pins must be bumped; CI runs per repository (free for public repositories). Mitigations: split with
+history preserved (`git filter-repo` per package path), keep the manifest as one reviewable file, and a scripted `bump` step.
+When: **after** the in-flight feature branches are merged (they cross these boundaries), and each new public repository is the
+maintainer's call. Alternative with the same cut: a `.repos` file for vcstool, the ROS norm; submodules were chosen for pinning
+by commit in one clone.
+
 ## Sequence (all themes)
 
 1. Scoring (section 0), then the measurement and fix of the demo tilt.
