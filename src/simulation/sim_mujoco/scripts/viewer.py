@@ -7,11 +7,15 @@ Needs a display and the `mujoco` Python package (4.x: mujoco-core + mujoco-studi
 joint states, it is not the simulation itself (the physics runs in the ros2_control plugin).
 """
 import sys
+import os
 import threading
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+
+
+VIEW_HZ = float(os.environ.get('SIM_MUJOCO_VIEWER_HZ', '15'))
 
 
 def main():
@@ -36,7 +40,7 @@ def main():
         while viewer.is_running() and rclpy.ok():
             mujoco.mj_forward(model, data)
             viewer.sync()
-            threading.Event().wait(0.03)
+            threading.Event().wait(1.0 / max(1.0, VIEW_HZ))
     rclpy.shutdown()
 
 
