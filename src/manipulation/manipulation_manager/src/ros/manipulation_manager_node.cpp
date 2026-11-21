@@ -106,7 +106,7 @@ const std::vector<std::vector<std::string>> kJointNameCandidates = {
 /// An earlier version filled a missing joint with 0.0: with names that did not match the robot the "live" state
 /// was the all-zero pose, and moving the arm "back" to it stretched the UR10e out and put the lift on its stop.
 std::vector<double> readCurrentJointState(
-  const rclcpp::Node::SharedPtr & node, const std::vector<std::string> & configured_names,
+  const rclcpp::Node::SharedPtr & node, const std::vector<std::vector<std::string>> & candidates,
   std::vector<std::string> * names_out = nullptr)
 {
   std::map<std::string, double> latest;
@@ -116,12 +116,6 @@ std::vector<double> readCurrentJointState(
         latest[msg->name[i]] = msg->position[i];
       }
     });
-  std::vector<std::vector<std::string>> candidates;
-  if (!configured_names.empty()) {
-    candidates.push_back(configured_names);
-  } else {
-    candidates = kJointNameCandidates;
-  }
   std::vector<std::string> names;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
   while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
@@ -283,6 +277,12 @@ public:
     recovery_keeps_branch_ = this->declare_parameter<bool>("recovery_keeps_branch", false);
     verify_approach_ = this->declare_parameter<bool>("verify_approach", true);
     approach_tolerance_m_ = this->declare_parameter<double>("approach_tolerance_m", 0.05);
+    // true: after the dock the tool must be on the standoff pose (position and orientation) before the press;
+    // a tool that arrives tilted (a redundant arm's goal solved to the wrong orientation) would press on the wall
+    // with its edge. A column that fails the check is skipped as a failed dock (retried only through column_retries).
+    verify_dock_ = this->declare_parameter<bool>("verify_dock", true);
+    dock_tolerance_m_ = this->declare_parameter<double>("dock_tolerance_m", 0.02);
+    dock_tolerance_rad_ = this->declare_parameter<double>("dock_tolerance_rad", 0.17);
     // The seed of that IK: a configuration of the arm docked at the wall (planning group order, lift first). Every
     // dock is then solved from the same seed, so the lift / shoulder / wrist branch does not creep from one column to
     // the next (a chain of seeds drifted into upper arm <-> lift carriage self-collision at the last column of a
@@ -296,7 +296,17 @@ public:
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
     press_settle_s_ = this->declare_parameter<double>("press_settle_s", 2.0);
-    unload_m_ = this->declare_parameter<double>("unload_m", 0.0);
+    unload_m_ = this->declare_parameter<double>("unload_m", 0.01);
+    // After a column the force target is set to 0 and the admittance is switched off only once the measured force has
+    // decayed below unload_release_force_n (0 = the old fixed 1.5 s wait), at most unload_timeout_s later: switching it
+    // off while the tool still presses releases the offset at once and the arm snaps (100 to 160 N spikes at the
+    // contact-to-retract handover on some arm configurations, docs/sim_mujoco.md).
+    unload_release_force_n_ = this->declare_parameter<double>("unload_release_force_n", 2.0);
+    unload_timeout_s_ = this->declare_parameter<double>("unload_timeout_s", 4.0);
+    // ... and the tool has stopped: it lags its reference along the wall (friction, the admittance's own time constant)
+    // and switching the admittance off while it still creeps makes it jump to the reference with the pad on the wall
+    // (a 6 mm jump in 0.1 s gave 90 to 175 N). 0 = do not wait for the tool to settle.
+    unload_release_speed_mps_ = this->declare_parameter<double>("unload_release_speed_mps", 0.001);
     // Tool kind. true (default): the contact flow above. false: a non-contact (spray) tool -- no force
     // engage, no press, no wall-contact allowance, strokes at the plan's stand-off (+ spray_extra_standoff_m
     // further from the wall) and the valve (std_msgs/Bool on valve_topic) is open during the stroke only.
@@ -412,6 +422,27 @@ public:
     // lift names, then the earlier arm's), used to read the live arm state.
     group_joint_names_ = this->declare_parameter<std::vector<std::string>>(
       "group_joint_names", std::vector<std::string>{});
+    // Which names read the live state: the parameter when set (nothing else then), else the planning group's joints
+    // from the profile (a 7-DOF arm has arm_joint1..7, which the fixed list below does not know), then the fixed
+    // list (UR10e, an earlier arm) as the last resort.
+    if (!group_joint_names_.empty()) {
+      joint_name_candidates_ = {group_joint_names_};
+      RCLCPP_INFO(this->get_logger(), "live joint state: group_joint_names parameter (%zu joints)",
+        group_joint_names_.size());
+    } else {
+      const auto derived = manipulation_manager::groupJointNames(
+        planning_group_, profile.whole_body_group, profile.arm_group, profile.lift_joint, profile.arm_joints);
+      if (!derived.empty()) {
+        joint_name_candidates_.push_back(derived);
+      }
+      joint_name_candidates_.insert(
+        joint_name_candidates_.end(), kJointNameCandidates.begin(), kJointNameCandidates.end());
+      RCLCPP_INFO(this->get_logger(),
+        "live joint state: group_joint_names empty, %s (%zu joints from profile '%s', group '%s')",
+        derived.empty() ? "no profile joints for this group, using the fixed fallback lists" :
+        "using the profile's joints for the group, fixed lists as the last resort",
+        derived.size(), profile.name.c_str(), planning_group_.c_str());
+    }
     // Where the tool's force is read for the feedback's and result's peak ("" = not read, peak -1).
     const auto force_topic = this->declare_parameter<std::string>(
       "force_topic", "/ft_conditioner/wrench_conditioned");
@@ -421,6 +452,7 @@ public:
         [this](const geometry_msgs::msg::WrenchStamped::SharedPtr msg) {
           const auto & f = msg->wrench.force;
           const double mag = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
+          force_now_ = mag;   // always: the release of the admittance waits for it to decay
           if (verify_trace_) {
             trace_.setForce(mag);   // the contact flag of the tool trace
           }
@@ -519,8 +551,9 @@ public:
     if (!buildPlanners()) {
       return false;
     }
-    if (!world_frame_.empty() || verify_trace_) {
-      // its own spin thread: the node itself is only spun in bursts while a request waits
+    {
+      // TF is needed in every run (ARMSTATE tool pose, approach and dock verification), not only with a world
+      // frame; its own spin thread: the node itself is only spun in bursts while a request waits
       tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
       tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_, shared_from_this(), true);
     }
@@ -929,7 +962,7 @@ private:
       for (size_t i = 0; i < all.size(); ++i) {
         all[i] = i;
       }
-      last_good_state_ = readCurrentJointState(shared_from_this(), group_joint_names_);
+      last_good_state_ = readCurrentJointState(shared_from_this(), joint_name_candidates_);
       for (const size_t i : orderColumns(all, sel)) {
         if (stop()) {
           break;
@@ -976,7 +1009,7 @@ private:
     setState("planning_stands");
     // The arm's pose before it first moves: what it goes back to before every drive.
     travel_state_ = !travel_joint_state_.empty() ?
-      travel_joint_state_ : readCurrentJointState(shared_from_this(), group_joint_names_);
+      travel_joint_state_ : readCurrentJointState(shared_from_this(), joint_name_candidates_);
     if (travel_state_.empty()) {
       why = "no travel pose: /joint_states does not carry the planning group's joints (set group_joint_names or "
         "travel_joint_state)";
@@ -1563,6 +1596,12 @@ private:
   /// Pose of `child` in `parent` from TF (latest), false when it does not resolve within 2 s.
   bool lookup(const std::string & parent, const std::string & child, FrameTransform & out)
   {
+    if (!tf_buffer_) {
+      // init() creates the buffer in every run; this only guards a lookup before init() or after a failed one:
+      // report "no TF" instead of dereferencing a null buffer
+      RCLCPP_DEBUG_ONCE(this->get_logger(), "TF lookup %s <- %s skipped: no TF buffer", parent.c_str(), child.c_str());
+      return false;
+    }
     try {
       const auto tf = tf_buffer_->lookupTransform(
         parent, child, tf2::TimePointZero, tf2::durationFromSec(2.0));
@@ -1617,7 +1656,7 @@ private:
     // idea of the current state. Needed with the cuRobo backend (it needs an explicit start); off by default.
     if (seed_start_from_live_state_) {
       manager_.setStartStateProvider(
-        [this]() {return readCurrentJointState(shared_from_this(), group_joint_names_);});
+        [this]() {return readCurrentJointState(shared_from_this(), joint_name_candidates_);});
     }
     RCLCPP_INFO(
       this->get_logger(), "planning backends from %s: cartesian=%s free_space=%s ik=%s collision=%s",
@@ -1641,7 +1680,7 @@ private:
     req.planning_group = planning_group_;
     req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
     if (dock_ik_continuity_) {
-      const auto live = readCurrentJointState(shared_from_this(), group_joint_names_);
+      const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_);
       const std::vector<double> & ref = !dock_branch_seed_.empty() ? dock_branch_seed_ : live;
       const auto choice = selectDockIk(
         [&](const std::vector<double> & sd) -> std::optional<std::vector<double>> {
@@ -1801,7 +1840,7 @@ private:
     std::vector<double> seed = !dock_seed_.empty() ? dock_seed_ :
       (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
     if (seed.empty()) {
-      seed = readCurrentJointState(shared_from_this(), group_joint_names_);
+      seed = readCurrentJointState(shared_from_this(), joint_name_candidates_);
     }
     const auto d = column_ik_gate_.decide(
       column_ik_port_.get(), intent.poses, {-wall_dir.d[0], -wall_dir.d[1], -wall_dir.d[2]}, seed);
@@ -1930,10 +1969,33 @@ private:
     }
   }
 
+
+  /// Position error (m) and orientation error (rad, the angle of the relative rotation) of the tool frame against `pose`
+  /// (both in frame_id_). False when the tool frame is unknown: callers must not block a run that has no tcp_link.
+  bool tcpPoseError(const core_types::Pose & pose, double & pos_err, double & ang_err)
+  {
+    FrameTransform tcp;
+    if (!lookup(frame_id_, "tcp_link", tcp)) {
+      pos_err = 0.0;
+      ang_err = 0.0;
+      return false;
+    }
+    pos_err = std::sqrt(
+      std::pow(tcp.t[0] - pose.x, 2) + std::pow(tcp.t[1] - pose.y, 2) + std::pow(tcp.t[2] - pose.z, 2));
+    // lookup() stores the quaternion as (x, y, z, w)
+    const double dot = std::fabs(
+      tcp.q[0] * pose.qx + tcp.q[1] * pose.qy + tcp.q[2] * pose.qz + tcp.q[3] * pose.qw);
+    const double n1 = std::sqrt(tcp.q[0] * tcp.q[0] + tcp.q[1] * tcp.q[1] + tcp.q[2] * tcp.q[2] + tcp.q[3] * tcp.q[3]);
+    const double n2 = std::sqrt(pose.qx * pose.qx + pose.qy * pose.qy + pose.qz * pose.qz + pose.qw * pose.qw);
+    const double c = (n1 > 0.0 && n2 > 0.0) ? std::min(1.0, dot / (n1 * n2)) : 1.0;
+    ang_err = 2.0 * std::acos(c);
+    return true;
+  }
+
   /// One diagnostic line: the planning group's live joint values (lift first) with a tag, for comparing runs.
   void logArmState(const std::string & tag)
   {
-    const auto q = readCurrentJointState(shared_from_this(), group_joint_names_);
+    const auto q = readCurrentJointState(shared_from_this(), joint_name_candidates_);
     std::string txt;
     char buf[32];
     for (const double v : q) {
@@ -1953,7 +2015,7 @@ private:
   /// before the first real segment, see this file's own readCurrentJointState() comment for why.
   void primeContinuityFromLiveState()
   {
-    const auto live_state = readCurrentJointState(shared_from_this(), group_joint_names_);
+    const auto live_state = readCurrentJointState(shared_from_this(), joint_name_candidates_);
     if (live_state.empty()) {
       RCLCPP_WARN(
         this->get_logger(),
@@ -2057,7 +2119,7 @@ private:
   /// Remembers where the arm is as the configuration to jog back to.
   void markGoodState()
   {
-    const auto live = readCurrentJointState(shared_from_this(), group_joint_names_);
+    const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_);
     if (!live.empty()) {
       last_good_state_ = live;
     }
@@ -2075,7 +2137,7 @@ private:
       return false;
     }
     std::vector<std::string> names;
-    const auto live = readCurrentJointState(shared_from_this(), group_joint_names_, &names);
+    const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_, &names);
     if (live.empty()) {
       RCLCPP_WARN(this->get_logger(), "%s: recovery jog skipped, no live joint state", what);
       return false;
@@ -2269,6 +2331,22 @@ private:
     if (stop()) {
       return ColumnOutcome::kFailed;
     }
+    if (verify_dock_) {
+      waitFor(0.5, false);   // let the controller and TF settle after the last point, as verify_approach does
+      double pos_err = 0.0, ang_err = 0.0;
+      if (tcpPoseError(standoff_pose, pos_err, ang_err) &&
+        (pos_err > dock_tolerance_m_ || ang_err > dock_tolerance_rad_))
+      {
+        RCLCPP_WARN(
+          this->get_logger(),
+          "%s: docked %.3f m and %.1f deg off the standoff pose (limits %.3f m, %.1f deg), not pressing from there",
+          intent.label.c_str(), pos_err, ang_err * 180.0 / M_PI, dock_tolerance_m_,
+          dock_tolerance_rad_ * 180.0 / M_PI);
+        logArmState("dock_off_pose_" + intent.label);
+        column_reason_ = SkipReason::kDockFailed;
+        return ColumnOutcome::kFailed;
+      }
+    }
     markGoodState();
     dock_branch_seed_ = last_good_state_;
     logArmState("docked_" + intent.label);
@@ -2360,7 +2438,55 @@ private:
       zero.data = 0.0;
       force_pub_->publish(zero);
     }
-    waitFor(1.5, false);
+    if (unload_release_force_n_ <= 0.0 || force_now_ < 0.0) {
+      waitFor(1.5, false);   // no force signal (or switched off): the old fixed wait
+    } else {
+      waitFor(0.5, false);   // the target has to reach the admittance and the tool start to move off
+      const auto t0 = std::chrono::steady_clock::now();
+      const auto elapsed = [&]() {
+          return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        };
+      // the tool speed from TF: the position change over the last sample; settled = below the limit for 0.3 s
+      FrameTransform prev_tcp;
+      bool have_prev = lookup(frame_id_, "tcp_link", prev_tcp);
+      double prev_t = elapsed(), still_since = -1.0, speed = 0.0;
+      const bool watch_speed = unload_release_speed_mps_ > 0.0 && have_prev;
+      while (elapsed() < unload_timeout_s_) {
+        waitFor(0.05, false);
+        bool settled = true;
+        if (watch_speed) {
+          FrameTransform cur;
+          const double now_t = elapsed();
+          if (lookup(frame_id_, "tcp_link", cur) && now_t > prev_t) {
+            speed = std::sqrt(
+              std::pow(cur.t[0] - prev_tcp.t[0], 2) + std::pow(cur.t[1] - prev_tcp.t[1], 2) +
+              std::pow(cur.t[2] - prev_tcp.t[2], 2)) / (now_t - prev_t);
+            prev_tcp = cur;
+            prev_t = now_t;
+          }
+          if (speed > unload_release_speed_mps_) {
+            still_since = -1.0;
+          } else if (still_since < 0.0) {
+            still_since = now_t;
+          }
+          settled = still_since >= 0.0 && now_t - still_since >= 0.3;
+        }
+        if (force_now_ <= unload_release_force_n_ && settled) {
+          break;
+        }
+      }
+      const double waited = 0.5 + elapsed();
+      if (force_now_ > unload_release_force_n_ || elapsed() >= unload_timeout_s_) {
+        RCLCPP_WARN(
+          this->get_logger(),
+          "%s: force %.1f N (limit %.1f N), tool speed %.1f mm/s after %.1f s, releasing the admittance anyway",
+          intent.label.c_str(), force_now_, unload_release_force_n_, speed * 1000.0, waited);
+      } else {
+        RCLCPP_INFO(
+          this->get_logger(), "%s: force %.1f N, tool speed %.1f mm/s after %.1f s, releasing the admittance",
+          intent.label.c_str(), force_now_, speed * 1000.0, waited);
+      }
+    }
     setAdmittanceEngaged(false);
 
     setState("retracting");
@@ -2498,6 +2624,7 @@ private:
   double nav_timeout_s_{240.0};
   std::vector<double> travel_joint_state_;
   std::vector<std::string> group_joint_names_;
+  std::vector<std::vector<std::string>> joint_name_candidates_;
   std::vector<double> travel_state_;
   std::vector<double> last_good_state_;   ///< the last arm configuration known to plan from (recovery target)
   bool arm_stuck_{false};                 ///< a retract or stow failed and no recovery got the arm out yet
@@ -2597,6 +2724,9 @@ private:
   DockIkSelectorParams dock_ik_sel_;
   bool recovery_keeps_branch_{false};
   bool verify_approach_{true};
+  bool verify_dock_{true};
+  double dock_tolerance_m_{0.02};
+  double dock_tolerance_rad_{0.17};
   double approach_tolerance_m_{0.05};
   std::vector<double> dock_seed_;
   std::vector<double> dock_branch_seed_;   ///< the last docked configuration: the IK seed of the next dock
@@ -2620,7 +2750,11 @@ private:
   double target_force_n_{0.0};
   std::string controller_name_{"combined_arm_lift_controller"};
   double press_settle_s_{2.0};
-  double unload_m_{0.0};
+  double unload_m_{0.01};
+  double unload_release_force_n_{2.0};
+  double unload_release_speed_mps_{0.001};
+  double unload_timeout_s_{4.0};
+  double force_now_{-1.0};   // latest conditioned force magnitude, -1 until one arrived
 };
 
 }  // namespace manipulation_manager

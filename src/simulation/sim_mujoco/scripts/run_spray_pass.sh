@@ -76,7 +76,7 @@ mp_coverage $DATA/wall_pass_coverage_scene.json || exit $?
 
 # 2. manager parameters (contact: false), the wall into MoveIt's planning scene as an octomap
 mp_manager_yaml
-mp_world_model $DATA/walls.pcd
+mp_world_model $DATA/${MANAGER_PASS_WORLD_PCD:-${MP_WORLD_PCD:-walls.pcd}}
 
 # 3. record and run
 mp_record
