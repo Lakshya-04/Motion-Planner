@@ -5,6 +5,9 @@
  */
 #include <gtest/gtest.h>
 
+#include <map>
+#include <string>
+
 #include "safety_monitor/curobo_yaml.hpp"
 
 using namespace safety_monitor;
@@ -71,15 +74,65 @@ TEST(CuroboYaml, ParentListedAfterChildStillWorks)
   EXPECT_FALSE(m.pairChecked(m.linkIndex("base_link"), m.linkIndex("link3")));
 }
 
+namespace
+{
+// Expects a std::runtime_error whose message contains `needle`.
+void expectError(
+  const std::string & yml, const std::string & needle,
+  const std::map<std::string, std::string> & parents = {})
+{
+  try {
+    loadSphereModelFromCuroboYaml(yml, parents);
+    ADD_FAILURE() << "no exception for: " << yml;
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find(needle), std::string::npos) << e.what();
+  }
+}
+}  // namespace
+
+TEST(CuroboYaml, DocumentedLayoutsLoad)
+{
+  const char * top_level =
+    "collision_spheres:\n  a: [{center: [0,0,0], radius: 1}]\n  b: [{center: [1,0,0], radius: 1}]\n";
+  EXPECT_EQ(loadSphereModelFromCuroboYaml(top_level).linkCount(), 2);
+  const char * kin_only =
+    "kinematics:\n  collision_link_names: [b, a]\n  collision_spheres:\n"
+    "    a: [{center: [0,0,0], radius: 1}]\n    b: [{center: [1,0,0], radius: 1}]\n"
+    "  self_collision_ignore:\n    a: [b]\n";
+  const SphereModel m = loadSphereModelFromCuroboYaml(kin_only);
+  ASSERT_EQ(m.linkCount(), 2);
+  EXPECT_EQ(m.linkName(0), "b");
+  EXPECT_FALSE(m.pairChecked(0, 1));
+  const char * robot_cfg_flat =
+    "robot_cfg:\n  collision_spheres:\n    a: [{position: [0,0,0.5], radius: 0.1}]\n";
+  EXPECT_EQ(loadSphereModelFromCuroboYaml(robot_cfg_flat).sphereCount(), 1);
+}
+
 TEST(CuroboYaml, MalformedInputThrows)
 {
-  EXPECT_THROW(loadSphereModelFromCuroboYaml("foo: 1"), std::runtime_error);
-  EXPECT_THROW(
-    loadSphereModelFromCuroboYaml("collision_spheres:\n  a: [{center: [0, 0], radius: 1}]"),
-    std::runtime_error);
-  EXPECT_THROW(
-    loadSphereModelFromCuroboYaml(
-      "collision_spheres:\n  a: [{center: [0,0,0], radius: 1}]\n  b: [{center: [0,0,0], radius: 1}]",
-      {{"a", "b"}, {"b", "a"}}),
-    std::runtime_error);
+  expectError("foo: 1", "no inline collision_spheres");
+  expectError("", "no inline collision_spheres");
+  expectError(
+    "robot_cfg:\n  kinematics:\n    collision_spheres:\n      a: [{center: [0, 0], radius: 1}]\n",
+    "malformed sphere on link a");
+  expectError(
+    "robot_cfg:\n  kinematics:\n    collision_spheres:\n      a: [{center: [0,0,0]}]\n",
+    "malformed sphere on link a");
+  expectError(
+    "robot_cfg:\n  kinematics:\n    collision_spheres:\n      a: [{center: [0,0,0], radius: 1}]\n"
+    "      b: [{center: [0,0,0], radius: 1}]\n",
+    "parent cycle", {{"a", "b"}, {"b", "a"}});
+}
+
+TEST(CuroboYaml, InvalidRadiusOrCentreThrows)
+{
+  expectError(
+    "robot_cfg:\n  kinematics:\n    collision_spheres:\n      a: [{center: [0,0,0], radius: .nan}]\n",
+    "radius on link a");
+  expectError(
+    "robot_cfg:\n  kinematics:\n    collision_spheres:\n      a: [{center: [0,0,0], radius: -0.1}]\n",
+    "radius on link a");
+  expectError(
+    "robot_cfg:\n  kinematics:\n    collision_spheres:\n      a: [{center: [.inf,0,0], radius: 0.1}]\n",
+    "centre or negative");
 }

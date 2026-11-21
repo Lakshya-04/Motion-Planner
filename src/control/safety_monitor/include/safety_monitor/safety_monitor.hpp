@@ -7,15 +7,18 @@
  *          `sweep_radius_inflation_m`; a moving source is advanced too). With the protective
  *          distance
  *
- *              d_stop = v_human * T_stop + v_toward * T_reaction + margin
+ *              d_stop = v_human * (T_stop + T_reaction) + v_toward * T_reaction + margin
  *              d_slow = d_stop + slow_band
  *              scale  = clamp((d - d_stop) / (d_slow - d_stop), 0, 1)
  *
- *          (form of ISO/TS 15066 speed-and-separation monitoring; v_human is 0 for static
- *          sources, max(human_speed, measured speed) for persons; v_toward is the sphere speed
- *          towards the obstacle; margin is the intrusion plus position uncertainty for persons and
- *          a smaller static margin otherwise) the overall scale is the minimum over all spheres,
- *          sources and sweep samples. Scale 0 is a protective stop. Self-collision uses the same
+ *          (form of ISO/TS 15066 speed-and-separation monitoring, S_p = S_h + S_r + S_s + C + Z with
+ *          S_h = v_human (T_reaction + T_stop) the distance the person covers while the system
+ *          reacts and stops, S_r = v_toward T_reaction the robot's travel during the reaction time,
+ *          S_s the robot's stopping travel (covered by the sweep over [0, T_stop]) and C + Z the
+ *          margin; v_human is 0 for static sources, max(human_speed, measured speed) for persons;
+ *          v_toward is the sphere speed towards the obstacle; margin is the intrusion plus
+ *          position uncertainty for persons and a smaller static margin otherwise) the overall scale is the minimum over all spheres,
+ *          sources and sweep samples; a NaN scale or distance counts as scale 0. Scale 0 is a protective stop. Self-collision uses the same
  *          form with the closing speed of each non-allowed sphere pair and the self margin.
  *
  *          Latching: a protective stop (including a fail-safe one) holds until the hazard is
@@ -23,11 +26,16 @@
  *          cleared (a reset made while the hazard is present is discarded).
  *
  *          Fail-safe: a missing or negative or non-finite stamp, input older than
- *          `stale_timeout_s`, a stale or unstamped obstacle source, a NaN anywhere in the
+ *          `stale_timeout_s`, a stamp (robot data or source) later than `now` by more than
+ *          `kFutureStampEps_s` (1 ms), a stale or unstamped obstacle source, a NaN anywhere in the
  *          transforms, velocities or distances, or a size mismatch gives a protective stop with
  *          scale 0 and reason kStaleData or kInvalidInput.
  *
- *          Contact-exempt links are skipped against sources flagged as the work surface only.
+ *          Moving sources (persons) are queried at `t + (now - stamp)` so their position is
+ *          extrapolated over the age of their data (constant velocity).
+ *
+ *          Contact-exempt links are skipped against sources flagged as the work surface only, and
+ *          never against a source of kind kPerson, whatever it is flagged as.
  *
  *          NOT A CERTIFIED SAFETY FUNCTION: ordinary software on a general-purpose OS. It only
  *          slows the robot earlier; see the package README.
@@ -38,6 +46,7 @@
 
 #include <Eigen/Dense>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include "safety_monitor/distance_source.hpp"
@@ -49,6 +58,12 @@ namespace safety_monitor
 enum class State {kOk, kSlow, kProtectiveStop};
 enum class Reason {kNone, kSelfCollision, kEnvironment, kPerson, kStaleData, kInvalidInput};
 
+/// Largest tolerated lead of a stamp over `now` (clock jitter); beyond it the input is invalid.
+constexpr double kFutureStampEps_s = 1e-3;
+
+/// All values must be finite; times, speeds, margins and bands >= 0, `sweep_samples` >= 0
+/// (0 is treated as 1). SafetyMonitor's constructor throws std::invalid_argument otherwise.
+/// A band of 0 turns the slow region off (hard threshold at d_stop).
 struct Params
 {
   double stop_time_s{0.3};         ///< T_stop, the stopping horizon of the whole system
@@ -80,8 +95,8 @@ struct Result
 class SafetyMonitor
 {
 public:
-  SafetyMonitor(const SphereModel & model, const Params & params)
-  : model_(model), p_(params) {}
+  /// Throws std::invalid_argument when `params` violates the ranges documented at Params.
+  SafetyMonitor(const SphereModel & model, const Params & params);
 
   /// One monitor cycle. `sphere_velocities` is in worldSpheres() order (empty = all at rest; see
   /// sphereVelocities() to build it from link twists). `data_stamp_s` is the time of the robot

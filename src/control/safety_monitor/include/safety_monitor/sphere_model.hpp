@@ -47,7 +47,8 @@ class SphereModel
 public:
   /// Adds a link; `parent` is the index of its parent link or -1. Returns the link index
   /// (transforms passed to worldSpheres() are ordered by this index). Throws on a duplicate name
-  /// or a parent index that does not exist yet.
+  /// or a parent index that does not exist yet, or a sphere with a non-finite centre or a
+  /// negative or non-finite radius (std::invalid_argument).
   int addLink(const std::string & name, int parent, const std::vector<Sphere> & spheres);
 
   /// Marks a link pair as allowed to touch (no distance check). Throws on an unknown name.
@@ -56,7 +57,8 @@ public:
   /// Marks a link as contact-exempt against the work surface. Throws on an unknown name.
   void setContactExempt(const std::string & link, bool exempt = true);
 
-  /// Attaches a tool/payload sphere to a link under `tag` (several spheres may share a tag).
+  /// Attaches a tool/payload sphere to a link under `tag` (several spheres may share a tag). Throws
+  /// std::invalid_argument on an unknown link or an invalid sphere (see addLink()).
   void attachSphere(const std::string & link, const std::string & tag, const Sphere & sphere);
   /// Removes every sphere attached under `tag`; returns how many were removed.
   int detachSpheres(const std::string & tag);

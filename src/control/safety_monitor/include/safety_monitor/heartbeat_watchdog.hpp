@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cmath>
+#include <stdexcept>
 
 namespace safety_monitor
 {
@@ -17,7 +18,13 @@ namespace safety_monitor
 class HeartbeatWatchdog
 {
 public:
-  explicit HeartbeatWatchdog(double timeout_s) : timeout_s_(timeout_s) {}
+  /// `timeout_s` must be finite and >= 0, otherwise std::invalid_argument is thrown.
+  explicit HeartbeatWatchdog(double timeout_s) : timeout_s_(timeout_s)
+  {
+    if (!std::isfinite(timeout_s) || timeout_s < 0.0) {
+      throw std::invalid_argument("HeartbeatWatchdog: timeout must be finite and >= 0");
+    }
+  }
 
   /// Records a heartbeat at `now_s`; an invalid time is ignored (the watchdog keeps ageing).
   void beat(double now_s)

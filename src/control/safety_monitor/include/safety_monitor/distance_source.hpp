@@ -4,14 +4,16 @@
  *        implementations: static primitives, a dense voxel ESDF grid and moving capsules.
  * @details Distances are signed: positive outside, negative inside the obstacle. The gradient is
  *          the unit direction of increasing distance (pointing away from the obstacle). A source
- *          may answer "no information" (`valid == false`, e.g. a point outside the ESDF grid or an
- *          empty source); the monitor then ignores it for that point.
+ *          may answer "no information" (`valid == false`, e.g. an empty static source); the monitor
+ *          then ignores it for that point. A source that cannot answer safely returns `valid == true`
+ *          with a NaN distance, which the monitor treats as invalid input (protective stop).
  *
  *          `query(p, t_ahead)` asks for the obstacle `t_ahead` seconds in the future: static
  *          sources ignore it, the moving-capsule source advances the capsules along their
  *          velocity (constant-velocity prediction). `stamp()` is the time of the last data update;
  *          sources that never change report +infinity (never stale), others the real stamp, and a
- *          negative or NaN stamp is an invalid input to the monitor.
+ *          negative or NaN stamp, or one later than the monitor's `now` by more than a millisecond,
+ *          is an invalid input to the monitor.
  *
  *          DistanceSource is the seam for adapters over the existing planner and world models (see
  *          the README, "Reuse of the planner models"); no motion_planner or MoveIt dependency here.
@@ -85,14 +87,30 @@ private:
   bool work_surface_;
 };
 
+/// What an EsdfGrid answers for a point outside the box spanned by the first and last voxel centres
+/// (and for an empty or degenerate grid).
+enum class OutsideGrid
+{
+  /// Default, conservative: the grid knows nothing there, so it answers `valid == true` with a NaN
+  /// distance and the monitor stops (kInvalidInput). A robot leaving the mapped volume is stopped.
+  kUnknownFailsSafe,
+  /// Opt-in: outside the grid is free space, the answer is `valid == false` and the monitor
+  /// ignores the grid for that point. Only for grids known to cover the whole workspace.
+  kFree
+};
+
 /// Dense signed-distance grid with trilinear interpolation. `values[(z*ny + y)*nx + x]` is the
 /// signed distance at the voxel centre `origin + voxel * (x, y, z)`. Points outside the box
-/// spanned by the first and last voxel centres return `valid == false`.
+/// spanned by the first and last voxel centres follow `OutsideGrid` (default: fail safe). A NaN or
+/// infinite voxel under a point gives `valid == true` with a NaN distance (the monitor stops).
 class EsdfGrid : public DistanceSource
 {
 public:
   EsdfGrid() = default;
   EsdfGrid(const Vec3 & origin, double voxel, int nx, int ny, int nz);
+
+  void setOutsideBehavior(OutsideGrid b) {outside_ = b;}
+  OutsideGrid outsideBehavior() const {return outside_;}
 
   /// Fills every voxel from a function of the voxel centre (tests, synthetic maps).
   template<typename F>
@@ -109,7 +127,13 @@ public:
   void set(int x, int y, int z, float v) {values_[index(x, y, z)] = v;}
   Vec3 center(int x, int y, int z) const {return origin_ + voxel_ * Vec3(x, y, z);}
   /// Time of the last data update (seconds); negative = never set (the monitor fails safe).
-  void setStamp(double s) {stamp_ = s;}
+  /// Setting a stamp makes the grid dynamic: staleness applies (call setDynamic(false) afterwards
+  /// to declare the grid permanently valid).
+  void setStamp(double s)
+  {
+    stamp_ = s;
+    dynamic_ = true;
+  }
   void setDynamic(bool d) {dynamic_ = d;}
   bool empty() const {return values_.empty();}
 
@@ -130,6 +154,7 @@ private:
   std::vector<float> values_;
   double stamp_{-1.0};
   bool dynamic_{false};
+  OutsideGrid outside_{OutsideGrid::kUnknownFailsSafe};
 };
 
 /// A capsule: segment a-b with a radius and a world velocity.
