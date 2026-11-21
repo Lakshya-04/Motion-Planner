@@ -1128,7 +1128,17 @@ comes from `walls.pcd`. Single runs, not repeated.
 
 ## Two-stand pass with the MoveIt planners, 2026-11-22
 
-`run_multi_stand_pass.sh`, scenario `two_panels_plain`, default `planning.yaml`, `MULTI_STAND_FILM=1`, on main at `8e41d7e` (after #167, #169 and #172); frames
-rendered with `render_run.py video --max-speed 12` and encoded with `encode` (1401 frames, 46.7 s). One run: 10 of 10 columns, coverage 1.0, peak 22.1 N
-(scored), RMS force error 2.8 N, tilt at most 0.149 deg, wall gap at most 0.9 mm, 0 bad poses, 0 start-out-of-bounds errors, 560 s of sim time. Media:
-`docs/media/two_stand_moveit.mp4` and `.gif`, shown in the README.
+`run_multi_stand_pass.sh`, scenario `two_panels_plain`, default `planning.yaml`, on main at `347ded0`, filmed with `MULTI_STAND_FILM=1`; frames rendered
+with `render_run.py video --max-speed 12` and encoded with `encode` (1380 frames, 46 s). Two runs of the same pass:
+
+| run | columns | coverage | peak force (scored) | tilt max | wall gap max | notes |
+|---|---|---|---|---|---|---|
+| A, no viewer, host quiet (8e41d7e) | 10 / 10 | 1.0 | 22.1 N | 0.15 deg | 0.9 mm | the first video (drawn without the base pose, replaced) |
+| B, live viewer on the GPU, host busy (347ded0) | 10 / 10 | 1.0 | 142.2 N | 31.8 deg (0 tilted samples by the scorer) | 15.8 mm | the video in the README; one force spike between the stands; cause not found |
+
+What was wrong with the first video and the live viewer: `/joint_states` carries the lift and the six arm joints only, the base pose (x, y, yaw) comes
+from the plugin as `sim_mujoco/base_pose`, and the telescopic lift stages follow the lift by an MJCF equality constraint that `mj_forward` does not solve.
+Without the base pose the arm was drawn at the origin with yaw 0 (90 degrees off the wall at stand 0); without the stage polynomials the column was drawn
+0.4 m too short at 0.4 m of lift. `render_run.py record` now stores the base pose, the replay and `viewer.py` apply it and the stage polynomials, and the
+viewer shows the ground-truth contact force and redraws at 15 Hz by default (`SIM_MUJOCO_VIEWER_HZ`; software GL at 33 Hz used 4 to 5 cores and starved the
+pass). Media: `docs/media/two_stand_moveit.mp4` and `.gif`.
