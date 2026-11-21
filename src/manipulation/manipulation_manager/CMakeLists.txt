@@ -73,7 +73,10 @@ ament_target_dependencies(${PROJECT_NAME}_core
 
 # RM4D-backed ColumnReachabilityPort (adapters/): its own library so manipulation_manager_core stays free of
 # the reachability package. Only the node and its test link it.
-add_library(${PROJECT_NAME}_column_reach src/adapters/reachability_column_port.cpp)
+add_library(${PROJECT_NAME}_column_reach
+  src/adapters/reachability_column_port.cpp
+  src/adapters/reachability_path_quality_port.cpp
+  src/adapters/reachability_column_ik_port.cpp)
 target_link_libraries(${PROJECT_NAME}_column_reach PUBLIC
   ${PROJECT_NAME}_core
   reachability::reachability_core
@@ -186,6 +189,34 @@ if(BUILD_TESTING)
   ament_add_gtest(base_stance_check_test test/base_stance_check_test.cpp)
   if(TARGET base_stance_check_test)
     target_link_libraries(base_stance_check_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(column_ik_gate_test test/column_ik_gate_test.cpp)
+  if(TARGET column_ik_gate_test)
+    target_link_libraries(column_ik_gate_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+  ament_add_gtest(reachability_column_ik_port_test test/reachability_column_ik_port_test.cpp)
+  if(TARGET reachability_column_ik_port_test)
+    target_link_libraries(reachability_column_ik_port_test ${PROJECT_NAME}_column_reach core_types::core_types)
+  endif()
+
+  ament_add_gtest(reachability_path_quality_port_test test/reachability_path_quality_port_test.cpp)
+  if(TARGET reachability_path_quality_port_test)
+    target_link_libraries(reachability_path_quality_port_test ${PROJECT_NAME}_column_reach)
+  endif()
+
+  # Header-only cores of the verify result: geometric coverage, the tool/joint trace, the verify JSON with them.
+  foreach(t geometric_coverage tool_trace)
+    ament_add_gtest(${t}_test test/${t}_test.cpp)
+    if(TARGET ${t}_test)
+      target_include_directories(${t}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+      target_compile_features(${t}_test PRIVATE cxx_std_17)
+    endif()
+  endforeach()
+  ament_add_gtest(mission_verify_geometry_test test/mission_verify_geometry_test.cpp)
+  if(TARGET mission_verify_geometry_test)
+    target_include_directories(mission_verify_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(mission_verify_geometry_test nlohmann_json::nlohmann_json)
   endif()
 
   ament_add_gtest(stand_check_test test/stand_check_test.cpp)
