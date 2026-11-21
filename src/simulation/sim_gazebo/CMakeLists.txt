@@ -16,6 +16,7 @@ if(BUILD_TESTING)
     ament_add_pytest_test(test_wall_world test/test_wall_world.py)
     ament_add_pytest_test(test_description_gazebo test/test_description_gazebo.py)
     ament_add_pytest_test(test_contact_script test/test_contact_script.py)
+    ament_add_pytest_test(test_contact_summary test/test_contact_summary.py)
   endif()
 endif()
 

@@ -220,6 +220,7 @@ Failing: the Gazebo two-stand pass (0 of 10 columns in two runs on 2026-11-21, w
 
 The history up to 2026-11-20 was consolidated from 561 commits into 15 milestone commits with identical content (the pull request numbers above are kept in the messages).
 - `reachability`: review fixes for the plane-generic stands and base placement. `surfaceFrame` classifies a plane as horizontal when its normal is within 35 degrees of vertical (a ceiling off level by 0.01 degrees is still a ceiling); `makeCandidateStands` and `selectStands(request)` now honour `StationRequest::avoid_stations` (they ignored it before; no current caller sets it); `planBasePlacement` no longer shrinks the caller's avoid radius and plans over the filtered survivors; its per-column escalation follows the final status; `stationGridPointCount` lets the node's work guard count a ceiling grid correctly; `StandSelectionCode::kNoFreeStand` moved to the end of the enum.
+- `sim_gazebo`: the Gazebo contact-force discrepancy (1240 to 1820 N scored vs 40 to 70 N feedback vs 22 N in MuJoCo) is analysed from the code only (ranked hypotheses and the runs that test them in docs/sim_gazebo.md, cause not found); adds a ROS-free contact summary with `contact_ground_truth` info topic and tool-wall filter parameters, a `run.csv.contacts.csv` sidecar from `record_run.py`, explicit contact surface parameters in the ground and wall SDF and pytests for them (not built or run in Gazebo).
 
 ### Changed (first block)
 - TRAC-IK with `Distance` is the default MoveIt IK solver.
