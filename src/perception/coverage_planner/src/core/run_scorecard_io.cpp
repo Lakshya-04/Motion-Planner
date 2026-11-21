@@ -111,6 +111,18 @@ std::vector<ObstacleRegion> obstaclesFromJson(const nlohmann::json & j, uint32_t
   return out;
 }
 
+void validateGateOptions(const ScorecardOptions & options, const ScorecardLimits & limits)
+{
+  const bool gap_gate = options.contact && options.max_wall_gap_m > 0.0;   // ignored for a non-contact tool
+  if (limits.max_bad_pose_fraction >= 0.0 && !gap_gate && options.max_tilt_deg <= 0.0) {
+    throw std::runtime_error(
+      "--max-bad-pose needs --max-wall-gap (contact runs only) or --max-tilt, otherwise no sample can be a bad pose");
+  }
+  if (options.nominal_tilt_deg != 0.0 && options.max_tilt_deg <= 0.0) {
+    throw std::runtime_error("--nominal-tilt needs --max-tilt, otherwise the tilt is not checked");
+  }
+}
+
 nlohmann::json scorecardToJson(const RunScorecard & c)
 {
   nlohmann::json j = {

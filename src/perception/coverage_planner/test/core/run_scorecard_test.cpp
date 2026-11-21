@@ -317,3 +317,51 @@ TEST(RunScorecard, AngledToolIsScoredAgainstItsIntendedTilt)
   EXPECT_FALSE(flat.passed);
   EXPECT_GT(flat.tilted_samples, 0U);
 }
+
+TEST(RunScorecard, GatedRunStillReportsItsTiltAndGap)
+{
+  ScorecardOptions o = contactOptions();
+  o.max_wall_gap_m = 0.01;
+  o.max_tilt_deg = 10.0;
+  const auto card = scoreRun(wall(), {}, poseRun(0.002, 25.0), o);   // held at 25 degrees: every sample refused
+  EXPECT_LT(card.coverage.covered_fraction, 0.01);
+  EXPECT_GT(card.tilted_samples, 0U);
+  EXPECT_NEAR(card.tilt_mean_deg, 25.0, 1e-9);
+  EXPECT_NEAR(card.tilt_max_deg, 25.0, 1e-9);
+  EXPECT_NEAR(card.wall_gap_mean_m, 0.002, 1e-9);
+  EXPECT_NEAR(card.wall_gap_max_abs_m, 0.002, 1e-9);
+}
+
+TEST(RunScorecard, NonContactRunIgnoresTheWallGapGate)
+{
+  auto samples = poseRun(0.30, 0.0);   // a spray nozzle 0.30 m from the wall
+  for (auto & s : samples) {s.force_n = 0.0; s.tool_active = (s.y < 1.0);}
+  ScorecardOptions o = contactOptions();
+  o.contact = false;
+  o.max_wall_gap_m = 0.01;
+  const auto card = scoreRun(wall(), {}, samples, o);
+  EXPECT_EQ(card.bad_pose_samples, 0U);
+  EXPECT_EQ(card.off_wall_samples, 0U);
+  EXPECT_GT(card.coverage.covered_fraction, 0.95);
+  EXPECT_NEAR(card.wall_gap_mean_m, 0.30, 1e-9);   // still reported
+}
+
+TEST(RunScorecard, GateOptionChecks)
+{
+  ScorecardOptions o = contactOptions();
+  ScorecardLimits l;
+  EXPECT_NO_THROW(validateGateOptions(o, l));
+  l.max_bad_pose_fraction = 0.05;
+  EXPECT_THROW(validateGateOptions(o, l), std::runtime_error);   // no gate to produce bad poses
+  o.max_wall_gap_m = 0.01;
+  EXPECT_NO_THROW(validateGateOptions(o, l));
+  o.contact = false;                                              // the gap gate is ignored without contact
+  EXPECT_THROW(validateGateOptions(o, l), std::runtime_error);
+  o.max_tilt_deg = 10.0;
+  EXPECT_NO_THROW(validateGateOptions(o, l));
+  ScorecardOptions n = contactOptions();
+  n.nominal_tilt_deg = 30.0;
+  EXPECT_THROW(validateGateOptions(n, ScorecardLimits{}), std::runtime_error);
+  n.max_tilt_deg = 5.0;
+  EXPECT_NO_THROW(validateGateOptions(n, ScorecardLimits{}));
+}

@@ -3,7 +3,8 @@
 //             [--target-force 10] [--band 1] [--engaged-force 1]
 //             [--spray-standoff 0.3 --spray-half-angle 20 [--spray-sigma 0.25] [--max-thickness-cov 0]]
 //             [--keepout-margin 0.07] [--obstacle-margin 0] [--obstacle-tol 0.003] [--max-obstacle-contacts N]
-//             [--max-wall-gap 0.01] [--max-tilt 10] [--nominal-tilt 0] [--max-bad-pose 0.05]  (tool on the wall and square to it; needs tilt_deg)
+//             [--max-wall-gap 0.01] [--max-tilt 10] [--nominal-tilt 0] [--max-bad-pose 0.05]  (tool on the wall and square to it; needs tilt_deg;
+//             --max-bad-pose needs a gate, --nominal-tilt needs --max-tilt, --max-wall-gap is ignored with --no-contact)
 //             [--min-coverage 0.95] [--max-rms 0] [--max-peak 0] [--min-in-band 0]
 //             [--mode contact|non_contact|spray]  (per-mode default limits; explicit flags override)
 //             [--segments segments.json] [--result-out result.json] [--report-out card.json]
@@ -71,6 +72,7 @@ int main(int argc, char ** argv)
     l.min_in_band_fraction = num("--min-in-band", l.min_in_band_fraction);
     l.max_bad_pose_fraction = num("--max-bad-pose", l.max_bad_pose_fraction);
     if (a.count("--max-obstacle-contacts")) {l.max_obstacle_contacts = std::stoi(a["--max-obstacle-contacts"]);}
+    coverage_planner::validateGateOptions(o, l);
     std::vector<coverage_planner::SegmentWindow> segments;
     if (a.count("--segments")) {
       std::ifstream sf(a["--segments"]);
