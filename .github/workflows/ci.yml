@@ -28,7 +28,7 @@ jobs:
         run: python3 docker/tools/check_public_readiness.py
       - name: Tool tests
         run: |
-          python3 -m pip install --quiet pytest pyyaml numpy
+          python3 -m pip install --quiet pytest pyyaml numpy xacro
           python3 -m pytest docker/tools/tests -q
 
   build-test:
