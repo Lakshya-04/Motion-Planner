@@ -12,6 +12,7 @@
 # Run, record in odom and score like run_manager_pass.sh.
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
 #   MULTI_STAND_DOCK_IK_CONTINUITY=true  choose the dock joint goal among IK solutions by continuity (manager `dock_ik_continuity`, default false)
+#   MULTI_STAND_RECOVERY_KEEPS_BRANCH=true  recover from a short approach on the live IK branch (manager `recovery_keeps_branch`, default false)
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented)
 #   STAND_MAP                      a built reachability map (skips the build, which takes a few minutes)
@@ -103,6 +104,7 @@ manipulation_manager:
     dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]}
     dock_ik_seeded: ${MULTI_STAND_DOCK_IK_SEEDED:-false}
     dock_ik_continuity: ${MULTI_STAND_DOCK_IK_CONTINUITY:-false}
+    recovery_keeps_branch: ${MULTI_STAND_RECOVERY_KEEPS_BRANCH:-false}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MULTI_STAND_PRESS:-0.005}
