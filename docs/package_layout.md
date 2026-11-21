@@ -70,6 +70,7 @@ ROS message and a converter in `ros/`. Then the same module can run either:
 |---|---|
 | `manipulation_manager` | already split into `core/` + `ros/`; the node builds its planners from `config/planning.yaml` (parameter `planning_config`) instead of linking a backend |
 | `core_types`, `force_core`, `diff_ik_core` | ROS-free already (pure core packages) |
+| `core_types`, `force_core`, `safety_monitor` | ROS-free already (pure core packages; `safety_monitor` has no node yet) |
 | `ros_adapters` | ROS-only conversions (correct as is) |
 | `motion_planner` | **done**: ROS-free core (ports, plugin base classes, `PlanningPipeline`, `MotionPlanner`, geometry helpers; its tests run without ROS) plus a small `motion_planner_ros` library (YAML selection loader, pluginlib registry; needs pluginlib and yaml-cpp, no node) |
 | `motion_planner_moveit` | **done**: the MoveIt / OMPL adapter (the only package that depends on MoveIt); `plugins.xml` exports `moveit_cartesian`, `moveit_ompl`, `moveit_ik`, `moveit_collision`, `moveit_scene` |
