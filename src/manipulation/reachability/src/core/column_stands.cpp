@@ -334,6 +334,7 @@ ColumnStandPlan planColumnStands(
           }
         }
         const std::vector<size_t> before = sc.strokes;
+        if (kept.size() != sc.strokes.size()) {out.refused.push_back({ps.stand, sc.column});}
         sc.whole = sc.whole && kept.size() == sc.strokes.size() && !kept.empty();
         sc.strokes = kept;
         sc.min_score = v.best.min_score;
