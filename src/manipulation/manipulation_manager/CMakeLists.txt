@@ -45,6 +45,7 @@ add_library(${PROJECT_NAME}_core
   src/core/motion_exec_reporter.cpp
   src/core/coverage_feasibility_analyzer.cpp
   src/core/base_stance_check.cpp
+  src/core/stand_check.cpp
   src/core/coverage_task.cpp
   src/ros/execution/jtac_execution_adapter.cpp
   src/ros/coverage/coverage_output_json_source.cpp
@@ -187,6 +188,11 @@ if(BUILD_TESTING)
     target_link_libraries(base_stance_check_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
+  ament_add_gtest(stand_check_test test/stand_check_test.cpp)
+  if(TARGET stand_check_test)
+    target_link_libraries(stand_check_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
   ament_add_gtest(coverage_output_json_source_test test/coverage_output_json_source_test.cpp)
   if(TARGET coverage_output_json_source_test)
     target_link_libraries(coverage_output_json_source_test ${PROJECT_NAME}_core core_types::core_types)
@@ -238,6 +244,11 @@ if(BUILD_TESTING)
   ament_add_gtest(recovery_jog_test test/recovery_jog_test.cpp)
   if(TARGET recovery_jog_test)
     target_include_directories(recovery_jog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  ament_add_gtest(dock_ik_selector_test test/dock_ik_selector_test.cpp)
+  if(TARGET dock_ik_selector_test)
+    target_include_directories(dock_ik_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   endif()
 
   ament_add_gtest(column_ordering_test test/column_ordering_test.cpp)

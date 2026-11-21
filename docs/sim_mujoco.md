@@ -417,7 +417,7 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    lift left at 0.4. So the failure follows the low lift with the arm swung out, not the size of the move and not the wall:
    cuRobo's sphere model most likely treats those configurations as in collision (with the base or itself) although MuJoCo does
    not; not confirmed (a `check_motion` on the docked pose would show it). Consequence: a docked-to-stow plan by cuRobo does not
-   exist, so the manager waits out its timeout; a MoveIt fallback for failed free-space segments is what a pass needs.
+   exist, so the manager waits out its timeout; a MoveIt fallback for failed free-space segments is what a pass needs. Code-side follow-up (unrun, hypotheses listed): [curobo_v2_notes.md](curobo_v2_notes.md), "Low-lift docked-to-stow `no_path`".
 
    **Fourth run, with `free_space_fallback: moveit_ompl` (PR #141) in `planning_curobo.yaml`: the pass passes.** MuJoCo,
    `two_panels_plain`, two stands, one run, 2026-11-20, node with `--max-boxes 3000`, default per-call timeout 60 s: manager

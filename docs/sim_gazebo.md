@@ -520,6 +520,12 @@ Same-session runs of `run_multi_stand_pass.sh` (two stands, ten columns, no cuRo
   pose, with the wrist joint winding down to -4.6 rad on the one column that docks (column 9); the stow then fails 36 times (`OMPL plan failed`). That is the IK-branch and
   wrist-winding problem of `docs/development_plan.md` section 4 (`ColumnIkChain` is the first piece; it is not yet in the manager). Not caused by cuRobo (this is the MoveIt pass).
 
+- **Opt-in dock continuity (`dock_ik_continuity`, default off; not built or run):** `manipulation_manager` can choose the dock joint goal among IK solutions from the previous dock, the live
+  state and `dock_seed_joint_state` (`core/dock_ik_selector.hpp`, ROS-free): the closest to the previous dock wins (max |dq|, non-lift joints wrapped), a flip of the sign of a
+  `dock_ik_branch_joints` joint (default `[1, 3]`, the shoulder pan and the elbow: in the Gazebo log the pan went -0.62 to +2.49 and the elbow +0.87 to -0.94) or a `dock_ik_wrist_joint` (default 6) outside `[dock_ik_wrist_min_rad, dock_ik_wrist_max_rad]` (default +-3.2) is dropped; none left means
+  the old seeded IK. Turn it on with `MULTI_STAND_DOCK_IK_CONTINUITY=true` in this script (it works with `dock_ik_seeded: false`). The default joint indices are a guess for the
+  lift-first UR10e group, check them against the `q2` of the log before relying on it. Gtested with a fake IK only; whether it fixes the pass is not measured.
+
 ### Log lines that show it
 
 - Node container (`run_curobo_node.sh logs`): `cuRobo ready: 7 joints, tool ['tcp_link']`. If instead

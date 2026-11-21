@@ -10,7 +10,9 @@
 #
 # Output: DIR/lift_arm.yml (default DIR build/robot_assets/ur10e_telescopic). The yml stores ABSOLUTE paths under DIR,
 # so the node container must mount DIR at the same path (run_curobo_node.sh does).
-# Env: BUILD_IMG (motion-planner:build), GPU_IMG (motion-planner:gpu), CUROBO_SPHERE_ARGS (extra generate_curobo_robot.py args).
+# Env: BUILD_IMG (motion-planner:build), GPU_IMG (motion-planner:gpu), CUROBO_SPHERE_ARGS (generate_curobo_robot.py args;
+# default `--ignore-hops 2`, the same rule as the 6-joint `robot_assets.py` curobo stage; set it empty to get cuRobo's
+# sampled matrix alone, add `--ignore-group a,b,c` / `--ignore-pair a:b` / `--sphere-buffer M`).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
@@ -27,7 +29,7 @@ while [ $# -gt 0 ]; do
     --out) OUT=$2; shift 2;;
     --tool-frame) TOOL=$2; shift 2;;
     --skip-urdf) SKIP_URDF=1; shift;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0;;
+    -h|--help) sed -n "2,15p" "$0"; exit 0;;
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
@@ -59,7 +61,7 @@ cp -r "$1/full_resolved/ur_description" "$1/meshed/"' _ "$OUT"
 # shellcheck disable=SC2086  # CUROBO_SPHERE_ARGS is a word list on purpose
 docker run --rm --gpus all --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$REPO/docker/tools:/tools:ro" -v "$OUT:$OUT" -w "$OUT" \
   "$GPU_IMG" /opt/venv/bin/python /tools/generate_curobo_robot.py --urdf "$OUT/meshed/robot.urdf" \
-  --tool-frame "$TOOL" --out "$OUT/lift_arm.yml" ${CUROBO_SPHERE_ARGS:-}
+  --tool-frame "$TOOL" --out "$OUT/lift_arm.yml" ${CUROBO_SPHERE_ARGS---ignore-hops 2}
 
 echo "wrote $OUT/lift_arm.yml"
 python3 - "$OUT/lift_arm.yml" <<'PY'

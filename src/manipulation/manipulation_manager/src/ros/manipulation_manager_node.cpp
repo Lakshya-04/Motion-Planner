@@ -65,7 +65,9 @@
 #include "manipulation_manager/core/manipulation_manager.hpp"
 #include "manipulation_manager/core/mission_fsm.hpp"
 #include "manipulation_manager/core/mission_ledger.hpp"
+#include "manipulation_manager/core/dock_ik_selector.hpp"
 #include "manipulation_manager/core/recovery_jog.hpp"
+#include "manipulation_manager/core/stand_check.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
 #include "manipulation_manager/core/joint_names.hpp"
 #include "manipulation_manager/core/travel_pose.hpp"
@@ -243,6 +245,30 @@ public:
     // true: after an approach segment the tool must be within approach_tolerance_m of the approach pose, otherwise the
     // attempt counts as failed (and the arm is jogged back / the continuity re-primed) instead of docking from where
     // the arm happens to be.
+    // true: the dock joint goal is chosen among IK solutions from several seeds (the previous dock, the live state,
+    // dock_seed_joint_state): the one closest to the previous dock (the live state before the first) wins, a solution
+    // on another branch (sign of a dock_ik_branch_joints joint flips) or with the dock_ik_wrist_joint outside
+    // [dock_ik_wrist_min_rad, dock_ik_wrist_max_rad] is dropped. None left: the seeded IK above as before. Off by default.
+    dock_ik_continuity_ = this->declare_parameter<bool>("dock_ik_continuity", false);
+    {
+      const auto to_idx = [](const std::vector<int64_t> & v) {
+          std::vector<size_t> out;
+          for (const auto i : v) {
+            if (i >= 0) {
+              out.push_back(static_cast<size_t>(i));
+            }
+          }
+          return out;
+        };
+      dock_ik_sel_.linear_joints = to_idx(
+        this->declare_parameter<std::vector<int64_t>>("dock_ik_linear_joints", std::vector<int64_t>{0}));
+      dock_ik_sel_.branch_joints = to_idx(
+        this->declare_parameter<std::vector<int64_t>>("dock_ik_branch_joints", std::vector<int64_t>{1, 3}));
+      dock_ik_sel_.wrist_joint = static_cast<int>(this->declare_parameter<int>("dock_ik_wrist_joint", 6));
+      dock_ik_sel_.wrist_min_rad = this->declare_parameter<double>("dock_ik_wrist_min_rad", -3.2);
+      dock_ik_sel_.wrist_max_rad = this->declare_parameter<double>("dock_ik_wrist_max_rad", 3.2);
+      dock_ik_sel_.max_dq_rad = this->declare_parameter<double>("dock_ik_max_dq_rad", 3.2);
+    }
     verify_approach_ = this->declare_parameter<bool>("verify_approach", true);
     approach_tolerance_m_ = this->declare_parameter<double>("approach_tolerance_m", 0.05);
     // The seed of that IK: a configuration of the arm docked at the wall (planning group order, lift first). Every
@@ -353,6 +379,21 @@ public:
     column_order_ = normalizeColumnOrder(this->declare_parameter<std::string>("column_order", "input"));
     nav_attempts_ = this->declare_parameter<int>("stand_nav_attempts", 2);
     nav_timeout_s_ = this->declare_parameter<double>("stand_nav_timeout_s", 240.0);
+    // Stand-check gate (default off): after the base arrives, its error is compared with a tolerance from the stand's
+    // reach margin (clamp(scale * margin, min, max); margin < 0 = unknown -> fallback) before the arm moves. Out of
+    // tolerance: drive to the stand again, up to max_redocks times, then the stand is failed (columns not run).
+    stand_check_enabled_ = this->declare_parameter<bool>("stand_check", false);
+    stand_check_reach_margin_ = this->declare_parameter<double>("stand_check_reach_margin_m", -1.0);
+    {
+      StandCheckConfig sc;
+      sc.min_tol_m = this->declare_parameter<double>("stand_check_min_tol_m", sc.min_tol_m);
+      sc.max_tol_m = this->declare_parameter<double>("stand_check_max_tol_m", sc.max_tol_m);
+      sc.margin_scale = this->declare_parameter<double>("stand_check_margin_scale", sc.margin_scale);
+      sc.fallback_tol_m = this->declare_parameter<double>("stand_check_fallback_tol_m", sc.fallback_tol_m);
+      sc.yaw_tol_rad = this->declare_parameter<double>("stand_check_yaw_tol_rad", sc.yaw_tol_rad);
+      sc.max_redocks = this->declare_parameter<int>("stand_check_max_redocks", sc.max_redocks);
+      stand_check_ = StandCheck(sc);
+    }
     travel_joint_state_ = this->declare_parameter<std::vector<double>>(
       "travel_joint_state", std::vector<double>{});
     // The planning group's joints in the group's order as /joint_states names them (empty = the repo's UR10e and
@@ -917,6 +958,7 @@ private:
       if (machine.state() == TaskState::kNavigating) {
         std::string msg;
         bool ok = true;
+        bool gate_abort = false;
         if (arm_deployed_) {
           setState("stowing", -1);
           if (stowArm()) {
@@ -929,11 +971,17 @@ private:
         if (ok) {
           setState("navigating", -1);
           ok = navigateToStand(visit[s], msg);
+          if (ok && stand_check_enabled_) {
+            ok = gateStand(visit[s], msg, gate_abort);
+          }
         }
         if (stop()) {
           break;
         }
-        const auto verdict = machine.navigationResult(ok);
+        auto verdict = machine.navigationResult(ok);
+        while (gate_abort && verdict == NavVerdict::kRetry) {
+          verdict = machine.navigationResult(false);   // the gate gave this stand up: no further navigation tries
+        }
         if (verdict == NavVerdict::kRun) {
           tracker_.standReached(s, true, "");
           if (!arrival_command_.empty()) {
@@ -1148,10 +1196,40 @@ private:
         outcome->result->error_msg : "navigation failed";
       return false;
     }
+    last_arrival_pos_err_m_ = outcome->result->position_error_m;
+    last_arrival_yaw_err_rad_ = outcome->result->yaw_error_rad;
     RCLCPP_INFO(
       this->get_logger(), "arrived at the stand (error %.1f mm, %.3f rad)",
       outcome->result->position_error_m * 1000.0, outcome->result->yaw_error_rad);
     return true;
+  }
+
+  /// Stand-check gate after an arrival: go, or drive to the stand again, or give the stand up (`abort` = true,
+  /// the caller then marks it failed). A failed re-drive returns false with `message` and the normal retry applies.
+  bool gateStand(const StanceStand & st, std::string & message, bool & abort)
+  {
+    int redocks = 0;
+    for (;;) {
+      const auto r = stand_check_.evaluate(
+        {last_arrival_pos_err_m_, last_arrival_yaw_err_rad_}, stand_check_reach_margin_, redocks);
+      if (r.decision == StandDecision::kGo) {
+        RCLCPP_INFO(this->get_logger(), "%s", r.message.c_str());
+        return true;
+      }
+      RCLCPP_WARN(this->get_logger(), "%s [%s]", r.message.c_str(), toString(r.reason));
+      if (r.decision == StandDecision::kAbort) {
+        message = std::string("stand check: ") + toString(r.reason);
+        abort = r.stand_failed;
+        return false;
+      }
+      ++redocks;
+      if (stop() || !navigateToStand(st, message)) {
+        if (message.empty()) {
+          message = "canceled";
+        }
+        return false;
+      }
+    }
   }
 
   void cancelNavigation()
@@ -1491,6 +1569,33 @@ private:
     req.frame_id = frame_id_;
     req.planning_group = planning_group_;
     req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
+    if (dock_ik_continuity_) {
+      const auto live = readCurrentJointState(shared_from_this(), group_joint_names_);
+      const std::vector<double> & ref = !dock_branch_seed_.empty() ? dock_branch_seed_ : live;
+      const auto choice = selectDockIk(
+        [&](const std::vector<double> & sd) -> std::optional<std::vector<double>> {
+          auto r = req;
+          r.joint_seed = sd;
+          const auto res = ik->ik(r);
+          if (!res.success) {
+            return std::nullopt;
+          }
+          return res.joint_solution;
+        },
+        {dock_branch_seed_, live, dock_seed_}, ref, dock_ik_sel_);
+      if (choice.ok) {
+        RCLCPP_INFO(
+          this->get_logger(),
+          "DOCKGOAL continuity: seed %zu of %zu candidates, max dq %.3f rad (dropped: branch %zu, wrist %zu, jump %zu)",
+          choice.seed_index, choice.candidates, choice.cost, choice.rejected_branch, choice.rejected_wrist,
+          choice.rejected_cost);
+        return choice.q;
+      }
+      RCLCPP_WARN(
+        this->get_logger(),
+        "DOCKGOAL continuity: no acceptable solution (%zu candidates; branch %zu, wrist %zu, jump %zu), seeded IK as before",
+        choice.candidates, choice.rejected_branch, choice.rejected_wrist, choice.rejected_cost);
+    }
     req.joint_seed = seed;
     const auto res = ik->ik(req);
     if (!res.success || res.joint_solution.size() != seed.size()) {
@@ -1760,7 +1865,7 @@ private:
     // the first goal (the approach pose, or the dock pose without an approach) as a joint goal on the branch of
     // the previous dock; every second attempt falls back to the pose goal the planner samples itself
     std::vector<double> goal_q;
-    if (dock_ik_seeded_) {
+    if (dock_ik_seeded_ || dock_ik_continuity_) {
       goal_q = seededDockIk(first_goal);
     }
     for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
@@ -2050,6 +2155,11 @@ private:
   // Task state (all touched from the main thread only: the action callbacks run inside the node's spins).
   bool run_on_start_{true};
   int nav_attempts_{2};
+  bool stand_check_enabled_{false};
+  double stand_check_reach_margin_{-1.0};
+  StandCheck stand_check_;
+  double last_arrival_pos_err_m_{0.0};
+  double last_arrival_yaw_err_rad_{0.0};
   double stand_max_span_{0.0};
   std::string arrival_command_;
   std::string wall_clear_command_;
@@ -2127,6 +2237,8 @@ private:
   double dock_standoff_{0.0};
   int dock_attempts_{3};
   bool dock_ik_seeded_{true};
+  bool dock_ik_continuity_{false};
+  DockIkSelectorParams dock_ik_sel_;
   bool verify_approach_{true};
   double approach_tolerance_m_{0.05};
   std::vector<double> dock_seed_;
