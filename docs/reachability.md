@@ -92,7 +92,20 @@ tool-axis joint rotate fully (Gen3 and xArm 7 do; iiwa 7 and the Panda family st
 paper reports as a small accuracy loss). Self-collision and obstacles are not in the map, as before. Tested on
 a Panda-kinematics chain at 0.1 m resolution (`redundancy_test`: fresh samples reachable, out-of-reach poses
 not, inverse query finds the true base, restricted map smaller than the union and consistent with it);
-not compared against IK or a simulator, and no stand plan has been run with a 7-DOF map.
+not compared against IK or a simulator.
+
+**Stands on a 7-DOF map.** `planStands`, `selectStands`, `planColumnStands`, the stand verifier and the node read only
+the map and tool poses; none of them assumes six joints (the verifier's joint solutions are plain vectors, any length),
+so no code change was needed there. `stands_redundant_test` runs them on the Panda-kinematics map: a wall patch gets
+stands whose every target is reachable in the map from that stand and lift height, columns stay whole under the
+union, set cover is no worse than greedy, and a fake IK (7-joint solutions) that refuses a stand makes the plan route
+around it, or report the targets as `rejected_by_verifier`. What the policy changes: pinning joint 3 at 0 (+- 0.05)
+left 22101 of 22216 non-zero cells (0.1 m, 20 degree cells, 2 million samples), and about 1 percent of poses reached
+with the elbow swung out are missing from it, so at this resolution the restriction is a small subset of the union.
+Cell counts do change (the pinned map concentrates the same samples), so `count_ref` of `MarginConfig` is per map.
+`~/plan_stands` and `~/plan_verified_stands` now return `arm_dof` and `redundancy` (the map header text) and the
+node logs them at start and per request, so a result says which null-space samples it rests on. Unverified against
+IK of a real 7-axis arm; the union stays optimistic for a planner that holds the elbow fixed.
 
 ## Base-aware stationing
 

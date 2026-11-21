@@ -17,6 +17,15 @@ template<typename T>
 bool get(std::ifstream & i, T & v) {return static_cast<bool>(i.read(reinterpret_cast<char *>(&v), sizeof(T)));}
 }  // namespace
 
+std::string describeMapInfo(const MapInfo & info)
+{
+  if (info.arm_dof == 0) {
+    return "arm and redundancy not recorded (map format version 1)";
+  }
+  return std::to_string(info.arm_dof) + " joints, redundancy: " +
+         (info.redundancy.empty() ? "not recorded" : info.redundancy);
+}
+
 void saveMap(const std::string & path, const Map4D & map, const std::string & fp,
   const MapInfo & info)
 {

@@ -43,10 +43,10 @@ std::string mapFile()
 struct Fixture
 {
   explicit Fixture(const std::string & base_profile = "", const std::string & strategy = "greedy",
-    bool verify_by_default = false)
+    bool verify_by_default = false, const std::string & map_file = "")
   {
     rclcpp::NodeOptions o;
-    o.parameter_overrides({{"map_file", mapFile()}, {"base_profile", base_profile}, {"stand_strategy", strategy},
+    o.parameter_overrides({{"map_file", map_file.empty() ? mapFile() : map_file}, {"base_profile", base_profile}, {"stand_strategy", strategy},
         {"verify_by_default", verify_by_default}});
     node = std::make_shared<reachability::ReachabilityNode>(o);
     client_node = std::make_shared<rclcpp::Node>("client");
@@ -260,6 +260,30 @@ TEST(ReachabilityNode, PlanStandsUsesTheBaseProfile)
   ASSERT_GE(res->stands.size(), 2U) << res->message;
   EXPECT_GT(res->total_travel_s, 0.0);
   for (const auto & s : res->stands) {EXPECT_GE(s.footprint_clearance, 0.3 - 1e-9);}
+}
+
+TEST(ReachabilityNode, PlanStandsReportsTheMapsRedundancyPolicy)
+{
+  const char * dir = std::getenv("TEST_TMPDIR");
+  const std::string path = std::string(dir ? dir : "/tmp") + "/reachability_node_test_info_" +
+    std::to_string(::getpid()) + ".rm4d";
+  reachability::MapInfo info;
+  info.arm_dof = 7;
+  info.redundancy = "joint 3 in {0} +- 0 rad";
+  reachability::saveMap(path, reachability::Map4D(reachability_test::coarse()), "", info);
+  {
+    Fixture f("", "greedy", false, path);
+    ASSERT_TRUE(f.node->ready());
+    const auto res = f.call<PlanStands>(std::make_shared<PlanStands::Request>());   // no targets: answered, not planned
+    EXPECT_FALSE(res->success);
+    EXPECT_EQ(res->arm_dof, 7U);
+    EXPECT_EQ(res->redundancy, info.redundancy);
+  }
+  std::remove(path.c_str());
+  Fixture plain;   // a map without header info reports 0 and no text
+  const auto res = plain.call<PlanStands>(std::make_shared<PlanStands::Request>());
+  EXPECT_EQ(res->arm_dof, 0U);
+  EXPECT_TRUE(res->redundancy.empty());
 }
 
 TEST(ReachabilityNode, PlanStandsRejectsABadRequest)
