@@ -32,3 +32,5 @@ uint32[] unreachable            # targets no stand can reach
 uint32[] not_planned            # targets left when the stand cap stopped planning; they may be reachable
 float64 total_travel_s
 string message
+uint32 arm_dof                  # joints of the arm the map was built for (0 = map file does not say)
+string redundancy               # how the map treated the null space of a >6-joint arm (the map header text), else empty

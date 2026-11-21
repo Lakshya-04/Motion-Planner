@@ -22,6 +22,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -58,6 +59,10 @@
 #include "manipulation_manager/ros/execution/retiming_wiring.hpp"
 #include "manipulation_manager/core/execution/tool_feed_execution_port.hpp"
 #include "manipulation_manager/adapters/reachability_column_port.hpp"
+#include "manipulation_manager/adapters/reachability_column_ik_port.hpp"
+#include "manipulation_manager/adapters/reachability_path_quality_port.hpp"
+#include "manipulation_manager/core/column_ik_gate.hpp"
+#include "manipulation_manager/core/tool_trace.hpp"
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/coverage_task.hpp"
 #include "manipulation_manager/core/column_ordering.hpp"
@@ -407,11 +412,14 @@ public:
       force_sub_ = this->create_subscription<geometry_msgs::msg::WrenchStamped>(
         force_topic, rclcpp::SensorDataQoS(),
         [this](const geometry_msgs::msg::WrenchStamped::SharedPtr msg) {
+          const auto & f = msg->wrench.force;
+          const double mag = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
+          if (verify_trace_) {
+            trace_.setForce(mag);   // the contact flag of the tool trace
+          }
           if (!tracking_peak_) {
             return;
           }
-          const auto & f = msg->wrench.force;
-          const double mag = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
           peak_force_ = std::max(peak_force_, mag);
           column_peak_ = std::max(column_peak_, mag);
         });
@@ -422,6 +430,40 @@ public:
     // Verify result written when a task ends ("" = off); max_peak 0 = no force limit in it.
     verify_result_path_ = this->declare_parameter<std::string>("verify_result_path", "");
     verify_max_peak_n_ = this->declare_parameter<double>("verify_max_peak_n", 0.0);
+    // Geometric coverage in the verify result (needs verify_result_path): the tool's TF position is sampled while a
+    // stroke runs and compared with the planned patch (geometric_coverage.hpp). Off by default. The swath width is not
+    // read from the tool. A sample works when the tool force is at least verify_contact_force_n (contact tools; the
+    // spray tool has no contact, so every stroking sample works) and the tool is within verify_max_standoff_m of the plane
+    // through the plan's first pose (plan poses press past the wall by contact_y_overshoot, hence the 4 cm default).
+    verify_geometric_ = this->declare_parameter<bool>("verify_geometric_coverage", false) && !verify_result_path_.empty();
+    verify_geo_cfg_.swath_m = this->declare_parameter<double>("verify_swath_m", 0.10);
+    verify_geo_cfg_.cell_m = this->declare_parameter<double>("verify_cell_m", 0.01);
+    verify_contact_force_n_ = this->declare_parameter<double>("verify_contact_force_n", 1.0);
+    verify_geo_cfg_.max_gap_m = this->declare_parameter<double>("verify_max_gap_m", 0.05);
+    verify_geo_cfg_.max_standoff_m = this->declare_parameter<double>("verify_max_standoff_m", 0.04);
+    verify_min_geometric_percent_ = this->declare_parameter<double>("verify_min_geometric_percent", 0.0);
+    verify_trace_hz_ = this->declare_parameter<double>("verify_trace_hz", 20.0);
+    // Opt-in, report only: how close the executed joint path came to a singularity or a joint limit (warnings in the
+    // verify result; it never fails a run). Needs a chain file of the arm joints (reachability/scripts/urdf_to_chain.py).
+    verify_path_quality_ = this->declare_parameter<bool>("verify_path_quality", false) && !verify_result_path_.empty();
+    verify_path_chain_file_ = this->declare_parameter<std::string>("verify_path_chain_file", "");
+    verify_path_skip_joints_ = this->declare_parameter<int>("verify_path_skip_joints", 1);
+    verify_path_cfg_.min_sigma = this->declare_parameter<double>("verify_path_min_sigma", 0.02);
+    verify_path_cfg_.min_limit_margin = this->declare_parameter<double>("verify_path_min_limit_margin", 0.02);
+    verify_trace_ = verify_geometric_ || verify_path_quality_;
+    // Opt-in whole-column IK continuity check before a column is run (column_ik_gate.hpp): IK along approach, strokes and
+    // retract from the current seed; on a branch break the same column is tried from other lift heights (the first that
+    // is continuous seeds the dock IK), else the column is skipped (reason plan_failed). Off by default.
+    column_ik_check_ = this->declare_parameter<bool>("column_ik_check", false);
+    column_ik_lift_step_ = this->declare_parameter<double>("column_ik_lift_step_m", 0.1);
+    column_ik_reject_on_refused_ = this->declare_parameter<bool>("column_ik_reject_on_refused", false);
+    column_ik_ratio_limit_ = this->declare_parameter<double>("column_ik_ratio_limit", 6.0);
+    column_ik_branch_joints_ = this->declare_parameter<std::vector<int64_t>>(
+      "column_ik_branch_joints", std::vector<int64_t>{1, 3});
+    column_ik_prismatic_joints_ = this->declare_parameter<std::vector<int64_t>>(
+      "column_ik_prismatic_joints", std::vector<int64_t>{0});
+    column_ik_continuous_joints_ = this->declare_parameter<std::vector<int64_t>>(
+      "column_ik_continuous_joints", std::vector<int64_t>{});
     mission_command_sub_ = this->create_subscription<std_msgs::msg::String>(
       "mission_command", 10, [this](const std_msgs::msg::String::SharedPtr msg) {
         if (msg->data == "pause") {
@@ -470,7 +512,7 @@ public:
     if (!buildPlanners()) {
       return false;
     }
-    if (!world_frame_.empty()) {
+    if (!world_frame_.empty() || verify_trace_) {
       // its own spin thread: the node itself is only spun in bursts while a request waits
       tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
       tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_, shared_from_this(), true);
@@ -478,6 +520,10 @@ public:
     if (!initColumnReachability()) {
       return false;
     }
+    if (!initVerifyTrace()) {
+      return false;
+    }
+    initColumnIkCheck();
     execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
       shared_from_this(), "/" + controller_name_ + "/follow_joint_trajectory");
     // Opt-in: the tool actuation executor (tool_actuation_node) owns the valve during a spray stroke. The
@@ -674,6 +720,9 @@ private:
     if (column != -2) {
       column_ = column;
     }
+    if (verify_trace_) {
+      trace_.setStroking(state_ == "stroking", static_cast<size_t>(std::max(0, column_)));
+    }
     if (!feedback_sink_) {
       return;
     }
@@ -711,6 +760,7 @@ private:
   TaskResult executeTask(const TaskRequest & req)
   {
     column_peaks_.clear();
+    trace_.reset();
     const TaskResult out = executeTaskImpl(req);
     if (!verify_result_path_.empty()) {
       MissionVerifyInput in;
@@ -725,6 +775,7 @@ private:
       in.max_peak_force_n = verify_max_peak_n_;
       in.message = out.message;
       in.report_path = ledger_.path();
+      addTraceToVerify(in);
       const auto result = buildMissionVerify(in);
       if (writeMissionVerify(verify_result_path_, missionVerifyToJson(result, in))) {
         RCLCPP_INFO(
@@ -840,6 +891,19 @@ private:
           return out;
         }
       }
+    }
+
+    if (verify_trace_) {
+      std::vector<PlannedStroke> planned;
+      for (size_t i = 0; i < ids.size(); ++i) {
+        PlannedStroke st;
+        st.column = ids[i];
+        for (const auto & p : sel[i].poses) {
+          st.points.push_back({p.x, p.y, p.z});
+        }
+        planned.push_back(std::move(st));
+      }
+      trace_.setPlan(std::move(planned));
     }
 
     TaskStateMachine machine(nav_attempts_);
@@ -1626,6 +1690,201 @@ private:
     return err <= tol;
   }
 
+  /// Builds the column IK check (column_ik_check): the reachability ColumnIkChain over the planner's IK port in the base
+  /// frame. Off (nothing built) when the parameter is false or the pipeline has no IK.
+  void initColumnIkCheck()
+  {
+    if (!column_ik_check_) {
+      return;
+    }
+    if (!pipeline_.ik()) {
+      RCLCPP_WARN(this->get_logger(), "column_ik_check is on but the planning pipeline has no IK backend: the check is off");
+      column_ik_check_ = false;
+      return;
+    }
+    const auto to_idx = [](const std::vector<int64_t> & v) {
+        std::vector<size_t> out;
+        for (const auto i : v) {
+          if (i >= 0) {out.push_back(static_cast<size_t>(i));}
+        }
+        return out;
+      };
+    ReachabilityColumnIkConfig cfg;
+    cfg.sequence.standoff_m = dock_standoff_;
+    cfg.sequence.approach_extra_m = std::fabs(dock_approach_extra_m_);
+    cfg.sequence.press_depth_m = contact_ ? contact_y_overshoot_ : 0.0;
+    cfg.sequence.dock_at_first_stroke = dock_at_stroke_start_;
+    cfg.chain.branch_joints = to_idx(column_ik_branch_joints_);
+    cfg.chain.ratio_limit_revolute = column_ik_ratio_limit_;
+    cfg.chain.ratio_limit_continuous = column_ik_ratio_limit_;
+    cfg.prismatic_joints = to_idx(column_ik_prismatic_joints_);
+    cfg.continuous_joints = to_idx(column_ik_continuous_joints_);
+    column_ik_port_ = std::make_unique<ReachabilityColumnIkPort>(
+      cfg, [this](const core_types::Pose & pose, const std::vector<double> & seed) -> std::optional<std::vector<double>> {
+        const auto ik = pipeline_.ik();
+        if (!ik) {
+          return std::nullopt;
+        }
+        motion_planner::IkRequest req;
+        req.frame_id = frame_id_;
+        req.planning_group = planning_group_;
+        req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
+        req.joint_seed = seed;
+        const auto res = ik->ik(req);
+        if (!res.success || res.joint_solution.size() != seed.size()) {
+          return std::nullopt;
+        }
+        return res.joint_solution;
+      });
+    ColumnIkGateConfig gc;
+    gc.lift_joint = cfg.prismatic_joints.empty() ? 0 : cfg.prismatic_joints.front();
+    gc.lift_candidates = liftHeights(base_check_lift_min_, base_check_lift_max_, column_ik_lift_step_);
+    gc.reject_on_refused = column_ik_reject_on_refused_;
+    column_ik_gate_ = ColumnIkGate(gc);
+    RCLCPP_INFO(
+      this->get_logger(), "column IK check on: %zu lift candidate(s), branch joints %zu, reject on refused %s",
+      gc.lift_candidates.size(), cfg.chain.branch_joints.size(), gc.reject_on_refused ? "yes" : "no");
+  }
+
+  /// True when the column may run: the IK chain along it is continuous from the seed or from another lift height, or the
+  /// check could not decide. False (the column is skipped) when every attempt breaks. A rescuing lift seeds the dock IK.
+  bool columnIkAllows(const CoverageSegmentIntent & intent, const WallDirection & wall_dir)
+  {
+    if (!column_ik_check_ || !column_ik_port_) {
+      return true;
+    }
+    std::vector<double> seed = !dock_seed_.empty() ? dock_seed_ :
+      (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
+    if (seed.empty()) {
+      seed = readCurrentJointState(shared_from_this(), group_joint_names_);
+    }
+    const auto d = column_ik_gate_.decide(
+      column_ik_port_.get(), intent.poses, {-wall_dir.d[0], -wall_dir.d[1], -wall_dir.d[2]}, seed);
+    RCLCPP_INFO(
+      this->get_logger(),
+      "%s: column IK check %s (%zu attempt(s)): %s; splits %zu, branch changes %zu, max ratio %.2f, lift travel %.3f m",
+      intent.label.c_str(), toString(d.action), d.attempts, d.reason.c_str(), d.verdict.split_count,
+      d.verdict.branch_changes, d.verdict.max_continuity_ratio, d.verdict.lift_travel_m);
+    if (d.action == ColumnIkAction::kGoWithSeed) {
+      dock_branch_seed_ = d.seed;
+    }
+    if (d.action == ColumnIkAction::kReject) {
+      RCLCPP_WARN(
+        this->get_logger(), "%s: skipped before docking, no continuous IK chain (%s)", intent.label.c_str(),
+        d.reason.c_str());
+      column_reason_ = SkipReason::kPlanFailed;
+      return false;
+    }
+    return true;
+  }
+
+  /// Opt-in verify trace (geometric coverage, path quality audit): a joint-state cache, a sampling timer and, for the audit,
+  /// the chain model. False when a configured chain file does not load.
+  bool initVerifyTrace()
+  {
+    if (!verify_trace_) {
+      return true;
+    }
+    if (verify_path_quality_) {
+      if (verify_path_chain_file_.empty()) {
+        RCLCPP_WARN(
+          this->get_logger(), "verify_path_quality is on without verify_path_chain_file: the audit will say it was not run");
+      } else {
+        try {
+          path_quality_ = std::make_unique<ReachabilityPathQualityPort>(
+            std::make_shared<reachability::ChainModel>(reachability::loadChainYaml(verify_path_chain_file_)),
+            verify_path_cfg_, static_cast<size_t>(std::max(0, verify_path_skip_joints_)));
+        } catch (const std::exception & e) {
+          RCLCPP_ERROR(
+            this->get_logger(), "verify_path_chain_file %s: %s", verify_path_chain_file_.c_str(), e.what());
+          return false;
+        }
+      }
+      joint_cache_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
+        "/joint_states", rclcpp::SensorDataQoS(), [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
+          std::lock_guard<std::mutex> lock(joint_cache_mutex_);
+          for (size_t i = 0; i < msg->name.size() && i < msg->position.size(); ++i) {
+            joint_cache_[msg->name[i]] = msg->position[i];
+          }
+        });
+    }
+    const double hz = std::max(1.0, verify_trace_hz_);
+    trace_timer_ = this->create_wall_timer(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(1.0 / hz)),
+      [this]() {sampleTrace();});
+    RCLCPP_INFO(
+      this->get_logger(), "verify trace on: geometric coverage %s, path quality %s, %.0f Hz (a spin of the node's wait loops)",
+      verify_geometric_ ? "yes" : "no", verify_path_quality_ ? "yes" : "no", hz);
+    return true;
+  }
+
+  /// One trace sample while a stroke runs: the tool position (TF, no waiting) and the planning group's joint values.
+  void sampleTrace()
+  {
+    if (!trace_.stroking()) {
+      return;
+    }
+    if (verify_geometric_ && tf_buffer_) {
+      const std::string wf = world_frame_.empty() ? frame_id_ : world_frame_;
+      try {
+        if (tf_buffer_->canTransform(wf, "tcp_link", tf2::TimePointZero)) {
+          const auto tf = tf_buffer_->lookupTransform(wf, "tcp_link", tf2::TimePointZero);
+          trace_.addTool({tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z});
+        }
+      } catch (const std::exception &) {
+        // no transform yet: skip this sample
+      }
+    }
+    if (verify_path_quality_) {
+      std::vector<double> q;
+      {
+        std::lock_guard<std::mutex> lock(joint_cache_mutex_);
+        if (trace_joint_names_.empty()) {
+          std::vector<std::string> available;
+          for (const auto & kv : joint_cache_) {
+            available.push_back(kv.first);
+          }
+          const std::vector<std::vector<std::string>> cand = group_joint_names_.empty() ?
+            kJointNameCandidates : std::vector<std::vector<std::string>>{group_joint_names_};
+          trace_joint_names_ = selectJointNames(cand, available);
+        }
+        for (const auto & name : trace_joint_names_) {
+          q.push_back(joint_cache_.at(name));
+        }
+      }
+      trace_.addJoints(q);
+    }
+  }
+
+  /// Adds the geometric coverage and the path quality audit to the verify input (no-ops when not enabled).
+  void addTraceToVerify(MissionVerifyInput & in)
+  {
+    if (verify_geometric_) {
+      GeometricCoverageConfig cfg = verify_geo_cfg_;
+      cfg.contact_force_n = contact_ ? verify_contact_force_n_ : -1.0;
+      cfg.wall_normal = {wall_dir_.d[0], wall_dir_.d[1], wall_dir_.d[2]};
+      const auto plan = trace_.plan();
+      if (!plan.empty() && !plan.front().points.empty()) {
+        cfg.plane_origin = plan.front().points.front();
+      }
+      in.geometric = computeGeometricCoverage(plan, trace_.samples(), cfg);
+      if (trace_.dropped() > 0) {
+        in.geometric.note += (in.geometric.note.empty() ? "" : "; ") + std::to_string(trace_.dropped()) +
+          " trace sample(s) dropped at the cap";
+      }
+      in.min_geometric_percent = verify_min_geometric_percent_;
+      in.swath_m = cfg.swath_m;
+    }
+    if (verify_path_quality_) {
+      in.path_quality_requested = true;
+      if (path_quality_) {
+        in.path_quality = path_quality_->audit(trace_.jointStrokes());
+      } else {
+        in.path_quality.note = "no verify_path_chain_file";
+      }
+    }
+  }
+
   /// One diagnostic line: the planning group's live joint values (lift first) with a tag, for comparing runs.
   void logArmState(const std::string & tag)
   {
@@ -1828,6 +2087,9 @@ private:
         intent.label.c_str(), base_in_world.t[0], base_in_world.t[1], base_in_world.yaw(),
         world_frame_.c_str(), intent.poses.front().x, intent.poses.front().y, intent.poses.front().z,
         frame_id_.c_str());
+    }
+    if (!columnIkAllows(intent, wall_dir)) {
+      return ColumnOutcome::kFailed;
     }
     logArmState("before_dock_" + intent.label);
     const auto & rep = intent.poses.front();
@@ -2193,6 +2455,30 @@ private:
   std::map<size_t, double> column_peaks_;
   std::string verify_result_path_;
   double verify_max_peak_n_{0.0};
+  bool column_ik_check_{false};
+  double column_ik_lift_step_{0.1};
+  bool column_ik_reject_on_refused_{false};
+  double column_ik_ratio_limit_{6.0};
+  std::vector<int64_t> column_ik_branch_joints_, column_ik_prismatic_joints_, column_ik_continuous_joints_;
+  std::unique_ptr<ReachabilityColumnIkPort> column_ik_port_;
+  ColumnIkGate column_ik_gate_;
+  bool verify_trace_{false};
+  bool verify_geometric_{false};
+  bool verify_path_quality_{false};
+  GeometricCoverageConfig verify_geo_cfg_;
+  double verify_contact_force_n_{1.0};
+  double verify_min_geometric_percent_{0.0};
+  double verify_trace_hz_{20.0};
+  std::string verify_path_chain_file_;
+  int verify_path_skip_joints_{1};
+  reachability::PathQualityConfig verify_path_cfg_;
+  ToolTrace trace_;
+  std::unique_ptr<ReachabilityPathQualityPort> path_quality_;
+  rclcpp::TimerBase::SharedPtr trace_timer_;
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_cache_sub_;
+  std::mutex joint_cache_mutex_;
+  std::map<std::string, double> joint_cache_;
+  std::vector<std::string> trace_joint_names_;
   SkipReason column_reason_{SkipReason::kPlanFailed};
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mission_command_sub_;
   rclcpp::Service<MissionCommandSrv>::SharedPtr mission_command_srv_;

@@ -9,13 +9,13 @@ sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware
         -> navigation / docking -> motion planning -> execution (JTAC + F/T) -> monitoring
 ```
 
-Last verified: 2026-11-19 on main at a2b5df9 (PRs up to #114), in the compile-only `build` image (the Dockerfile `build` stage itself failed two tests that day, fixed in #117): simulator-free checks green (`docker/run_all_checks.sh --skip-sims` with `NO_BUILD=1`: 29 packages, 1352 colcon tests, 0 failures, 226 skipped; pytest directories passed: tools 36 passed 2 skipped, description 224, moveit_config 30, curobo_bridge 1 skipped, stand_navigator 42). The public-readiness scan was not part of this run. Simulator, GPU and hardware items below were not re-run for that date; their evidence is the earlier run each line cites. Legend: `[x]` done, `[~]` partial (what is
+Last verified: 2026-11-19 on main at a2b5df9 (PRs up to #114): simulator-free checks green in the compile-only `build` image (29 packages, 1352 colcon tests, 0 failures, 226 skipped). Newer merges (#143 to #173) were each built and tested in a workspace build when merged (counts in their PRs: 455 to 1203 tests, 0 failures), and are listed with their evidence in section 19; sections 1 to 18 below were not all re-read for those changes, so an item can be older than the date suggests. Simulator, GPU and hardware items were not re-run for that date; their evidence is the earlier run each line cites. Legend: `[x]` done, `[~]` partial (what is
 missing is stated), `[ ]` not done (some are design-only). Each item names its evidence. Tick items as they land
 and update the date. **Policy:** reuse maintained open source before writing our own (section 17); ROS 2 distro
 support is not a reason to reject a candidate (we port); prefer the newest method that fits, including papers
 without code, when we can implement it.
 
-**Headline:** the building blocks exist; **nothing runs them together** (section 11).
+**Headline:** the building blocks exist and both simulators run the pipeline end to end in headless one-command passes (section 11); MuJoCo two-stand passes pass, the Gazebo two-stand pass still fails (section 11, `docs/sim_gazebo.md`). **Nothing has run on hardware** (section 12).
 
 ## 1. Perception input (self and external data)
 
@@ -205,7 +205,7 @@ without code, when we can implement it.
 - [x] `THIRD_PARTY.md` (licences, use, nothing vendored); revisit as adopted software lands (a few licences are marked unverified there; cddlib GPL-2.0 in the VAMP stage: reviewed 2026-11-15, source and recipes only, no binaries shipped, see THIRD_PARTY.md)
 - [x] CHANGELOG (#5 to #61) and CONTRIBUTING written; every package is at `0.1.0` (checked: nothing depends on an exact version; `colcon list` over all 28 packages works)
 - [x] `docs/docker.md` covers the `sim` and `sim-gazebo` targets
-- [x] CI: none by decision; one documented "run all checks" section in `docs/docker.md` (`docker/build.sh test`, tool tests, public-readiness scan, sim scripts); the sim scripts are still not in `colcon test`
+- [x] CI on free GitHub-hosted runners only (readiness scan, tool tests, colcon build and tests; #167; the first run on GitHub is not recorded here); simulators and GPU stay local. The "run all checks" section in `docs/docker.md` (`docker/build.sh test`, tool tests, public-readiness scan, sim scripts) still applies; the sim scripts are not in `colcon test`
 - [ ] **Public-readiness cleanup**
   - [x] References to documents that are not in the repo: none left in code or docs (checked 2026-11-16 with a script over every `*.md` mention in tracked files; `docker/tools/check_public_readiness.py` keeps checking)
   - [x] Earlier-project base and application names are removed (no `serum` anywhere; "mop" is a real tool in `coverage_planner/config/tool_profiles.yaml`, not a leftover)
@@ -234,8 +234,7 @@ without code, when we can implement it.
 
 All pull requests up to #106 are merged into `main` except two drafts kept on purpose: #41 (a JTAC force barrier whose own description says there is
 no usable bound at the 100 Hz loop, conflicts with `main`) and any newer work in progress. The earlier chain (#5 `feat/scene-adapters` onward,
-through #22 Gazebo contact test) is merged. History is merge commits, so each PR is a named line in `git log --merges`. There is deliberately no CI;
-each merged PR ran the local checks named in its description. Not run for the latest batch (#101 to #106): the full `run_all_checks.sh`; each PR's
+through #22 Gazebo contact test) is merged. History is linear: pull requests are squash-merged with Conventional Commit titles (CONTRIBUTING.md; the history was rewritten to milestone commits on 2026-11-21 and is squash-merged since). CI runs on free runners (section 13); each merged PR also ran the local checks named in its description. Not run for the latest batch (#101 to #106): the full `run_all_checks.sh`; each PR's
 own package tests were run instead (reachability 10 executables, coverage_planner 17, the behaviour-tree prototype 10).
 
 ## 17. Reuse map: adopt, implement from a paper, avoid
@@ -331,6 +330,23 @@ Not adopted: the supervisor launch system, a site database with authoring GUI, a
 calibration, Isaac bring-up (stub here), vendor-specific tool bridges.
 
 ---
+
+## 19. Since #143: what merged, and what it is worth
+
+Written 2026-11-22 for main at #173. "Tested" is the strongest evidence for that line; nothing here ran on hardware. Counts are from the PR that merged it.
+
+| Area | What is in | Tested | Not done |
+|---|---|---|---|
+| cuRobo | `free_space_fallback` (`FallbackPlanner`, #141, #147), live start state, complete/partial fix (#143), joint limit guard (#152), start/goal precheck, 7-joint `--ignore-hops 2`, `--ignore-pair/--ignore-group` (#169) | MuJoCo two-stand pass x4 (10/10, peaks 46.8-72.4 N, fallback did stow and stand 1); guard and precheck host/gtest | cause of the low-lift `no_path` (hypothesis); 12-16 s per plan; node unavailable while busy (single-threaded); no GPU run after #169 |
+| Gazebo | clamp of the live start state in OMPL (#156) and Cartesian (#157) planners, seeded dock IK off in the script | reruns: 4/6, 6/4, then 1/9 columns done/failed (single runs; no start-bound errors in the last) | pass still fails (dock IK branch jump, wrist winding, stow failures); scored force spikes 1240-1820 N unexplained |
+| Manager | verify result and `mission_state` (#151), column feasibility port + RM4D adapter (#153, #159), stand-check gate, dock IK continuity (#169) | gtests with fakes; 275-1203 tests in workspace builds | geometric coverage in the verify result; column check is advisory; gate and continuity never run in a sim; metric reach margin does not reach the gate |
+| Reachability | whole-column sequences with split avoidance (#153), cheaper verified stands (#154), N-DOF arms and redundancy policy (#155), `ColumnIkChain` and path quality audit (#166), plane-generic stands, base placement optimiser (#167) | gtests, host and workspace builds | IK chain and audit are not called by the planner/manager; swivel-angle parametrisation; no IK/simulator comparison; verified stands not used by the manager |
+| Scoring and tools | tool-pose scoring (tilt, wall gap, bad-pose fraction), `MP_PROFILE` for any robot in the MuJoCo passes, tool contact frame and tilt, plane-touch calibration core (#167) | 29+ scorer gtests, 22 py tests; MuJoCo run scored on tool pose (README, 0.15 deg, 0.9 mm) | calibration not wired into a manager stage; tilt calibration from force not validated; hardware |
+| New ROS-free cores | `diff_ik_core`, `safety_monitor` (**not a certified safety function**), `teleop_core` and `ContactFreeGate`, stand_navigator lateral dock term and noise harness (#167, #172) | host/gtest (diff IK 55, safety monitor 67, teleop 79 after review fixes) | no controller plugin, node, JTAC or manager consumer, simulator or hardware run |
+| Repository | CI on free runners, issue/PR templates, package READMEs, `docs/modules.md`, `docs/development_plan.md`, SECURITY and CODE_OF_CONDUCT (#150, #167) | readiness scan 0 problems | submodule split prepared, not merged |
+
+Next, in the order of `docs/development_plan.md`: measure the dock continuity in Gazebo, call the IK chain and the path audit from the
+manager (opt-in), geometric coverage in the verify result, then the GPU run that settles the low-lift cuRobo hypothesis.
 
 ## Proposed order (each milestone has an exit test)
 

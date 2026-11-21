@@ -13,6 +13,7 @@
 
 #include "reachability/core/base_model.hpp"
 #include "reachability/core/global_stands.hpp"
+#include "reachability/core/io.hpp"
 #include "reachability/core/stand_verifier.hpp"
 #include "reachability/core/stands.hpp"
 #include "reachability/core/map4d.hpp"
@@ -48,6 +49,7 @@ private:
   bool verify_by_default_{false};
   VerifyOptions verify_options_;
   std::shared_ptr<Map4D> map_;
+  MapInfo map_info_;   ///< Header of the loaded map: joint count and redundancy policy (reported by ~/plan_stands).
   std::optional<BaseModel> base_;
   StandStrategy stand_strategy_{StandStrategy::Greedy};   ///< Parameter `stand_strategy`: greedy | set_cover.
   rclcpp::Service<reachability_msgs::srv::IsReachable>::SharedPtr is_reachable_;

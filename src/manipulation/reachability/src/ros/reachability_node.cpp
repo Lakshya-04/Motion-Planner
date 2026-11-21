@@ -37,12 +37,13 @@ ReachabilityNode::ReachabilityNode(const rclcpp::NodeOptions & options)
   const auto file = declare_parameter<std::string>("map_file", "");
   const auto fingerprint = declare_parameter<std::string>("robot_fingerprint", "");
   try {
-    map_ = std::make_shared<Map4D>(loadMap(file, fingerprint));
+    map_ = std::make_shared<Map4D>(loadMap(file, fingerprint, &map_info_));
   } catch (const std::exception & e) {
     RCLCPP_ERROR(get_logger(), "cannot load map '%s': %s", file.c_str(), e.what());
     return;
   }
-  RCLCPP_INFO(get_logger(), "loaded map %s (%zu non-zero cells)", file.c_str(), map_->nonzeroCells());
+  RCLCPP_INFO(get_logger(), "loaded map %s (%zu non-zero cells; %s)", file.c_str(), map_->nonzeroCells(),
+    describeMapInfo(map_info_).c_str());
   const auto base_file = declare_parameter<std::string>("base_profile", "");
   if (!base_file.empty()) {
     try {
@@ -193,6 +194,13 @@ void ReachabilityNode::handlePlanStands(
   const auto * req = &request;
   auto * res = &response;
   {
+    // which null-space samples the map was built from: the stands below are only as good as that policy
+    res->arm_dof = map_info_.arm_dof;
+    res->redundancy = map_info_.redundancy;
+    if (map_info_.arm_dof > 6) {
+      RCLCPP_INFO(get_logger(), "plan_stands on a map of a %u-joint arm, redundancy: %s", map_info_.arm_dof,
+        map_info_.redundancy.empty() ? "not recorded" : map_info_.redundancy.c_str());
+    }
     if (req->targets_world.empty()) {
       res->message = "no targets";
       return;
