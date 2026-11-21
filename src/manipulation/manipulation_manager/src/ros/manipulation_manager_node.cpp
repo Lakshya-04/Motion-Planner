@@ -59,7 +59,9 @@
 #include "manipulation_manager/ros/execution/retiming_wiring.hpp"
 #include "manipulation_manager/core/execution/tool_feed_execution_port.hpp"
 #include "manipulation_manager/adapters/reachability_column_port.hpp"
+#include "manipulation_manager/adapters/reachability_column_ik_port.hpp"
 #include "manipulation_manager/adapters/reachability_path_quality_port.hpp"
+#include "manipulation_manager/core/column_ik_gate.hpp"
 #include "manipulation_manager/core/tool_trace.hpp"
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/coverage_task.hpp"
@@ -449,6 +451,19 @@ public:
     verify_path_cfg_.min_sigma = this->declare_parameter<double>("verify_path_min_sigma", 0.02);
     verify_path_cfg_.min_limit_margin = this->declare_parameter<double>("verify_path_min_limit_margin", 0.02);
     verify_trace_ = verify_geometric_ || verify_path_quality_;
+    // Opt-in whole-column IK continuity check before a column is run (column_ik_gate.hpp): IK along approach, strokes and
+    // retract from the current seed; on a branch break the same column is tried from other lift heights (the first that
+    // is continuous seeds the dock IK), else the column is skipped (reason plan_failed). Off by default.
+    column_ik_check_ = this->declare_parameter<bool>("column_ik_check", false);
+    column_ik_lift_step_ = this->declare_parameter<double>("column_ik_lift_step_m", 0.1);
+    column_ik_reject_on_refused_ = this->declare_parameter<bool>("column_ik_reject_on_refused", false);
+    column_ik_ratio_limit_ = this->declare_parameter<double>("column_ik_ratio_limit", 6.0);
+    column_ik_branch_joints_ = this->declare_parameter<std::vector<int64_t>>(
+      "column_ik_branch_joints", std::vector<int64_t>{1, 3});
+    column_ik_prismatic_joints_ = this->declare_parameter<std::vector<int64_t>>(
+      "column_ik_prismatic_joints", std::vector<int64_t>{0});
+    column_ik_continuous_joints_ = this->declare_parameter<std::vector<int64_t>>(
+      "column_ik_continuous_joints", std::vector<int64_t>{});
     mission_command_sub_ = this->create_subscription<std_msgs::msg::String>(
       "mission_command", 10, [this](const std_msgs::msg::String::SharedPtr msg) {
         if (msg->data == "pause") {
@@ -508,6 +523,7 @@ public:
     if (!initVerifyTrace()) {
       return false;
     }
+    initColumnIkCheck();
     execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
       shared_from_this(), "/" + controller_name_ + "/follow_joint_trajectory");
     // Opt-in: the tool actuation executor (tool_actuation_node) owns the valve during a spray stroke. The
@@ -1674,6 +1690,94 @@ private:
     return err <= tol;
   }
 
+  /// Builds the column IK check (column_ik_check): the reachability ColumnIkChain over the planner's IK port in the base
+  /// frame. Off (nothing built) when the parameter is false or the pipeline has no IK.
+  void initColumnIkCheck()
+  {
+    if (!column_ik_check_) {
+      return;
+    }
+    if (!pipeline_.ik()) {
+      RCLCPP_WARN(this->get_logger(), "column_ik_check is on but the planning pipeline has no IK backend: the check is off");
+      column_ik_check_ = false;
+      return;
+    }
+    const auto to_idx = [](const std::vector<int64_t> & v) {
+        std::vector<size_t> out;
+        for (const auto i : v) {
+          if (i >= 0) {out.push_back(static_cast<size_t>(i));}
+        }
+        return out;
+      };
+    ReachabilityColumnIkConfig cfg;
+    cfg.sequence.standoff_m = dock_standoff_;
+    cfg.sequence.approach_extra_m = std::fabs(dock_approach_extra_m_);
+    cfg.sequence.press_depth_m = contact_ ? contact_y_overshoot_ : 0.0;
+    cfg.sequence.dock_at_first_stroke = dock_at_stroke_start_;
+    cfg.chain.branch_joints = to_idx(column_ik_branch_joints_);
+    cfg.chain.ratio_limit_revolute = column_ik_ratio_limit_;
+    cfg.chain.ratio_limit_continuous = column_ik_ratio_limit_;
+    cfg.prismatic_joints = to_idx(column_ik_prismatic_joints_);
+    cfg.continuous_joints = to_idx(column_ik_continuous_joints_);
+    column_ik_port_ = std::make_unique<ReachabilityColumnIkPort>(
+      cfg, [this](const core_types::Pose & pose, const std::vector<double> & seed) -> std::optional<std::vector<double>> {
+        const auto ik = pipeline_.ik();
+        if (!ik) {
+          return std::nullopt;
+        }
+        motion_planner::IkRequest req;
+        req.frame_id = frame_id_;
+        req.planning_group = planning_group_;
+        req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
+        req.joint_seed = seed;
+        const auto res = ik->ik(req);
+        if (!res.success || res.joint_solution.size() != seed.size()) {
+          return std::nullopt;
+        }
+        return res.joint_solution;
+      });
+    ColumnIkGateConfig gc;
+    gc.lift_joint = cfg.prismatic_joints.empty() ? 0 : cfg.prismatic_joints.front();
+    gc.lift_candidates = liftHeights(base_check_lift_min_, base_check_lift_max_, column_ik_lift_step_);
+    gc.reject_on_refused = column_ik_reject_on_refused_;
+    column_ik_gate_ = ColumnIkGate(gc);
+    RCLCPP_INFO(
+      this->get_logger(), "column IK check on: %zu lift candidate(s), branch joints %zu, reject on refused %s",
+      gc.lift_candidates.size(), cfg.chain.branch_joints.size(), gc.reject_on_refused ? "yes" : "no");
+  }
+
+  /// True when the column may run: the IK chain along it is continuous from the seed or from another lift height, or the
+  /// check could not decide. False (the column is skipped) when every attempt breaks. A rescuing lift seeds the dock IK.
+  bool columnIkAllows(const CoverageSegmentIntent & intent, const WallDirection & wall_dir)
+  {
+    if (!column_ik_check_ || !column_ik_port_) {
+      return true;
+    }
+    std::vector<double> seed = !dock_seed_.empty() ? dock_seed_ :
+      (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
+    if (seed.empty()) {
+      seed = readCurrentJointState(shared_from_this(), group_joint_names_);
+    }
+    const auto d = column_ik_gate_.decide(
+      column_ik_port_.get(), intent.poses, {-wall_dir.d[0], -wall_dir.d[1], -wall_dir.d[2]}, seed);
+    RCLCPP_INFO(
+      this->get_logger(),
+      "%s: column IK check %s (%zu attempt(s)): %s; splits %zu, branch changes %zu, max ratio %.2f, lift travel %.3f m",
+      intent.label.c_str(), toString(d.action), d.attempts, d.reason.c_str(), d.verdict.split_count,
+      d.verdict.branch_changes, d.verdict.max_continuity_ratio, d.verdict.lift_travel_m);
+    if (d.action == ColumnIkAction::kGoWithSeed) {
+      dock_branch_seed_ = d.seed;
+    }
+    if (d.action == ColumnIkAction::kReject) {
+      RCLCPP_WARN(
+        this->get_logger(), "%s: skipped before docking, no continuous IK chain (%s)", intent.label.c_str(),
+        d.reason.c_str());
+      column_reason_ = SkipReason::kPlanFailed;
+      return false;
+    }
+    return true;
+  }
+
   /// Opt-in verify trace (geometric coverage, path quality audit): a joint-state cache, a sampling timer and, for the audit,
   /// the chain model. False when a configured chain file does not load.
   bool initVerifyTrace()
@@ -1983,6 +2087,9 @@ private:
         intent.label.c_str(), base_in_world.t[0], base_in_world.t[1], base_in_world.yaw(),
         world_frame_.c_str(), intent.poses.front().x, intent.poses.front().y, intent.poses.front().z,
         frame_id_.c_str());
+    }
+    if (!columnIkAllows(intent, wall_dir)) {
+      return ColumnOutcome::kFailed;
     }
     logArmState("before_dock_" + intent.label);
     const auto & rep = intent.poses.front();
@@ -2348,6 +2455,13 @@ private:
   std::map<size_t, double> column_peaks_;
   std::string verify_result_path_;
   double verify_max_peak_n_{0.0};
+  bool column_ik_check_{false};
+  double column_ik_lift_step_{0.1};
+  bool column_ik_reject_on_refused_{false};
+  double column_ik_ratio_limit_{6.0};
+  std::vector<int64_t> column_ik_branch_joints_, column_ik_prismatic_joints_, column_ik_continuous_joints_;
+  std::unique_ptr<ReachabilityColumnIkPort> column_ik_port_;
+  ColumnIkGate column_ik_gate_;
   bool verify_trace_{false};
   bool verify_geometric_{false};
   bool verify_path_quality_{false};

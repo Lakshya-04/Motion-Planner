@@ -75,7 +75,8 @@ ament_target_dependencies(${PROJECT_NAME}_core
 # the reachability package. Only the node and its test link it.
 add_library(${PROJECT_NAME}_column_reach
   src/adapters/reachability_column_port.cpp
-  src/adapters/reachability_path_quality_port.cpp)
+  src/adapters/reachability_path_quality_port.cpp
+  src/adapters/reachability_column_ik_port.cpp)
 target_link_libraries(${PROJECT_NAME}_column_reach PUBLIC
   ${PROJECT_NAME}_core
   reachability::reachability_core
@@ -188,6 +189,15 @@ if(BUILD_TESTING)
   ament_add_gtest(base_stance_check_test test/base_stance_check_test.cpp)
   if(TARGET base_stance_check_test)
     target_link_libraries(base_stance_check_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(column_ik_gate_test test/column_ik_gate_test.cpp)
+  if(TARGET column_ik_gate_test)
+    target_link_libraries(column_ik_gate_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+  ament_add_gtest(reachability_column_ik_port_test test/reachability_column_ik_port_test.cpp)
+  if(TARGET reachability_column_ik_port_test)
+    target_link_libraries(reachability_column_ik_port_test ${PROJECT_NAME}_column_reach core_types::core_types)
   endif()
 
   ament_add_gtest(reachability_path_quality_port_test test/reachability_path_quality_port_test.cpp)
