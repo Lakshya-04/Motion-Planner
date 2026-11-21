@@ -156,6 +156,10 @@ controller drives the base through `cmd_vel`. Each macro exposes its dimensions 
 | `mir100` | MiR100-class | diff | no | 0.89 x 0.58 | 0.352 | 0.1 / 0.404 / none | 1.5 / 1.0 | 67 |
 | `turtlebot3_burger` | TurtleBot3 Burger (CI, demos) | diff | no | 0.138 x 0.14 | 0.192 | 0.033 / 0.16 / none | 0.22 / 2.84 | 1 |
 | `turtlebot3_waffle` | TurtleBot3 Waffle (CI, demos) | diff | no | 0.281 x 0.24 | 0.141 | 0.033 / 0.287 / none | 0.26 / 1.82 | 1.8 |
+| `jackal` | Clearpath Jackal (4-wheel differential / skid) | diff | no | 0.508 x 0.37 | 0.25 | 0.098 / 0.3756 / 0.262 | 2.0 / 4.0 | 17 |
+| `dingo_o` | Clearpath Dingo-O (mecanum) | omni | yes | 0.506 x 0.40 | 0.172 | 0.05 / 0.404 / 0.3 | 1.1 / 2.0 | 17 |
+| `tiago_style` | round differential base, torso-lift robot style | diff | no | 0.54 x 0.54 (box) | 0.30 | 0.0985 / 0.4044 / none | 1.0 / 1.0 | 60 |
+| `fetch_style` | round differential base, torso-lift robot style | diff | no | 0.56 x 0.56 (box) | 0.30 | 0.0605 / 0.3748 / none | 1.0 / 2.0 | 70 |
 
 **The numbers are nominal**, taken from published spec sheets and rounded; wheel positions and
 body outlines are simplified (wheels inside the body envelope carry no collision shape, casters
@@ -181,6 +185,15 @@ agreement. Profiles per base: `ur10e_<base>_telescopic.yaml` (for example
 would tip it. The `ur10e_scout_mini_telescopic.yaml` profile is a geometry example: the Scout
 Mini's rated payload is far below a UR10e on a 1.5 m lift, so check the platform rating before
 using it.
+
+The last four rows are approximate (written from the public spec sheets without a unit to check
+against; the round bases are modelled as their bounding box, so the footprint is conservative). The
+torso lift of `tiago_style` / `fetch_style` is not part of the base: it is the profile's `lift:` as
+a one-carriage column (`telescopic`, `stages: 0`, stroke 0.35 / 0.386 m), the existing
+[column-lift recipe](#lift-variants), so no new lift macro was needed. Profiles:
+`kinova_gen3_jackal_nolift`, `xarm7_dingo_o_nolift` (small bases, short pedestal, no lift),
+`fr3_tiago_style_torso`, `generic_6dof_fetch_style_torso`. The sizes are payload-honest only for the
+small arms chosen; check the platform rating.
 
 Swap steps: `xacro urdf/mobile_manipulator.urdf.xacro arm:=ur10e base:=ranger_mini`, or pick the
 matching profile. The lift mounts at `lift_mount_link`; shift it with the `lift_mount_xyz` xacro
@@ -260,3 +273,13 @@ python3 -m pytest src/description/mobile_manipulator_description/test
   approximation; check it before relying on tight clearances.
 - Verified here with `check_urdf` and the contract tests for the generic arm, the Panda-like arm and UR10e (rendered
   with the Humble xacro). Loaded into MoveIt and planned with on Jazzy, see [moveit_config.md](moveit_config.md).
+
+## Home-pose check
+
+`test/test_home_pose.py` renders every profile and checks that its `home` pose lists exactly the
+actuated joints, lies inside the URDF joint limits, and does not self-collide in a capsule model
+built from the URDF collision shapes (arm and tool links as inscribed capsules, the lift column as
+oriented boxes; links up to two moving joints apart are not checked). It runs on the host (xacro,
+urdf_parser_py, numpy) and skips UR profiles without `ur_description`. It is the same question the
+`check` stage of [robot_assets.md](robot_assets.md#self-collision-sanity) asks of the FOAM spheres,
+answered earlier and without Docker; it is a planning-grade check on primitives, not a mesh check.

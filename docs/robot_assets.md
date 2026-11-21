@@ -61,6 +61,10 @@ if both hold, and a stage with `ok` false fails (exit 1). It needs the `vamp` st
 stage deletes an older one, so a skipped `vamp` stage fails the check instead of using a stale list. A home pose that collides means the SRDF misses pairs (raise `--hops`); a folded pose that
 does not means the spheres are too small or the pose does not fold that arm.
 
+A host-only precursor of this check, on the URDF's own primitive collision shapes, is
+`mobile_manipulator_description/test/test_home_pose.py` ([robot_description.md](robot_description.md#home-pose-check)):
+it runs without Docker, FOAM or the SRDF.
+
 ## Manifest
 
 `manifest.json`: UTC time, profile path / hash / expanded xacro args, repo commit, FOAM and Cricket pins,
