@@ -1795,7 +1795,7 @@ private:
     std::vector<double> seed = !dock_seed_.empty() ? dock_seed_ :
       (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
     if (seed.empty()) {
-      seed = readCurrentJointState(shared_from_this(), group_joint_names_);
+      seed = readCurrentJointState(shared_from_this(), joint_name_candidates_);
     }
     const auto d = column_ik_gate_.decide(
       column_ik_port_.get(), intent.poses, {-wall_dir.d[0], -wall_dir.d[1], -wall_dir.d[2]}, seed);
