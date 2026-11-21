@@ -9,13 +9,13 @@
 #                  the second only when 7000 MB are available
 #   light      0   git, gh, docs, downloads, ls: always
 # Every start must leave RESERVE MB free (the host has 7.8 GB and ~2 GB baseline use). Memory verdict HOLD/PAUSE: nothing new.
-RESERVE=${SLOTS_RESERVE:-1500}
+RESERVE=${SLOTS_RESERVE:-700}
 here=$(dirname "$(readlink -f "$0")")
 line=$(bash "$here/memwatch.sh"); eval "$line"
 names=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null)
 n_sim=$(echo "$names" | grep -c -E ' motion-planner:(sim|sim-gazebo)$')
 n_node=$(echo "$names" | grep -c -E '^curobo-node ')
-n_build=$(echo "$names" | grep -c -E ' motion-planner:(build|build-live|dev)$')
+n_build=$(echo "$names" | grep -c -E ' motion-planner:(build|build-fast|build-live|dev)$')
 gpu_used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1); gpu_used=${gpu_used:-0}
 verdict=${verdict:-HOLD}; avail=${avail_mb:-0}
 ok() { [ "$verdict" = GO ] && [ $((avail - $1)) -ge "$RESERVE" ]; }
@@ -28,5 +28,5 @@ elif [ "$gpu_used" -gt 1500 ]; then say node NO "GPU busy (${gpu_used} MB used)"
 elif ok 2500; then say node YES "GPU"; else say node NO "verdict=$verdict avail=${avail}MB"; fi
 if [ "$n_build" -ge 2 ]; then say build NO "two build containers already running"
 elif [ "$n_build" -ge 1 ] && [ "$avail" -lt 7000 ]; then say build NO "one is running; a second needs 7000 MB available"
-elif ok 2800; then say build YES "one worker, -j1, --memory=2800m (-j2 and 3800m only above 5300 MB available)"; else say build NO "verdict=$verdict avail=${avail}MB"; fi
+elif ok 2400; then say build YES "one worker, -j1, --memory=2400m (-j2 and 3800m only above 5300 MB available)"; else say build NO "verdict=$verdict avail=${avail}MB"; fi
 say light YES "git, gh, docs, downloads"
