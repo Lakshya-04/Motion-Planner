@@ -90,6 +90,17 @@ and joint jog through MoveIt Servo, an AUTO / TELEOP / HOLD mode manager arbitra
 effort actuators in MuJoCo; then a `joint_impedance_controller` plugin with torque gravity compensation. Real-hardware
 impedance needs an effort command interface the arm driver may not offer.
 
+Reference studied for the impedance work: [wengmister/impedance_control_mujoco](https://github.com/wengmister/impedance_control_mujoco)
+(Python, MuJoCo, xArm 7 and Franka from MuJoCo Menagerie). It shows joint-space impedance (`tau = -Kp(q - q_des) - Kd(qd - qd_des) + bias`
+with `mj_rne` as gravity and Coriolis compensation), task-space impedance (`tau = J^T F + J_r^T M`), a null-space torque projector,
+a velocity admittance law, and bilateral teleoperation with an end-effector proxy for arms with different kinematics. Its notes record
+two MuJoCo traps that apply to our effort-actuator step: `ctrlrange` must match `forcerange` (the default of +-1 saturates torque
+commands) and `biastype="affine"` actuators carry a hidden PD term unless `biasprm` is zero. **The repository has no licence**, so no
+code is copied into this Apache-2.0 repository: it is a design reference and a behavioural cross-check (our controller is written
+independently from the published equations and compared against it on the same arm), and the author can be asked to add a licence if
+direct reuse is wanted. It is a single-threaded Python playground without ros2_control, a hardware path or inertia shaping, so
+it does not replace the planned controller plugin.
+
 ## 9. Cobot operation: whole-robot collision monitor and safety layer
 
 Today there is no runtime monitor: collision checks (MoveIt, cuRobo, VAMP) run at plan time on a snapshot, `robot_self_filter`
