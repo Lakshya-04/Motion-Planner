@@ -15,8 +15,10 @@ def pcd_points(path):
     return [tuple(map(float, ln.split()[:3])) for ln in lines[lines.index('DATA ascii') + 1:] if ln.strip()]
 
 
-def run(tmp_path, dx, dy, width=None):
+def run(tmp_path, dx, dy, width=None, dz=None):
     argv = [str(DATA), str(tmp_path), str(dx), str(dy)] + ([] if width is None else [str(width)])
+    if dz is not None:
+        argv.append(str(dz))
     import sys
     old, sys.argv = sys.argv, ['shift_wall_scene.py'] + argv
     try:
@@ -50,3 +52,15 @@ def test_wider_patch_starts_at_dy_and_grows_both_sides(tmp_path):
     assert {p[0] for p in pts} == {1.08}
     header = (tmp_path / 'walls.pcd').read_text().splitlines()
     assert f'POINTS {len(pts)}' in header and f'WIDTH {len(pts)}' in header
+
+
+def test_dz_moves_the_wall_in_z_only(tmp_path):
+    run(tmp_path, -0.4, 0.0, 0.3, 0.05)
+    cov = json.loads((tmp_path / 'wall_pass_coverage_scene.json').read_text())['walls'][0]
+    assert abs(cov['origin_xyz'][0] - 0.58) < 1e-9 and abs(cov['origin_xyz'][2] - 1.20) < 1e-9
+    assert abs(cov['plane_abcd'][3] - 0.58) < 1e-9
+    zs = [p[2] for p in pcd_points(tmp_path / 'walls.pcd')]
+    stock = pcd_points(DATA / 'walls.pcd')
+    assert abs(min(zs) - (min(p[2] for p in stock) + 0.05)) < 1e-9
+    sim = pcd_points(tmp_path / 'walls_sim.pcd')   # the curtain keeps z 0..2.6
+    assert min(p[2] for p in sim) == 0.0 and abs(max(p[2] for p in sim) - 2.6) < 1e-6

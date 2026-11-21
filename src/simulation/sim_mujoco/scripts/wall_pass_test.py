@@ -30,7 +30,7 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from contact_test import ContactTest, guarded  # noqa: E402
-from smoke_test import FREE, JOINTS  # noqa: E402
+from smoke_test import DEFAULT_PROFILE, FREE, profile_name  # noqa: E402
 
 WALL_X = 0.98
 
@@ -55,7 +55,7 @@ class WallPass(ContactTest):
         req.header.frame_id = 'base_footprint'
         js, _, _ = self.state()
         start = RobotState()
-        start.joint_state = JointState(name=list(JOINTS), position=list(js))
+        start.joint_state = JointState(name=list(self.joints), position=list(js))
         req.start_state = start
         req.group_name = 'lift_arm'
         req.link_name = 'tcp_link'
@@ -96,9 +96,16 @@ def main():
     ap.add_argument('--press-depth', type=float, default=0.0015, help='reference past the wall surface, m')
     ap.add_argument('--stroke-speed', type=float, default=0.02, help='velocity scale of the stroke (and of free moves)')
     ap.add_argument('--target-path', choices=['bridge', 'jtac'], default='jtac')
+    ap.add_argument('--wall-x', type=float, default=WALL_X, help='wall plane x in base_footprint (shifted wall of another profile)')
+    ap.add_argument('--ready-pose', type=float, nargs=7, metavar=('X', 'Y', 'Z', 'QX', 'QY', 'QZ', 'QW'),
+                    help='first move: a planned tcp pose (ready_pose.py --pose) instead of the UR10e FREE joint pose; '
+                         'needed for any other MP_PROFILE (the stroke orientation is the one reached)')
     ap.add_argument('--record', default='/tmp/wall_pass.csv')
     ap.add_argument('--timeout', type=float, default=120.0)
     args = ap.parse_args()
+    if args.ready_pose is None and profile_name() != DEFAULT_PROFILE:
+        sys.exit(f'wall_pass_test: FREE is a UR10e joint pose; MP_PROFILE={profile_name()} needs --ready-pose')
+    wall_x = args.wall_x
 
     rclpy.init()
     node = WallPass()
@@ -124,13 +131,20 @@ def main():
         os._exit(1)
 
     def run():
-        node.move(FREE, 8.0)
+        if args.ready_pose is not None:
+            from ready_pose import planned_move
+            code = planned_move(node, None, 0.3, args.ready_pose)
+            check('ready pose planned and executed', code == 0, f'code {code}')
+            if code != 0:
+                return
+        else:
+            node.move(FREE, 8.0)
         node.hold(1.0)
         orientation = node.tcp_pose().rotation
         axes_on = [False, False, True, False, False, False]
         for k, y in enumerate(args.strokes_y):
-            free_x = WALL_X - 0.03
-            press_x = WALL_X + args.press_depth
+            free_x = wall_x - 0.03
+            press_x = wall_x + args.press_depth
             steps = [
                 ('approach', [node.pose(free_x, y, args.z_top, orientation)], 0.15, False),
                 ('press', [node.pose(press_x, y, args.z_top, orientation)], args.stroke_speed, True),
@@ -171,7 +185,7 @@ def main():
     guarded(node, run)
 
     y_lo, y_hi = min(args.strokes_y) - 0.07, max(args.strokes_y) + 0.07
-    n = node.write_recording(args.record, WALL_X, (y_lo, y_hi), (args.z_bottom - 0.02, args.z_top + 0.02))
+    n = node.write_recording(args.record, wall_x, (y_lo, y_hi), (args.z_bottom - 0.02, args.z_top + 0.02))
     print(f'recorded {n} samples to {args.record}', flush=True)
     print('WALL PASS', 'FAILED: ' + ', '.join(failures) if failures else 'EXECUTED', flush=True)
     os._exit(1 if failures else 0)

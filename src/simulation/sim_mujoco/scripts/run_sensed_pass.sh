@@ -10,17 +10,22 @@
 #   SENSED_PASS_OUT (default /tmp/sensed_pass)  SENSED_PASS_NOISE (sensor range noise, m, default 0.003)
 #   SENSED_PASS_CROP_Y / _Z  contact crop "min max" (defaults "0 0.3" / "1.0 1.3")
 # plus the MANAGER_PASS_* variables of run_manager_pass.sh.
+# MP_PROFILE=<name>: another robot profile, as in run_manager_pass.sh; the wall, the crop and the camera follow it.
 set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
 SHARE=$PKG/share/sim_mujoco
 . "$PKG/lib/sim_mujoco/manager_pass_common.sh"
 mp_init "${SENSED_PASS_OUT:-/tmp/sensed_pass}"
+mp_profile_init "$SHARE/data" || exit $?
+DATA=$MP_DATA
+# the camera sits at the wall's mid height (1.15 m for the stock wall)
+CAM_Z=$(python3 -c "print(round(($MP_Z_LO + $MP_Z_HI) / 2, 3))")
 trap mp_stop_all EXIT
 rm -f "$OUT/wall_scene.json" "$OUT/walls.pcd" "$OUT/wall_scene_crop.json"
 
-mp_start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=ur10e_telescopic controller:=jtac conditioner:=true \
-  payload_mass_kg:=0.5 move_group:=true scene:=$SHARE/data/smoke_wall_scene.json depth_sensor:=true \
-  depth_sensor_pose:="0.1 0 1.15 0 0 0" depth_sensor_noise_m:=${SENSED_PASS_NOISE:-0.003} ${MANAGER_PASS_LAUNCH_ARGS:-}
+mp_start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$MP_PROFILE controller:=jtac conditioner:=true \
+  payload_mass_kg:=0.5 move_group:=true scene:=$DATA/smoke_wall_scene.json depth_sensor:=true \
+  depth_sensor_pose:="0.1 0 $CAM_Z 0 0 0" depth_sensor_noise_m:=${SENSED_PASS_NOISE:-0.003} ${MANAGER_PASS_LAUNCH_ARGS:-}
 SIM_T0=$SECONDS
 mp_start coverage_planner ros2 run coverage_planner coverage_planner_node
 mp_start wall_detector ros2 launch wall_detector wall_detector.launch.py output_dir:=$OUT target_frame:=base_footprint max_range_m:=4.0
@@ -36,7 +41,7 @@ grep -E "wall: n" "$OUT/wall_detector.log" | tail -1 | cut -c1-220
 
 # 2. coverage plan for the contact region of the sensed wall
 python3 "$PKG/lib/sim_mujoco/crop_wall_scene.py" "$OUT/wall_scene.json" "$OUT/wall_scene_crop.json" \
-  --y ${SENSED_PASS_CROP_Y:-0 0.3} --z ${SENSED_PASS_CROP_Z:-1.0 1.3} || exit 5
+  --y ${SENSED_PASS_CROP_Y:-0 0.3} --z ${SENSED_PASS_CROP_Z:-$MP_Z_LO $MP_Z_HI} || exit 5
 mp_coverage "$OUT/wall_scene_crop.json" || exit $?
 
 # 3. manager parameters, and the whole sensed wall into MoveIt's planning scene as an octomap

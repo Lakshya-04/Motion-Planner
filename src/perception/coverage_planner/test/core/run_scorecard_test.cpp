@@ -242,3 +242,78 @@ TEST(RunScorecard, KeepoutMarginShrinksTheCoverageTarget)
   EXPECT_LT(plain.coverage.target_cells, none.coverage.target_cells);
   EXPECT_LT(keepout.coverage.target_cells, plain.coverage.target_cells);
 }
+
+namespace
+{
+// The good run, with every sample `standoff` in front of the wall and tilted by `tilt_deg`.
+std::vector<RunSample> poseRun(double standoff, double tilt_deg)
+{
+  auto s = run(0.16, 10.1);
+  for (auto & r : s) {r.z = -standoff; r.tilt_deg = tilt_deg;}
+  return s;
+}
+}  // namespace
+
+TEST(RunScorecard, PoseGateOffKeepsTheOldBehaviour)
+{
+  // far from the wall and tilted 40 degrees, but force reads 10 N: counted, as before the gate existed
+  const auto card = scoreRun(wall(), {}, poseRun(0.2, 40.0), contactOptions());
+  EXPECT_GT(card.coverage.covered_fraction, 0.95);
+  EXPECT_EQ(card.bad_pose_samples, 0U);
+}
+
+TEST(RunScorecard, ForceWithTheToolOffTheWallIsNotCoverage)
+{
+  ScorecardOptions o = contactOptions();
+  o.max_wall_gap_m = 0.01;
+  ScorecardLimits l;
+  l.max_bad_pose_fraction = 0.05;
+  const auto card = scoreRun(wall(), {}, poseRun(0.05, 0.0), o, l);   // 5 cm off the plane: something else is pressing
+  EXPECT_FALSE(card.passed);
+  EXPECT_LT(card.coverage.covered_fraction, 0.01);
+  EXPECT_GT(card.off_wall_samples, 0U);
+  EXPECT_EQ(card.tilted_samples, 0U);
+  EXPECT_NEAR(card.bad_pose_fraction, 1.0, 1e-9);
+}
+
+TEST(RunScorecard, TiltedToolIsNotCoverageAndTheSquareOneIs)
+{
+  ScorecardOptions o = contactOptions();
+  o.max_wall_gap_m = 0.01;
+  o.max_tilt_deg = 10.0;
+  ScorecardLimits l;
+  l.max_bad_pose_fraction = 0.05;
+  const auto tilted = scoreRun(wall(), {}, poseRun(0.002, 25.0), o, l);
+  EXPECT_FALSE(tilted.passed);
+  EXPECT_GT(tilted.tilted_samples, 0U);
+  EXPECT_EQ(tilted.off_wall_samples, 0U);
+
+  const auto square = scoreRun(wall(), {}, poseRun(0.002, 3.0), o, l);
+  EXPECT_TRUE(square.passed) << (square.failures.empty() ? "" : square.failures.front());
+  EXPECT_NEAR(square.tilt_mean_deg, 3.0, 1e-9);
+  EXPECT_NEAR(square.wall_gap_mean_m, 0.002, 1e-9);
+  EXPECT_EQ(square.bad_pose_samples, 0U);
+}
+
+TEST(RunScorecard, UnrecordedTiltIsNotChecked)
+{
+  ScorecardOptions o = contactOptions();
+  o.max_tilt_deg = 10.0;
+  const auto card = scoreRun(wall(), {}, poseRun(0.0, -1.0), o);
+  EXPECT_EQ(card.tilted_samples, 0U);
+  EXPECT_GT(card.coverage.covered_fraction, 0.95);
+}
+
+TEST(RunScorecard, AngledToolIsScoredAgainstItsIntendedTilt)
+{
+  ScorecardOptions o = contactOptions();
+  o.max_wall_gap_m = 0.01;
+  o.max_tilt_deg = 5.0;
+  o.nominal_tilt_deg = 30.0;
+  ScorecardLimits l;
+  l.max_bad_pose_fraction = 0.05;
+  EXPECT_TRUE(scoreRun(wall(), {}, poseRun(0.002, 31.0), o, l).passed);    // at its intended 30 degrees
+  const auto flat = scoreRun(wall(), {}, poseRun(0.002, 0.0), o, l);       // held flat: not what this tool should do
+  EXPECT_FALSE(flat.passed);
+  EXPECT_GT(flat.tilted_samples, 0U);
+}

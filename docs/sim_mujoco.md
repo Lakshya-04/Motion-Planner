@@ -617,6 +617,59 @@ the lift, `generate_acm.py`), a press-then-stroke sequence with a 2 s settle (`p
 tool's swath (0.14 m, `MANAGER_PASS_SWATH`) instead of the profile's 0.20 m. Next: the contact force (slower stroke,
 F/T filtering, JTAC gains).
 
+### Running another robot profile
+
+The manager passes (`run_manager_pass.sh`, `run_sensed_pass.sh`, `run_spray_pass.sh`, `run_wall_pass.sh`,
+`run_multi_stand_pass.sh`; `run_scenarios.sh` refuses it) take the robot from `MP_PROFILE` (default `ur10e_telescopic`;
+`STAND_PROFILE` still wins in the multi-stand script). With the default nothing changes: the stock wall, the UR10e joint
+pose in `ready_pose.py` and the manager's default profile. Another profile, for example
+`MP_PROFILE=xarm7_telescopic run_manager_pass.sh` (also `panda_`, `fr3_`, `iiwa7_`, `kinova_gen3_telescopic`), changes:
+
+| Step | Default (UR10e) | Another profile |
+|---|---|---|
+| sim launch and manager launch | `profile:=ur10e_telescopic` (the manager used its default) | `profile:=$MP_PROFILE` for both; group names, joint names and controllers come from the profile |
+| wall | stock: plane x = 0.98 m, patch y 0..0.3, z 1.0..1.3 | `scripts/profile_reach.py` picks the plane x and the z band; `shift_wall_scene.py` moves the three scene files (a `DZ` argument was added); manager `coverage_z_min_m/max_m` and the recorder (`record_run.py --wall-x/--wall-z`, so `run.csv.wall.json` matches the shifted wall) follow |
+| pre-contact pose | unplanned joint move to `smoke_test.FREE` | `ready_pose.py --pose x y z qx qy qz qw`: a MoveIt pose goal (plan only, collision-checked) on the whole-body group for the tool pointing at the wall, 3 cm in front of it at the band's mid height, executed through the controller |
+| tool roll `tool_frame_yaw_deg` | -90 | `profile_reach.py` output: -90 unless the profile has `coverage: {tool_frame_yaw_deg: ..}`; `MANAGER_PASS_TOOL_YAW` overrides |
+| multi-stand | UR10e reachability map and dock seed | map built for the profile's arm and tcp, dock seed `[]` (chained), arm mount height and stroke from the profile |
+| joint names in the scripts | UR names | read from the profile (`smoke_test.active_joints`) |
+
+What `profile_reach.py` derives, and what is a guess:
+
+- Derived from the profile: arm base height (`base.lift_mount_height_m` + `lift.mount_height_m`, 1.17 m for every shipped
+  telescopic profile), lift stroke, tcp offset along z, footprint front, joint names, group and tcp link.
+- Wall distance: the stock UR10e wall defines the ratio (distance from the arm base to the patch's far corner over the arm's
+  published reach, about 0.69); the same ratio is applied to the published reach of the arm (`ARM_REACH_M`: xArm 7 0.70 m,
+  Panda and FR3 0.855, iiwa 7 0.80, Gen3 0.902, UR3e 0.50 which is too short for a 0.3 m band). **Guesses to confirm by
+  a run:** that ratio carries over to other arms, the reach figures (taken from vendor data sheets, to be re-checked), the
+  band (0.3 m high, centred 2 cm under the retracted shoulder, as for the UR10e), the 0.10 m clearance in front of the
+  base footprint (the xArm 7 on the generic base hits it: the wall is placed at 0.55 m and the script prints a warning;
+  the arm may not reach it, use a longer arm or a smaller base for a real test).
+- Tool roll: **not derived.** -90 is the roll that suited the UR10e's ready posture (wrist_3 at +90 degrees folds the arm
+  away from the lift column). It depends on the arm's flange convention and joint ranges, and the profiles have no `tcp_rpy`
+  field to derive it from. Try `MANAGER_PASS_TOOL_YAW=90` or `0` if planning to the first pose fails.
+- The 7-DOF `home` postures are unchecked (docs/robot_description.md); the passes no longer use them, the pre-contact pose
+  is planned.
+
+Not run: none of this was run in a simulator, for any profile. `bash -n`, `py_compile` and the unit tests of
+`profile_reach.py` and `shift_wall_scene.py` (`test/test_profile_reach.py`, `test/test_shift_wall_scene.py`) are the
+only checks. `smoke_test.py` and `contact_test.py` stay UR10e-only (joint-space poses) and exit with a message for another
+`MP_PROFILE`; `run_stand_pass.sh`, `run_depth_wall.sh` and the other helper scripts are unchanged.
+
+#### Scoring gates
+
+`MANAGER_PASS_SCORE_ARGS` (default empty) is passed to every `score_run` call of these scripts (also the spray, wall,
+multi-stand and scenario scripts). The recommended tool-pose gates are
+
+```bash
+MANAGER_PASS_SCORE_ARGS="--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.05" run_manager_pass.sh
+```
+
+(tool point within 1 cm of the wall while in contact, tool axis within 10 degrees of the wall normal, at most 5 percent of the
+contact samples off either). They are not on by default: the thresholds have not been checked against a measured run yet.
+The `tilt_deg` column of `run.csv` comes from the recorder (`record_run.py`, `contact_test.py`), measured on the tool's z axis
+against the wall normal in the frame the wall is in.
+
 ### Spray pass (non-contact tool)
 
 `scripts/run_spray_pass.sh` is the manager pass for a non-contact tool (the contact script is unchanged). The coverage
