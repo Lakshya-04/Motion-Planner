@@ -111,7 +111,7 @@ revolute and `100 * effort_limit` (N/m) for prismatic joints, `kv = 0.1 kp`, for
 limit. The plugin applies `ctrl = q* + kv/kp * v*`, which is exactly the PD law
 `kp (q* - q) + kv (v* - qdot)`: velocity feed-forward without a second actuator. Arm links and the
 lift are gravity compensated (`gravcomp`), so the PD holds poses; everything beyond the F/T site
-is not (see below). Joint damping and armature are small defaults (2 N m s/rad plus
+is not (see below). The generator option `gravcomp` takes `True` (default, as described), `False`, or a list of link names to compensate exactly those bodies. Joint damping and armature are small defaults (2 N m s/rad plus
 `0.0005 * effort`; lift 100 N s/m and 2 kg) chosen so the implicit-fast integrator stays stable at
 2 ms and a 100 Hz controller.
 

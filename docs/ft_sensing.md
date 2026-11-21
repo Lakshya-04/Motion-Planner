@@ -127,6 +127,24 @@ The admittance axis did not hold a 10 N contact there; the cause (a stiff simula
 velocity-servo joints, or a controller-side limit) is not established, see [sim_gazebo.md](sim_gazebo.md). The
 script gates the mean error (1 N, 0.2 Nm); the maxima are printed, not checked.
 
+## The `contact_free` gate (library)
+
+The bias tracker (`force_core::BiasTracker`) only learns while the caller says the tool is free of contact, and
+nothing published that flag. `force_core::ContactFreeGate` (`contact_free_gate.hpp`) computes it from the force
+FSM state and the conditioned force magnitude. It is plain C++ with caller-supplied time, so the `ft_conditioner`
+node can call `update(state, |F|, now_s, commanded_motion)` once per wrench sample and publish the result; the node
+is not changed yet.
+
+| Rule | Behaviour |
+|---|---|
+| Free states | only `kIdle` and `kApproach` (before contact is confirmed). Every contact state, `kRetractSettle`, `kRetractFollow` and `kAborted` are never free |
+| Settle | after entering a free state from a non-free one (for example when a retract completes) it stays not free for `min_settle_s` (default 1 s) |
+| Hysteresis | becomes free after `debounce_ticks` (5) consecutive samples under `free_below_n` (0.5 N); loses it at once above `not_free_above_n` (1 N) |
+| Fail safe | NaN or infinite force, backwards or non-finite time: not free. Optional `require_no_motion` makes commanded motion not free |
+
+Tested by 13 host gtests against fabricated traces; not run in a simulator or with the real node, and the default
+thresholds are untuned.
+
 ## Not done yet
 
 - Reading the sensor-to-tool offset and the payload from the robot profile / URDF, so no parameter has to
