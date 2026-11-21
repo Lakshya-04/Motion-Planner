@@ -525,6 +525,7 @@ Same-session runs of `run_multi_stand_pass.sh` (two stands, ten columns, no cuRo
   `dock_ik_branch_joints` joint (default `[1, 3]`, the shoulder pan and the elbow: in the Gazebo log the pan went -0.62 to +2.49 and the elbow +0.87 to -0.94) or a `dock_ik_wrist_joint` (default 6) outside `[dock_ik_wrist_min_rad, dock_ik_wrist_max_rad]` (default +-3.2) is dropped; none left means
   the old seeded IK. Turn it on with `MULTI_STAND_DOCK_IK_CONTINUITY=true` in this script (it works with `dock_ik_seeded: false`). The default joint indices are a guess for the
   lift-first UR10e group, check them against the `q2` of the log before relying on it. Gtested with a fake IK only; whether it fixes the pass is not measured.
+- **Opt-in recovery on the same branch (`recovery_keeps_branch`, default off; not built or run):** the rerun showed `approach_short`, then a jump to another branch. `recoverArm` jogged toward `last_good_state_` of any branch and the next attempt used a planner-sampled pose goal. With the flag the jog goes only toward a configuration on the live branch (last good, else the last docked one, else the arm stays) and the attempts after a short approach keep a joint goal from `selectDockIk` with the live state as reference (`core/recovery_branch.hpp`, 6 gtests with fake IK, host g++). Uses the `dock_ik_*` branch and wrist limits. Whether it fixes the 9 failed columns is not measured.
 
 ### Log lines that show it
 
