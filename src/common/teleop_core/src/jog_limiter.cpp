@@ -2,12 +2,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace teleop_core
 {
 
 JogLimiter::JogLimiter(const JogLimiterConfig & config)
-: cfg_(config) {}
+: cfg_(config)
+{
+  if (!std::isfinite(cfg_.stale_timeout_s) || cfg_.stale_timeout_s <= 0.0) {
+    throw std::invalid_argument("JogLimiterConfig.stale_timeout_s must be finite and > 0");
+  }
+}
 
 void JogLimiter::setSpeedScale(double scale, double now_s)
 {

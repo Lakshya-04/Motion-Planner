@@ -6,8 +6,11 @@
  *
  *          Transition table (from -> to : condition):
  *            AUTO   -> HOLD   : stop or safety event (always)
- *            AUTO   -> TELEOP : operator request AND the running segment is halted (`segment_halted`)
- *            TELEOP -> HOLD   : stop or safety event (always), or no operator input for `input_timeout_s`
+ *            AUTO   -> TELEOP : operator request AND the running segment is halted (`segment_halted`);
+                               refused with kInvalidTime for a non-finite time
+ *            TELEOP -> HOLD   : stop or safety event (always), or no operator input for `input_timeout_s`;
+                               a clock that went backwards, an input stamped after the tick time, or a
+                               non-finite tick time also count as a timeout (fail safe)
  *            TELEOP -> AUTO   : operator confirm AND replan-from-current-pose acknowledged
  *            HOLD   -> TELEOP : operator request
  *            HOLD   -> AUTO   : operator request; if teleoperation moved the arm since the last AUTO
@@ -37,6 +40,7 @@ enum class Reason
   kNeedsConfirm,         ///< refused: TELEOP -> AUTO without operator confirm
   kNeedsReplanAck,       ///< refused: return to AUTO without replan acknowledgement
   kAlreadyInMode,        ///< no-op
+  kInvalidTime,          ///< refused: non-finite time for a TELEOP request
 };
 
 struct TransitionResult
@@ -48,7 +52,9 @@ struct TransitionResult
 
 struct TeleopModeConfig
 {
-  double input_timeout_s{2.0};  ///< TELEOP without input for this long falls back to HOLD.
+  /// TELEOP without input for this long falls back to HOLD. Must be finite and > 0, otherwise the
+  /// constructor throws std::invalid_argument.
+  double input_timeout_s{2.0};
 };
 
 class TeleopModeManager
@@ -77,6 +83,7 @@ private:
   TransitionResult refuse(Reason r);
 
   TeleopModeConfig cfg_;
+  bool hold_from_safety_{false};
   Mode mode_{Mode::kAuto};
   double last_input_s_{0.0};
   bool needs_replan_{false};
