@@ -190,6 +190,10 @@ public:
    * @param[in] frame_id Reference frame the intents' poses are expressed in.
    * @param[in] planning_group MoveIt planning group to check feasibility for.
    */
+  /// Optional column reachability check (core/column_reach_port.hpp) handed to the analyzer by
+  /// analyzeFeasibleSegments(). Non-owning, must outlive the manager's use of it; nullptr (default) = off.
+  void setColumnReachability(ColumnReachabilityPort * port);
+
   FeasibilityReport analyzeFeasibleSegments(
     const std::vector<CoverageSegmentIntent> & intents,
     const std::string & frame_id,
@@ -268,6 +272,7 @@ private:
     const std::string & planning_group) const;
 
   std::unique_ptr<motion_planner::MotionPlanner> motion_planner_;  ///< No default -- inject before use.
+  ColumnReachabilityPort * column_reach_{nullptr};  ///< Non-owning; null = no column reach check.
   std::unique_ptr<SegmentOrderingPolicy> segment_ordering_policy_;
   std::shared_ptr<core_types::Logger> logger_{std::make_shared<core_types::NullLogger>()};
   std::shared_ptr<ExecutionPort> execution_port_;  ///< No default -- inject before use.

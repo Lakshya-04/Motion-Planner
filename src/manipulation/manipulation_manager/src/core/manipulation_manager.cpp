@@ -160,12 +160,18 @@ void ManipulationManager::setCancelRequestedCallback(CancelRequestedCallback cal
   cancel_requested_callback_ = std::move(callback);
 }
 
+void ManipulationManager::setColumnReachability(ColumnReachabilityPort * port)
+{
+  column_reach_ = port;
+}
+
 FeasibilityReport ManipulationManager::analyzeFeasibleSegments(
   const std::vector<CoverageSegmentIntent> & intents,
   const std::string & frame_id,
   const std::string & planning_group)
 {
   CoverageFeasibilityAnalyzer analyzer(motion_planner_->cartesianPlanner());
+  analyzer.setColumnReachability(column_reach_);
   return analyzer.analyze(intents, frame_id, planning_group);
 }
 
