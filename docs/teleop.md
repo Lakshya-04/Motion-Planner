@@ -5,7 +5,7 @@ in the stack. This page describes the ROS-free logic that sits around a Cartesia
 rule of adopting industry practice first, the engine itself is planned to be MoveIt Servo (twist in, joint commands
 out, with its own singularity and joint-limit handling); it is not written here.
 
-**Status: the logic below exists as the library `teleop_core` with 50 host-compiled gtests. There is no node, no
+**Status: the logic below exists as the library `teleop_core` with a host-compiled gtest suite (66 teleop_core tests). There is no node, no
 MoveIt Servo wiring, no joystick driver, and nothing has been run in a simulator or on hardware.**
 
 ## Modes and transitions
@@ -17,10 +17,10 @@ MoveIt Servo wiring, no joystick driver, and nothing has been run in a simulator
 |---|---|---|---|
 | AUTO | HOLD | stop or safety event, always | `kStopRequested` / `kSafetyStop` |
 | AUTO | TELEOP | operator request and the running segment is halted (caller reports `segment_halted`) | `kOperatorRequest`; refused with `kSegmentStillRunning` |
-| TELEOP | HOLD | stop or safety event, or no operator input for `input_timeout_s` (2 s) | `kStopRequested` / `kSafetyStop` / `kInputTimeout` |
+| TELEOP | HOLD | stop or safety event, or no operator input for `input_timeout_s` (2 s). A clock that went backwards, an input stamped after the tick time, or a non-finite tick time also count as a timeout | `kStopRequested` / `kSafetyStop` / `kInputTimeout` |
 | TELEOP | AUTO | explicit operator confirm and a replan-from-current-pose acknowledgement | `kOperatorConfirmed`; refused with `kNeedsConfirm` / `kNeedsReplanAck` |
-| HOLD | TELEOP | operator request | `kOperatorRequest` |
-| HOLD | AUTO | operator request; also the replan acknowledgement if teleoperation moved the arm since the last AUTO | `kOperatorRequest`; refused with `kNeedsReplanAck` |
+| HOLD | TELEOP | operator request (refused with `kInvalidTime` for a non-finite time, as is AUTO to TELEOP) | `kOperatorRequest` |
+| HOLD | AUTO | operator request; also the replan acknowledgement if teleoperation moved the arm since the last AUTO; also `operator_confirm` if the HOLD came from a safety stop (`onStop(safety=true)`; the reason is kept until HOLD is left) | `kOperatorRequest`; refused with `kNeedsConfirm` / `kNeedsReplanAck` |
 
 The last row goes slightly beyond "by request only": after TELEOP the arm is somewhere the old plan did not
 start from, so resuming through HOLD must not skip the replan.
@@ -29,14 +29,20 @@ start from, so resuming through HOLD must not skip the replan.
 
 `JogShaper` turns a normalised 6D input (spacemouse or joystick, -1 to 1) into a base-frame twist:
 clamp, per-axis deadband (rescaled so full deflection still reaches the maximum), expo curve
-`(1 - e) x + e x^3`, per-axis enable mask, scale to the maximum linear and angular speed, rotate from the selected
+`(1 - e) x + e x^3`, per-axis enable mask, scale to the maximum linear and angular speed, clamp the norm of the linear part to `max_linear_mps` and of the angular part to `max_angular_rps` (direction kept, so (1, 1, 1) is not faster than a single axis at full deflection), rotate from the selected
 frame (tool, base or world, using a rotation the caller supplies), then a vector slew limit for linear and angular
 parts (direction kept). A watchdog gives an immediate zero twist, flagged, when no valid input arrived for
-`watchdog_s`. Non-finite input counts as zero and does not refresh the watchdog.
+`watchdog_s`; the watchdog also trips when time goes backwards (now before the last input). Non-finite input counts as zero and does not refresh the watchdog. A non-finite frame rotation gives a zero twist with `invalid_rotation` set and clears the slew state, so the next good sample ramps from rest.
 
-The enable mask is how force-limited contact works: while the tool is pressing, the contact-normal axis is masked
-off so the operator cannot push into the wall, and the remaining axes slide along it. The mask is applied in the
-jog frame (tool Z for a wall contact) before rotation.
+Config validation: `input_timeout_s`, `watchdog_s` and `stale_timeout_s` must be finite and > 0, and the shaper accel limits must be finite (<= 0 still disables slew); otherwise the constructor or `setConfig` throws `std::invalid_argument` (the shaper keeps its old config).
+
+The enable mask is how force-limited contact is meant to work: while the tool is pressing, the contact-normal axis is
+masked off and the remaining axes slide along it. The mask is applied in the jog frame (tool Z for a wall contact)
+before rotation. What is guaranteed: from the `update()` after an axis becomes masked, the commanded velocity along
+that axis in the jog frame is zero (the masked axes of the slew state are cleared, there is no ramp-down), up to
+floating-point rounding of the rotation. Not guaranteed: that the arm does not touch or press the wall. The shaper
+does not sense contact, other axes can still move, and motion already issued downstream (Servo, controller
+latency) is outside this class.
 
 ## Limiting
 

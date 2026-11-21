@@ -11,63 +11,131 @@ namespace diff_ik_core
 
 namespace
 {
-constexpr double kRankTol = 1e-9;
+constexpr double kRankTol = 1e-9;   // guard for the damped inverse only
 
-bool hasLimit(const Eigen::VectorXd & v, Eigen::Index i)
+using RowMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, 0, 6, kMaxJoints>;
+using RowVector = Eigen::Matrix<double, Eigen::Dynamic, 1, 0, 6, 1>;
+
+/// A finite velocity limit (0 included); +infinity = unlimited.
+bool hasLimit(const Eigen::VectorXd & v, Eigen::Index i) {return std::isfinite(v(i));}
+
+bool isContinuous(const DiffIkLimits & l, Eigen::Index i)
 {
-  return i < v.size() && std::isfinite(v(i)) && v(i) > 0.0;
+  if (!l.continuous.empty()) {return l.continuous[static_cast<size_t>(i)];}
+  return !isLimitedJoint(l.q_min(i), l.q_max(i));
 }
 
-double limitOr(const Eigen::VectorXd & v, Eigen::Index i)
+bool nonNegOrInf(double x) {return !std::isnan(x) && x >= 0.0;}
+
+InputStatus checkLimits(const DiffIkLimits & l, Eigen::Index n, bool need_qdd)
 {
-  return hasLimit(v, i) ? v(i) : std::numeric_limits<double>::infinity();
+  if (l.q_min.size() != n || l.q_max.size() != n || l.qd_max.size() != n ||
+    (need_qdd && l.qdd_max.size() != n) ||
+    (!l.continuous.empty() && static_cast<Eigen::Index>(l.continuous.size()) != n))
+  {
+    return InputStatus::BadSize;
+  }
+  if (!std::isfinite(l.position_margin) || l.position_margin < 0.0) {return InputStatus::BadValue;}
+  for (Eigen::Index i = 0; i < n; ++i) {
+    if (std::isnan(l.q_min(i)) || std::isnan(l.q_max(i)) || l.q_min(i) > l.q_max(i)) {
+      return InputStatus::BadValue;
+    }
+    if (!isContinuous(l, i) && !(std::isfinite(l.q_min(i)) && std::isfinite(l.q_max(i)))) {
+      return InputStatus::BadValue;
+    }
+    if (!nonNegOrInf(l.qd_max(i)) || (need_qdd && !nonNegOrInf(l.qdd_max(i)))) {
+      return InputStatus::BadValue;
+    }
+  }
+  return InputStatus::Ok;
+}
+
+InputStatus checkStep(
+  const Eigen::Ref<const Eigen::MatrixXd> & J, const Vector6d & twist, const JointRef & q,
+  const DiffIkLimits & limits, const DiffIkParams & params)
+{
+  const Eigen::Index n = J.cols();
+  if (n < 1 || n > kMaxJoints || J.rows() != 6 || q.size() != n) {return InputStatus::BadSize;}
+  if (params.joint_weights.size() != 0 && params.joint_weights.size() != n) {
+    return InputStatus::BadSize;
+  }
+  const InputStatus ls = checkLimits(limits, n, false);
+  if (ls != InputStatus::Ok) {return ls;}
+  if (!J.allFinite() || !twist.allFinite() || !q.allFinite()) {return InputStatus::NonFinite;}
+  if (!std::isfinite(params.sigma_threshold) || !std::isfinite(params.lambda_max) ||
+    !std::isfinite(params.rank_tolerance) || !params.row_scale.allFinite() ||
+    (params.joint_weights.size() != 0 && !params.joint_weights.allFinite()))
+  {
+    return InputStatus::NonFinite;
+  }
+  if (params.sigma_threshold < 0.0 || params.lambda_max < 0.0 || params.rank_tolerance < 0.0) {
+    return InputStatus::BadValue;
+  }
+  for (int a = 0; a < 6; ++a) {
+    if (!(params.row_scale(a) > 0.0)) {return InputStatus::BadValue;}
+  }
+  for (Eigen::Index i = 0; i < params.joint_weights.size(); ++i) {
+    if (!(params.joint_weights(i) > 0.0)) {return InputStatus::BadValue;}
+  }
+  for (const auto & t : params.null_space) {
+    if (!std::isfinite(t.gain)) {return InputStatus::NonFinite;}
+  }
+  return InputStatus::Ok;
+}
+
+DiffIkResult invalid(Eigen::Index n, InputStatus why)
+{
+  DiffIkResult r;
+  r.status = why;
+  r.qd = (n >= 1 && n <= kMaxJoints) ? JointVector::Zero(n).eval() : JointVector();
+  return r;
 }
 }  // namespace
 
 DiffIkResult computeStep(
-  const Eigen::MatrixXd & J, const Vector6d & twist, const AxisMask & mask,
-  const Eigen::VectorXd & q, const DiffIkLimits & limits, const DiffIkParams & params)
+  const Eigen::Ref<const Eigen::MatrixXd> & J, const Vector6d & twist, const AxisMask & mask,
+  const JointRef & q, const DiffIkLimits & limits, const DiffIkParams & params)
 {
-  DiffIkResult res;
   const Eigen::Index n = J.cols();
-  res.qd = Eigen::VectorXd::Zero(n);
-  res.saturation.assign(static_cast<size_t>(n), JointSaturation::None);
-  if (J.rows() != 6 || q.size() != n || limits.q_min.size() != n || limits.q_max.size() != n ||
-    (params.joint_weights.size() != 0 && params.joint_weights.size() != n))
-  {
-    return res;
-  }
-  for (Eigen::Index i = 0; i < params.joint_weights.size(); ++i) {
-    if (!(params.joint_weights(i) > 0.0)) {return res;}
-  }
+  const InputStatus st = checkStep(J, twist, q, limits, params);
+  if (st != InputStatus::Ok) {return invalid(n, st);}
+
+  DiffIkResult res;
+  res.qd = JointVector::Zero(n);
 
   // Row selection for the masked task.
-  std::vector<int> rows;
+  std::array<int, 6> rows = {};
+  int m = 0;
   for (int a = 0; a < 6; ++a) {
-    if (mask[static_cast<size_t>(a)]) {rows.push_back(a);}
-  }
-  const Eigen::Index m = static_cast<Eigen::Index>(rows.size());
-  Eigen::MatrixXd Js(m, n);
-  Eigen::VectorXd vs(m);
-  for (Eigen::Index r = 0; r < m; ++r) {
-    Js.row(r) = J.row(rows[static_cast<size_t>(r)]);
-    vs(r) = twist(rows[static_cast<size_t>(r)]);
+    if (mask[static_cast<size_t>(a)]) {rows[static_cast<size_t>(m++)] = a;}
   }
 
-  // Weighted coordinates: Jw = Js W^-1/2, qd = W^-1/2 qd_w.
-  Eigen::VectorXd winv = Eigen::VectorXd::Ones(n);
-  for (Eigen::Index i = 0; i < params.joint_weights.size(); ++i) {
-    winv(i) = 1.0 / std::sqrt(params.joint_weights(i));
+  // Locked joints (velocity limit 0) leave the solve; weights and row scales go into Jw.
+  JointVector winv = JointVector::Ones(n);
+  std::array<bool, kMaxJoints> locked = {};
+  for (Eigen::Index i = 0; i < n; ++i) {
+    if (params.joint_weights.size() != 0) {winv(i) = 1.0 / std::sqrt(params.joint_weights(i));}
+    locked[static_cast<size_t>(i)] = hasLimit(limits.qd_max, i) && limits.qd_max(i) == 0.0;
   }
-  const Eigen::MatrixXd Jw = Js * winv.asDiagonal();
+  RowMatrix Jw(m, n);
+  RowVector vs(m);
+  for (int r = 0; r < m; ++r) {
+    const int a = rows[static_cast<size_t>(r)];
+    const double sc = params.row_scale(a);
+    vs(r) = sc * twist(a);
+    for (Eigen::Index j = 0; j < n; ++j) {
+      Jw(r, j) = locked[static_cast<size_t>(j)] ? 0.0 : sc * J(a, j) * winv(j);
+    }
+  }
 
-  Eigen::VectorXd qd_task = Eigen::VectorXd::Zero(n);
-  Eigen::MatrixXd V = Eigen::MatrixXd::Zero(n, 0);
-  Eigen::VectorXd f;   // damped projection share per singular direction
+  JointVector qd_task = JointVector::Zero(n);
+  Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, 0, kMaxJoints, kMaxJoints> V;
+  Eigen::Matrix<double, Eigen::Dynamic, 1, 0, kMaxJoints, 1> s;
   res.sigma_min = std::numeric_limits<double>::infinity();
   if (m > 0) {
-    Eigen::JacobiSVD<Eigen::MatrixXd> svd(Jw, Eigen::ComputeThinU | Eigen::ComputeThinV);
-    const Eigen::VectorXd s = svd.singularValues();
+    Eigen::JacobiSVD<RowMatrix> svd(Jw, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    s = svd.singularValues();
+    V = svd.matrixV();
     res.sigma_min = (n < m) ? 0.0 : s.minCoeff();
     double lambda2 = 0.0;
     if (res.sigma_min < params.sigma_threshold && params.sigma_threshold > 0.0) {
@@ -75,26 +143,39 @@ DiffIkResult computeStep(
       lambda2 = (1.0 - ratio * ratio) * params.lambda_max * params.lambda_max;
     }
     res.damping = std::sqrt(lambda2);
-    V = svd.matrixV();
-    f = Eigen::VectorXd::Zero(s.size());
-    Eigen::VectorXd qd_w = Eigen::VectorXd::Zero(n);
+    JointVector qd_w = JointVector::Zero(n);
     for (Eigen::Index i = 0; i < s.size(); ++i) {
       const double den = s(i) * s(i) + lambda2;
       if (s(i) < kRankTol || den < 1e-18) {continue;}
-      f(i) = s(i) * s(i) / den;
       qd_w += (s(i) / den) * svd.matrixU().col(i).dot(vs) * V.col(i);
     }
     qd_task = winv.asDiagonal() * qd_w;
   }
+  for (Eigen::Index i = 0; i < n; ++i) {
+    if (locked[static_cast<size_t>(i)]) {qd_task(i) = 0.0;}
+  }
 
-  // Null-space motion: (I - J_W^+ J) qd0 in weighted coordinates.
-  Eigen::VectorXd qd_null = Eigen::VectorXd::Zero(n);
+  // Null-space motion: N qd0 with the TRUE projector of the undamped Jacobian, in weighted
+  // coordinates (remove the components along singular directions above the rank tolerance).
+  JointVector qd_null = JointVector::Zero(n);
   if (!params.null_space.empty()) {
-    const Eigen::VectorXd qd0 = combinedAscent(params.null_space, q, limits.q_min, limits.q_max);
-    Eigen::VectorXd nw(n);
-    for (Eigen::Index i = 0; i < n; ++i) {nw(i) = qd0(i) / winv(i);}
-    for (Eigen::Index i = 0; i < f.size(); ++i) {nw -= f(i) * V.col(i).dot(nw) * V.col(i);}
+    JointVector lo = JointVector::Zero(n), hi = JointVector::Zero(n);
+    for (Eigen::Index i = 0; i < n; ++i) {
+      if (!isContinuous(limits, i)) {lo(i) = limits.q_min(i); hi(i) = limits.q_max(i);}
+    }
+    const JointVector qd0 = combinedAscent(params.null_space, q, lo, hi);
+    if (!qd0.allFinite()) {return invalid(n, InputStatus::NonFinite);}
+    JointVector nw(n);
+    for (Eigen::Index i = 0; i < n; ++i) {
+      nw(i) = locked[static_cast<size_t>(i)] ? 0.0 : qd0(i) / winv(i);
+    }
+    for (Eigen::Index i = 0; i < s.size(); ++i) {
+      if (s(i) > params.rank_tolerance) {nw -= V.col(i).dot(nw) * V.col(i);}
+    }
     qd_null = winv.asDiagonal() * nw;
+    for (Eigen::Index i = 0; i < n; ++i) {
+      if (locked[static_cast<size_t>(i)]) {qd_null(i) = 0.0;}
+    }
   }
 
   // Uniform task scaling at the velocity limits.
@@ -120,9 +201,9 @@ DiffIkResult computeStep(
   res.qd = qd_task + t * qd_null;
 
   // Hard position-limit zones.
+  const double margin = limits.position_margin;
   for (Eigen::Index i = 0; i < n; ++i) {
-    if (!isLimitedJoint(limits.q_min(i), limits.q_max(i))) {continue;}
-    const double margin = std::max(0.0, limits.position_margin);
+    if (isContinuous(limits, i)) {continue;}
     const bool into_lo = q(i) <= limits.q_min(i) + margin && res.qd(i) < 0.0;
     const bool into_hi = q(i) >= limits.q_max(i) - margin && res.qd(i) > 0.0;
     if (into_lo || into_hi) {
@@ -133,44 +214,70 @@ DiffIkResult computeStep(
   }
   for (Eigen::Index i = 0; i < n; ++i) {
     auto & sat = res.saturation[static_cast<size_t>(i)];
-    if (sat == JointSaturation::None && hasLimit(limits.qd_max, i) &&
+    if (sat == JointSaturation::None && hasLimit(limits.qd_max, i) && limits.qd_max(i) > 0.0 &&
       std::abs(res.qd(i)) >= 0.999 * limits.qd_max(i))
     {
       sat = JointSaturation::Velocity;
       ++res.velocity_limit_hits;
     }
   }
-  res.achieved_twist = J * res.qd;
+  for (int a = 0; a < 6; ++a) {
+    double acc = 0.0;
+    for (Eigen::Index j = 0; j < n; ++j) {acc += J(a, j) * res.qd(j);}
+    res.achieved_twist(a) = acc;
+  }
+  if (!res.qd.allFinite() || !res.achieved_twist.allFinite()) {
+    return invalid(n, InputStatus::NonFinite);
+  }
   res.valid = true;
+  res.status = InputStatus::Ok;
   return res;
 }
 
 IntegrateResult integrate(
-  const Eigen::VectorXd & q, const Eigen::VectorXd & qd_prev, const Eigen::VectorXd & qd_cmd,
+  const JointRef & q, const JointRef & qd_prev, const JointRef & qd_cmd,
   double dt, const DiffIkLimits & limits)
 {
   IntegrateResult out;
   const Eigen::Index n = q.size();
+  if (n < 1 || n > kMaxJoints) {return out;}
   out.q = q;
-  out.qd = Eigen::VectorXd::Zero(n);
-  if (qd_prev.size() != n || qd_cmd.size() != n || !(dt > 0.0)) {return out;}
+  out.qd = JointVector::Zero(n);
+  if (qd_prev.size() != n || qd_cmd.size() != n || !std::isfinite(dt) || !(dt > 0.0) ||
+    !q.allFinite() || !qd_prev.allFinite() || !qd_cmd.allFinite() ||
+    checkLimits(limits, n, true) != InputStatus::Ok)
+  {
+    return out;
+  }
   for (Eigen::Index i = 0; i < n; ++i) {
     double dv = qd_cmd(i) - qd_prev(i);
-    const double amax = limitOr(limits.qdd_max, i) * dt;
+    const double amax = limits.qdd_max(i) * dt;
     dv = std::clamp(dv, -amax, amax);
     double v = qd_prev(i) + dv;
-    const double vmax = limitOr(limits.qd_max, i);
+    const double vmax = limits.qd_max(i);
     v = std::clamp(v, -vmax, vmax);
     double qn = q(i) + v * dt;   // semi-implicit: new velocity
-    if (i < limits.q_min.size() && i < limits.q_max.size() &&
-      isLimitedJoint(limits.q_min(i), limits.q_max(i)))
-    {
-      if (qn < limits.q_min(i)) {qn = limits.q_min(i); v = 0.0;}
-      if (qn > limits.q_max(i)) {qn = limits.q_max(i); v = 0.0;}
+    if (!isContinuous(limits, i)) {
+      const double lo = limits.q_min(i), hi = limits.q_max(i);
+      if (qn < lo) {
+        if (q(i) < lo) {
+          if (qn < q(i)) {qn = q(i); v = 0.0;}   // further out: cancelled; inwards is allowed
+        } else {
+          qn = lo; v = 0.0;
+        }
+      } else if (qn > hi) {
+        if (q(i) > hi) {
+          if (qn > q(i)) {qn = q(i); v = 0.0;}
+        } else {
+          qn = hi; v = 0.0;
+        }
+      }
     }
+    if (!std::isfinite(qn)) {return IntegrateResult{false, JointVector(q), JointVector::Zero(n)};}
     out.q(i) = qn;
     out.qd(i) = v;
   }
+  out.valid = true;
   return out;
 }
 

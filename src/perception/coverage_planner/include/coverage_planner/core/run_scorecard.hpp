@@ -65,6 +65,7 @@ struct ScorecardOptions
   /// A sample only counts as working when the tool point is within this distance of the wall plane (either side,
   /// so a pad pressed into the surface still counts) and, if the tilt was recorded, within `max_tilt_deg` of square.
   /// Without it a link brushing the wall, or a tilted tool, scores as coverage. 0 = not checked (old behaviour).
+  /// Contact tools only: ignored when `contact` is false (a spray nozzle stands off the wall by design).
   double max_wall_gap_m{0.0};
   double max_tilt_deg{0.0};              ///< Allowed deviation of the tilt from `nominal_tilt_deg`; 0 = not checked.
   double nominal_tilt_deg{0.0};          ///< The tool's intended angle to the wall normal (0 for a flat pad, e.g. 30 for an angled tool).
@@ -98,10 +99,12 @@ struct RunScorecard
   size_t off_wall_samples{0};           ///< ...of which farther than `max_wall_gap_m` from the wall plane.
   size_t tilted_samples{0};             ///< ...of which tilted more than `max_tilt_deg`.
   double bad_pose_fraction{0.0};        ///< bad_pose_samples over (working + bad pose) samples.
-  double tilt_mean_deg{0.0};            ///< Over working samples that carry a tilt.
-  double tilt_max_deg{0.0};
-  double wall_gap_mean_m{0.0};          ///< Signed tool-point height over the wall (+ = in front), working samples.
-  double wall_gap_max_abs_m{0.0};
+  /// Tilt and gap statistics cover every would-be-working sample (force at least engaged, or valve open), also the
+  /// ones the pose gate refused, so a run that fails the gate still reports how far off it was.
+  double tilt_mean_deg{0.0};            ///< Over would-be-working samples that carry a tilt.
+  double tilt_max_deg{0.0};             ///< Largest recorded tilt among them.
+  double wall_gap_mean_m{0.0};          ///< Signed tool-point height over the wall (+ = in front), same samples.
+  double wall_gap_max_abs_m{0.0};       ///< Largest |gap| among them.
   bool passed{false};
   std::vector<std::string> failures;
 };

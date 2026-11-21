@@ -101,6 +101,72 @@ TEST(PlaneTouch, RecoversTipOffsetWithNoise)
   EXPECT_EQ(res.touches_used, 40u);
 }
 
+TEST(PlaneTouch, ConditionNumberIsIndependentOfTheBaseOrigin)
+{
+  Scene sc;
+  const auto base = simulate(sc);
+  std::vector<double> conds;
+  for (const double shift : {0.0, 1.0, 3.0, 10.0}) {
+    auto poses = base;
+    for (auto & q : poses) {
+      q.x += shift;       // along the plane
+      q.y -= 0.5 * shift;  // along the plane
+    }
+    const auto res = core_types::planeTouchCalibration(poses, {});
+    ASSERT_TRUE(res.ok) << res.error << " shift " << shift;
+    EXPECT_LT(dist(res.tcp_xyz, sc.tip), 0.0015) << shift;
+    conds.push_back(res.condition_number);
+  }
+  for (const double c : conds) {
+    EXPECT_NEAR(c / conds[0], 1.0, 0.01) << c << " vs " << conds[0];
+  }
+  // Moving the plane itself along its normal changes nothing either.
+  auto lifted = base;
+  for (auto & q : lifted) {q.z += 5.0;}
+  const auto up = core_types::planeTouchCalibration(lifted, {});
+  ASSERT_TRUE(up.ok) << up.error;
+  EXPECT_NEAR(up.condition_number / conds[0], 1.0, 0.01);
+  EXPECT_NEAR(up.plane_offset_m, -5.0, 0.002);
+}
+
+TEST(PlaneTouch, SlippedTouchIsFlaggedWithItsIndex)
+{
+  Scene sc;
+  auto poses = simulate(sc);
+  const auto clean = core_types::planeTouchCalibration(poses, {});
+  ASSERT_TRUE(clean.ok) << clean.error;
+  EXPECT_LT(clean.max_residual_m, 0.003);
+
+  // The default (no limit) accepts the slipped touch but names it as the worst one.
+  auto slipped = poses;
+  slipped[17].z += 0.010;
+  const auto unlimited = core_types::planeTouchCalibration(slipped, {});
+  EXPECT_TRUE(unlimited.ok);
+  EXPECT_EQ(unlimited.worst_touch_index, 17u);
+  EXPECT_GT(unlimited.max_residual_m, 0.005);
+
+  core_types::PlaneTouchOptions opt;
+  opt.max_residual_m = 0.004;
+  const auto limited = core_types::planeTouchCalibration(slipped, {}, opt);
+  EXPECT_FALSE(limited.ok);
+  EXPECT_EQ(limited.worst_touch_index, 17u);
+  EXPECT_NE(limited.error.find("touch 17"), std::string::npos) << limited.error;
+  // Clean data passes the same limit.
+  EXPECT_TRUE(core_types::planeTouchCalibration(poses, {}, opt).ok);
+}
+
+TEST(PlaneTouch, WorstTouchIndexCountsTheOriginalListWhenTouchesAreDropped)
+{
+  Scene sc;
+  sc.n = 12;
+  auto poses = simulate(sc);
+  poses[9].z += 0.010;
+  std::vector<bool> ok(poses.size(), true);
+  ok[2] = false;
+  const auto res = core_types::planeTouchCalibration(poses, ok);
+  EXPECT_EQ(res.worst_touch_index, 9u);
+}
+
 TEST(PlaneTouch, ExactWithoutNoise)
 {
   Scene sc;
@@ -338,16 +404,21 @@ namespace
 {
 // Tool with a mounting tilt `err` about tool-x: true axis = R_i Rx(err) ez, normal is its opposite.
 std::vector<core_types::ToolTiltTouch> tiltTouches(
-  const Vec3 & err_axis, double err_deg, bool with_pose, double noise_deg = 0.0, unsigned seed = 3)
+  const Vec3 & err_axis, double err_deg, bool with_pose, double noise_deg = 0.0, unsigned seed = 3,
+  double max_roll_deg = 0.0)
 {
   std::mt19937 rng(seed);
   std::uniform_real_distribution<double> ang(-25 * kDeg, 25 * kDeg);
   std::normal_distribution<double> g(0.0, noise_deg * kDeg);
+  std::uniform_real_distribution<double> roll_dist(-max_roll_deg * kDeg - 1e-12, max_roll_deg * kDeg + 1e-12);
   std::vector<core_types::ToolTiltTouch> out;
   const Quat down = axisAngle(1, 0, 0, M_PI);
   const Quat err = axisAngle(err_axis[0], err_axis[1], err_axis[2], err_deg * kDeg);
   for (int i = 0; i < 8; ++i) {
-    const Quat q = mul(mul(axisAngle(1, 0, 0, ang(rng)), axisAngle(0, 1, 0, ang(rng))), down);
+    // A roll about the tool axis changes the pose but not the commanded axis.
+    const Quat q = mul(
+      mul(mul(axisAngle(1, 0, 0, ang(rng)), axisAngle(0, 1, 0, ang(rng))), down),
+      axisAngle(0, 0, 1, roll_dist(rng)));
     const auto r = matrix(q);
     core_types::ToolTiltTouch t;
     t.commanded_axis = core_types::detail::mulMat(r, Vec3{0, 0, 1});
@@ -403,16 +474,51 @@ TEST(ToolTilt, RollIsReportedUnobservable)
   const auto fit = core_types::fitToolTilt(tiltTouches({1, 0, 0}, 2.0, true));
   ASSERT_TRUE(fit.ok);
   EXPECT_FALSE(fit.roll_observable);
-  EXPECT_DOUBLE_EQ(fit.correction_rotvec[2], 0.0);
+  EXPECT_NEAR(fit.correction_rotvec[2], 0.0, 1e-12);
 }
 
 TEST(ToolTilt, RollAboutAxisDoesNotChangeTheEstimate)
 {
-  // Same tilt, but the commanded axis comes with a roll about itself: result is identical.
-  const auto a = core_types::fitToolTilt(tiltTouches({1, 0, 0}, 5.0, false));
-  ASSERT_TRUE(a.ok);
-  EXPECT_FALSE(a.roll_observable);
-  EXPECT_NEAR(a.tilt_error_deg, 5.0, 0.3);
+  // Same tilt, but every touch comes with a different roll (up to 80 degrees) about the tool axis.
+  const auto plain = core_types::fitToolTilt(tiltTouches({1, 0, 0}, 5.0, true));
+  const auto rolled = core_types::fitToolTilt(tiltTouches({1, 0, 0}, 5.0, true, 0.0, 3, 80.0));
+  ASSERT_TRUE(plain.ok && rolled.ok);
+  EXPECT_FALSE(rolled.roll_observable);
+  EXPECT_NEAR(rolled.tilt_error_deg, 5.0, 0.05);
+  EXPECT_NEAR(rolled.about_x_deg, 5.0, 0.05);
+  EXPECT_NEAR(rolled.about_y_deg, 0.0, 0.05);
+  EXPECT_NEAR(rolled.tilt_error_deg, plain.tilt_error_deg, 0.05);
+  EXPECT_LT(rolled.spread_deg, 0.05);
+}
+
+TEST(ToolTilt, AngledMountGivesTheTrueErrorWhateverTheMountAngle)
+{
+  // The tool is mounted at `angle` about flange-x: its commanded axis is R Rx(angle) ez. The true
+  // error is 3 degrees about w = a x x_hat (perpendicular to the axis, with a flange-z part).
+  for (const double angle : {0.0, 30.0, 60.0}) {
+    std::mt19937 rng(11);
+    std::uniform_real_distribution<double> ang(-25 * kDeg, 25 * kDeg);
+    const Quat down = axisAngle(1, 0, 0, M_PI);
+    const Quat mount = axisAngle(1, 0, 0, angle * kDeg);
+    const Vec3 a = core_types::detail::mulMat(matrix(mount), Vec3{0, 0, 1});
+    const Vec3 w{0.0, std::cos(angle * kDeg), std::sin(angle * kDeg)};
+    const Quat err = axisAngle(w[0], w[1], w[2], 3.0 * kDeg);
+    std::vector<core_types::ToolTiltTouch> touches;
+    for (int i = 0; i < 8; ++i) {
+      const Quat q = mul(mul(axisAngle(1, 0, 0, ang(rng)), axisAngle(0, 1, 0, ang(rng))), down);
+      core_types::ToolTiltTouch t;
+      t.commanded_axis = core_types::detail::mulMat(matrix(q), a);
+      const Vec3 true_local = core_types::detail::mulMat(matrix(err), a);
+      t.measured_normal = core_types::detail::scale3(
+        core_types::detail::mulMat(matrix(q), true_local), -1.0);
+      t.tool_pose = toPose(q, {0, 0, 0});  // the flange pose; the axis is a in that frame
+      touches.push_back(t);
+    }
+    const auto fit = core_types::fitToolTilt(touches);
+    ASSERT_TRUE(fit.ok) << fit.error;
+    EXPECT_NEAR(fit.tilt_error_deg, 3.0, 0.05) << "mount angle " << angle;
+    EXPECT_LT(fit.spread_deg, 0.05) << "mount angle " << angle;
+  }
 }
 
 TEST(ToolTilt, BaseFrameModeWithoutPoses)

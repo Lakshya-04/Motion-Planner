@@ -5,10 +5,22 @@
 #include "safety_monitor/sphere_model.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace safety_monitor
 {
+
+namespace
+{
+void checkSphere(const Sphere & s, const std::string & where)
+{
+  if (!s.center.allFinite() || !std::isfinite(s.radius) || s.radius < 0.0) {
+    throw std::invalid_argument(
+      "SphereModel: non-finite centre or negative/non-finite radius on " + where);
+  }
+}
+}  // namespace
 
 int SphereModel::addLink(const std::string & name, int parent, const std::vector<Sphere> & spheres)
 {
@@ -18,6 +30,7 @@ int SphereModel::addLink(const std::string & name, int parent, const std::vector
   if (parent < -1 || parent >= linkCount()) {
     throw std::invalid_argument("SphereModel: unknown parent of " + name);
   }
+  for (const auto & s : spheres) {checkSphere(s, name);}
   Link l;
   l.name = name;
   l.parent = parent;
@@ -55,6 +68,7 @@ void SphereModel::attachSphere(const std::string & link, const std::string & tag
 {
   const int i = linkIndex(link);
   if (i < 0) {throw std::invalid_argument("SphereModel: unknown link " + link);}
+  checkSphere(s, link + "/" + tag);
   links_[i].attached.push_back({tag, s});
 }
 

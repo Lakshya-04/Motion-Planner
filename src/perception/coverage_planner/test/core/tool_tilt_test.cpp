@@ -170,8 +170,46 @@ TEST(ToolTiltLift, PositionStaysAtContactPointAndStandoffUnchanged)
   EXPECT_NEAR(c.pose.position.x, 1.0, 1e-12);
   EXPECT_NEAR(c.pose.position.y, 0.0, 1e-12);
   EXPECT_NEAR(c.pose.position.z, 1.0, 1e-12);
-  const auto s = liftCoveragePathPose(flatPath(1.0, 1.0), wall, sprayTask(0.2, 0.0, 30.0)).poses[0];
-  EXPECT_NEAR(s.pose.position.y, -0.2, 1e-12);  // standoff along the surface normal, not the tilted axis
+  // Non-contact: the standoff is measured along the tilted axis, so the axis meets the strip point.
+  const auto s = liftCoveragePathPose(flatPath(1.0, 1.0), wall, sprayTask(0.3, 0.0, 30.0)).poses[0];
+  const Eigen::Vector3d pos(s.pose.position.x, s.pose.position.y, s.pose.position.z);
+  const Eigen::Vector3d z = rotationOf(s.pose).col(2);
+  EXPECT_NEAR((pos + 0.3 * z - Eigen::Vector3d(1.0, 0.0, 1.0)).norm(), 0.0, 1e-9);
+  EXPECT_NEAR(s.pose.position.y, -0.3 * std::cos(30.0 * kDeg), 1e-12);
+}
+
+TEST(ToolTiltLift, SprayAxisHitsTheWallAtTheStripPointForEveryTilt)
+{
+  const auto wall = makeWall();
+  for (const double tilt : {-60.0, -30.0, 10.0, 45.0}) {
+    for (const std::array<double, 3> axis : {std::array<double, 3>{1, 0, 0}, {0, 1, 0}, {1, 1, 0}}) {
+      const auto s = liftCoveragePathPose(flatPath(0.8, 1.3), wall, sprayTask(0.3, 0.0, tilt, axis)).poses[0];
+      const Eigen::Vector3d pos(s.pose.position.x, s.pose.position.y, s.pose.position.z);
+      const Eigen::Vector3d z = rotationOf(s.pose).col(2);
+      const double t = -pos.y() / z.y();  // wall plane y = 0
+      EXPECT_NEAR(t, 0.3, 1e-9);
+      EXPECT_NEAR((pos + t * z - Eigen::Vector3d(0.8, 0.0, 1.3)).norm(), 0.0, 1e-9);
+    }
+  }
+}
+
+TEST(ToolTiltLift, TotalTiltNeverExceedsEightyFiveDegreesFromIntoWall)
+{
+  const auto wall = makeWall();
+  for (const std::array<double, 3> axis : {std::array<double, 3>{-1, 0, 0}, {1, 0, 0}}) {
+    for (const double v : {0.0, 0.05, 0.1, 0.2}) {
+      const Eigen::Vector3d z = rotationOf(
+        liftCoveragePathPose(flatPath(1.0, v), wall, sprayTask(0.2, 40.0, 79.0, axis)).poses[0].pose).col(2);
+      EXPECT_LE(angleBetween(z, Eigen::Vector3d(0, 1, 0)), 85.0 + 1e-9);
+    }
+  }
+  const Eigen::Vector3d z_edge = rotationOf(
+    liftCoveragePathPose(flatPath(1.0, 0.0), wall, sprayTask(0.2, 40.0, 79.0, {-1, 0, 0})).poses[0].pose).col(2);
+  EXPECT_NEAR(angleBetween(z_edge, Eigen::Vector3d(0, 1, 0)), 85.0, 1e-9);
+  // A fixed tilt beyond the bound is clamped too.
+  const Eigen::Vector3d z_big = rotationOf(
+    liftCoveragePathPose(flatPath(1.0, 1.0), wall, sprayTask(0.2, 0.0, 89.0, {1, 0, 0})).poses[0].pose).col(2);
+  EXPECT_LE(angleBetween(z_big, Eigen::Vector3d(0, 1, 0)), 85.0 + 1e-9);
 }
 
 TEST(ToolTiltLift, EveryPoseOfAPathGetsTheSameTilt)
@@ -237,7 +275,9 @@ TEST(ToolTiltLift, TiltAboutUPlusEdgeTiltTowardVAddsAnglesInThePlane)
   const Eigen::Vector3d z = rotationOf(
     liftCoveragePathPose(flatPath(1.0, 0.0), wall, sprayTask(0.2, 30.0, 20.0, {-1, 0, 0})).poses[0].pose).col(2);
   const double a = angleBetween(z, Eigen::Vector3d(0, 1, 0));
-  EXPECT_TRUE(std::fabs(a - 50.0) < 1e-9 || std::fabs(a - 10.0) < 1e-9) << a;
+  EXPECT_NEAR(a, 50.0, 1e-9);
+  // Tilt about -u by a positive angle moves the axis toward world -Z, the v_min edge direction.
+  EXPECT_LT(z.z(), 0.0);
 }
 
 TEST(ToolTiltLift, EdgeTiltAwayFromFixedTiltSubtracts)
@@ -280,15 +320,16 @@ ToolCoverageProfile padTool(double tilt_deg, std::array<double, 3> axis, const s
   double pad_length = 0.0)
 {
   ToolCoverageProfile t;
-  t.name = "pad";
-  t.task.contact = true;
-  t.task.target_force_n = 10.0;
+  // The tilted swath only applies to non-contact tools; this spray model has a 0.2 m base swath.
+  (void)pad_length;
+  t.name = "spray";
+  t.task.contact = false;
+  t.task.standoff_m = 0.3;
+  t.coverage.spray_half_angle_deg = std::atan(1.0 / 3.0) / kDeg;
+  t.coverage.effective_width_fraction = 1.0;
   t.task.tool_tilt_deg = tilt_deg;
   t.task.tool_tilt_axis = axis;
   t.coverage.sweep_direction = sweep;
-  t.coverage.contact_area.pad_width_m = 0.2;
-  t.coverage.contact_area.pad_length_m = pad_length;
-  t.coverage.contact_area.reference_force_n = 10.0;
   return t;
 }
 }  // namespace
@@ -341,10 +382,17 @@ TEST(ToolTiltSwath, SpacingFollowsTheProjectedSwath)
   EXPECT_NEAR(toolLineSpacing(t), 0.4 * 0.75, 1e-12);
 }
 
-TEST(ToolTiltSwath, PadLengthMattersOnlyAtAnObliqueTilt)
+TEST(ToolTiltSwath, ContactPadKeepsItsOwnModelAndIgnoresTheFixedTilt)
 {
-  EXPECT_NEAR(toolSwath(padTool(40.0, {0, 1, 0}, "vertical", 0.3)), 0.2 / std::cos(40.0 * kDeg), 1e-12);
-  EXPECT_GT(toolSwath(padTool(40.0, {1, 1, 0}, "vertical", 0.3)), toolSwath(padTool(40.0, {1, 1, 0}, "vertical", 0.0)));
+  ToolCoverageProfile t;
+  t.task.contact = true;
+  t.task.target_force_n = 10.0;
+  t.task.tool_tilt_deg = 40.0;  // refused by the loader; the pad width stays on its cos model
+  t.task.tool_tilt_axis = {0, 1, 0};
+  t.coverage.sweep_direction = "vertical";
+  t.coverage.contact_area.pad_width_m = 0.2;
+  t.coverage.contact_area.reference_force_n = 10.0;
+  EXPECT_DOUBLE_EQ(toolSwath(t), 0.2);
 }
 
 TEST(ToolTiltSwath, FixedSwathToolIsUnchangedByTilt)

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace teleop_core
 {
@@ -13,6 +14,12 @@ JogShaper::JogShaper(const JogShaperConfig & config)
 
 void JogShaper::setConfig(const JogShaperConfig & config)
 {
+  if (!std::isfinite(config.watchdog_s) || config.watchdog_s <= 0.0) {
+    throw std::invalid_argument("JogShaperConfig.watchdog_s must be finite and > 0");
+  }
+  if (!std::isfinite(config.max_linear_accel) || !std::isfinite(config.max_angular_accel)) {
+    throw std::invalid_argument("JogShaperConfig accel limits must be finite");
+  }
   cfg_ = config;
   for (auto & d : cfg_.deadband) {
     d = std::clamp(std::isfinite(d) ? d : 0.0, 0.0, 0.99);
@@ -63,7 +70,8 @@ JogOutput JogShaper::update(double now_s, double dt, const FrameRotations & rot)
 {
   JogOutput out;
   out.invalid_input = last_invalid_;
-  if (!have_input_ || !std::isfinite(now_s) || now_s - last_input_s_ > cfg_.watchdog_s) {
+  if (!have_input_ || !std::isfinite(now_s) || now_s < last_input_s_ ||
+    now_s - last_input_s_ > cfg_.watchdog_s) {
     out.watchdog_tripped = true;
     prev_.setZero();  // immediate zero, no ramp: fail safe
     return out;
@@ -79,12 +87,37 @@ JogOutput JogShaper::update(double now_s, double dt, const FrameRotations & rot)
     const double s = cfg_.enabled[i] ? shapeAxis(x, cfg_.deadband[i], cfg_.expo) : 0.0;
     target[i] = s * (i < 3 ? cfg_.max_linear_mps : cfg_.max_angular_rps);
   }
+  // Bound the norm of each part (direction kept), not each axis.
+  if (const double n = target.head<3>().norm(); n > cfg_.max_linear_mps && n > 0.0) {
+    target.head<3>() *= cfg_.max_linear_mps / n;
+  }
+  if (const double n = target.tail<3>().norm(); n > cfg_.max_angular_rps && n > 0.0) {
+    target.tail<3>() *= cfg_.max_angular_rps / n;
+  }
 
   Eigen::Matrix3d R = Eigen::Matrix3d::Identity();
   if (cfg_.frame == JogFrame::kTool) {
     R = rot.tool_in_base;
   } else if (cfg_.frame == JogFrame::kWorld) {
     R = rot.world_in_base;
+  }
+  if (!R.allFinite()) {
+    out.invalid_rotation = true;
+    prev_.setZero();
+    return out;
+  }
+  // A masked axis must be zero now, not after the slew ramp: clear it in the slew state (jog frame).
+  if (!cfg_.enabled[0] || !cfg_.enabled[1] || !cfg_.enabled[2] ||
+    !cfg_.enabled[3] || !cfg_.enabled[4] || !cfg_.enabled[5])
+  {
+    Eigen::Vector3d pv = R.transpose() * prev_.head<3>();
+    Eigen::Vector3d pw = R.transpose() * prev_.tail<3>();
+    for (int i = 0; i < 3; ++i) {
+      if (!cfg_.enabled[i]) {pv[i] = 0.0;}
+      if (!cfg_.enabled[i + 3]) {pw[i] = 0.0;}
+    }
+    prev_.head<3>() = R * pv;
+    prev_.tail<3>() = R * pw;
   }
   Eigen::Vector3d v = R * target.head<3>();
   Eigen::Vector3d w = R * target.tail<3>();

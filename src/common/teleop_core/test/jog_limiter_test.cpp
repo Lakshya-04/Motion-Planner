@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 
 #include "teleop_core/jog_limiter.hpp"
 
@@ -130,4 +132,13 @@ TEST(JogLimiter, ShaperThenLimiterEndToEndAndDeterministic)
     };
   EXPECT_EQ(run(), run());
   EXPECT_NEAR(run()[0], 0.05, 1e-12);
+}
+
+TEST(JogLimiter, BadStaleTimeoutThrows)
+{
+  for (double bad : {std::nan(""), std::numeric_limits<double>::infinity(), 0.0, -0.5}) {
+    JogLimiterConfig c;
+    c.stale_timeout_s = bad;
+    EXPECT_THROW(JogLimiter{c}, std::invalid_argument);
+  }
 }

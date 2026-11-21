@@ -41,14 +41,29 @@ Behaviour of `computeStep`:
   commanded direction is followed less and less; at the singularity the velocity is 0.
 - Weights: `joint_weights` (larger = moves less) give a weighted pseudo-inverse, so a heavily
   weighted lift moves little for the task as well as in the null space.
-- Null space: `(I - J_W^+ J) * sum(gain_i * ascent_i)`. Costs: `JointCenteringCost`,
+- Null space: `N * sum(gain_i * ascent_i)` with `N` the true projector of the undamped (masked,
+  weighted) Jacobian: components along singular directions above `rank_tolerance` (default 1e-6) are
+  removed, so with unit weights and row scales the null-space part moves the tool by at most
+  `rank_tolerance` times its size, also while the task damping is active (task tracking is damped,
+  null-space motion is not). Directions below the tolerance are rank-deficient and left free. Costs: `JointCenteringCost`,
   `LimitAvoidanceCost` (weighted, zone at the ends), `JointEndBiasCost` (keeps one joint, e.g. a lift,
   away from its ends); add your own by deriving `NullSpaceCost`.
 - Velocity limits: the whole task part is scaled by one factor so the worst joint reaches its limit
   (direction kept); the null-space part is then cut to what still fits.
+- A velocity limit of 0 locks the joint (its velocity is 0 and the other joints do the task); an
+  explicit `+infinity` means unlimited. Strict input check: every limit vector must have size N,
+  all inputs finite, `q_min <= q_max`, 1 <= N <= 8; otherwise `valid = false`, `status` says why and
+  `qd` is zero. `integrate` holds `q` on bad input.
+- One `sigma_threshold` applies to a masked Jacobian whose rows mix metres and radians, so its meaning
+  depends on robot scale; `row_scale` (per task row, default 1) puts the rows on a common footing.
 - Position limits: inside `position_margin` of a limit the velocity into it is zeroed (this can
-  deviate from the task, and is counted in `position_limit_hits`). Joints with a range of 2*pi or more
-  are continuous and have no stop.
+  deviate from the task, and is counted in `position_limit_hits`). `DiffIkLimits::continuous` flags
+  joints explicitly; when it is empty a joint is continuous if its range is not positive or is 2*pi or
+  more (a revolute joint limited to +-pi must be flagged `false` to get its stop). If `q` starts
+  outside a limit, `integrate` cancels only the step further out and does not snap `q` back.
+- Real time: for N <= 8 and at most 6 task rows, `computeStep` and `integrate` use inline
+  fixed-capacity Eigen storage and do not allocate (counted in `diff_ik_alloc_test`); user-written
+  `NullSpaceCost` classes are outside that guarantee.
 - A masked task (`AxisMask`) tracks a subset of x, y, z, rx, ry, rz and leaves the others free.
 
 ## Dependencies
@@ -73,13 +88,14 @@ const auto next = diff_ik_core::integrate(q, qd, r.qd, dt, lim);
 
 ## Tests
 
-Three gtest executables (`jacobian_quality_test`, `diff_ik_test`, `pose_error_test`, 42 tests in
-all) with a generic DH chain helper in `test/chain_helper.hpp` (analytic geometric Jacobian, checked
+Four gtest executables (`jacobian_quality_test`, `diff_ik_test`, `pose_error_test`,
+`diff_ik_alloc_test`) with a generic DH chain helper in `test/chain_helper.hpp` (analytic geometric Jacobian, checked
 against finite differences): planar 2R and 3R against the analytic inverse, spatial 6R and 7R,
 self-motion that leaves the twist unchanged, a path through a singularity (bounded joint velocity,
 stops), uniform scaling that keeps the direction, limits never exceeded over random
 configurations, a weighted lift, masked axes, rotation-log sign and wrap near pi, closed-loop
-convergence to a target pose, determinism.
+convergence to a target pose, null-space invariance under active damping, input rejection, locked
+joints, the continuous flag, integrate from outside a limit, zero heap allocations.
 
 ```bash
 colcon test --packages-select diff_ik_core
@@ -93,6 +109,9 @@ colcon test --packages-select diff_ik_core
   test is one noise-free kinematic case.
 - Position zones are a hard velocity stop, not a smooth barrier; acceleration limits are applied only
   in `integrate`, not inside `computeStep`.
-- Damping uses the smallest singular value only; the null-space projector is the damped one, so
-  very close to a singularity null-space motion can disturb the task slightly.
+- Damping uses the smallest singular value only. The null-space projector is undamped, so near a
+  singularity the null-space part can be large in joint space (it is still capped by the velocity
+  limits) while it leaves the tool where it is.
+- At most 8 joints (`kMaxJoints`); larger chains are rejected.
+- Limit-based null-space costs skip joints whose range is 2*pi or more, also when flagged not continuous.
 - Orientation error is the rotation vector in the base frame; no tool-frame or tilted-tool handling.

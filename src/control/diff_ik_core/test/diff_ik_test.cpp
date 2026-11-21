@@ -144,7 +144,9 @@ TEST(DiffIk, PathThroughSingularityStopsWithoutJointVelocitySpike)
   const double speed = 0.05;            // m/s towards the stretched pose along the radial direction
   Eigen::VectorXd q = vec({0.4, 0.6});
   double max_qd = 0.0, last_radial = 1e9;
-  const double bound = speed / (2.0 * p.lambda_max) * 1.05;   // DLS gain is at most 1/(2 lambda)
+  // Joint speed per unit task speed is s/(s^2 + lambda(s)^2): at most 1/(2 lambda) at fixed
+  // lambda, and over the ramp 1/eps at the threshold (the larger of the two here), so it is bounded.
+  const double bound = speed * std::max(1.0 / p.sigma_threshold, 1.0 / (2.0 * p.lambda_max));
   for (int k = 0; k < 4000; ++k) {
     const Eigen::Isometry3d T = c.fk(q);
     const Eigen::Vector2d radial = T.translation().head<2>().normalized();
@@ -154,7 +156,7 @@ TEST(DiffIk, PathThroughSingularityStopsWithoutJointVelocitySpike)
     last_radial = r.achieved_twist.head<2>().dot(radial);
     q += r.qd * 0.005;
   }
-  EXPECT_LT(max_qd, std::max(bound, 3.0 * speed / 0.1));   // no spike (a plain inverse diverges)
+  EXPECT_LT(max_qd, bound);   // DLS gain <= 1/(2 lambda_max): no spike (a plain inverse diverges)
   EXPECT_LT(std::abs(last_radial), 1e-3);                  // slowed to a stop
   EXPECT_GT(q(1), -0.05);                                  // never flipped through the singularity
 }
@@ -352,15 +354,285 @@ TEST(DiffIk, ClosedLoopTrackingConvergesToTheTargetPose)
   EXPECT_LT(e.tail<3>().norm(), 2e-3);
 }
 
-TEST(DiffIk, IsDeterministic)
+TEST(DiffIk, SeparatelyConstructedIdenticalInputsGiveIdenticalResults)
 {
-  const Chain c = arm7();
-  const Eigen::MatrixXd J = c.jacobian(kQ7);
-  DiffIkParams p;
-  p.null_space.push_back({std::make_shared<JointCenteringCost>(), 3.0});
-  const Vector6d v = twist(0.02, -0.01, 0.03, 0.05, -0.04, 0.02);
-  const auto a = computeStep(J, v, kAllAxes, kQ7, limitsFor(7), p);
-  const auto b = computeStep(J, v, kAllAxes, kQ7, limitsFor(7), p);
+  auto run = []() {
+      const Chain c = arm7();
+      const Eigen::VectorXd q = vec({0.3, 0.8, -0.4, -1.2, 0.5, 0.9, 0.2});
+      DiffIkParams p;
+      p.null_space.push_back({std::make_shared<JointCenteringCost>(), 3.0});
+      return computeStep(c.jacobian(q), twist(0.02, -0.01, 0.03, 0.05, -0.04, 0.02), kAllAxes, q,
+        limitsFor(7), p);
+    };
+  const auto a = run();
+  const auto b = run();
   EXPECT_EQ(a.qd, b.qd);
   EXPECT_EQ(a.sigma_min, b.sigma_min);
+}
+
+// ---- true null-space projector (review: damped projector leaked task motion) ----
+
+namespace
+{
+double toolSpeedFromCentering(double q2, double lambda_max, double sigma_threshold = 0.05)
+{
+  const Chain c3 = planar({0.8, 0.6, 0.4});
+  const Eigen::VectorXd q = vec({0.2, q2, q2});
+  DiffIkLimits l = limitsFor(3);
+  l.q_min << -1, -0.2, -0.2;
+  l.q_max << 2.5, 2.8, 2.8;
+  DiffIkParams p;
+  p.lambda_max = lambda_max;
+  p.sigma_threshold = sigma_threshold;
+  p.null_space.push_back({std::make_shared<JointCenteringCost>(), 20.0});
+  const Eigen::MatrixXd J = c3.jacobian(q);
+  const auto r = computeStep(J, Vector6d::Zero(), kXY, q, l, p);
+  EXPECT_TRUE(r.valid);
+  EXPECT_GT(r.qd.norm(), 1e-3);   // self-motion exists
+  return (J.topRows(2) * r.qd).norm();
+}
+}  // namespace
+
+TEST(DiffIk, NullSpaceMotionDoesNotMoveTheToolWhileDampingIsActive)
+{
+  const Chain c3 = planar({0.8, 0.6, 0.4});
+  const Eigen::VectorXd q = vec({0.2, 0.05, 0.05});
+  DiffIkParams p;
+  const auto probe = computeStep(c3.jacobian(q), Vector6d::Zero(), kXY, q, limitsFor(3), p);
+  EXPECT_GT(probe.damping, 0.0);              // damping really is active (sigma ~ 0.034 < 0.05)
+  EXPECT_LT(toolSpeedFromCentering(0.05, 0.1), 1e-6);   // the review's case: was 0.084 m/s
+  EXPECT_LT(toolSpeedFromCentering(0.02, 0.1), 1e-6);
+  EXPECT_LT(toolSpeedFromCentering(0.05, 0.5, 0.2), 1e-6);
+}
+
+TEST(DiffIk, NullSpaceInvarianceHoldsOnA7RSweepIntoTheSingularityDamping)
+{
+  const Chain c = arm7();
+  DiffIkParams p;
+  p.null_space.push_back({std::make_shared<JointCenteringCost>(), 1.0});
+  bool saw_damping = false;
+  for (double q3 = 0.6; q3 >= 0.0; q3 -= 0.02) {
+    const Eigen::VectorXd q = vec({0.3, 0.8, -0.4, q3, 0.5, 0.9, 0.2});
+    const Eigen::MatrixXd J = c.jacobian(q);
+    const auto r = computeStep(J, Vector6d::Zero(), kAllAxes, q, limitsFor(7, 3.0), p);
+    saw_damping = saw_damping || r.damping > 0.0;
+    EXPECT_LT((J * r.qd).norm(), 1e-5 * std::max(1.0, r.qd.norm())) << "q3=" << q3;
+  }
+  EXPECT_TRUE(saw_damping);
+}
+
+TEST(DiffIk, TaskIsStillDampedWhileNullSpaceIsExact)
+{
+  const Chain c = planar({1.0, 0.7});
+  const Eigen::VectorXd q = vec({0.2, 0.02});
+  const Eigen::MatrixXd J = c.jacobian(q);
+  const auto r = computeStep(J, twist(0.0, 0.05, 0, 0, 0, 0), kXY, q, limitsFor(2), DiffIkParams());
+  EXPECT_GT(r.damping, 0.0);
+  EXPECT_LT(r.qd.cwiseAbs().maxCoeff(), 0.05 / (2.0 * 0.1) * 1.05);
+}
+
+// ---- input validation ----
+
+TEST(DiffIk, NonFiniteInputsAreRejectedAndIntegrateHoldsQ)
+{
+  const Chain c = arm7();
+  const Eigen::VectorXd q = kQ7;
+  const Eigen::MatrixXd J = c.jacobian(q);
+  const DiffIkLimits lim = limitsFor(7, 3.0, 1.0);
+  const double nan = std::nan("");
+  auto expectRejected = [](const DiffIkResult & r) {
+      EXPECT_FALSE(r.valid);
+      EXPECT_EQ(r.status, InputStatus::NonFinite);
+      EXPECT_EQ(r.qd.norm(), 0.0);
+    };
+  Vector6d v = Vector6d::Ones() * 0.01;
+  Vector6d vn = v; vn(0) = nan;
+  expectRejected(computeStep(J, vn, kAllAxes, q, lim, DiffIkParams()));
+  Eigen::MatrixXd Jn = J; Jn(0, 0) = nan;
+  expectRejected(computeStep(Jn, v, kAllAxes, q, lim, DiffIkParams()));
+  Eigen::VectorXd qn = q; qn(2) = INFINITY;
+  expectRejected(computeStep(J, v, kAllAxes, qn, lim, DiffIkParams()));
+  DiffIkParams pl; pl.lambda_max = nan;
+  expectRejected(computeStep(J, v, kAllAxes, q, lim, pl));
+  DiffIkParams pw; pw.joint_weights = Eigen::VectorXd::Ones(7); pw.joint_weights(3) = nan;
+  expectRejected(computeStep(J, v, kAllAxes, q, lim, pw));
+  DiffIkLimits lq = lim; lq.q_min(1) = nan;
+  EXPECT_FALSE(computeStep(J, v, kAllAxes, q, lq, DiffIkParams()).valid);
+  DiffIkLimits lv = lim; lv.qd_max(1) = nan;
+  EXPECT_FALSE(computeStep(J, v, kAllAxes, q, lv, DiffIkParams()).valid);
+
+  const auto bad = computeStep(J, vn, kAllAxes, q, lim, DiffIkParams());
+  const auto in = integrate(q, Eigen::VectorXd::Zero(7), bad.qd, 0.01, lim);
+  EXPECT_TRUE(in.valid);   // qd = 0 is a valid command
+  EXPECT_EQ(in.q, q);
+  Eigen::VectorXd cmd = Eigen::VectorXd::Zero(7); cmd(0) = nan;
+  const auto held = integrate(q, Eigen::VectorXd::Zero(7), cmd, 0.01, lim);
+  EXPECT_FALSE(held.valid);
+  EXPECT_EQ(held.q, q);
+  EXPECT_EQ(held.qd.norm(), 0.0);
+  EXPECT_FALSE(integrate(q, Eigen::VectorXd::Zero(7), Eigen::VectorXd::Zero(7), nan, lim).valid);
+}
+
+TEST(DiffIk, ZeroJointsOversizeAndMismatchedSizesAreInvalid)
+{
+  const Chain c = planar({1.0, 0.7});
+  const Eigen::VectorXd q = vec({0.3, 1.1});
+  const Eigen::MatrixXd J = c.jacobian(q);
+  const Vector6d v = twist(0.01, 0, 0, 0, 0, 0);
+  const auto zero = computeStep(Eigen::MatrixXd(6, 0), v, kXY, Eigen::VectorXd(0), DiffIkLimits(),
+      DiffIkParams());
+  EXPECT_FALSE(zero.valid);
+  EXPECT_EQ(zero.status, InputStatus::BadSize);
+  const Chain big = planar(std::vector<double>(9, 0.3));
+  const Eigen::VectorXd q9 = Eigen::VectorXd::Constant(9, 0.2);
+  EXPECT_FALSE(computeStep(big.jacobian(q9), v, kXY, q9, limitsFor(9), DiffIkParams()).valid);
+  for (int which = 0; which < 4; ++which) {
+    DiffIkLimits l = limitsFor(2);
+    Eigen::VectorXd & t = which == 0 ? l.qd_max : which == 1 ? l.q_min : which == 2 ? l.q_max : l.qdd_max;
+    t = Eigen::VectorXd::Constant(1, 1.0);
+    const auto r = computeStep(J, v, kXY, q, l, DiffIkParams());
+    if (which == 3) {
+      EXPECT_TRUE(r.valid);   // qdd_max is only read by integrate
+      EXPECT_FALSE(integrate(q, Eigen::VectorXd::Zero(2), Eigen::VectorXd::Zero(2), 0.01, l).valid);
+    } else {
+      EXPECT_FALSE(r.valid) << which;
+      EXPECT_EQ(r.status, InputStatus::BadSize);
+    }
+  }
+  DiffIkLimits empty_qd = limitsFor(2);
+  empty_qd.qd_max.resize(0);   // empty no longer means unlimited
+  EXPECT_FALSE(computeStep(J, v, kXY, q, empty_qd, DiffIkParams()).valid);
+  DiffIkLimits unlimited = limitsFor(2);
+  unlimited.qd_max = Eigen::VectorXd::Constant(2, INFINITY);   // explicit unlimited
+  EXPECT_TRUE(computeStep(J, v, kXY, q, unlimited, DiffIkParams()).valid);
+  DiffIkParams pw; pw.joint_weights = Eigen::VectorXd::Ones(3);
+  EXPECT_FALSE(computeStep(J, v, kXY, q, limitsFor(2), pw).valid);
+  DiffIkLimits neg = limitsFor(2); neg.qd_max(0) = -1.0;
+  EXPECT_FALSE(computeStep(J, v, kXY, q, neg, DiffIkParams()).valid);
+}
+
+TEST(DiffIk, ZeroVelocityLimitLocksTheJointAndTheOthersDoTheTask)
+{
+  const Chain c = planar({0.8, 0.6, 0.4});
+  const Eigen::VectorXd q = vec({0.2, 0.9, -0.7});
+  const Eigen::MatrixXd J = c.jacobian(q);
+  DiffIkLimits lim = limitsFor(3);
+  lim.qd_max(1) = 0.0;
+  DiffIkParams p;
+  p.null_space.push_back({std::make_shared<JointCenteringCost>(), 5.0});
+  const auto r = computeStep(J, twist(0.02, 0.01, 0, 0, 0, 0), kXY, q, lim, p);
+  ASSERT_TRUE(r.valid);
+  EXPECT_EQ(r.qd(1), 0.0);
+  EXPECT_NEAR(r.scale, 1.0, 1e-12);
+  EXPECT_LT((J.topRows(2) * r.qd - Eigen::Vector2d(0.02, 0.01)).norm(), 1e-9);   // still done
+  EXPECT_EQ(r.velocity_limit_hits, 0);
+  // Locked joint plus a low limit on another: the whole task scales, the locked one stays 0.
+  const auto free_r = computeStep(J, twist(0.02, 0.01, 0, 0, 0, 0), kXY, q, lim, DiffIkParams());
+  lim.qd_max(0) = 0.25 * std::abs(free_r.qd(0));
+  const auto s = computeStep(J, twist(0.02, 0.01, 0, 0, 0, 0), kXY, q, lim, DiffIkParams());
+  EXPECT_EQ(s.qd(1), 0.0);
+  EXPECT_NEAR(s.scale, 0.25, 1e-9);   // scaled down, not zeroed by the locked joint
+  EXPECT_NEAR(std::abs(s.qd(0)), lim.qd_max(0), 1e-12);
+  EXPECT_LT((J.topRows(2) * s.qd - 0.25 * Eigen::Vector2d(0.02, 0.01)).norm(), 1e-9);
+}
+
+// ---- continuous flag ----
+
+TEST(DiffIk, RevoluteLimitedToPlusMinusPiGetsItsStopWhenFlaggedNotContinuous)
+{
+  const Chain c = planar({1.0, 0.7});
+  DiffIkLimits lim = limitsFor(2, M_PI);   // range 2*pi
+  lim.position_margin = 0.5;
+  const Eigen::VectorXd q = vec({3.1, 0.8});
+  const Eigen::MatrixXd J = c.jacobian(q);
+  const Eigen::Vector2d d = J.topRows(2) * vec({1.0, 0.0});
+  const Vector6d v = twist(d.x(), d.y(), 0, 0, 0, 0);
+  EXPECT_EQ(computeStep(J, v, kXY, q, lim, DiffIkParams()).position_limit_hits, 0);   // derived
+  lim.continuous = {false, false};
+  const auto r = computeStep(J, v, kXY, q, lim, DiffIkParams());
+  EXPECT_EQ(r.position_limit_hits, 1);
+  EXPECT_EQ(r.qd(0), 0.0);
+  EXPECT_EQ(r.saturation[0], JointSaturation::PositionLimit);
+  DiffIkLimits one = limitsFor(1, M_PI);
+  one.continuous = {false};
+  const auto in = integrate(vec({3.14}), vec({1.0}), vec({1.0}), 0.1, one);
+  EXPECT_EQ(in.q(0), M_PI);
+  EXPECT_EQ(in.qd(0), 0.0);
+  // flagged continuous overrides a narrow range
+  DiffIkLimits narrow = limitsFor(2, 1.0);
+  narrow.continuous = {true, true};
+  narrow.position_margin = 0.5;
+  const Eigen::VectorXd q_edge = vec({0.99, 0.8});
+  const Eigen::MatrixXd J2 = c.jacobian(q_edge);
+  const Eigen::Vector2d d2 = J2.topRows(2) * vec({1.0, 0.0});
+  EXPECT_EQ(computeStep(J2, twist(d2.x(), d2.y(), 0, 0, 0, 0), kXY, q_edge, narrow, DiffIkParams())
+    .position_limit_hits, 0);
+}
+
+TEST(DiffIk, SwappedPositionLimitsAndWrongFlagSizeAreInvalid)
+{
+  const Chain c = planar({1.0, 0.7});
+  const Eigen::VectorXd q = vec({0.3, 1.1});
+  const Eigen::MatrixXd J = c.jacobian(q);
+  const Vector6d v = twist(0.01, 0, 0, 0, 0, 0);
+  DiffIkLimits swapped = limitsFor(2);
+  std::swap(swapped.q_min(0), swapped.q_max(0));
+  const auto r = computeStep(J, v, kXY, q, swapped, DiffIkParams());
+  EXPECT_FALSE(r.valid);
+  EXPECT_EQ(r.status, InputStatus::BadValue);
+  DiffIkLimits flags = limitsFor(2);
+  flags.continuous = {false};
+  EXPECT_EQ(computeStep(J, v, kXY, q, flags, DiffIkParams()).status, InputStatus::BadSize);
+  DiffIkLimits inf_limited = limitsFor(2);
+  inf_limited.q_max(0) = INFINITY;
+  inf_limited.continuous = {false, false};
+  EXPECT_FALSE(computeStep(J, v, kXY, q, inf_limited, DiffIkParams()).valid);
+  inf_limited.continuous = {true, false};
+  EXPECT_TRUE(computeStep(J, v, kXY, q, inf_limited, DiffIkParams()).valid);
+}
+
+// ---- integrate from outside a limit ----
+
+TEST(DiffIk, IntegrateFromOutsideALimitDoesNotTeleport)
+{
+  DiffIkLimits lim = limitsFor(1, 5.0, 5.0);
+  lim.q_min(0) = 0.0;
+  lim.q_max(0) = 1.0;
+  const auto inward = integrate(vec({-0.5}), vec({0.0}), vec({0.1}), 0.01, lim);
+  EXPECT_NEAR(inward.q(0), -0.5 + 0.1 * 0.01, 1e-12);   // moved inward, was 0 before the fix
+  EXPECT_NEAR(inward.qd(0), 0.1, 1e-12);
+  const auto outward = integrate(vec({-0.5}), vec({0.0}), vec({-0.1}), 0.01, lim);
+  EXPECT_EQ(outward.q(0), -0.5);
+  EXPECT_EQ(outward.qd(0), 0.0);
+  const auto above = integrate(vec({1.4}), vec({0.0}), vec({-0.2}), 0.01, lim);
+  EXPECT_NEAR(above.q(0), 1.4 - 0.002, 1e-12);
+  const auto above_out = integrate(vec({1.4}), vec({0.0}), vec({0.2}), 0.01, lim);
+  EXPECT_EQ(above_out.q(0), 1.4);
+  // A fast inward step from outside that crosses into the range is a plain step.
+  const auto cross = integrate(vec({-0.001}), vec({0.0}), vec({1.0}), 0.1, lim);
+  EXPECT_NEAR(cross.q(0), 0.099, 1e-12);
+}
+
+// ---- per-row scaling ----
+
+TEST(DiffIk, RowScaleScalesSigmaAndLeavesExactTrackingUnchanged)
+{
+  const Chain c = planar({1.0, 0.7});
+  const Eigen::VectorXd q = vec({0.3, 1.1});
+  const Eigen::MatrixXd J = c.jacobian(q);
+  const Vector6d v = twist(0.05, -0.02, 0, 0, 0, 0);
+  const auto base = computeStep(J, v, kXY, q, limitsFor(2), DiffIkParams());
+  DiffIkParams p;
+  p.row_scale << 0.1, 0.1, 1, 1, 1, 1;
+  const auto scaled = computeStep(J, v, kXY, q, limitsFor(2), p);
+  EXPECT_NEAR(scaled.sigma_min, 0.1 * base.sigma_min, 1e-12);
+  EXPECT_GT(scaled.damping, 0.0);   // 0.1 sigma falls below the threshold
+  EXPECT_LT(scaled.qd.norm(), base.qd.norm());   // the damped region now applies
+  DiffIkParams exact = p;
+  exact.sigma_threshold = 0.0;
+  const auto same = computeStep(J, v, kXY, q, limitsFor(2), exact);
+  EXPECT_LT((same.qd - base.qd).norm(), 1e-9);
+  DiffIkParams bad;
+  bad.row_scale(0) = 0.0;
+  EXPECT_FALSE(computeStep(J, v, kXY, q, limitsFor(2), bad).valid);
 }

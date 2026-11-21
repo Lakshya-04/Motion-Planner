@@ -10,7 +10,8 @@
  *          (link -> parent link name, e.g. from the URDF); the nearest ancestor present in the sphere
  *          table becomes the parent (parent-child pairs are then excluded). A sphere table given as a
  *          file name instead of inline is not followed: pass that file's text. Throws
- *          std::runtime_error on a missing table, a malformed sphere or a parent cycle.
+ *          std::runtime_error on a missing table, a malformed sphere (also a non-finite centre or a
+ *          negative or non-finite radius) or a parent cycle.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 

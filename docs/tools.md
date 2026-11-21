@@ -59,7 +59,9 @@ from `target_force_n`; a non-contact tool with `standoff_m <= 0` or with `contac
 `reachability_tilt_deg_max > 0` on a contact tool; a spray cone on a contact tool, a half-angle outside
 (0, 90) deg or a fraction outside (0, 1]; `contact_area` or `edge_*` on a non-contact tool, a
 `contact_area` with a factor, tilt, stiffness or curvature out of range, `edge_spacing_scale` outside (0, 1];
-`geometry.tilt_deg` not finite or `|tilt_deg| >= 80`, a tilt without an in-surface `tilt_axis`.
+`geometry.tilt_deg` not finite or `|tilt_deg| >= 80`, a tilt without an in-surface `tilt_axis`, a tilt on a
+contact tool, a tilt together with `contact_area.nominal_tilt_deg`, and `tilt_deg + max_edge_tilt_deg >= 85` with
+`tilt_at_edges`.
 
 ## Contact and non-contact tools in planning
 
@@ -86,23 +88,31 @@ profile).
 axis and the surface normal, and the in-surface axis the tool tilts about, given in the contact frame as
 `[x, y, 0]` (any length; the loader normalises it). A negative tilt is stored as the positive tilt about the
 opposite axis. The loader rejects non-finite values, `|tilt_deg| >= 80`, a tilt without an axis and an axis
-with a z component. The two shipped tools have no tilt, and with `tilt_deg == 0` nothing changes: the lift
-output is bit-identical.
+with a z component. For now a tilt is refused on a contact tool (`task.contact: true`): the force path still
+presses along the tool Z, so a tilted contact tool would press with `F cos` and shear with `F sin` until the JTAC
+and conditioner frame checks exist. A tilt together with `contact_area.nominal_tilt_deg` is refused (both would
+narrow or widen the same swath), and so is a fixed tilt plus `max_edge_tilt_deg` of 85 degrees or more. The two
+shipped tools have no tilt, and with `tilt_deg == 0` nothing changes: the lift output is bit-identical.
 
 What the tilt does:
 
 - Lift (`wall_pose_lift`): the nominal tool Z (-normal) is rotated by `tilt_deg` about the axis (rotated with
-  `tool_frame_yaw_deg`, because the axis belongs to the tool). The position stays at the contact point, the
-  standoff stays along the surface normal. The edge tilt of a non-contact tool (`tilt_at_edges`) composes
+  `tool_frame_yaw_deg`, because the axis belongs to the tool). The standoff is measured along the tilted axis:
+  the nozzle sits at `strip point - axis * standoff`, so the axis meets the wall at the strip point (at tilt 0
+  this is the plain offset along the normal, bit-identical). The lift clamps the axis to 85 degrees from
+  into-wall as a defensive bound (the loader already refuses larger totals). The edge tilt of a non-contact tool (`tilt_at_edges`) composes
   afterwards: the intended tilt is applied first, the edge tilt rotates that axis toward the wall edge.
 - Swath: a tilted flat pad's footprint is stretched by `1/cos(tilt)` along the tilt direction (perpendicular to
   the tilt axis, in the surface). The swath across the stroke becomes `w (1 + k sin^2 phi) + l |k sin phi cos phi|`
   with `k = 1/cos(tilt) - 1`, `phi` the angle from the stroke to the tilt direction, `w` the pad width and `l`
   the pad length. Tilt along the stroke leaves `w`, tilt across it gives `w / cos(tilt)`
-  (`core_types/tool_footprint.hpp`). `toolSwath` applies it to the contact-area model and to the spray cone;
-  a fixed `swath_m` is left as the author set it. For the spray cone this is a first-order approximation (the
+  (`core_types/tool_footprint.hpp`). `toolSwath` applies it to the spray cone of a non-contact tool;
+  the contact-area model keeps its own width model (a fixed tilt is refused on a contact tool) and a fixed
+  `swath_m` is left as the author set it. The panel and bottom rows of a wall pattern take the swath from the
+  tool as turned for those rows (horizontal sweep, yaw plus `panel_tool_turn_deg`), not from the tool's own sweep
+  direction. For the spray cone this is a first-order approximation (the
   cone asymmetry and the longer slant range are ignored). `contact_area.nominal_tilt_deg` is the older, separate
-  narrowing for a tilted wall; do not set both for the same tilt.
+  narrowing for a tilted wall; the loader refuses it together with `geometry.tilt_deg`.
 - Force path: the wrench is already moved from the sensor to the tool frame by `force_core::moveWrench` with the
   conditioner's `tool_in_sensor` offset, so it is expressed at the contact frame provided `tcp_link` is the
   contact frame. A tilted tool's normal force is then along the tool Z, not the wall normal; the JTAC

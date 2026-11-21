@@ -2,6 +2,8 @@
 import importlib.util
 import math
 import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -87,3 +89,34 @@ def test_shell_output_is_evalable_assignments():
     lines = pr.shell_lines(pr.derive(load('panda_telescopic')))
     names = [ln.split('=')[0] for ln in lines]
     assert {'MP_WALL_X', 'MP_WALL_DX', 'MP_Z_LO', 'MP_Z_HI', 'MP_WALL_DZ', 'MP_TOOL_YAW', 'MP_FREE_POSE'} <= set(names)
+
+
+SCRIPT = HERE.parent / 'scripts' / 'profile_reach.py'
+
+
+def test_shell_output_evals_in_bash_under_nounset():
+    out = subprocess.run([sys.executable, str(SCRIPT), '--profile', 'panda_telescopic', '--shell'],
+                         capture_output=True, text=True, check=True).stdout
+    script = f'set -u\nvars=$(cat <<\'EOF\'\n{out}EOF\n)\neval "$vars"\necho "$MP_WALL_X|$MP_TOOL_YAW|$MP_ARM"\n'
+    r = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    wall_x, yaw, arm = r.stdout.strip().split('|')
+    d = pr.derive(load('panda_telescopic'))
+    assert float(wall_x) == pytest.approx(d['wall_x']) and float(yaw) == -90.0 and arm == 'panda'
+
+
+@pytest.mark.parametrize('name', ['ur3e_telescopic', 'generic_6dof_telescopic', 'no_such_profile'])
+def test_failing_profile_exits_nonzero_with_a_message_and_prints_nothing_evalable(name):
+    r = subprocess.run([sys.executable, str(SCRIPT), '--profile', name, '--shell'], capture_output=True, text=True)
+    assert r.returncode == 2
+    assert r.stdout == ''
+    assert f'profile {name}' in r.stderr
+
+
+def test_missing_lift_mount_height_falls_back_to_the_xacro_default_or_names_the_key():
+    p = load('ur10e_husky_telescopic')
+    assert 'mount_height_m' not in p['lift']
+    assert pr.mount_z(p) == pytest.approx(p['base']['lift_mount_height_m'] + 0.82)
+    p['lift']['type'] = 'scissor'
+    with pytest.raises(ValueError, match='lift.mount_height_m'):
+        pr.mount_z(p)

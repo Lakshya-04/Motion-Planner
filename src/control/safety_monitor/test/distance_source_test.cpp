@@ -5,6 +5,8 @@
  */
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include "safety_monitor/distance_source.hpp"
 
 using namespace safety_monitor;
@@ -81,13 +83,29 @@ TEST(EsdfGrid, MatchesSphereSdfNearVoxelCentres)
   EXPECT_NEAR(g.query(g.center(30, 20, 20), 0).distance, g.center(30, 20, 20).norm() - 0.3, 1e-6);
 }
 
-TEST(EsdfGrid, OutsideGridAndEmptyAreInvalid)
+TEST(EsdfGrid, OutsideGridAndEmptyDefaultToNaNFailSafe)
 {
   EsdfGrid g(Vec3(0, 0, 0), 0.1, 5, 5, 5);
+  for (const Vec3 & p : {Vec3(-0.01, 0.2, 0.2), Vec3(0.2, 0.2, 0.41)}) {
+    const auto q = g.query(p, 0);
+    EXPECT_TRUE(q.valid);
+    EXPECT_TRUE(std::isnan(q.distance));
+  }
+  EXPECT_TRUE(g.query(Vec3(0.4, 0.4, 0.4), 0).valid);  // upper corner centre is inside
+  EXPECT_FALSE(std::isnan(g.query(Vec3(0.4, 0.4, 0.4), 0).distance));
+  EXPECT_TRUE(std::isnan(EsdfGrid().query(Vec3::Zero(), 0).distance));
+}
+
+TEST(EsdfGrid, OutsideFreeIsExplicitOptIn)
+{
+  EsdfGrid g(Vec3(0, 0, 0), 0.1, 5, 5, 5);
+  g.setOutsideBehavior(OutsideGrid::kFree);
   EXPECT_FALSE(g.query(Vec3(-0.01, 0.2, 0.2), 0).valid);
   EXPECT_FALSE(g.query(Vec3(0.2, 0.2, 0.41), 0).valid);
-  EXPECT_TRUE(g.query(Vec3(0.4, 0.4, 0.4), 0).valid);  // upper corner centre is inside
-  EXPECT_FALSE(EsdfGrid().query(Vec3::Zero(), 0).valid);
+  EXPECT_TRUE(g.query(Vec3(0.4, 0.4, 0.4), 0).valid);
+  EsdfGrid empty;
+  empty.setOutsideBehavior(OutsideGrid::kFree);
+  EXPECT_FALSE(empty.query(Vec3::Zero(), 0).valid);
 }
 
 TEST(CapsuleSource, DistanceToSegmentAndCaps)

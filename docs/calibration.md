@@ -85,12 +85,18 @@ own kinematic error. In the seeded simulation (0.5 mm noise on each position axi
 degrees about both axes, 40 touches) the tip is within 1.5 mm for the headline seed, the mean over 30 seeds is
 under 1 mm and the worst seed about 2 mm; with 14 touches and 30 degrees the worst seed was 8 mm. The
 offset along the surface normal is the weakest direction: use wide tilts and many touches, and accept the
-result only with a small residual and a condition number well below the limit.
+result only with a small residual and a condition number well below the limit. The normal columns use the tips
+relative to their centroid, so the condition number does not depend on where the base origin is. `options.max_residual_m`
+(default infinity, off) refuses the fit when the worst touch is further than that from the plane; the error and
+`worst_touch_index` (an index into the poses given) name the touch to drop or redo, and the index is set on every
+result, so a slipped touch (a +10 mm slip gives a residual of several millimetres against a fraction of a
+millimetre for clean data) can also be found without a limit.
 
 **Tilt** (`fitToolTilt`). Given touches with the commanded tool axis and the surface normal measured by a
 detector (or the normal fitted from the touches above), it returns the rotation that aligns the commanded
 axis with the inward normal, averaged over the touches, in the tool frame when the tool poses are given (a fixed
-mounting error) and in the base frame otherwise (e.g. a wall-normal error). It also gives the spread between
+mounting error; `tool_pose` is the CONTACT-frame pose, the flange pose composed with `tcp_rpy`, and the roll along
+the commanded axis in that frame is removed, so an angled mount gives the true error) and in the base frame otherwise (e.g. a wall-normal error). It also gives the spread between
 touches. Roll about the tool axis does not move the axis and is not observable; `roll_observable` is always
 false. A tilt estimated from the contact force alone is not offered: friction confounds the force direction
 with the tilt, and it needs validation on a real pad. In simulation 2 and 10 degree errors are recovered within
@@ -101,9 +107,11 @@ holds `tcp_xyz/rpy`, payload mass and centre of gravity, F/T bias, method, ISO 8
 id strings, residuals (RMS, maximum, tilt spread) and validity: `max_age_hours` and the mounting-event counter
 at calibration time. JSON with `toJson` / `fromJson` / `parseRecord` (non-finite numbers and missing fields
 are errors). `isValid(now_epoch_s, current_mounting_events)` is false after `max_age_hours`, for a date in the
-future, or when the counter differs (the tool was re-mounted). `requireValidCalibration(tool, record, now,
+future, for a date that does not exist (2026-02-31, leap years respected), or when the counter differs (the tool was re-mounted).
+`validityReport(...)` returns `valid`, `mounting_checked` (false = no counter was given, the re-mount check was
+skipped) and the error. `requireValidCalibration(tool, record, now,
 mounting_events)` throws for a contact tool with no record, a record of another tool, or an invalid one, and
-accepts a non-contact tool without a record. Not done: nothing calls it yet (no manager stage, no file
+also throws when the current mounting counter is not given, and accepts a non-contact tool without a record. Not done: nothing calls it yet (no manager stage, no file
 location convention, no comparison with the profile's `tcp_xyz`), wear tracking, payload and bias are stored
 but not produced by these methods.
 

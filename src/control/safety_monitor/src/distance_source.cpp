@@ -101,11 +101,21 @@ EsdfGrid::EsdfGrid(const Vec3 & origin, double voxel, int nx, int ny, int nz)
 DistanceQuery EsdfGrid::query(const Vec3 & p, double) const
 {
   DistanceQuery q;
-  if (values_.empty() || nx_ < 2 || ny_ < 2 || nz_ < 2 || !p.allFinite()) {return q;}
+  DistanceQuery unknown;  // no data at this point: free or fail-safe, per the outside behaviour
+  if (outside_ == OutsideGrid::kUnknownFailsSafe) {
+    unknown.valid = true;
+    unknown.distance = std::numeric_limits<double>::quiet_NaN();
+  }
+  if (!p.allFinite()) {
+    q.valid = true;  // a NaN query point is never "free"
+    q.distance = std::numeric_limits<double>::quiet_NaN();
+    return q;
+  }
+  if (values_.empty() || nx_ < 2 || ny_ < 2 || nz_ < 2 || !(voxel_ > 0.0)) {return unknown;}
   const Vec3 g = (p - origin_) / voxel_;
   const double hi[3] = {nx_ - 1.0, ny_ - 1.0, nz_ - 1.0};
   for (int i = 0; i < 3; ++i) {
-    if (g[i] < 0.0 || g[i] > hi[i]) {return q;}
+    if (!(g[i] >= 0.0 && g[i] <= hi[i])) {return unknown;}
   }
   int i0[3];
   double f[3];
@@ -137,8 +147,10 @@ DistanceQuery EsdfGrid::query(const Vec3 & p, double) const
   const double gx = lerp(lerp(dxv[0][0], dxv[0][1], f[1]), lerp(dxv[1][0], dxv[1][1], f[1]), f[2]);
   const double gy = lerp(cx[0][1] - cx[0][0], cx[1][1] - cx[1][0], f[2]);
   const double gz = cy1 - cy0;
-  q.valid = std::isfinite(d);
-  q.distance = d;
+  // A NaN or infinite voxel poisons d (inf - inf, 0 * inf): report valid with NaN so that the
+  // monitor fails safe instead of ignoring the answer.
+  q.valid = true;
+  q.distance = std::isfinite(d) ? d : std::numeric_limits<double>::quiet_NaN();
   q.gradient = unitOr(Vec3(gx, gy, gz), Vec3::UnitZ());
   return q;
 }

@@ -233,12 +233,17 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
     if unknown:
         raise TypeError(f'unknown options {sorted(unknown)}')
     opt.update(options)
-    # gravcomp: True/False (all bodies before the F/T site) or a list of link names to compensate.
+    # gravcomp: True/False (all bodies before the F/T site) or a list, tuple, set or frozenset of link
+    # names to compensate. Dicts and other types raise TypeError (a dict used to fall through to bool()).
     gc = opt['gravcomp']
-    if isinstance(gc, (str, list, tuple, set, frozenset)):
-        gravcomp_all, gravcomp_links = False, frozenset([gc] if isinstance(gc, str) else gc)
+    if isinstance(gc, bool):
+        gravcomp_all, gravcomp_links = gc, frozenset()
+    elif isinstance(gc, str):
+        gravcomp_all, gravcomp_links = False, frozenset([gc])
+    elif isinstance(gc, (list, tuple, set, frozenset)):
+        gravcomp_all, gravcomp_links = False, frozenset(gc)
     else:
-        gravcomp_all, gravcomp_links = bool(gc), frozenset()
+        raise TypeError(f'gravcomp must be a bool or a list/tuple/set of link names, got {type(gc).__name__}')
     robot = UrdfRobot(urdf_text)
     unknown_links = gravcomp_links - set(robot.links)
     if unknown_links:

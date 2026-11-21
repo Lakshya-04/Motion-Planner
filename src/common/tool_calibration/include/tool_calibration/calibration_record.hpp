@@ -49,10 +49,15 @@ inline std::optional<std::int64_t> parseIso8601Utc(const std::string & s)
     };
   const int y = num(0, 4), mo = num(5, 2), d = num(8, 2), h = num(11, 2), mi = num(14, 2),
     se = num(17, 2);
-  if (y < 0 || mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59 ||
+  if (y < 0 || mo < 1 || mo > 12 || d < 1 || h < 0 || h > 23 || mi < 0 || mi > 59 ||
     se < 0 || se > 60)
   {
     return std::nullopt;
+  }
+  const bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+  static const int kDays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (d > kDays[mo - 1] + ((mo == 2 && leap) ? 1 : 0)) {
+    return std::nullopt;  // e.g. 2026-02-31
   }
   // Days from civil (H. Hinnant).
   const int yy = y - (mo <= 2 ? 1 : 0);
@@ -63,6 +68,16 @@ inline std::optional<std::int64_t> parseIso8601Utc(const std::string & s)
   const std::int64_t days = static_cast<std::int64_t>(era) * 146097 + doe - 719468;
   return days * 86400 + h * 3600 + mi * 60 + se;
 }
+
+/// Outcome of a validity check, saying whether the re-mount check could run.
+struct ValidityReport
+{
+  bool valid{false};
+  /// True when a current mounting counter was given and compared. False means the re-mount check
+  /// was SKIPPED: a valid result then only covers the date, expiry and finite fields.
+  bool mounting_checked{false};
+  std::string error;  ///< Empty when valid.
+};
 
 /// One tool's calibration result with provenance and validity.
 struct ToolCalibrationRecord
@@ -122,6 +137,18 @@ struct ToolCalibrationRecord
       return "tool was re-mounted since the calibration (mounting_events changed)";
     }
     return "";
+  }
+
+  /// Like validityError(), with the explicit statement of whether the re-mount check was done.
+  ValidityReport validityReport(
+    std::int64_t now_epoch_s,
+    std::optional<std::uint32_t> current_mounting_events = std::nullopt) const
+  {
+    ValidityReport rep;
+    rep.error = validityError(now_epoch_s, current_mounting_events);
+    rep.valid = rep.error.empty();
+    rep.mounting_checked = current_mounting_events.has_value();
+    return rep;
   }
 
   bool isValid(
@@ -210,7 +237,8 @@ inline ToolCalibrationRecord parseRecord(const std::string & text)
 /**
  * @brief Loader gate: a contact tool needs a valid calibration record, a non-contact tool does not.
  * @throws std::runtime_error naming the tool for a contact tool with no record, a record for a
- *         different tool, or an invalid (expired, re-mounted, malformed) one.
+ *         different tool, an invalid (expired, re-mounted, malformed) one, or no current mounting
+ *         counter (required for a contact tool).
  */
 inline void requireValidCalibration(
   const core_types::ToolProfile & tool, const std::optional<ToolCalibrationRecord> & record,
@@ -230,6 +258,13 @@ inline void requireValidCalibration(
   const std::string err = record->validityError(now_epoch_s, current_mounting_events);
   if (!err.empty()) {
     throw std::runtime_error("tool '" + tool.name + "': calibration refused: " + err);
+  }
+  // A contact tool's TCP is only trusted for the mounting it was measured on: the caller must say
+  // how often the tool has been mounted, or the re-mount check would pass silently.
+  if (!current_mounting_events) {
+    throw std::runtime_error(
+            "tool '" + tool.name + "': calibration refused: the current mounting counter is "
+            "required for a contact tool (the re-mount check cannot be skipped)");
   }
 }
 

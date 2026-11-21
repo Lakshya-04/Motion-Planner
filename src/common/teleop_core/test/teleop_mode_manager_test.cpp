@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 
 #include "teleop_core/teleop_mode_manager.hpp"
 
@@ -224,4 +226,79 @@ TEST(TeleopModeManager, DeterministicSequence)
       return h;
     };
   EXPECT_EQ(run(), run());
+}
+
+// ---- fail-safe time handling and safety-stop confirm (review fixes)
+
+TEST(TeleopModeManager, BackwardsClockFallsToHold)
+{
+  auto m = inTeleop(100.0);
+  const auto r = m.tick(1.0);
+  EXPECT_TRUE(r.accepted);
+  EXPECT_EQ(r.reason, Reason::kInputTimeout);
+  EXPECT_EQ(m.mode(), Mode::kHold);
+}
+
+TEST(TeleopModeManager, NanEntryTimeRefusedAndStaysSafe)
+{
+  TeleopModeManager m;
+  const auto r = m.requestTeleop(true, std::nan(""));
+  EXPECT_FALSE(r.accepted);
+  EXPECT_EQ(r.reason, Reason::kInvalidTime);
+  EXPECT_EQ(m.mode(), Mode::kAuto);
+  m.onStop(false, 0.0);
+  EXPECT_FALSE(m.requestTeleop(true, std::nan("")).accepted);
+  EXPECT_EQ(m.mode(), Mode::kHold);
+  EXPECT_EQ(m.tick(1000.0).accepted, false);
+}
+
+TEST(TeleopModeManager, FutureInputStampDoesNotKeepTeleopAlive)
+{
+  auto m = inTeleop(0.0);
+  m.noteInput(1e9);
+  EXPECT_EQ(m.tick(100.0).reason, Reason::kInputTimeout);
+  EXPECT_EQ(m.mode(), Mode::kHold);
+}
+
+TEST(TeleopModeManager, NanTickFallsToHold)
+{
+  auto m = inTeleop(0.0);
+  EXPECT_EQ(m.tick(std::nan("")).reason, Reason::kInputTimeout);
+  EXPECT_EQ(m.mode(), Mode::kHold);
+}
+
+TEST(TeleopModeManager, BadConfigThrows)
+{
+  for (double bad : {std::nan(""), std::numeric_limits<double>::infinity(), 0.0, -1.0}) {
+    TeleopModeConfig c;
+    c.input_timeout_s = bad;
+    EXPECT_THROW(TeleopModeManager{c}, std::invalid_argument);
+  }
+}
+
+TEST(TeleopModeManager, SafetyHoldToAutoNeedsConfirm)
+{
+  TeleopModeManager m;
+  m.onStop(true, 0.0);
+  auto r = m.requestAuto(false, false, 1.0);
+  EXPECT_FALSE(r.accepted);
+  EXPECT_EQ(r.reason, Reason::kNeedsConfirm);
+  EXPECT_EQ(m.mode(), Mode::kHold);
+  EXPECT_TRUE(m.requestAuto(true, false, 1.0).accepted);  // no teleop happened: no replan needed
+}
+
+TEST(TeleopModeManager, SafetyHoldFromTeleopNeedsConfirmAndReplanAck)
+{
+  auto m = inTeleop(0.0);
+  m.onStop(true, 1.0);
+  EXPECT_EQ(m.requestAuto(false, true, 2.0).reason, Reason::kNeedsConfirm);
+  EXPECT_EQ(m.requestAuto(true, false, 2.0).reason, Reason::kNeedsReplanAck);
+  EXPECT_TRUE(m.requestAuto(true, true, 2.0).accepted);
+}
+
+TEST(TeleopModeManager, PlainStopHoldToAutoStillNoConfirm)
+{
+  TeleopModeManager m;
+  m.onStop(false, 0.0);
+  EXPECT_TRUE(m.requestAuto(false, false, 1.0).accepted);
 }

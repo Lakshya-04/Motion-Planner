@@ -14,7 +14,11 @@ export MP_PROFILE
 DATA=$SHARE/data
 PASS_ARGS=()
 if [ "$MP_PROFILE" != ur10e_telescopic ]; then
-  eval "$(python3 "$PKG/lib/sim_mujoco/profile_reach.py" --profile "$MP_PROFILE" --shell)" || exit 2
+  vars=$(python3 "$PKG/lib/sim_mujoco/profile_reach.py" --profile "$MP_PROFILE" --shell) || {
+    echo "run_wall_pass: profile $MP_PROFILE is not supported (profile_reach.py failed, message above)" >&2
+    exit 2
+  }
+  eval "$vars"
   python3 "$PKG/lib/sim_mujoco/shift_wall_scene.py" "$SHARE/data" "${WALL_PASS_DATA_OUT:-/tmp/wall_pass_data}" \
     "$MP_WALL_DX" 0 0.3 "$MP_WALL_DZ" || exit 2
   DATA=${WALL_PASS_DATA_OUT:-/tmp/wall_pass_data}

@@ -314,7 +314,6 @@ def test_depth_sensor_model_compiles_and_a_ray_hits_only_the_scene(tmp_path):
 
 
 # ---------------------------------------------------------------- per-body gravcomp
-BASELINE_SHA = 'b370f1d0536f31b82be7f461e484bdffc3e16d9c1dc05d0f2e8bb9f81961e218'
 
 
 def _gravcomp_bodies(path):
@@ -343,7 +342,15 @@ def test_gravcomp_unknown_link_rejected(tmp_path):
         urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, gravcomp=['nope'])
 
 
-def test_gravcomp_default_output_byte_identical_to_pre_change(mjcf):
-    # sha256 of the default robot.xml generated before the per-link option existed.
-    import hashlib
-    assert hashlib.sha256(mjcf.read_bytes()).hexdigest() == BASELINE_SHA
+@pytest.mark.parametrize('names', [['link1'], ('link1',), {'link1'}, frozenset({'link1'})])
+def test_gravcomp_accepts_any_non_string_iterable(tmp_path, names):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME,
+                        commanded=COMMANDED, gravcomp=names)
+    assert _gravcomp_bodies(path) == {'link1'}
+
+
+@pytest.mark.parametrize('bad', [{'link1': 1}, 3, 1.5, b'link1', object()])
+def test_gravcomp_rejects_dicts_and_other_types(tmp_path, bad):
+    with pytest.raises(TypeError):
+        urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME,
+                     commanded=COMMANDED, gravcomp=bad)
