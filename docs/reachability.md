@@ -475,9 +475,19 @@ m; continuous joints wrapped) and a branch signature (signs of chosen joints, a 
 discontinuous after reseeding is `PoseFailure::kBranchBreak`. It reports `split_count`, `branch_changes`, `max_continuity_ratio`,
 `reseeds` and `lift_travel_m`. Tested only against a fake 2-link planar IK; no real arm, no adapter, no build run yet.
 
-Planned, not implemented: an IK adapter over the stand verifier, the whole-column check before a column is committed, the
-escalation (change lift height, then re-stand, then re-order columns, split only last), and the split numbers in the column
-analysis, scorecard, verify result and the execution-time count. See `docs/development_plan.md` section 4.
+Used by the manager (opt-in, `column_ik_check:=true`, default off; `manipulation_manager` `core/column_ik_gate.hpp`,
+`adapters/reachability_column_ik_port.hpp`): before a column is docked, `ColumnIkChain` runs over the planner's IK in the base
+frame (approach, strokes and retract built from `dock_standoff_m`, `dock_approach_extra_m` and the press depth). A continuous chain
+lets the column run. A branch break from the current seed is retried from the other lift heights (`column_ik_lift_step_m` over the
+base check's lift range; the first continuous one becomes the dock IK seed); if every attempt breaks the column is skipped with the
+reason `plan_failed` and the log names the failing pose and its role. A pose the IK refuses in every attempt is let through with a
+warning (the planner's pose-goal search may still solve it) unless `column_ik_reject_on_refused`. The default branch joints are
+the shoulder pan and the elbow (`column_ik_branch_joints: [1, 3]`, the joints that flipped in the Gazebo run). Gtested with fake IKs
+only; never run on a real arm or in a simulator, so the thresholds (`column_ik_ratio_limit`, rad per metre) are starting values.
+
+Planned, not implemented: re-standing and re-ordering columns on a break, splitting a column at the break and running the pieces
+from another stand, an IK adapter over the stand verifier, and the split numbers in the column analysis, scorecard, verify result
+and the execution-time count. See `docs/development_plan.md` section 4.
 
 ### Split avoidance, measured
 

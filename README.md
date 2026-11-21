@@ -10,20 +10,32 @@ end to end in headless one-command passes (coverage planner, manager, MoveIt, co
 and scored), including multi-stand passes where the base drives between stands. Nothing here has run on hardware.
 The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
-**Where it stands (2026-11-21):**
+**Where it stands (2026-11-22, main at #173):**
 - **Single-stand wall passes** in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
-- **Two-stand passes in MuJoCo** now pass. Same-session batches of 8 runs each: plain wall 6 of 8 before the second-stand fix and 8 of 8
-  after, the rib scenario `two_panels` 8 of 8 both times (scored on the reachable wall). That 6/8 vs 8/8 gap is not statistically
-  significant on its own; the clear differences are fewer truncated plans (at least 5 per run before, 0 to 6 after) and lower
-  peak forces. Peaks are still 47 to 88 N against a 10 N target on these passes (a 10 N hold works in the single-stand test).
-- **cuRobo v0.9.0 (cuRoboV2-Fast) as the free-space planner** now completes a two-stand MuJoCo pass: four runs, all 10 of 10 columns,
-  coverage 1.0, peak force 46.8 to 72.4 N. How much cuRobo did, honestly: it planned the stand-0 approach moves (12 to 16 s each on
-  this 4 GB laptop GPU, executed in 0.4 to 0.7 s); MoveIt/OMPL planned the stow and the second stand, either because cuRobo
-  could not (no path from the docked pose to the stow, even in an empty world: its robot model treats low lift with the arm swung out as
-  in collision) or did not answer in time. A `free_space_fallback` makes that automatic and logged. See [the pass below](#curobo-in-a-two-stand-pass-mujoco).
-- **Gazebo two-stand passes currently fail** (0 of 10 columns in two runs on 2026-11-21, with and without cuRobo: MoveIt reports an invalid
-  dock goal and a start state out of bounds). Earlier Gazebo runs of the same script completed one stand; the regression is not isolated yet.
-- Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md); the day-by-day handoff: [docs/dev_handoff.md](docs/dev_handoff.md).
+- **Two-stand passes in MuJoCo pass**, with MoveIt/OMPL and with cuRobo. The latest run (MoveIt/OMPL, scored on the tool pose after #167 and
+  #172, one run): 10 of 10 columns, coverage 100 %, tool tilt at most 0.15 deg, wall gap at most 0.9 mm, peak force 22.1 N against a 10 N
+  target ([video below](#two-stand-pass-with-moveit-scored-on-the-tool-pose-mujoco)). Earlier same-session batches: 6 of 8 before the
+  second-stand fix and 8 of 8 after (not significant on its own).
+- **cuRobo v0.9.0 as the free-space planner** completed a two-stand MuJoCo pass four times (10 of 10 columns, peaks 46.8 to 72.4 N), but
+  MoveIt/OMPL still planned the stow and the second stand: cuRobo found no docked-to-stow path (its model treats low lift with the arm swung
+  out as in collision) or did not answer in time, and it needs 12 to 16 s per plan on the 4 GB laptop GPU. A `free_space_fallback` makes the
+  hand-over automatic and logged; a start/goal precheck, a 7-joint collision-matrix fix (`--ignore-hops 2`) and a joint limit guard are in,
+  but the cause of the low-lift refusal is a hypothesis until a GPU run confirms it ([docs/curobo_v2_notes.md](docs/curobo_v2_notes.md)).
+- **Gazebo two-stand passes still fail.** After the start-state clamps (#156, #157, no "start state out of bounds" error is left) the pass
+  completed 1 of 10 columns in the latest run (6 of 10 in the one before; the pass varies a lot between runs). The log shows the dock IK
+  jumping to another arm branch (shoulder pan -0.62 to +2.49 rad) and the wrist winding, after which every column fails. An opt-in dock IK
+  continuity choice (`dock_ik_continuity`, #169) targets that; it has not been measured in Gazebo on main yet
+  ([docs/sim_gazebo.md](docs/sim_gazebo.md)).
+- **Merged since the cuRobo work, mostly host-tested only (no simulator, GPU or hardware run unless stated):** column-sequence feasibility
+  (approach, contact, strokes, retract; split avoidance), an RM4D-backed column port in the manager (advisory, off by default), `ColumnIkChain`
+  and a path quality audit (not yet called by the planner), a stand-check gate and dock IK continuity (both opt-in), N-DOF arms and a
+  redundancy policy for maps (FR3, iiwa 7, Kinova Gen3, xArm 7, UR3e to UR20), tool-pose scoring (tilt, wall gap), plane-generic stands and a
+  base placement optimiser (ceilings, corners), a differential-IK core, a runtime safety monitor core (**not a certified safety function**),
+  tool contact frame, tilt and plane-touch calibration, a teleoperation core and a lateral dock term. The list with evidence is
+  [CHANGELOG.md](CHANGELOG.md) and [docs/ROADMAP.md](docs/ROADMAP.md#19-since-143-what-merged-and-what-it-is-worth).
+- **Nothing has run on hardware.**
+- Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md); the handoff: [docs/dev_handoff.md](docs/dev_handoff.md); the order of
+  the next themes: [docs/development_plan.md](docs/development_plan.md).
 
 ```
 sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware) -> base stands
