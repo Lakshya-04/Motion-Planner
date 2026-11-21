@@ -57,3 +57,5 @@ planning:
       limit_mode: retime
       limit_safety_factor: 0.9     # use at most 90 % of each limit
       limit_use_file_scaling: true # also apply default_velocity/acceleration_scaling_factor, as MoveIt does
+      # limit_jerk: 0.0           # rad/s^3 (m/s^3): jerk limit for every joint without one (file max_jerk with
+                                   # has_jerk_limits, or inline name:v:a:j). 0 = off (default). Reject: jerk_violation.

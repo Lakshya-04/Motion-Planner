@@ -220,6 +220,7 @@ Failing: the Gazebo two-stand pass (0 of 10 columns in two runs on 2026-11-21, w
 
 The history up to 2026-11-20 was consolidated from 561 commits into 15 milestone commits with identical content (the pull request numbers above are kept in the messages).
 - `reachability`: review fixes for the plane-generic stands and base placement. `surfaceFrame` classifies a plane as horizontal when its normal is within 35 degrees of vertical (a ceiling off level by 0.01 degrees is still a ceiling); `makeCandidateStands` and `selectStands(request)` now honour `StationRequest::avoid_stations` (they ignored it before; no current caller sets it); `planBasePlacement` no longer shrinks the caller's avoid radius and plans over the filtered survivors; its per-column escalation follows the final status; `stationGridPointCount` lets the node's work guard count a ceiling grid correctly; `StandSelectionCode::kNoFreeStand` moved to the end of the enum.
+- `curobo_planner`: optional per-joint jerk limit in the joint limit guard (`JointLimit::jerk`, file `max_jerk` with `has_jerk_limits`, inline `name:v:a:j`, plugin param `limit_jerk`; default off). Finite differences of the retimed trajectory; `limit_mode: reject` fails with `jerk_violation` (joint and waypoint in the message), `retime` stretches time by cbrt(jerk ratio / factor). gtests built and run on the host only; not built under colcon, not run in the sim.
 
 ### Changed (first block)
 - TRAC-IK with `Distance` is the default MoveIt IK solver.
