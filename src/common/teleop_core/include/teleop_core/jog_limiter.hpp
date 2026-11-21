@@ -18,6 +18,7 @@ enum class LimitReason {kNone = 0, kScaled, kStop, kStaleScale, kInvalidTwist};
 
 struct JogLimiterConfig
 {
+  /// Must be finite and > 0, otherwise the constructor throws std::invalid_argument.
   double stale_timeout_s{0.5};
 };
 

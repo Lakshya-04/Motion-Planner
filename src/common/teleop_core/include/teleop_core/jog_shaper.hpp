@@ -7,6 +7,12 @@
  *          The result is rotated from the selected frame (tool, base or world) into the base frame, then
  *          slew-limited as a vector (linear and angular separately, so direction is kept). A watchdog forces
  *          an immediate zero twist when no valid input arrived for `watchdog_s`.
+ *          The speed bound is on the norm: the linear part is limited to `max_linear_mps` and the angular part
+ *          to `max_angular_rps` with the direction kept (not per axis).
+ *          A masked axis is zero in the jog frame at every update: its slew state is zeroed too, so the
+ *          velocity along it drops at once. A non-finite rotation gives a zero twist, flagged, and the slew
+ *          state is cleared so the next good sample starts from rest.
+ *          Time going backwards (now before the last input) trips the watchdog.
  *          Input is [x, y, z, rx, ry, rz]; the twist is [vx, vy, vz, wx, wy, wz]. NaN/inf axes count as zero
  *          and the sample is not valid (it does not refresh the watchdog). No clock: the caller passes time.
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
@@ -32,9 +38,9 @@ struct JogShaperConfig
   double max_linear_mps{0.10};
   double max_angular_rps{0.30};
   std::array<bool, 6> enabled{true, true, true, true, true, true};
-  double max_linear_accel{0.5};      ///< Slew limit [m/s^2]; <= 0 disables.
-  double max_angular_accel{1.5};     ///< Slew limit [rad/s^2]; <= 0 disables.
-  double watchdog_s{0.25};
+  double max_linear_accel{0.5};      ///< Slew limit [m/s^2]; <= 0 disables; non-finite throws.
+  double max_angular_accel{1.5};     ///< Slew limit [rad/s^2]; <= 0 disables; non-finite throws.
+  double watchdog_s{0.25};           ///< Must be finite and > 0.
   JogFrame frame{JogFrame::kBase};
 };
 
@@ -50,6 +56,7 @@ struct JogOutput
   bool watchdog_tripped{false};
   bool saturated{false};             ///< An input axis was clamped.
   bool invalid_input{false};         ///< The last input had a non-finite axis.
+  bool invalid_rotation{false};      ///< The selected frame rotation was not finite: zero twist this tick.
 };
 
 class JogShaper
@@ -57,8 +64,11 @@ class JogShaper
 public:
   explicit JogShaper(const JogShaperConfig & config = JogShaperConfig{});
 
+  /// Throws std::invalid_argument (config unchanged) if `watchdog_s` is not finite and > 0, or an accel
+  /// limit is not finite. Other fields are clamped to their valid range.
   void setConfig(const JogShaperConfig & config);
   void setFrame(JogFrame frame) {cfg_.frame = frame;}
+  /// A newly masked axis goes to zero velocity on the next update(), not through the slew ramp.
   void setEnabled(const std::array<bool, 6> & mask) {cfg_.enabled = mask;}
 
   /// Store the latest operator input at time `now_s`.
