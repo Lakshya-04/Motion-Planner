@@ -197,7 +197,7 @@ no Gazebo or MuJoCo run.
 
 ## Horizontal surfaces (ceiling, floor)
 
-`chooseStation` needs a wall plane and a free side, so it refuses a horizontal one. `planHorizontalStands(map,
+`chooseStation` also accepts a horizontal plane now (see "Plane-generic stands and base free space" below); `planHorizontalStands` is the older, separate planner. `planHorizontalStands(map,
 request)` (`core/horizontal_stands.hpp`) is the counterpart for a ceiling (tool pointing up) or a floor (tool
 pointing down). The tool axis is vertical, so the map has no azimuth: a cell depends only on the horizontal
 distance and the height between base and target, and one stand reaches a ring around itself.
@@ -474,6 +474,105 @@ Implemented (`reachability/core/pose_quality.hpp`, `path_quality_audit.hpp`; ROS
 - `auditPathQuality`: takes stroke joint trajectories plus injected `JacobianFn` / `LimitMarginFn` (`armJacobianFn`, `armLimitMarginFn`, `limitMarginFromBounds` build them) and returns per stroke the min sigma, min limit margin, the worst waypoint index and a reason `near_singular` / `near_limit` / `ok`, with aggregate counts. `PathQualityConfig` defaults are `min_sigma = 0.02` and `min_limit_margin = 0.02` (share of the joint range); 0 switches a check off. The Jacobian is unscaled, so these are starting values, not calibrated. It only reports; it does not change a path.
 
 Planned, not built: calling the audit from the Cartesian planner and a `manipulation_manager` gate (opt-in parameter, default off, report and flag only); profile-level thresholds into the stand verifier and the cuRobo guard (which checks velocity and acceleration only); a damped least-squares / null-space IK decorator; an opt-in monitor that slows and then faults; per-pass reporting and an A/B on one wall.
+
+## Plane-generic stands and base free space
+
+The stand search no longer assumes a vertical wall. `core/surface_frame.hpp` builds the in-plane axes for any normal
+(`surfaceFrame`): for a vertical or tilted plane `u = normalize(UnitZ x n)` exactly as before (every wall result is
+unchanged, tested bit for bit), for a horizontal plane `u` is +x projected into the plane and `v = n x u`.
+`chooseStation`, `makeCandidateStands`, the set-cover enumeration and the column-stand ordering all go through one
+grid generator, `stationGrid`.
+
+- **Ceiling and floor.** For a horizontal patch the grid covers the patch area (bounding box of the targets, plus
+  `lateral_margin`), the base stands under a ceiling or over a floor patch, `standoff` is 0 and `min_clearance` /
+  `max_standoff` do not apply (no plane clearance). `normal` points into the free side (down for a ceiling, up for a
+  floor). A zero or non-finite normal is still `invalid_request`.
+- **Free space.** `StationRequest::free_space` (`core/free_space.hpp`, default unset = no change) holds walls other
+  than the work plane (half-planes in the floor plane) and obstacle polygons (`FreeSpace::box` for axis-aligned
+  ones; a finite wall is a thin polygon). `footprintFree(pose, base, margin)` is a hard filter on every candidate
+  in `chooseStation`, `makeCandidateStands` and the set-cover candidates: all 24 yaw samples are tested with the full
+  footprint inflated by `free_space_margin` (default 0.05 m), a candidate is kept when at least one yaw fits and
+  takes the feasible yaw with the most work-plane clearance. At an inside corner the footprint is therefore kept off
+  the perpendicular wall; without a base model only the arm-base point is tested.
+- **Wall end and outside corner.** The work plane is infinite by default. With `FreeSpace::has_work_span` (a
+  `[work_span_lo, work_span_hi]` interval along `u` from `wall_point`) the work-plane clearance applies only to the
+  footprint points inside the span, so a stand beyond the end is allowed; put the wall's end in `obstacles` to keep the
+  footprint off it.
+- **Reason codes.** `Station::code` (`StationCode`: `ok`, `invalid_request`, `no_free_stand`, `no_reachable_stand`) and
+  `StandSelectionCode::kNoFreeStand` (`no_free_stand`) say that every candidate was removed by the footprint
+  (work-plane clearance or free space), as against "free stands exist but reach nothing". A too-narrow alcove ends in
+  `no_free_stand` with all targets in `unreachable`; no stand is invented.
+- **Non-planar surfaces: not done, the frame abstraction is the hook.** `SurfaceFrame` (origin, outward normal,
+  tangents u and v) is the local frame of the work surface at a point; a plane has one everywhere, a curved patch
+  could supply one per candidate point. The free-space filter only needs the other obstacles and the footprint, not
+  the surface type. Nothing here handles curvature yet (the grid, the work-plane clearance and the span are planar).
+- **Limits.** Obstacles are 2D (heights are not modelled); the stand stays on the free side of the work plane except
+  through the work span (the search does not go behind a wall end); the arm and tool are not checked against an
+  adjacent wall; there is no navigation-feasibility (connectivity) check, so a free stand may not be reachable by the
+  base; yaw samples are 24 fixed steps. Tested with hand-made maps (`test/core/plane_stands_test.cpp`: 13 tests, ceiling,
+  floor, inside corner, wall end, narrow alcove, determinism); not run in any simulation or on hardware.
+
+## Base placement optimiser
+
+`planBasePlacement` (`core/base_placement.hpp`, ROS-free) decides where the base stands from the reachability of the
+whole column sequence, not from single targets. It composes the existing pieces; nothing is reimplemented.
+
+**Decides from.** The surface frame (`SurfaceFrame`: a plane, or any frame with an origin and an outward normal), the
+columns as stroke lists (each turned into approach, contact, strokes and retract by `buildColumnSequence` with the
+manager's `dock_standoff_m`, `dock_approach_extra_m`, press depth and retract conventions, checked against the RM4D map per
+stand and lift height), the base footprint, a `FreeSpace` (obstacles and other walls), the navigation start pose and the
+options (`allow_splits`, `MarginConfig`, optional verifier, `max_stands`, yaw window). One map is taken (several maps are not
+combined).
+
+**Steps.**
+1. Candidate stands: `makeCandidateStands` (grid on the free side, footprint and work-plane clearance, `FreeSpace` over all yaw samples).
+2. Navigation filter (hard, before selection): a `NavFeasibility` port; the shipped `GridNavFeasibility` floods a grid
+   over the free space plus the work wall, inflated by the footprint's circumscribed radius plus a margin, from the start
+   pose, and every candidate must be connected (the stand and the start may sit up to circumscribed minus inscribed radius
+   plus one cell inside the inflation, since the real footprint was already tested). A Nav2 costmap can replace the grid
+   by implementing the port (`BasePlacementOptions::nav`). Without a start pose nothing is filtered by navigation.
+3. Yaw window: with a base that cannot strafe, the yaw must stay within `diff_yaw_window_rad` (default 0.7) of facing the
+   surface and keep the footprint clear; a base that can strafe is unrestricted (`yaw_window_rad` overrides). The stand takes
+   the feasible yaw closest to facing.
+4. `planColumnStands` over the surviving candidates (rejected ones are avoided).
+5. Verifier loop (the `planStandsVerified` semantics): a (stand, column) the verifier cut puts that stand on the avoid list and
+   the columns are planned again, at most `verifier_rounds`; the best round (most strokes, then whole columns, then fewer stands)
+   is kept. A stand avoided for one column is avoided for all (coarse).
+
+**Escalation when a column is not whole at its best stand**, in this order: another lift height of the same column (every
+candidate is evaluated at all heights); another candidate stand that does it whole (whole-column set cover); column re-order
+is the caller's (the optimiser reports and does not re-order); a split only as the last resort, reported. `allow_splits =
+false` leaves such a column out (`skipped_to_avoid_split`). `BpoColumn::escalation` names the cheapest step at which a whole
+stand exists: `none` (whole at the stand nearest the column at the nominal lift, the one that puts the arm base level with the
+column's middle), `lift_height`, `other_stand`, or `split` / `skipped` / `unreachable`.
+
+**Reason codes** (`BpoReason`, stable strings): `ok`, `split_no_whole_stand`, `skipped_to_avoid_split`, `out_of_reach`,
+`low_margin`, `refused_by_verifier`, `near_singular`, `near_joint_limit`, `unreachable_by_nav` and `yaw_window` (a candidate
+the filters removed would have done better), `no_free_stand`, `max_stands`. Each non-whole column also carries the limiting
+pose (role, stroke, failure, score). No column is dropped: whole + split + unreachable equals the columns given.
+
+**Outputs.** Stands in visiting order with the columns each covers, yaw, standoff, travel (time with a base model, and
+metres) and the footprint clearance; `covered_fraction`; `reachable_fraction` (strokes usable at some navigable stand with
+usable end poses: what the arm and the stands allow at best); `stand_count`; `exact_min_stands` (iterative-deepening
+exact cover of the whole-coverable columns over the navigable candidates, up to `exact_max_columns` columns and a node
+budget, a lower bound on the stands for whole columns, taken before verification); `split_count`; travel; rejected candidates
+with their reasons.
+
+**Tested** (`test/core/base_placement_test.cpp`, 19 tests, hand-made maps, no arm, no ROS): the plain wall against
+`planColumnStands`; inside corner (coverage non-decreasing with the distance from the second wall, no stand inside the corner);
+outside corner / wall end; window border with a bench; a pillar; a narrow alcove (`no_free_stand`, nothing invented); a corridor
+(a diff base cannot turn in it: `yaw_window`; omni can); partition (`unreachable_by_nav`); a costmap port; a refusing
+verifier; stand cap; allowed and forbidden splits; 40 random inside corners (angle 60 to 120 degrees, finite or infinite
+walls, wall length, patch offset, ring reach and footprint size from a synthetic ring map, fixed seeds) and 30 random walls
+with obstacles. Asserted on all: covered >= 0.99 of reachable, stands within 1 of the exact minimum, no split when every
+column has a whole stand, stands footprint-clear with the margin, every unreachable column coded, determinism. The run prints
+a metrics table (coverage, stands, exact minimum, splits, travel, clearance).
+
+**Honest limits.** The arm links and the tool against an adjacent wall are not checked; obstacles are 2D; there is no Nav2
+costmap yet (the grid is a stand-in: circle inflation is conservative, so a gap just wider than the footprint can be called
+blocked); the yaw is not an input to reachability (the map is taken as yaw-free, like the rest of the core); the verifier
+loop avoids a refusing stand outright; column re-order is not done here; RM4D is optimistic (no IK, no collision), so
+whole means the map says so. The harness uses hand-made maps, not a built arm, and nothing was run in a simulator or on hardware.
 
 ## Limits and next steps
 
