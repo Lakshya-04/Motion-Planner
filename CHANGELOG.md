@@ -221,6 +221,8 @@ Failing: the Gazebo two-stand pass (0 of 10 columns in two runs on 2026-11-21, w
 The history up to 2026-11-20 was consolidated from 561 commits into 15 milestone commits with identical content (the pull request numbers above are kept in the messages).
 - `reachability`: review fixes for the plane-generic stands and base placement. `surfaceFrame` classifies a plane as horizontal when its normal is within 35 degrees of vertical (a ceiling off level by 0.01 degrees is still a ceiling); `makeCandidateStands` and `selectStands(request)` now honour `StationRequest::avoid_stations` (they ignored it before; no current caller sets it); `planBasePlacement` no longer shrinks the caller's avoid radius and plans over the filtered survivors; its per-column escalation follows the final status; `stationGridPointCount` lets the node's work guard count a ceiling grid correctly; `StandSelectionCode::kNoFreeStand` moved to the end of the enum.
 
+- `mobile_manipulator_description`: four more primitive bases (`jackal` diff, `dingo_o` omni, `tiago_style` and `fetch_style` round diff bases whose torso lift is the profile's one-carriage telescopic lift, 0.35 / 0.386 m) with four profiles, and `test/test_home_pose.py`, a host-run joint-limit and capsule self-collision check of every profile's home pose (UR profiles skip without `ur_description`). Rendered and tested with host xacro only; not built in colcon or Docker.
+
 ### Changed (first block)
 - TRAC-IK with `Distance` is the default MoveIt IK solver.
 - Docs that said "planned" or "not done" for things that now exist were brought in line with the code
