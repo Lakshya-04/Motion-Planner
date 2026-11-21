@@ -451,6 +451,21 @@ no collision, no obstacles) unless the verifier is given; the thresholds are sta
 run was involved. The adapter has gtests against a hand-made map (whole, approach / retract / low-margin limits, split, lift heights,
 unknown stand); the node wiring (parameters, TF stand provider, the log) was written without a build and has not been run.
 
+### How splits are avoided
+
+A column that is "whole" in the map can still have no continuous joint path: IK solved pose by pose may land on another branch
+(elbow or wrist flip, a lift jump) for the next pose. Implemented (ROS-free, `core/column_ik_chain.hpp`, `ColumnIkChain`): it
+solves a column's pose sequence in order through an injected IK callable, seeding each pose from the previous solution and then
+from caller-supplied folded seeds; per step it computes the continuity ratio `max |dq_i| / jump` (jump is the Cartesian distance
+of the two poses), compares each joint with the limit of its type (continuous and revolute in rad per m, prismatic lift in m per
+m; continuous joints wrapped) and a branch signature (signs of chosen joints, a deadband around zero). A step that stays
+discontinuous after reseeding is `PoseFailure::kBranchBreak`. It reports `split_count`, `branch_changes`, `max_continuity_ratio`,
+`reseeds` and `lift_travel_m`. Tested only against a fake 2-link planar IK; no real arm, no adapter, no build run yet.
+
+Planned, not implemented: an IK adapter over the stand verifier, the whole-column check before a column is committed, the
+escalation (change lift height, then re-stand, then re-order columns, split only last), and the split numbers in the column
+analysis, scorecard, verify result and the execution-time count. See `docs/development_plan.md` section 4.
+
 ## Limits and next steps
 
 - **Request validation.** Search grids are checked before they are enumerated: `grid_step` must be finite and
