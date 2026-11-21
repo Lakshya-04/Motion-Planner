@@ -159,6 +159,16 @@ bool planRegion(
   return out.success && !out.path.poses.empty();
 }
 
+/// The tool as it is turned for the horizontal rows (panels and the bottom pass); its swath is the
+/// width the rows really cover, not the width along its own sweep direction and yaw.
+ToolCoverageProfile rowTool(const ToolCoverageProfile & tool, const PatternOptions & options)
+{
+  ToolCoverageProfile t = tool;
+  t.coverage.sweep_direction = "horizontal";
+  t.task.tool_frame_yaw_deg += options.panel_tool_turn_deg;
+  return t;
+}
+
 }  // namespace
 
 PatternPlan planWallPattern(
@@ -192,7 +202,8 @@ PatternPlan planWallPattern(
     if (options.enable_bottom_pass && options.bottom_band_height_m > 0.0) {
       band_top = wall.v_min + options.bottom_band_height_m;
       // Bottom pass: horizontal rows over the band, with the tool turned like the panels.
-      const double swath = options.panel_swath_m > 0.0 ? options.panel_swath_m : toolSwath(tool);
+      const double swath =
+        options.panel_swath_m > 0.0 ? options.panel_swath_m : toolSwath(rowTool(tool, options));
       CoveragePlannerParams p = base_params;
       p.sweep_direction = "horizontal";
       p.swath = swath;
@@ -242,7 +253,8 @@ PatternPlan planWallPattern(
   }
   plan.panels = splitIntoPanels(u0, u1, options.panel_width_m, options.panel_overlap_m, options.start_left);
 
-  const double swath = options.panel_swath_m > 0.0 ? options.panel_swath_m : toolSwath(tool);
+  const double swath =
+    options.panel_swath_m > 0.0 ? options.panel_swath_m : toolSwath(rowTool(tool, options));
   ToolCoverageProfile panel_tool = tool;
   panel_tool.coverage.sweep_direction = "horizontal";
   panel_tool.coverage.swath_m = swath;

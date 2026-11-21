@@ -78,6 +78,8 @@ Eigen::Vector3d rotateTowardDirection(
   return (rotation * z_nominal).normalized();
 }
 
+constexpr double kMaxAxisTiltDeg = 85.0;
+
 }  // namespace
 
 Path liftCoveragePathPose(
@@ -111,7 +113,10 @@ Path liftCoveragePathPose(
     Eigen::Vector3d axis = (ax * x_tangent + ay * y_tangent);
     if (axis.norm() > 1e-12) {
       axis = (Eigen::AngleAxisd(yaw_rad, z_nominal) * axis).normalized();
-      const Eigen::AngleAxisd tilt(tool_task.tool_tilt_deg * M_PI / 180.0, axis);
+      // Defensive bound; the loader already refuses a total (fixed + edge) tilt of 85 degrees.
+      const double tilt_rad =
+        std::clamp(tool_task.tool_tilt_deg, -kMaxAxisTiltDeg, kMaxAxisTiltDeg) * M_PI / 180.0;
+      const Eigen::AngleAxisd tilt(tilt_rad, axis);
       z_start = (tilt * z_nominal).normalized();
       x_start = (tilt * x_tangent).normalized();
     }
@@ -157,6 +162,14 @@ Path liftCoveragePathPose(
         z_axis = rotateTowardDirection(z_start, target_direction, fraction * max_tilt_rad);
       }
     }
+    // Never let the fixed plus edge tilt turn the axis more than kMaxAxisTiltDeg from into-wall.
+    const double cos_limit = std::cos(kMaxAxisTiltDeg * M_PI / 180.0);
+    if (z_axis.dot(z_nominal) < cos_limit) {
+      const Eigen::Vector3d side = z_axis - z_nominal * z_axis.dot(z_nominal);
+      const Eigen::Vector3d dir = side.norm() > 1e-12 ? Eigen::Vector3d(side.normalized()) :
+        x_tangent;
+      z_axis = (z_nominal * cos_limit + dir * std::sqrt(1.0 - cos_limit * cos_limit)).normalized();
+    }
 
     Eigen::Vector3d x_final = (x_start - z_axis * z_axis.dot(x_start)).normalized();
     Eigen::Vector3d y_final = z_axis.cross(x_final).normalized();
@@ -178,7 +191,9 @@ Path liftCoveragePathPose(
     Eigen::Quaterniond quaternion(rotation);
     quaternion.normalize();
 
-    const Eigen::Vector3d offset_position = position + normal * tool_task.standoff_m;
+    // The standoff is measured along the tool axis, so the axis meets the strip point at that
+    // distance. Without a fixed tilt z_start == -normal and this is the plain normal offset.
+    const Eigen::Vector3d offset_position = position - z_start * tool_task.standoff_m;
 
     PoseStamped lifted_pose;
     lifted_pose.header = flat_pose.header;
