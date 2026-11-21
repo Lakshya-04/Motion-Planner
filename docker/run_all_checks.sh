@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# One command for every check that needs no simulator, GPU or hardware (there is no CI; see
-# CONTRIBUTING.md and docs/docker.md#run-all-checks). Run it from the repo root on the host:
+# One command for every check that needs no simulator, GPU or hardware (CI runs part of this on free
+# runners; see CONTRIBUTING.md and docs/docker.md#run-all-checks). Run it from the repo root on the host:
 #
 #   docker/run_all_checks.sh                  everything below
 #   docker/run_all_checks.sh --skip-sims      leave out sim_gazebo, sim_mujoco, sim_isaac (packages and Python tests)

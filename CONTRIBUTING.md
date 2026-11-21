@@ -40,10 +40,13 @@ Inside the shell, `docker/build.sh test` is the one build entry point. For a sin
 GPU tests (cuRobo) need the `gpu` image and skip without CUDA; simulator tests need the `sim` /
 `sim-gazebo` images (and the MuJoCo SDK for the plugin) and skip what they lack.
 
-## There is deliberately no CI
+## Checks: CI and local
 
-No workflow files are kept in this repository, by decision. The replacement is that every contributor
-runs the checks locally before opening a pull request. The commands are collected in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the repository checks, the colcon build and all
+colcon tests on every pull request, on standard GitHub-hosted runners only (free for a public repository). It cannot
+run what needs a GPU, a display or a robot: the simulator passes, cuRobo and VAMP, hardware. Those stay local, and
+anything that would cost money (larger runners, a private repository) is run locally too. Run the checks yourself
+before opening a pull request. The commands are collected in
 [docs/docker.md](docs/docker.md#run-all-checks); "run all checks" today is:
 
 1. `docker compose -f docker/compose.yaml run --rm test` (all colcon tests, C++ and Python).

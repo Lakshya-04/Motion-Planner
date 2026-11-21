@@ -3,6 +3,7 @@
 | Document | What it covers |
 |---|---|
 | [ROADMAP.md](ROADMAP.md) | Status checklist for the whole workflow (done / partial / not done), the reuse map of open source and recent papers, the milestone order and the open decisions |
+| [development_plan.md](development_plan.md) | What is planned next, in order, with the design of each theme: scoring, ceiling, tools, splits, singularities, base placement, docking, control, cobot safety, diff-IK, tool correction |
 | [architecture.md](architecture.md) | The modular pipeline, every port, selection by config, surface and policy slots |
 | [modules.md](modules.md) | Module map: every package with its tier and what it needs (ROS, GPU, simulator), the dependency layers, and recipes for lifting parts out |
 | [package_layout.md](package_layout.md) | `core/` + `ros/` split per module, how modules connect (pluginlib in-process, ROS interfaces across processes) |

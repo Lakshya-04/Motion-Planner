@@ -1,0 +1,52 @@
+# Free-tier CI: only standard GitHub-hosted runners (free and unlimited for a public repository).
+# Simulator, GPU (cuRobo, VAMP) and hardware checks do not run here; they need a GPU or a display and are run
+# locally (docker/run_all_checks.sh, the sim scripts). If this repository is ever made private, these jobs start
+# to bill minutes: disable the workflow and run docker/run_all_checks.sh locally instead.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: Repository checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Public-readiness scan (links, paths, forbidden terms)
+        run: python3 docker/tools/check_public_readiness.py
+      - name: Tool tests
+        run: |
+          python3 -m pip install --quiet pytest pyyaml numpy
+          python3 -m pytest docker/tools/tests -q
+
+  build-test:
+    name: Build and test (ROS 2 Jazzy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space on the runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Build the dependency image
+        run: docker build -f docker/Dockerfile --target deps -t motion-planner:deps .
+      - name: colcon build and test
+        run: |
+          docker run --rm -e ROS_DOMAIN_ID=42 -v "$PWD:/ws" -w /ws motion-planner:deps \
+            bash -lc 'git config --global --add safe.directory /ws && docker/build.sh test' 2>&1 | tee build.log
+          test "${PIPESTATUS[0]}" -eq 0
+          # build.sh ends with `colcon test-result`; require its summary line and no errors or failures
+          grep -E '^Summary: [0-9]+ tests, 0 errors, 0 failures' build.log
