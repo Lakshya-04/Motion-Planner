@@ -42,14 +42,21 @@ def test_deterministic_for_a_seed_and_different_across_seeds():
     assert mc.run_many(scn, 4, 5).results == mc.run_many(scn, 4, 5).results
 
 
-def test_no_noise_docks_precisely_in_every_mode_and_base():
+@pytest.mark.parametrize('seed', [1, 2, 3, 4, 5, 6])
+def test_no_noise_docks_precisely_in_every_mode_and_base(seed):
     for base in ('omni', 'diff'):
         for lat in mc.LATERAL_MODES:
             scn = mc.Scenario(base=base, lateral=lat, noise=quiet())
-            rep = mc.run_many(scn, 10, 3)
-            assert rep.docked_rate == 1.0, (base, lat, rep.failures())
+            rep = mc.run_many(scn, 10, seed)
+            assert rep.docked_rate == 1.0, (seed, base, lat, rep.failures())
             assert rep.stats()['standoff']['max'] <= 0.005 + 1e-6
             assert rep.stats()['yaw']['max'] <= 0.02 + 1e-6
+
+
+def test_manoeuvre_terminates_when_the_remaining_goal_is_below_float_resolution():
+    w = mc._World((0.0, 0.0, 0.0), quiet(), mc.random.Random(1), mc.random.Random(2))
+    t = mc._manoeuvre(w, [('drive', 0.3), ('turn', math.pi / 2), ('drive', 1.0 / 3.0)], 0.05)
+    assert t < 20.0
 
 
 def test_edge_source_cancels_odom_drift_that_planned_cannot_see():

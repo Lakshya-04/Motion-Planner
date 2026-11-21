@@ -119,7 +119,7 @@ it yet: the action's result has no lateral field, so the follow-up is to add `la
   the wall). The caller runs them on odom and docks again. An error above `max_correctable` gives the same status on any base.
 - Typed outcomes `DockOutcome`: `docked`, `timeout`, `lost_wall`, `lateral_unreachable`, `blocked` (lower_snake like the manager's
   stand_check reason codes); `outcome_of(status)`; `DockStep` carries `lateral_error`, `outcome`, `reapproach`; `WallDockController.result()`
-  gives `DockResult(outcome, standoff_error, yaw_error, lateral_error, elapsed_s)`. `blocked` (commanding motion, measured speed under
+  gives `DockResult(outcome, standoff_error, yaw_error, lateral_error, elapsed_s)` (outcome None while running; a non-finite lateral reading counts as no reading; `LateralConfig` rejects non-positive or non-finite values). `blocked` (commanding motion, measured speed under
   a quarter of it for `blocked_timeout_s`) is off by default (0). Relation to the manager's stand check (#169, which compares the
   arrival error with a tolerance from the reachability margin): that gate decides go, re-dock or abort after the base arrives; this term
   works inside the dock. A sensible tolerance for the lateral term is the same margin-derived value (`stand_check` position tolerance),
@@ -141,34 +141,39 @@ Run of `--runs 200 --seed 1 --sweep` (Python 3.10, under a minute), final error 
 
 | base | lateral | docked | failures | position | standoff | lateral | yaw |
 |---|---|---|---|---|---|---|---|
-| omni | off | 100 % | none | 14.1 / 31.8 / 36.8 | 5.7 / 7.8 / 9.0 | 12.1 / 31.3 / 36.1 | 0.20 / 0.71 / 1.21 |
-| omni | planned | 100 % | none | 14.8 / 32.7 / 44.8 | 5.7 / 7.8 / 9.0 | 12.9 / 32.1 / 44.4 | 0.20 / 0.71 / 1.21 |
-| omni | edge | 100 % | none | 8.0 / 13.6 / 18.6 | 5.4 / 7.7 / 9.0 | 4.9 / 13.2 / 18.5 | 0.16 / 0.54 / 0.86 |
-| diff | off | 99.5 % | lost_wall 1 | 64.7 / 316.6 / 910.1 | 8.9 / 8.1 / 667.1 | 60.7 / 276.3 / 910.1 | 0.29 / 0.85 / 4.19 |
-| diff | planned | 66.5 % | lateral_unreachable 66, lost_wall 1 | 94.7 / 454.8 / 1261.5 | 8.9 / 8.1 / 667.1 | 91.0 / 445.6 / 1261.5 | 0.32 / 0.85 / 4.19 |
-| diff | edge | 94.5 % | lateral_unreachable 10, lost_wall 1 | 11.6 / 14.1 / 700.9 | 8.9 / 8.5 / 667.1 | 6.2 / 12.5 / 215.0 | 0.34 / 0.87 / 4.19 |
+| omni | off | 100 % | none | 14.2 / 31.9 / 36.8 | 5.9 / 8.5 / 9.5 | 12.1 / 31.3 / 36.0 | 0.20 / 0.71 / 1.17 |
+| omni | planned | 100 % | none | 14.9 / 32.6 / 43.9 | 5.9 / 8.5 / 9.5 | 12.8 / 32.1 / 43.5 | 0.20 / 0.71 / 1.02 |
+| omni | edge | 100 % | none | 8.2 / 14.0 / 18.6 | 5.5 / 8.4 / 9.6 | 4.9 / 13.2 / 18.5 | 0.16 / 0.52 / 0.71 |
+| diff | off | 99.5 % | lost_wall 1 | 64.7 / 316.6 / 910.1 | 9.0 / 8.6 / 667.1 | 60.7 / 276.2 / 910.1 | 0.30 / 0.84 / 4.19 |
+| diff | planned | 65.5 % | lateral_unreachable 68, lost_wall 1 | 95.4 / 454.7 / 1259.1 | 9.0 / 8.2 / 667.1 | 91.7 / 447.6 / 1259.0 | 0.31 / 0.84 / 4.19 |
+| diff | edge | 95.5 % | lateral_unreachable 8, lost_wall 1 | 11.8 / 14.5 / 700.9 | 9.0 / 8.3 / 667.1 | 6.4 / 12.3 / 215.0 | 0.33 / 0.87 / 4.19 |
 
 Drift sweep (per-axis drift sigma in mm/s against mean lateral error in mm, p95 in brackets; docked rate in %):
 
 | drift | omni off | omni planned | omni edge | diff off | diff planned | diff edge |
 |---|---|---|---|---|---|---|
-| 0 | 8.9 (22) 100 | 8.4 (21) 100 | 3.9 (10) 100 | 14.8 (52) 100 | 25.9 (91) 81 | 5.4 (13) 97 |
-| 1 | 9.6 (27) 100 | 9.5 (26) 100 | 4.2 (10) 100 | 24.3 (78) 100 | 40.0 (139) 75 | 5.4 (12) 94.5 |
-| 2 | 12.1 (31) 100 | 12.9 (32) 100 | 4.9 (13) 100 | 60.7 (276) 99.5 | 91.0 (446) 66.5 | 6.2 (12) 94.5 |
-| 5 | 22.5 (54) 100 | 44.5 (82) 99.5 | 6.1 (15) 100 | 256 (958) 92.5 | 344 (1274) 38.5 | 97 (743) 78 |
-| 10 | 174.5 (1303) 95.5 | 417 (1891) 85.5 | 74.1 (19) 95.5 | 706 (1759) 82.5 | 905 (2291) 20 | 639 (2799) 47 |
+| 0 | 8.9 (22) 100 | 8.3 (21) 100 | 4.0 (11) 100 | 14.8 (52) 100 | 25.4 (91) 82.5 | 5.5 (12) 95.5 |
+| 1 | 9.6 (27) 100 | 9.5 (26) 100 | 4.0 (10) 100 | 24.3 (78) 100 | 40.1 (143) 76.5 | 5.2 (11) 97.5 |
+| 2 | 12.1 (31) 100 | 12.8 (32) 100 | 4.9 (13) 100 | 60.7 (276) 99.5 | 91.7 (448) 65.5 | 6.4 (12) 95.5 |
+| 5 | 22.5 (54) 100 | 48.1 (82) 99.5 | 6.1 (15) 100 | 256 (958) 92.5 | 343 (1277) 40 | 49.4 (425) 78 |
+| 10 | 174.5 (1303) 95.5 | 379 (1888) 86.5 | 74.0 (18) 95.5 | 706 (1759) 82.5 | 907 (2285) 19 | 178 (1168) 51.5 |
 
 What it shows, and what it does not: (1) the wall edge source holds the lateral error near the plane noise on the omni base and
-cuts it by a factor of 2.5 at the default drift, while the planned-vs-odom source does nothing (it cannot see drift, and by the dock the
-approach has already put the odometry within the stand tolerance), so enabling it alone is pointless; (2) lateral error grows with drift
-without a wall feature (about linearly to 5 mm/s, then the approach itself fails); (3) the differential base shows 10 of 200 approaches
-where `StandController` did not settle in 90 s on a drifting odometry (stand_timeouts, 5 %): the truth then wanders up to 0.9 m and the
-dock recovers standoff and yaw but not the lateral error; that is a finding about the approach controller under this noise model, not
-fixed here; (4) the back-off, turn and approach manoeuvre fixes lateral error on the differential base but costs time (mean 35 s
-against 20 s) and leaves `lateral_unreachable` outcomes where it ran out of the 90 s dock budget or 2 re-approaches (10 of 200 with the
-edge source, 66 with the planned source, whose odom-based error the turns cannot bring under 10 mm); at 10 mm/s drift the omni runs
-that time out show the approach itself has failed. With a drift this large the whole scheme is out of its range; the numbers
-are a property of the assumed noise.
+cuts it by a factor of 2.5 at the default drift; the planned-vs-odom source does not help on omni (it cannot see drift, and by the
+dock the approach has already put the odometry within the stand tolerance) and on the differential base it lowers the docked rate
+from 99.5 % to 65.5 % (its odom-based error is not brought under 10 mm by the turns), so enabling it alone is counterproductive;
+(2) lateral error grows with drift without a wall feature (about linearly to 5 mm/s, then the approach itself fails);
+(3) the differential base shows 10 of 200 approaches where `StandController` did not settle in 90 s on a drifting odometry
+(stand_timeouts, 5 %): the truth then wanders up to 0.9 m and the dock recovers standoff and yaw but not the lateral error; that is a
+finding about the approach controller under this noise model, not fixed here; (4) on the differential base with the edge source
+123 of 200 runs do at least one back-off, turn and approach manoeuvre (162 manoeuvres, they begin square: the plan turns out the
+yaw error first) because the stand tolerance (20 mm) is looser than the lateral one (10 mm); it brings the lateral error down but
+costs time (mean 35 s against 20 s), and 9 of 200 runs (4.5 %) fail: 8 `lateral_unreachable` (out of the 90 s dock budget or the 2
+re-approaches) and 1 `lost_wall`; (5) at 10 mm/s drift the scheme is out of its range. The "docked" call is made on one noisy
+reading, so some "docked" runs end with a true lateral error above 10 mm. The numbers are a property of the assumed noise. A
+review of the first version found a stall in the harness's open-loop manoeuvre (zero-noise runs) and the harness plane noise not
+reaching the wall direction; both are fixed, and these tables are from the fixed code (the shift against the first run is small: the
+diff edge docked rate went from 94.5 % to 95.5 %).
 
 ## The pass from the stand
 

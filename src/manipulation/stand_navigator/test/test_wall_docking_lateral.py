@@ -271,3 +271,52 @@ def test_manoeuvre_with_the_rear_to_the_wall_is_mirrored():
     assert (x, y) == pytest.approx((0.0, -0.25), abs=1e-9)
     prims = plan_lateral_manoeuvre(0.25, backoff=0.4, facing_rad=math.pi)
     assert prims[0] == ('drive', 0.4)           # backing off from a rear wall is driving forward
+
+
+# --- review fixes ---------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize('profile', [OMNI, DIFF], ids=['omni', 'diff'])
+def test_nan_lateral_reading_is_no_reading(profile):
+    ctl = WallDockController(profile, 0.55, lateral=LAT)
+    ctl.step(meas(math.nan, (-1.0, 0.0, 0.0, 0.8)), 0.05)
+    s = None
+    for _ in range(100):
+        s = ctl.step(meas(0.0, (-1.0, 0.0, 0.0, 0.8)), 0.05)
+    assert all(map(math.isfinite, s.cmd))
+    assert s.cmd[0] > 0.0 or profile is DIFF
+    # a NaN reading never counts as docked
+    s = WallDockController(profile, 0.55, lateral=LAT).step(meas(math.nan), 0.02)
+    assert s.status == DockStatus.RUNNING and s.lateral_error is None
+
+
+def test_sources_do_not_return_nan():
+    m = meas()
+    assert PlannedStandLateral((1.0, 1.0)).error(LateralContext(m, (0.0, 0.0), math.nan)) is None
+    assert WallEdgeLateral(math.nan).error(LateralContext(m, u_range=(-1.0, 1.0))) is None
+
+
+def test_manoeuvre_squares_up_first_for_a_yawed_base():
+    # diff base 1.2 m from the wall at x = 1.2, yawed 0.4 rad, lateral error -1.2 m: ends square, lateral and standoff right
+    yaw0 = 0.4
+    m = measure_wall(plane_to_base((-1.0, 0.0, 0.0, 1.2), (0.0, 0.0, yaw0)))
+    assert m.yaw_error == pytest.approx(-yaw0)
+    prims = plan_lateral_manoeuvre(-1.2, backoff=0.3, yaw_error=m.yaw_error)
+    x, y, yaw = _run_prims(prims, (0.0, 0.0, yaw0))
+    assert yaw == pytest.approx(0.0, abs=1e-9)
+    assert (x, y) == pytest.approx((0.0, -1.2), abs=0.01)
+    # without the yaw the slide is off
+    x, y, _ = _run_prims(plan_lateral_manoeuvre(-1.2, backoff=0.3), (0.0, 0.0, yaw0))
+    assert abs(y + 1.2) > 0.05
+
+
+@pytest.mark.parametrize('kw', [dict(kp=0.0), dict(kp=-1.0), dict(tol=0.0), dict(max_speed=0.0),
+                                dict(tol=math.nan), dict(max_speed=math.inf), dict(max_correctable=-1.0)])
+def test_lateral_config_is_validated(kw):
+    with pytest.raises(ValueError):
+        LateralConfig(enabled=True, **kw)
+
+
+def test_result_while_running_has_no_outcome():
+    ctl = WallDockController(OMNI, 0.55, lateral=LAT)
+    s = ctl.step(meas(0.2, (-1.0, 0.0, 0.0, 1.0)), 0.02)
+    assert s.status == DockStatus.RUNNING and ctl.result(s).outcome is None

@@ -149,7 +149,9 @@ class _Sensor:
         if m is None:               # base past the wall plane or tilted view: no usable plane
             return None, None
         g = self.rng.gauss
-        m = replace(m, standoff=m.standoff + g(0.0, self.n.standoff_sigma), yaw_error=m.yaw_error + g(0.0, self.n.yaw_sigma))
+        yn = g(0.0, self.n.yaw_sigma)
+        m = replace(m, standoff=m.standoff + g(0.0, self.n.standoff_sigma), yaw_error=m.yaw_error + yn,
+                    into_wall=m.into_wall + yn)
         # the wall tangent is +y in the world for this wall (90 deg left of the direction into the wall, +x)
         u_range = (WALL_Y[0] - true_pose[1] + g(0.0, self.n.edge_sigma), WALL_Y[1] - true_pose[1] + g(0.0, self.n.edge_sigma))
         return m, u_range
@@ -163,7 +165,9 @@ def _manoeuvre(world, prims, dt, lin=0.1, ang=0.3):
         goal = abs(amount)
         sign = 1.0 if amount >= 0 else -1.0
         done = 0.0
-        while done < goal:
+        for _ in range(100000):
+            if goal - done < 1e-9:
+                break
             rate = lin if kind == 'drive' else ang
             step = min(rate * dt, goal - done)
             cmd = (sign * step / dt, 0.0, 0.0) if kind == 'drive' else (0.0, 0.0, sign * step / dt)
@@ -228,7 +232,7 @@ def run_once(scn, seed, index):
         outcome = step.outcome
         if step.reapproach and reapproaches < scn.max_reapproach:
             reapproaches += 1
-            tm = _manoeuvre(world, plan_lateral_manoeuvre(step.lateral_error, scn.backoff), dt)
+            tm = _manoeuvre(world, plan_lateral_manoeuvre(step.lateral_error, scn.backoff, yaw_error=step.yaw_error), dt)
             t += tm
             dock_t += tm
             continue

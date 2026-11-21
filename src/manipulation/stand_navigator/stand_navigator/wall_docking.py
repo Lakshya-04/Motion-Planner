@@ -85,6 +85,12 @@ class LateralConfig:
     kp: float = 1.0
     max_correctable: float = 1.0    # m, a larger error is not slid out: NEEDS_REAPPROACH (lateral_unreachable)
 
+    def __post_init__(self):
+        for name in ('tol', 'max_speed', 'kp', 'max_correctable'):
+            v = getattr(self, name)
+            if not (math.isfinite(v) and v > 0.0):
+                raise ValueError(f'LateralConfig.{name} must be finite and > 0, got {v}')
+
 
 @dataclass
 class LateralContext:
@@ -120,7 +126,8 @@ class PlannedStandLateral(LateralSource):
         if ctx.ref_world_xy is None or not all(map(math.isfinite, (*ctx.ref_world_xy, *self.planned))):
             return None
         a = ctx.base_yaw + tangent_angle(ctx.m)
-        return (self.planned[0] - ctx.ref_world_xy[0]) * math.cos(a) + (self.planned[1] - ctx.ref_world_xy[1]) * math.sin(a)
+        e = (self.planned[0] - ctx.ref_world_xy[0]) * math.cos(a) + (self.planned[1] - ctx.ref_world_xy[1]) * math.sin(a)
+        return e if math.isfinite(e) else None
 
 
 class WallEdgeLateral(LateralSource):
@@ -138,7 +145,8 @@ class WallEdgeLateral(LateralSource):
         if ctx.u_range is None or not all(map(math.isfinite, ctx.u_range)):
             return None
         u_min, u_max = ctx.u_range
-        return edge_lateral_error(u_min, u_max, self.target, self.edge)
+        e = edge_lateral_error(u_min, u_max, self.target, self.edge)
+        return e if math.isfinite(e) else None
 
 
 def edge_lateral_error(u_min, u_max, target, edge='left'):
@@ -155,24 +163,26 @@ def with_lateral(m, source, ctx):
     return replace(m, lateral=source.error(replace(ctx, m=m)))
 
 
-def plan_lateral_manoeuvre(lateral_error, backoff=0.3, facing_rad=0.0):
+def plan_lateral_manoeuvre(lateral_error, backoff=0.3, facing_rad=0.0, yaw_error=0.0):
     """Back-off, turn, slide, turn back, approach for a base that cannot move sideways, as primitives
     [('drive', m), ('turn', rad), ...] in the base frame (drive: + along +x; turn: + counterclockwise). The caller runs
     them on odom (open or closed loop) and docks again; the last drive returns to about the original standoff and the
     dock servo trims it. The tangent is 90 deg left of the direction into the wall, so with the front to the wall
     (`facing_rad` 0) a positive error turns left and with the rear to the wall (pi) it turns right, and the
-    back-off and approach drives are reversed."""
+    back-off and approach drives are reversed. A nonzero `yaw_error` (WallMeasurement.yaw_error) is turned out first,
+    so the manoeuvre starts square to the wall; the slide is along the wall, so the lateral error stays valid."""
     fwd = 1.0 if math.cos(facing_rad) >= 0.0 else -1.0
     turn = (1.0 if lateral_error >= 0.0 else -1.0) * fwd * 0.5 * math.pi
-    return [('drive', -fwd * backoff), ('turn', turn), ('drive', abs(lateral_error)),
-            ('turn', -turn), ('drive', fwd * backoff)]
+    prims = [('drive', -fwd * backoff), ('turn', turn), ('drive', abs(lateral_error)),
+             ('turn', -turn), ('drive', fwd * backoff)]
+    return ([('turn', yaw_error)] + prims) if yaw_error else prims
 
 
 @dataclass
 class DockResult:
     """Final numbers of a dock attempt (plain dataclass; the WallDock action keeps its standoff and yaw fields,
     the lateral error and the outcome are the follow-up for the .action file)."""
-    outcome: DockOutcome
+    outcome: Optional[DockOutcome]       # None while the dock is still running
     standoff_error: float
     yaw_error: float
     lateral_error: Optional[float]
@@ -255,7 +265,7 @@ class WallDockController:
     def result(self, step=None):
         """DockResult of a step (default: the last one)."""
         st = step or self.last
-        return DockResult(st.outcome or DockOutcome.TIMEOUT, st.standoff_error, st.yaw_error, st.lateral_error, self.elapsed)
+        return DockResult(st.outcome, st.standoff_error, st.yaw_error, st.lateral_error, self.elapsed)
 
     def _lateral_velocity(self, m):
         """(vx, vy) of the sliding correction in the base frame (holonomic bases)."""
@@ -304,9 +314,13 @@ class WallDockController:
             status = DockStatus.NO_WALL if self.since_wall > self.wall_timeout_s else DockStatus.RUNNING
         else:
             self.since_wall = 0.0
+            if m.lateral is not None and not math.isfinite(m.lateral):
+                m = replace(m, lateral=None)          # a NaN reading is no reading
             tx, ty, tw = self._target(m)
             e = (m.standoff - self.standoff, m.yaw_error)
             lat = m.lateral if self.lat.enabled else None
+            if lat is not None and not math.isfinite(lat):
+                lat = None
             status = DockStatus.RUNNING
             at_rest = lin_speed <= self.tol.speed and ang_speed <= self.tol.speed
             plane_ok = abs(e[0]) <= self.tol.standoff and abs(e[1]) <= self.tol.yaw

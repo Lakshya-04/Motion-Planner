@@ -30,7 +30,7 @@ ros2 run stand_navigator wall_docking_node --ros-args -p base_profile:=/path/pro
 
 ## Tests
 
-`test/test_core.py`, `test/test_wall_docking.py`, `test/test_wall_docking_lateral.py` and `test/test_dock_montecarlo.py` (77 tests in the last host run).
+`test/test_core.py`, `test/test_wall_docking.py`, `test/test_wall_docking_lateral.py` and `test/test_dock_montecarlo.py` (95 tests in the last host run).
 
 ```bash
 colcon test --packages-select stand_navigator
