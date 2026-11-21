@@ -38,10 +38,13 @@ mp_profile_init() {
   MP_DATA=$src
   if [ "$MP_PROFILE" = ur10e_telescopic ]; then
     # the stock wall the passes were written for: nothing derived, nothing shifted
-    MP_NONDEFAULT=0; MP_WALL_X=0.98; MP_Z_LO=1.0; MP_Z_HI=1.3; MP_TOOL_YAW=-90.0; MP_FREE_POSE=
+    MP_WORLD_PCD=walls.pcd; MP_NONDEFAULT=0; MP_WALL_X=0.98; MP_Z_LO=1.0; MP_Z_HI=1.3; MP_TOOL_YAW=-90.0; MP_FREE_POSE=
     return 0
   fi
   MP_NONDEFAULT=1
+  # the planning scene gets the WHOLE wall (walls_sim.pcd, the cloud of the simulated wall), not only the contact patch
+  # (walls.pcd): a planner that cannot see the rest of the wall plans the tool through it (xArm 7, docs/sim_mujoco.md)
+  MP_WORLD_PCD=walls_sim.pcd
   if [ -n "${MANAGER_PASS_DATA:-}" ]; then
     echo "MP_PROFILE=$MP_PROFILE with MANAGER_PASS_DATA: a custom wall is not shifted for another profile; unset one of them"
     return 2
@@ -157,6 +160,22 @@ mp_run_and_score() {
   local ready_args=${MP_READY_ARGS:-}
   if [ "${MP_NONDEFAULT:-0}" = 1 ] && [ -z "$ready_args" ]; then
     ready_args="--pose $MP_FREE_POSE --scale ${MP_READY_SCALE:-0.3}"
+  fi
+  # another profile: reach a pre-pose MP_READY_PRE_M (default 0.15 m) further from the wall first, then the FREE pose: a
+  # single planned move from the stowed pose swings the tool down the wall and grazes it with the pad edge (seen on the
+  # xArm 7: tilt up to 59 degrees, 57 N, before the manager had started); 0 disables the pre-pose
+  if [ "${MP_SKIP_READY:-0}" != 1 ] && [ "${MP_NONDEFAULT:-0}" = 1 ] && [ -z "${MP_READY_ARGS:-}" ] &&
+    [ "${MP_READY_PRE_M:-0.15}" != 0 ] && [ -n "${MP_FREE_POSE:-}" ]; then
+    local pre
+    pre=$(python3 -c 'import sys; v=sys.argv[1:8]; print(" ".join([repr(float(v[0]) - float(sys.argv[8]))] + v[1:]))' \
+      $MP_FREE_POSE "${MP_READY_PRE_M:-0.15}") || pre=
+    if [ -n "$pre" ]; then
+      python3 "$PKG/lib/sim_mujoco/ready_pose.py" --pose $pre --scale "${MP_READY_SCALE:-0.3}" --tol-pos 0.02 --tol-ang 0.15 \
+        | tee "$OUT/ready_pose_pre.log"
+      if [ "${PIPESTATUS[0]}" != 0 ]; then
+        echo "WARNING: the pre-pose move failed (see $OUT/ready_pose_pre.log): the single move to the FREE pose follows and may graze the wall" >&2
+      fi
+    fi
   fi
   if [ "${MP_SKIP_READY:-0}" != 1 ]; then python3 "$PKG/lib/sim_mujoco/ready_pose.py" $ready_args | tee "$OUT/ready_pose.log"; fi
   timeout 900 ros2 launch manipulation_manager manipulation_manager.launch.py hardware:=jtac_mock use_sim_time:=false \

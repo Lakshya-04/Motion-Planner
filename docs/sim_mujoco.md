@@ -677,9 +677,66 @@ MANAGER_PASS_SCORE_ARGS="--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.05" 
 ```
 
 (tool point within 1 cm of the wall while in contact, tool axis within 10 degrees of the wall normal, at most 5 percent of the
-contact samples off either). They are not on by default: the thresholds have not been checked against a measured run yet.
+contact samples off either). They are not on by default. Two measured passes (UR10e and xArm 7, below, one run each) both have zero refused samples at these thresholds, so `--max-bad-pose 0.0` is a candidate demo gate; it has been seen to pass once per robot, not tested over many runs.
 The `tilt_deg` column of `run.csv` comes from the recorder (`record_run.py`, `contact_test.py`), measured on the tool's z axis
 against the wall normal in the frame the wall is in.
+
+#### First 7-DOF run: xArm 7 (`MP_PROFILE=xarm7_telescopic`, one MuJoCo single-stand pass)
+
+Measured 2026-11-22 on the branch of this change (it includes the single-stand crash fix; `main` crashes on a single-stand run without it; the run directories are not kept in the repository), one run per variant, scored with `--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.0` (a single
+force-bearing sample with the tool tilted over 10 degrees or more than 1 cm off the wall fails the run). The UR10e pass
+is the reference: 4 of 4 columns, tool tilt at most 0.19 degrees, wall gap at most 0.9 mm, peak 19.3 N.
+
+| Variant | Columns done | Coverage | Bad samples | Peak force | Where the bad samples are |
+|---|---|---|---|---|---|
+| planning scene = contact patch only, ready pose | 4 of 4 | 1.0 | 91 | 34.8 N | the ready-pose transit (tilt to 62 degrees) |
+| + dock pose gate | 3 of 4 | 0.80 | 88 | 72 N | the manager's dock, pushed into the unmodelled wall |
+| patch only, no ready pose | 3 of 4 | 0.93 | 552 | 67 N | the manager's dock from the stowed pose |
+| full wall in the scene, ready pose | 4 of 4 | 1.0 | 116 | 57 N | only the ready-pose transit (before the manager starts) |
+| full wall, no ready pose | 3 of 4 | 0.93 | 3548 | 198 N | the dock from the stowed pose (tilt to 85 degrees) |
+| full wall, no ready pose, approach stage 0.15 m | 1 of 4 | 0.27 | 196 | 53 N | docks of columns 1 to 3 fail |
+| **full wall, two-stage ready pose (default for another profile)** | **4 of 4** | **1.0 (930 of 930 cells)** | **0** | **16.9 N** | tilt at most 1.0 degree, wall gap at most 0.96 mm, force RMS error 2.1 N |
+
+What this shows:
+
+- The planning scene was built from `walls.pcd`, the 0.4 x 0.4 m contact patch only, while the simulator wall is the
+  whole 1.8 x 2.6 m wall. Every tilted contact was in wall the planner did not know about. The UR10e's short ready-pose
+  move stays inside the patch, so it never showed. For another profile the pass now loads `walls_sim.pcd`
+  (`MANAGER_PASS_WORLD_PCD` is a file name inside the pass's data directory, for example `walls.pcd`, and overrides the file for any profile; the manager pass and the spray pass honour it, the other passes still use the patch).
+- A single planned move from the stowed pose to a pose 3 cm from the wall swings the tool down the wall and grazes it
+  with the pad edge before the manager has started. The pass now reaches a pre-pose `MP_READY_PRE_M` (default 0.15 m)
+  further from the wall first. Skipping the ready pose, or the manager's own approach stage
+  (`dock_approach_extra_m`), were worse in these runs.
+- The manager now checks, before the press, that the tool is within `dock_tolerance_m` (0.02 m) and
+  `dock_tolerance_rad` (0.17 rad) of the standoff pose (`verify_dock`), and it has a TF buffer in every run (it had one only
+  with a `world_frame`, which made the first-column arm-state log dereference a null buffer).
+- Repeats of the final variant with the shipped defaults (two more runs, same build): both 4 of 4 columns, coverage 1.0, zero
+  refused samples, but the force differs a lot between runs. Run 1: peak 16.9 N, force RMS error 2.1 N, tilt at most 1.0 degree,
+  gap at most 0.96 mm. Repeat 1: peak **159 N**, force RMS error 13.8 N, tilt at most 9.3 degrees, gap at most 4.7 mm; the
+  force spikes (113 to 159 N, under one second) are in all four columns, each at the moment the contact stroke hands over to the
+  retract. Repeat 2: peak 22.9 N, force RMS error 2.3 N, tilt at most 0.99 degrees, gap at most 0.8 mm. So the alignment
+  holds in all three runs, but whether the end-of-column force spike occurs depends on the run (probably on which arm
+  configuration the dock lands on); it is not understood or fixed, and the tool's 60 N overload threshold is not enforced
+  on this path. The two-stand UR10e pass had a 49 N peak and one 3 s episode of tilt just over 10 degrees (10.85) at the second stand.
+- End-of-column force spike (cause and fix, xArm 7, MuJoCo): at the end of a column the force target goes to 0 and the
+  admittance is switched off. The tool lags its reference along the wall (friction and the admittance's own time constant:
+  still creeping up the wall at about 9 mm/s when the stroke is reported done), and switching the admittance off lets it jump
+  to the reference with the pad on the wall: z +6 mm in 0.1 s, tilt rising to 4 degrees, 88 to 175 N. Waiting for the force to
+  decay alone made it worse (peaks 231 to 248 N in three runs: the admittance had retreated further before the snap);
+  `unload_m: 0.01` alone reduced it (137 to 175 N in three runs). The manager now backs the reference off the wall
+  (`unload_m`, default 0.01 m) and releases the admittance only when the force is below `unload_release_force_n` (2 N) and the
+  tool speed has stayed below `unload_release_speed_mps` (1 mm/s) for 0.3 s, at most `unload_timeout_s` (4 s) after it starts
+  waiting (then it releases anyway and says so in the log together with the force and the speed). With this, three xArm 7
+  runs: run 1 peak 21.2 N, run 3 peak 18.1 N with tilt at most 1.3 degrees and gap under 0.7 mm; run 2 failed three columns
+  for a different reason (below). The tool speed at release was 0.8 to 4 mm/s and the 4 s timeout ended most waits, so the
+  speed criterion is mostly the timeout in practice and a longer or smarter settle may still be worth trying.
+- A tilted pad edge can still graze the wall before the manager starts (run 2 above: tilt 67 degrees, gap 29 mm, 102 N,
+  before the first manager event, and the arm state was damaged for the rest of the run). Likely cause, not yet fixed: the
+  planner's tool (`generic_tool.xacro`) is a 0.1 m mount cylinder with a bare TCP frame at 0.165 m and no pad, while the simulator
+  adds a 3 cm radius pad disc at the TCP, so the planner thinks the tool ends 6.5 cm short of it. The contact gaps seen (23
+  to 29 mm at tilts of 54 to 67 degrees) are what a 3 cm radius pad gives: gap = 0.03 sin(tilt) = 24 and 28 mm.
+- One run per variant is not a distribution: the xArm 7 result is a first working run, not a reliability figure. Not
+  checked: other 7-DOF arms, multi-stand, the unconfirmed tool yaw of -90 degrees, the guessed wall distance.
 
 ### Spray pass (non-contact tool)
 
