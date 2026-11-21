@@ -112,15 +112,19 @@ loaded, which also gives the arm collision geometry; that run scored 0.58 covera
 ### Two-stand pass with MoveIt, scored on the tool pose (MuJoCo)
 
 The same `run_multi_stand_pass.sh` on `two_panels_plain` with the default MoveIt/OMPL planners (no GPU node), on main after the tool-pose
-scoring (#167) and the review fixes (#172); filmed 2026-11-22. The video is the run at 12x (560 s of simulated time, 46.7 s of video) with the
-contact force trace and a close-up of the tool; [mp4](docs/media/two_stand_moveit.mp4).
+scoring (#167) and the review fixes (#172); filmed 2026-11-22. The video is the run at 12x (551 s of simulated time, 46 s of video) with the
+contact force trace and a close-up of the tool; [mp4](docs/media/two_stand_moveit.mp4). It replaces a first version of this video that was drawn
+without the driven base pose (the arm sat at the origin, 90 degrees off the wall); the renderer and the live viewer now replay the base pose.
 
 ![A two-stand MuJoCo pass with MoveIt planners](docs/media/two_stand_moveit.gif)
 
-Scored result (`score_run`, one run, not repeated): 10 columns done, 0 partial, 0 failed (stand 0: 6, stand 1: 4); coverage 100 % (2790 of 2790
-cells); peak force 22.1 N scored, 21.4 N in the feedback (target 10 N); RMS force error 2.8 N; 33 % of the contact samples in the force band;
-tool tilt at most 0.15 deg, wall gap at most 0.9 mm, 0 bad-pose samples, 0 obstacle contacts; 276 s engaged. This pass runs the seeded dock IK
-(`dock_ik_seeded`), which is tuned for MuJoCo; the same pass in Gazebo still fails ([docs/sim_gazebo.md](docs/sim_gazebo.md)).
+Scored result of the filmed run (`score_run`, one run, made with the live viewer open and the host busy): 10 columns done, 0 partial, 0 failed
+(stand 0: 6, stand 1: 4); coverage 100 % (2790 of 2790 cells); peak force 142.2 N scored, 20.9 N in the feedback; RMS force error 6.7 N; 34 % of the
+contact samples in the force band; tool tilt at most 31.8 deg (a transient: 0 tilted samples and 0 bad-pose samples by the scorer's rule), wall gap
+at most 15.8 mm; 277 s engaged. The 142 N is one spike between the two stands (visible in the force trace of the video at about 430 s of simulated time);
+its cause is not found. An earlier run of the same pass without the viewer scored 10 of 10, coverage 1.0, peak 22.1 N, tilt at most 0.15 deg, wall gap at
+most 0.9 mm. This pass runs the seeded dock IK (`dock_ik_seeded`), which is tuned for MuJoCo; the same pass in Gazebo still fails
+([docs/sim_gazebo.md](docs/sim_gazebo.md)).
 
 ### cuRobo in a two-stand pass (MuJoCo)
 
@@ -129,6 +133,8 @@ tool tilt at most 0.15 deg, wall gap at most 0.9 mm, 0 bad-pose samples, 0 obsta
 (1128 s of simulated time), with the contact force trace and a close-up of the tool; [mp4](docs/media/multi_stand_curobo.mp4).
 
 ![A two-stand MuJoCo pass with cuRobo as the free-space planner](docs/media/multi_stand_curobo.gif)
+
+*Note (2026-11-22): this video was rendered before the renderer replayed the driven base pose, so the arm is drawn at the origin and not where the base was; the numbers below are from the run itself. It needs a rerun with the GPU node to be redrawn.*
 
 Scored result of that run: 10 columns done, 0 partial, 0 failed; coverage 100 % (2790 of 2790 cells); peak force 69.3 N (target 10 N);
 RMS force error 5.1 N; 33 % of the contact samples in the 1.5 N band; one collision-monitor line (a lift link pair at depth 0 in the first

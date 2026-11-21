@@ -3,7 +3,7 @@
 #   GO     enough headroom to start another job   (avail >= 3600 MB, memory pressure < 8, swap growth ok)
 #   HOLD   do not start anything new               (avail < 2200 MB or pressure >= 8)
 #   PAUSE  pause the runner's own containers       (avail < 900 MB or pressure >= 25)
-# Back to GO only when avail >= 4000 MB and pressure < 4 (so it does not flap).
+# Back to GO only when avail >= 3100 MB and pressure < 4 (so it does not flap).
 S=${HOSTWATCH_DIR:-$HOME/.cache/hostwatch}/.verdict; mkdir -p "$(dirname "$S")"
 avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
 swap=$(awk '/SwapTotal/{t=$2}/SwapFree/{f=$2}END{print int((t-f)/1024)}' /proc/meminfo)
@@ -16,7 +16,7 @@ lt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a<b)}'; }
 if lt "$avail" 900 || ! lt "$psi" 25; then v=PAUSE
 elif lt "$avail" 2200 || ! lt "$psi" 8; then v=HOLD
 elif [ "$prev" = GO ]; then v=GO
-elif ! lt "$avail" 4000 && lt "$psi" 4; then v=GO
+elif ! lt "$avail" 3100 && lt "$psi" 4; then v=GO
 elif [ "$prev" = PAUSE ]; then v=HOLD
 fi
 [ -n "${MW_FORCE:-}" ] && v=$MW_FORCE   # test hook only
