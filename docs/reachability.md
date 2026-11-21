@@ -466,6 +466,15 @@ Planned, not implemented: an IK adapter over the stand verifier, the whole-colum
 escalation (change lift height, then re-stand, then re-order columns, split only last), and the split numbers in the column
 analysis, scorecard, verify result and the execution-time count. See `docs/development_plan.md` section 4.
 
+### Singularities and joint limits
+
+Implemented (`reachability/core/pose_quality.hpp`, `path_quality_audit.hpp`; ROS-free, gtested with planar 2- and 3-link fakes, not run against a real arm or a sim):
+
+- `minSingularValue`, `conditionNumber` and `manipulability` (Yoshikawa product of singular values) of a Jacobian, and of an `ArmModel` at a joint vector (`armJacobian`, finite differences); `jointLimitMargin` as before.
+- `auditPathQuality`: takes stroke joint trajectories plus injected `JacobianFn` / `LimitMarginFn` (`armJacobianFn`, `armLimitMarginFn`, `limitMarginFromBounds` build them) and returns per stroke the min sigma, min limit margin, the worst waypoint index and a reason `near_singular` / `near_limit` / `ok`, with aggregate counts. `PathQualityConfig` defaults are `min_sigma = 0.02` and `min_limit_margin = 0.02` (share of the joint range); 0 switches a check off. The Jacobian is unscaled, so these are starting values, not calibrated. It only reports; it does not change a path.
+
+Planned, not built: calling the audit from the Cartesian planner and a `manipulation_manager` gate (opt-in parameter, default off, report and flag only); profile-level thresholds into the stand verifier and the cuRobo guard (which checks velocity and acceleration only); a damped least-squares / null-space IK decorator; an opt-in monitor that slows and then faults; per-pass reporting and an A/B on one wall.
+
 ## Limits and next steps
 
 - **Request validation.** Search grids are checked before they are enumerated: `grid_step` must be finite and
