@@ -22,6 +22,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -58,6 +59,8 @@
 #include "manipulation_manager/ros/execution/retiming_wiring.hpp"
 #include "manipulation_manager/core/execution/tool_feed_execution_port.hpp"
 #include "manipulation_manager/adapters/reachability_column_port.hpp"
+#include "manipulation_manager/adapters/reachability_path_quality_port.hpp"
+#include "manipulation_manager/core/tool_trace.hpp"
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/coverage_task.hpp"
 #include "manipulation_manager/core/column_ordering.hpp"
@@ -407,11 +410,14 @@ public:
       force_sub_ = this->create_subscription<geometry_msgs::msg::WrenchStamped>(
         force_topic, rclcpp::SensorDataQoS(),
         [this](const geometry_msgs::msg::WrenchStamped::SharedPtr msg) {
+          const auto & f = msg->wrench.force;
+          const double mag = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
+          if (verify_trace_) {
+            trace_.setForce(mag);   // the contact flag of the tool trace
+          }
           if (!tracking_peak_) {
             return;
           }
-          const auto & f = msg->wrench.force;
-          const double mag = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
           peak_force_ = std::max(peak_force_, mag);
           column_peak_ = std::max(column_peak_, mag);
         });
@@ -422,6 +428,27 @@ public:
     // Verify result written when a task ends ("" = off); max_peak 0 = no force limit in it.
     verify_result_path_ = this->declare_parameter<std::string>("verify_result_path", "");
     verify_max_peak_n_ = this->declare_parameter<double>("verify_max_peak_n", 0.0);
+    // Geometric coverage in the verify result (needs verify_result_path): the tool's TF position is sampled while a
+    // stroke runs and compared with the planned patch (geometric_coverage.hpp). Off by default. The swath width is not
+    // read from the tool. A sample works when the tool force is at least verify_contact_force_n (contact tools; the
+    // spray tool has no contact, so every stroking sample works) and the tool is within verify_max_standoff_m of the plane
+    // through the plan's first pose (plan poses press past the wall by contact_y_overshoot, hence the 4 cm default).
+    verify_geometric_ = this->declare_parameter<bool>("verify_geometric_coverage", false) && !verify_result_path_.empty();
+    verify_geo_cfg_.swath_m = this->declare_parameter<double>("verify_swath_m", 0.10);
+    verify_geo_cfg_.cell_m = this->declare_parameter<double>("verify_cell_m", 0.01);
+    verify_contact_force_n_ = this->declare_parameter<double>("verify_contact_force_n", 1.0);
+    verify_geo_cfg_.max_gap_m = this->declare_parameter<double>("verify_max_gap_m", 0.05);
+    verify_geo_cfg_.max_standoff_m = this->declare_parameter<double>("verify_max_standoff_m", 0.04);
+    verify_min_geometric_percent_ = this->declare_parameter<double>("verify_min_geometric_percent", 0.0);
+    verify_trace_hz_ = this->declare_parameter<double>("verify_trace_hz", 20.0);
+    // Opt-in, report only: how close the executed joint path came to a singularity or a joint limit (warnings in the
+    // verify result; it never fails a run). Needs a chain file of the arm joints (reachability/scripts/urdf_to_chain.py).
+    verify_path_quality_ = this->declare_parameter<bool>("verify_path_quality", false) && !verify_result_path_.empty();
+    verify_path_chain_file_ = this->declare_parameter<std::string>("verify_path_chain_file", "");
+    verify_path_skip_joints_ = this->declare_parameter<int>("verify_path_skip_joints", 1);
+    verify_path_cfg_.min_sigma = this->declare_parameter<double>("verify_path_min_sigma", 0.02);
+    verify_path_cfg_.min_limit_margin = this->declare_parameter<double>("verify_path_min_limit_margin", 0.02);
+    verify_trace_ = verify_geometric_ || verify_path_quality_;
     mission_command_sub_ = this->create_subscription<std_msgs::msg::String>(
       "mission_command", 10, [this](const std_msgs::msg::String::SharedPtr msg) {
         if (msg->data == "pause") {
@@ -470,12 +497,15 @@ public:
     if (!buildPlanners()) {
       return false;
     }
-    if (!world_frame_.empty()) {
+    if (!world_frame_.empty() || verify_trace_) {
       // its own spin thread: the node itself is only spun in bursts while a request waits
       tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
       tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_, shared_from_this(), true);
     }
     if (!initColumnReachability()) {
+      return false;
+    }
+    if (!initVerifyTrace()) {
       return false;
     }
     execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
@@ -674,6 +704,9 @@ private:
     if (column != -2) {
       column_ = column;
     }
+    if (verify_trace_) {
+      trace_.setStroking(state_ == "stroking", static_cast<size_t>(std::max(0, column_)));
+    }
     if (!feedback_sink_) {
       return;
     }
@@ -711,6 +744,7 @@ private:
   TaskResult executeTask(const TaskRequest & req)
   {
     column_peaks_.clear();
+    trace_.reset();
     const TaskResult out = executeTaskImpl(req);
     if (!verify_result_path_.empty()) {
       MissionVerifyInput in;
@@ -725,6 +759,7 @@ private:
       in.max_peak_force_n = verify_max_peak_n_;
       in.message = out.message;
       in.report_path = ledger_.path();
+      addTraceToVerify(in);
       const auto result = buildMissionVerify(in);
       if (writeMissionVerify(verify_result_path_, missionVerifyToJson(result, in))) {
         RCLCPP_INFO(
@@ -840,6 +875,19 @@ private:
           return out;
         }
       }
+    }
+
+    if (verify_trace_) {
+      std::vector<PlannedStroke> planned;
+      for (size_t i = 0; i < ids.size(); ++i) {
+        PlannedStroke st;
+        st.column = ids[i];
+        for (const auto & p : sel[i].poses) {
+          st.points.push_back({p.x, p.y, p.z});
+        }
+        planned.push_back(std::move(st));
+      }
+      trace_.setPlan(std::move(planned));
     }
 
     TaskStateMachine machine(nav_attempts_);
@@ -1626,6 +1674,113 @@ private:
     return err <= tol;
   }
 
+  /// Opt-in verify trace (geometric coverage, path quality audit): a joint-state cache, a sampling timer and, for the audit,
+  /// the chain model. False when a configured chain file does not load.
+  bool initVerifyTrace()
+  {
+    if (!verify_trace_) {
+      return true;
+    }
+    if (verify_path_quality_) {
+      if (verify_path_chain_file_.empty()) {
+        RCLCPP_WARN(
+          this->get_logger(), "verify_path_quality is on without verify_path_chain_file: the audit will say it was not run");
+      } else {
+        try {
+          path_quality_ = std::make_unique<ReachabilityPathQualityPort>(
+            std::make_shared<reachability::ChainModel>(reachability::loadChainYaml(verify_path_chain_file_)),
+            verify_path_cfg_, static_cast<size_t>(std::max(0, verify_path_skip_joints_)));
+        } catch (const std::exception & e) {
+          RCLCPP_ERROR(
+            this->get_logger(), "verify_path_chain_file %s: %s", verify_path_chain_file_.c_str(), e.what());
+          return false;
+        }
+      }
+      joint_cache_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
+        "/joint_states", rclcpp::SensorDataQoS(), [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
+          std::lock_guard<std::mutex> lock(joint_cache_mutex_);
+          for (size_t i = 0; i < msg->name.size() && i < msg->position.size(); ++i) {
+            joint_cache_[msg->name[i]] = msg->position[i];
+          }
+        });
+    }
+    const double hz = std::max(1.0, verify_trace_hz_);
+    trace_timer_ = this->create_wall_timer(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(1.0 / hz)),
+      [this]() {sampleTrace();});
+    RCLCPP_INFO(
+      this->get_logger(), "verify trace on: geometric coverage %s, path quality %s, %.0f Hz (a spin of the node's wait loops)",
+      verify_geometric_ ? "yes" : "no", verify_path_quality_ ? "yes" : "no", hz);
+    return true;
+  }
+
+  /// One trace sample while a stroke runs: the tool position (TF, no waiting) and the planning group's joint values.
+  void sampleTrace()
+  {
+    if (!trace_.stroking()) {
+      return;
+    }
+    if (verify_geometric_ && tf_buffer_) {
+      const std::string wf = world_frame_.empty() ? frame_id_ : world_frame_;
+      try {
+        if (tf_buffer_->canTransform(wf, "tcp_link", tf2::TimePointZero)) {
+          const auto tf = tf_buffer_->lookupTransform(wf, "tcp_link", tf2::TimePointZero);
+          trace_.addTool({tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z});
+        }
+      } catch (const std::exception &) {
+        // no transform yet: skip this sample
+      }
+    }
+    if (verify_path_quality_) {
+      std::vector<double> q;
+      {
+        std::lock_guard<std::mutex> lock(joint_cache_mutex_);
+        if (trace_joint_names_.empty()) {
+          std::vector<std::string> available;
+          for (const auto & kv : joint_cache_) {
+            available.push_back(kv.first);
+          }
+          const std::vector<std::vector<std::string>> cand = group_joint_names_.empty() ?
+            kJointNameCandidates : std::vector<std::vector<std::string>>{group_joint_names_};
+          trace_joint_names_ = selectJointNames(cand, available);
+        }
+        for (const auto & name : trace_joint_names_) {
+          q.push_back(joint_cache_.at(name));
+        }
+      }
+      trace_.addJoints(q);
+    }
+  }
+
+  /// Adds the geometric coverage and the path quality audit to the verify input (no-ops when not enabled).
+  void addTraceToVerify(MissionVerifyInput & in)
+  {
+    if (verify_geometric_) {
+      GeometricCoverageConfig cfg = verify_geo_cfg_;
+      cfg.contact_force_n = contact_ ? verify_contact_force_n_ : -1.0;
+      cfg.wall_normal = {wall_dir_.d[0], wall_dir_.d[1], wall_dir_.d[2]};
+      const auto plan = trace_.plan();
+      if (!plan.empty() && !plan.front().points.empty()) {
+        cfg.plane_origin = plan.front().points.front();
+      }
+      in.geometric = computeGeometricCoverage(plan, trace_.samples(), cfg);
+      if (trace_.dropped() > 0) {
+        in.geometric.note += (in.geometric.note.empty() ? "" : "; ") + std::to_string(trace_.dropped()) +
+          " trace sample(s) dropped at the cap";
+      }
+      in.min_geometric_percent = verify_min_geometric_percent_;
+      in.swath_m = cfg.swath_m;
+    }
+    if (verify_path_quality_) {
+      in.path_quality_requested = true;
+      if (path_quality_) {
+        in.path_quality = path_quality_->audit(trace_.jointStrokes());
+      } else {
+        in.path_quality.note = "no verify_path_chain_file";
+      }
+    }
+  }
+
   /// One diagnostic line: the planning group's live joint values (lift first) with a tag, for comparing runs.
   void logArmState(const std::string & tag)
   {
@@ -2193,6 +2348,23 @@ private:
   std::map<size_t, double> column_peaks_;
   std::string verify_result_path_;
   double verify_max_peak_n_{0.0};
+  bool verify_trace_{false};
+  bool verify_geometric_{false};
+  bool verify_path_quality_{false};
+  GeometricCoverageConfig verify_geo_cfg_;
+  double verify_contact_force_n_{1.0};
+  double verify_min_geometric_percent_{0.0};
+  double verify_trace_hz_{20.0};
+  std::string verify_path_chain_file_;
+  int verify_path_skip_joints_{1};
+  reachability::PathQualityConfig verify_path_cfg_;
+  ToolTrace trace_;
+  std::unique_ptr<ReachabilityPathQualityPort> path_quality_;
+  rclcpp::TimerBase::SharedPtr trace_timer_;
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_cache_sub_;
+  std::mutex joint_cache_mutex_;
+  std::map<std::string, double> joint_cache_;
+  std::vector<std::string> trace_joint_names_;
   SkipReason column_reason_{SkipReason::kPlanFailed};
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mission_command_sub_;
   rclcpp::Service<MissionCommandSrv>::SharedPtr mission_command_srv_;
