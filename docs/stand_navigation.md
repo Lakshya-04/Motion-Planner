@@ -163,6 +163,15 @@ arm's self-collision or how awkward the pose is at the edge of reach, so asking 
 stand "reaching" 54 poses that the arm cannot press in practice. With a span the columns are asked for in groups of at most
 that width along the wall (nearest end first, each group starting from the previous group's last stand).
 
+**Stand check** (`stand_check`, default off; `core/stand_check.hpp`, `StandCheck`): after `navigate_to_stand` reports the arrival error
+(the "arrived at the stand (error .. mm, .. rad)" line) and before the arm moves, the error is compared with a tolerance
+`clamp(stand_check_margin_scale * reach_margin, stand_check_min_tol_m, stand_check_max_tol_m)` and `stand_check_yaw_tol_rad`.
+Within: go. Outside: drive to the stand again (`stand_check_max_redocks`, default 1), then abort: the stand is failed and its columns
+are not run (reasons `position_out_of_tolerance`, `yaw_out_of_tolerance`, `position_and_yaw_out_of_tolerance`, `redocks_exhausted`,
+`invalid_measurement`). The reach margin is the parameter `stand_check_reach_margin_m` (a length; negative = unknown, then
+`stand_check_fallback_tol_m`); the planner's per-stand margin (`offset_margin` of a verified plan is a share, not a length) is not passed
+through yet, and the defaults are unmeasured. gtests use fake values (`stand_check_test`); not built in the ROS image, not run in a sim.
+
 **Cancel**: the trajectory in flight is cancelled (`JtacExecutionAdapter::cancelCurrent`), a navigation in flight is
 cancelled, the force target goes to 0, the admittance is disengaged (after the 1.5 s unload ramp the normal flow also gives it,
 only when it was engaged) and the valve is closed; the arm stays where it stopped, and the result is `canceled`. Latency: the

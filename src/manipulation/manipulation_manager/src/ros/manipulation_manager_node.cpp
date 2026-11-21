@@ -67,6 +67,7 @@
 #include "manipulation_manager/core/mission_ledger.hpp"
 #include "manipulation_manager/core/dock_ik_selector.hpp"
 #include "manipulation_manager/core/recovery_jog.hpp"
+#include "manipulation_manager/core/stand_check.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
 #include "manipulation_manager/core/joint_names.hpp"
 #include "manipulation_manager/core/travel_pose.hpp"
@@ -378,6 +379,21 @@ public:
     column_order_ = normalizeColumnOrder(this->declare_parameter<std::string>("column_order", "input"));
     nav_attempts_ = this->declare_parameter<int>("stand_nav_attempts", 2);
     nav_timeout_s_ = this->declare_parameter<double>("stand_nav_timeout_s", 240.0);
+    // Stand-check gate (default off): after the base arrives, its error is compared with a tolerance from the stand's
+    // reach margin (clamp(scale * margin, min, max); margin < 0 = unknown -> fallback) before the arm moves. Out of
+    // tolerance: drive to the stand again, up to max_redocks times, then the stand is failed (columns not run).
+    stand_check_enabled_ = this->declare_parameter<bool>("stand_check", false);
+    stand_check_reach_margin_ = this->declare_parameter<double>("stand_check_reach_margin_m", -1.0);
+    {
+      StandCheckConfig sc;
+      sc.min_tol_m = this->declare_parameter<double>("stand_check_min_tol_m", sc.min_tol_m);
+      sc.max_tol_m = this->declare_parameter<double>("stand_check_max_tol_m", sc.max_tol_m);
+      sc.margin_scale = this->declare_parameter<double>("stand_check_margin_scale", sc.margin_scale);
+      sc.fallback_tol_m = this->declare_parameter<double>("stand_check_fallback_tol_m", sc.fallback_tol_m);
+      sc.yaw_tol_rad = this->declare_parameter<double>("stand_check_yaw_tol_rad", sc.yaw_tol_rad);
+      sc.max_redocks = this->declare_parameter<int>("stand_check_max_redocks", sc.max_redocks);
+      stand_check_ = StandCheck(sc);
+    }
     travel_joint_state_ = this->declare_parameter<std::vector<double>>(
       "travel_joint_state", std::vector<double>{});
     // The planning group's joints in the group's order as /joint_states names them (empty = the repo's UR10e and
@@ -942,6 +958,7 @@ private:
       if (machine.state() == TaskState::kNavigating) {
         std::string msg;
         bool ok = true;
+        bool gate_abort = false;
         if (arm_deployed_) {
           setState("stowing", -1);
           if (stowArm()) {
@@ -954,11 +971,17 @@ private:
         if (ok) {
           setState("navigating", -1);
           ok = navigateToStand(visit[s], msg);
+          if (ok && stand_check_enabled_) {
+            ok = gateStand(visit[s], msg, gate_abort);
+          }
         }
         if (stop()) {
           break;
         }
-        const auto verdict = machine.navigationResult(ok);
+        auto verdict = machine.navigationResult(ok);
+        while (gate_abort && verdict == NavVerdict::kRetry) {
+          verdict = machine.navigationResult(false);   // the gate gave this stand up: no further navigation tries
+        }
         if (verdict == NavVerdict::kRun) {
           tracker_.standReached(s, true, "");
           if (!arrival_command_.empty()) {
@@ -1173,10 +1196,40 @@ private:
         outcome->result->error_msg : "navigation failed";
       return false;
     }
+    last_arrival_pos_err_m_ = outcome->result->position_error_m;
+    last_arrival_yaw_err_rad_ = outcome->result->yaw_error_rad;
     RCLCPP_INFO(
       this->get_logger(), "arrived at the stand (error %.1f mm, %.3f rad)",
       outcome->result->position_error_m * 1000.0, outcome->result->yaw_error_rad);
     return true;
+  }
+
+  /// Stand-check gate after an arrival: go, or drive to the stand again, or give the stand up (`abort` = true,
+  /// the caller then marks it failed). A failed re-drive returns false with `message` and the normal retry applies.
+  bool gateStand(const StanceStand & st, std::string & message, bool & abort)
+  {
+    int redocks = 0;
+    for (;;) {
+      const auto r = stand_check_.evaluate(
+        {last_arrival_pos_err_m_, last_arrival_yaw_err_rad_}, stand_check_reach_margin_, redocks);
+      if (r.decision == StandDecision::kGo) {
+        RCLCPP_INFO(this->get_logger(), "%s", r.message.c_str());
+        return true;
+      }
+      RCLCPP_WARN(this->get_logger(), "%s [%s]", r.message.c_str(), toString(r.reason));
+      if (r.decision == StandDecision::kAbort) {
+        message = std::string("stand check: ") + toString(r.reason);
+        abort = r.stand_failed;
+        return false;
+      }
+      ++redocks;
+      if (stop() || !navigateToStand(st, message)) {
+        if (message.empty()) {
+          message = "canceled";
+        }
+        return false;
+      }
+    }
   }
 
   void cancelNavigation()
@@ -2102,6 +2155,11 @@ private:
   // Task state (all touched from the main thread only: the action callbacks run inside the node's spins).
   bool run_on_start_{true};
   int nav_attempts_{2};
+  bool stand_check_enabled_{false};
+  double stand_check_reach_margin_{-1.0};
+  StandCheck stand_check_;
+  double last_arrival_pos_err_m_{0.0};
+  double last_arrival_yaw_err_rad_{0.0};
   double stand_max_span_{0.0};
   std::string arrival_command_;
   std::string wall_clear_command_;
