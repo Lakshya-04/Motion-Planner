@@ -35,7 +35,7 @@ from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from smoke_test import FREE, HOME, PRESS, Smoke, mean  # noqa: E402
+from smoke_test import DEFAULT_PROFILE, FREE, HOME, PRESS, Smoke, mean, profile_name  # noqa: E402
 
 CONTROLLER = 'combined_arm_lift_controller'
 TOOL_MASS = 0.5          # generic_tool inertial; its centre of gravity is the sensor origin
@@ -226,6 +226,9 @@ def main():
     ap.add_argument('--timeout', type=float, default=120.0)
     ap.add_argument('--record', default='', help='write the run as a score_run CSV (and PATH.wall.json)')
     args = ap.parse_args()
+    if profile_name() != DEFAULT_PROFILE:
+        sys.exit(f'contact_test: FREE/PRESS/HOME are UR10e joint poses; MP_PROFILE={profile_name()} is not supported here '
+                 '(run_manager_pass.sh and run_wall_pass.sh plan the pre-contact pose instead)')
     rclpy.init()
     node = ContactTest()
     threading.Thread(target=rclpy.spin, args=(node,), daemon=True).start()

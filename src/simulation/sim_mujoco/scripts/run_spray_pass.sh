@@ -13,6 +13,9 @@
 #   SPRAY_PASS_READY (seed: slow move to the first stroke's arm configuration, default; none; free = the contact passes' move 3 cm from the wall)
 #   SPRAY_PASS_SEED_Q / SPRAY_PASS_SEED_SCALE (the seed joints in smoke_test.FREE order, velocity scale 0.3 of the MoveIt plan)
 #   SPRAY_PASS_SCORE_ARGS (extra score_run arguments, e.g. "--max-thickness-cov 0.6")  SPRAY_PASS_LAUNCH_ARGS
+#   MP_PROFILE=<name> another robot profile (default ur10e_telescopic), see run_manager_pass.sh; there SPRAY_PASS_READY=seed
+#   plans the tool to SPRAY_PASS_STANDOFF in front of the wall's middle (SPRAY_PASS_SEED_Q is a UR10e joint pose and is
+#   refused). MANAGER_PASS_SCORE_ARGS is added to every score_run call too.
 set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
 SHARE=$PKG/share/sim_mujoco
@@ -34,11 +37,21 @@ MP_MANAGER_YAML_EXTRA=$'    contact: false\n    valve_topic: /tool/valve'
 READY=${SPRAY_PASS_READY:-}
 [ -z "$READY" ] && case "${SPRAY_PASS_SKIP_READY:-}" in 1) READY=none;; 0) READY=free;; *) READY=seed;; esac
 MP_SKIP_READY=0
+mp_init "${SPRAY_PASS_OUT:-/tmp/spray_pass}"
+mp_profile_init "$SHARE/data" || exit $?
+DATA=$MP_DATA
+if [ "$MP_NONDEFAULT" = 1 ] && [ "$READY" = seed ]; then
+  # the seed joints are a UR10e pose; for another arm plan the tool pose at the stand-off in front of the wall's middle
+  [ -n "${SPRAY_PASS_SEED_Q:-}" ] && { echo "SPRAY_PASS_SEED_Q is a UR10e joint pose; not usable with MP_PROFILE=$MP_PROFILE"; exit 2; }
+  MP_FREE_POSE=$(python3 "$PKG/lib/sim_mujoco/profile_reach.py" --profile "$MP_PROFILE" --standoff "$STANDOFF" --field free_pose) || exit 2
+  READY=seedpose
+fi
 case "$READY" in
   none) MP_SKIP_READY=1;;
   free) ;;
   seed) # lift pan shoulder_lift elbow wrist_1 wrist_2 wrist_3 (smoke_test.FREE order); override with SPRAY_PASS_SEED_Q
     MP_READY_ARGS="--joints ${SPRAY_PASS_SEED_Q:-0.6091,0.1811,0.4325,1.348,1.3607,-1.7519,1.5708} --planned --scale ${SPRAY_PASS_SEED_SCALE:-0.3}";;
+  seedpose) MP_READY_ARGS="--pose $MP_FREE_POSE --scale ${SPRAY_PASS_SEED_SCALE:-0.3}";;
   *) echo "SPRAY_PASS_READY must be seed, none or free"; exit 2;;
 esac
 MP_MANAGER_GREP="spray success|valve |Coverage plan complete|dock failed|retract failed"
@@ -48,23 +61,22 @@ mp_score() {
   ros2 run coverage_planner score_run --no-contact --samples "$REC" --wall "$REC.wall.json" --swath $SWATH \
     --spray-standoff $STANDOFF --spray-half-angle $HALF_ANGLE --min-coverage "${SPRAY_PASS_MIN_COVERAGE:-0.9}" \
     --max-peak "${SPRAY_PASS_MAX_PEAK:-0}" \
-    ${SPRAY_PASS_SCORE_ARGS:-}
+    ${MANAGER_PASS_SCORE_ARGS:-} ${SPRAY_PASS_SCORE_ARGS:-}
 }
 
-mp_init "${SPRAY_PASS_OUT:-/tmp/spray_pass}"
 trap mp_stop_all EXIT
 
-mp_start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=ur10e_telescopic controller:=jtac conditioner:=true \
-  payload_mass_kg:=0.5 move_group:=true scene:=$SHARE/data/smoke_wall_scene.json ${SPRAY_PASS_LAUNCH_ARGS:-}
+mp_start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$MP_PROFILE controller:=jtac conditioner:=true \
+  payload_mass_kg:=0.5 move_group:=true scene:=$DATA/smoke_wall_scene.json ${SPRAY_PASS_LAUNCH_ARGS:-}
 mp_start coverage_planner ros2 run coverage_planner coverage_planner_node
 
 # 1. coverage plan for the wall (the wall scene schema, with walls.pcd beside it)
 sleep 3
-mp_coverage $SHARE/data/wall_pass_coverage_scene.json || exit $?
+mp_coverage $DATA/wall_pass_coverage_scene.json || exit $?
 
 # 2. manager parameters (contact: false), the wall into MoveIt's planning scene as an octomap
 mp_manager_yaml
-mp_world_model $SHARE/data/walls.pcd
+mp_world_model $DATA/walls.pcd
 
 # 3. record and run
 mp_record
