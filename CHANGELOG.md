@@ -18,6 +18,8 @@ anything verified on hardware.
 - `moveit_ros_perception` (needed at run time by the live octomap) is an `exec_depend` of `mobile_manipulator_moveit_config`, not a build dependency. The older `motion-planner:build` image lacks it, so build and test pass there but `live_octomap:=true` fails until the image is rebuilt (it is in `docker/apt-extra.txt`). The feature stays opt-in.
 
 ### Added
+
+- `reachability`: `split_benchmark` app and gtest, a Monte Carlo benchmark of split avoidance on planar 2-link and 3-link fakes (per-pose first, per-pose lowest cost, `ColumnIkChain`; 1000 columns per setting, CSV output); measured numbers and model limits in `docs/reachability.md` ("Split avoidance, measured"). Built with host g++ only, not colcon.
 - Teleoperation groundwork (host-tested only, no node, no simulator or hardware run): `force_core::ContactFreeGate`; ROS-free package `teleop_core` (`TeleopModeManager`, `JogShaper`, `JogLimiter`) that fails safe on a backwards, non-finite or future clock, zeroes a masked axis at once, clamps the speed norm, requires a confirm to leave a safety HOLD and throws on non-finite timeouts; the MuJoCo generator option `gravcomp` also accepts a list, tuple, set or frozenset of link names (default output byte-identical). See docs/teleop.md.
 
 - `stand_navigator` core: optional lateral-along-the-wall term in the wall dock (planned-stand and wall-edge sources, back-off/turn/approach manoeuvre for bases without lateral velocity, off by default), typed dock outcomes (`docked`, `timeout`, `lost_wall`, `lateral_unreachable`, `blocked`), and a noise Monte Carlo of the dock controllers (`python3 -m stand_navigator.dock_montecarlo`, controller logic against synthetic noise only). Host pytest only; node, action and simulator unchanged.
