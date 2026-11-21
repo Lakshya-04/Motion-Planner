@@ -1067,3 +1067,11 @@ Result (3 mm range noise): detected normal (-1.0000, 0.0002, -0.0001), d 0.9801,
 coverage 1.00 (930 of 930), peak 23.6 N, RMS error 3.4 N, in-band 0.46, scorer exit 0. The detected wall schema needed nothing
 added: the planner reads only the plane, extents and `plane_rms_mm` / `spread_p95_mm` / `spread_p99_mm`, and the observed mask
 comes from `walls.pcd`. Single runs, not repeated.
+
+
+## Two-stand pass with the MoveIt planners, 2026-11-22
+
+`run_multi_stand_pass.sh`, scenario `two_panels_plain`, default `planning.yaml`, `MULTI_STAND_FILM=1`, on main at `8e41d7e` (after #167, #169 and #172); frames
+rendered with `render_run.py video --max-speed 12` and encoded with `encode` (1401 frames, 46.7 s). One run: 10 of 10 columns, coverage 1.0, peak 22.1 N
+(scored), RMS force error 2.8 N, tilt at most 0.149 deg, wall gap at most 0.9 mm, 0 bad poses, 0 start-out-of-bounds errors, 560 s of sim time. Media:
+`docs/media/two_stand_moveit.mp4` and `.gif`, shown in the README.

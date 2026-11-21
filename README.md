@@ -97,6 +97,19 @@ loaded, which also gives the arm collision geometry; that run scored 0.58 covera
 |---|---|
 | ![gazebo seed](docs/media/gazebo_spray_seed.png) | ![gazebo stroke](docs/media/gazebo_spray_stroke.png) |
 
+### Two-stand pass with MoveIt, scored on the tool pose (MuJoCo)
+
+The same `run_multi_stand_pass.sh` on `two_panels_plain` with the default MoveIt/OMPL planners (no GPU node), on main after the tool-pose
+scoring (#167) and the review fixes (#172); filmed 2026-11-22. The video is the run at 12x (560 s of simulated time, 46.7 s of video) with the
+contact force trace and a close-up of the tool; [mp4](docs/media/two_stand_moveit.mp4).
+
+![A two-stand MuJoCo pass with MoveIt planners](docs/media/two_stand_moveit.gif)
+
+Scored result (`score_run`, one run, not repeated): 10 columns done, 0 partial, 0 failed (stand 0: 6, stand 1: 4); coverage 100 % (2790 of 2790
+cells); peak force 22.1 N scored, 21.4 N in the feedback (target 10 N); RMS force error 2.8 N; 33 % of the contact samples in the force band;
+tool tilt at most 0.15 deg, wall gap at most 0.9 mm, 0 bad-pose samples, 0 obstacle contacts; 276 s engaged. This pass runs the seeded dock IK
+(`dock_ik_seeded`), which is tuned for MuJoCo; the same pass in Gazebo still fails ([docs/sim_gazebo.md](docs/sim_gazebo.md)).
+
 ### cuRobo in a two-stand pass (MuJoCo)
 
 `run_multi_stand_pass.sh` on `two_panels_plain` (a free base, two stands, ten columns), with cuRobo v0.9.0 selected as the free-space planner
