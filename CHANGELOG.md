@@ -18,6 +18,8 @@ anything verified on hardware.
 - `moveit_ros_perception` (needed at run time by the live octomap) is an `exec_depend` of `mobile_manipulator_moveit_config`, not a build dependency. The older `motion-planner:build` image lacks it, so build and test pass there but `live_octomap:=true` fails until the image is rebuilt (it is in `docker/apt-extra.txt`). The feature stays opt-in.
 
 ### Added
+
+- `stand_navigator` core: optional lateral-along-the-wall term in the wall dock (planned-stand and wall-edge sources, back-off/turn/approach manoeuvre for bases without lateral velocity, off by default), typed dock outcomes (`docked`, `timeout`, `lost_wall`, `lateral_unreachable`, `blocked`), and a noise Monte Carlo of the dock controllers (`python3 -m stand_navigator.dock_montecarlo`, controller logic against synthetic noise only). Host pytest only; node, action and simulator unchanged.
 - `manipulation_manager`: opt-in `dock_ik_continuity` (default off) chooses the dock joint goal among IK solutions from several seeds by smallest joint change from the previous dock, dropping branch flips and wrist winding (`core/dock_ik_selector.hpp`, gtest with a fake IK); `MULTI_STAND_DOCK_IK_CONTINUITY` in the Gazebo and MuJoCo multi-stand scripts. Not built in a workspace, not run in a sim.
 
 - `manipulation_manager`: stand-check gate (`core/stand_check.hpp`, `StandCheck`): arrival error vs a tolerance from the reach margin, decision go / re-dock / abort with coded reasons and a re-dock limit; opt-in `stand_check` parameter (default off) in the multi-stand loop. Fake-value gtests; compiled with host g++ only, not built in the ROS image, no sim run.
