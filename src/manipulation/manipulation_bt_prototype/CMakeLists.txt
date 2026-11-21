@@ -40,6 +40,13 @@ if(behaviortree_cpp_FOUND AND nlohmann_json_FOUND)
         BT_PROTOTYPE_TREE_FILE="${CMAKE_CURRENT_SOURCE_DIR}/trees/prototype_mission.xml"
         BT_TARGET_TREE_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../../../docs/behavior_trees/coverage_mission.xml")
     endif()
+
+    ament_add_gtest(mission_tree_test test/mission_tree_test.cpp)
+    if(TARGET mission_tree_test)
+      target_link_libraries(mission_tree_test ${PROJECT_NAME})
+      target_compile_definitions(mission_tree_test PRIVATE
+        MISSION_TREE_FILE="${CMAKE_CURRENT_SOURCE_DIR}/trees/mission.xml")
+    endif()
   endif()
 else()
   message(STATUS "manipulation_bt_prototype: behaviortree_cpp not found, skipped (opt-in package)")
