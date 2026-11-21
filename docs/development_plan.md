@@ -144,6 +144,23 @@ require recovery (1.5 mm, 0.5 degrees, 1 %), with a seed sweep, published in the
 5. Safety monitor core and oracle (9), tool correction (11), gravity and teleop (8), diff-IK controller (10).
 6. Impedance control, only with an effort-capable arm.
 
+## Working rule: adopt industry practice first
+
+For every open design question the default is what industry and maintained open source already do: reuse or adapt it,
+cite it in the [ROADMAP reuse map](ROADMAP.md) (section 17) with its licence, and write our own only where nothing fits
+(JTAC was built that way, after studying a reference design). Decided on that basis:
+
+- **Calibration fixture:** allowed and preferred. Industry TCP calibration uses a fixed pointer, plate or cone; the wall-touch
+  method stays as the field option. Tilt is found from a measured plane at several commanded tilts, never from force alone.
+- **Pad:** treat it as compliant by default (industry contact tools for sanding, polishing and wiping are compliant or
+  force-controlled flanges) and keep rigid pads working through the plane-touch method.
+- **Hand-eye and sensor extrinsics:** in scope as adoption, not development: use maintained packages (MoveIt Calibration,
+  `easy_handeye2`, `robot_calibration`; licences to verify) and consume their result; do not write our own solver.
+- **Safety:** follow ISO 10218 / ISO/TS 15066 structure (speed and separation, power and force limiting), implemented as a protective layer on top of the
+  robot controller's certified safety, never replacing it.
+- **Controllers, docking, navigation:** ros2_controllers, Nav2 and `opennav_docking`, MoveIt Servo, `kinematics_interface` first;
+  our own code only for the contact-stroke behaviour no package provides.
+
 ## Decisions pending
 
 - Is a free-space reposition inside a column acceptable (split as fallback), or must a column be one contact pass?
@@ -153,4 +170,3 @@ require recovery (1.5 mm, 0.5 degrees, 1 %), with a seed sweep, published in the
 - Where does room geometry come from at run time (scene model, wall detector, supplied polygon)?
 - Which arm and controller, and is its safety I/O reachable from ROS? Which people-detection source will exist?
 - Do the target drivers honour velocity commands at 100 Hz? One controller (replace JTAC admittance) or two chained?
-- Is the real pad compliant or rigid, and is a calibration fixture allowed or must calibration use the wall?
