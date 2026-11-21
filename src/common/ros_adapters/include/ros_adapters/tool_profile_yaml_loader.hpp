@@ -13,6 +13,8 @@
 
 #pragma once
 
+#include <array>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -51,6 +53,12 @@ inline core_types::ToolGeometry loadGeometry(const YAML::Node & node)
   }
   if (node["tcp_rpy"]) {
     geometry.tcp_rpy = readXyz(node["tcp_rpy"], "geometry.tcp_rpy");
+  }
+  if (node["tilt_deg"]) {
+    geometry.tilt_deg = node["tilt_deg"].as<double>();
+  }
+  if (node["tilt_axis"]) {
+    geometry.tilt_axis = readXyz(node["tilt_axis"], "geometry.tilt_axis");
   }
   if (node["contact_allowed_links"]) {
     geometry.contact_allowed_links = node["contact_allowed_links"].as<std::vector<std::string>>();
@@ -238,11 +246,41 @@ inline core_types::ToolControl loadControl(const YAML::Node & node)
  *        have, and is the caller's responsibility at the ROS boundary.
  * @throws std::runtime_error on any violated invariant, naming the tool and the specific rule.
  */
-inline void validateToolProfile(const core_types::ToolProfile & profile)
+inline void validateToolProfile(core_types::ToolProfile & profile)
 {
   const auto fail = [&profile](const std::string & rule) {
       throw std::runtime_error("tool_profiles.yaml: tool '" + profile.name + "' violates: " + rule);
     };
+
+  {
+    // Intended tool tilt: finite, below 80 degrees, about an in-surface axis (z == 0). A negative
+    // tilt is stored as the positive tilt about the opposite axis; the axis is normalised.
+    core_types::ToolGeometry & g = profile.geometry;
+    const bool finite = std::isfinite(g.tilt_deg) && std::isfinite(g.tilt_axis[0]) &&
+      std::isfinite(g.tilt_axis[1]) && std::isfinite(g.tilt_axis[2]);
+    if (!finite) {
+      fail("geometry.tilt_deg and geometry.tilt_axis must be finite");
+    }
+    if (!(std::fabs(g.tilt_deg) < 80.0)) {
+      fail("|geometry.tilt_deg| must be below 80 degrees");
+    }
+    if (g.tilt_deg != 0.0) {
+      const double len = std::sqrt(
+        g.tilt_axis[0] * g.tilt_axis[0] + g.tilt_axis[1] * g.tilt_axis[1] +
+        g.tilt_axis[2] * g.tilt_axis[2]);
+      if (!(len > 1e-9)) {
+        fail("geometry.tilt_deg != 0 requires a non-zero geometry.tilt_axis");
+      }
+      if (std::fabs(g.tilt_axis[2]) > 1e-6 * len) {
+        fail("geometry.tilt_axis must lie in the surface plane (z component 0)");
+      }
+      const double sign = g.tilt_deg < 0.0 ? -1.0 : 1.0;
+      for (double & c : g.tilt_axis) {
+        c = sign * c / len;
+      }
+      g.tilt_deg = std::fabs(g.tilt_deg);
+    }
+  }
 
   const bool is_admittance = profile.control.controller == "admittance_chain";
   if (profile.task.contact != is_admittance) {

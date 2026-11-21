@@ -201,6 +201,11 @@ if(BUILD_TESTING)
   target_compile_definitions(test_tool_profiles PUBLIC
     TOOL_PROFILES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/tool_profiles.yaml")
 
+  ament_add_gtest(test_tool_tilt test/core/tool_tilt_test.cpp)
+  target_link_libraries(test_tool_tilt coverage_planner_core ros_adapters::ros_adapters)
+  target_compile_definitions(test_tool_tilt PUBLIC
+    TOOL_PROFILES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/tool_profiles.yaml")
+
   # ros/ tests: message <-> core conversions.
   ament_add_gtest(test_conversions test/ros/conversions_test.cpp)
   target_link_libraries(test_conversions coverage_planner_core ${coverage_planner_msgs_TARGETS})
