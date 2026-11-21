@@ -35,6 +35,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -182,6 +183,10 @@ struct PlaneTouchOptions
   double min_orientation_variation_deg{20.0};  ///< Refuse smaller flange-frame normal variation.
   double max_condition_number{1e4};       ///< Refuse an ill-conditioned Jacobian (sqrt of normal-matrix ratio).
   std::size_t min_touches{0};             ///< 0 = 4 with a known normal, 6 with an unknown one.
+  /// Refuse the fit (ok = false, the worst touch named in the error) when the worst single-touch
+  /// distance from the plane exceeds this. Infinity (default) = no limit: clean data is unchanged.
+  /// A slipped or mis-confirmed touch shows up as one large residual.
+  double max_residual_m{std::numeric_limits<double>::infinity()};
 };
 
 /// Result of planeTouchCalibration().
@@ -195,6 +200,9 @@ struct PlaneTouchResult
   double plane_offset_m{0.0};             ///< d in n . x + d = 0 (base frame).
   double rms_m{0.0};                      ///< RMS distance of the tips from the plane.
   double max_residual_m{0.0};             ///< Worst single touch.
+  /// Index (into the flange_poses given, before the forces_ok filter) of the touch with the
+  /// largest residual: the first suspect when the fit is poor. Valid when touches_used > 0.
+  std::size_t worst_touch_index{0};
   double condition_number{0.0};           ///< Jacobian condition number at the solution.
   double orientation_variation_deg{0.0};  ///< Largest angle between flange-frame normals R_i^T n.
   std::size_t touches_used{0};            ///< Touches with forces_ok.
@@ -218,6 +226,7 @@ inline PlaneTouchResult planeTouchCalibration(
   }
   std::vector<Vec3> p;
   std::vector<std::array<double, 9>> rot;
+  std::vector<std::size_t> original_index;
   for (std::size_t i = 0; i < flange_poses.size(); ++i) {
     if (!forces_ok.empty() && !forces_ok[i]) {
       continue;
@@ -234,6 +243,7 @@ inline PlaneTouchResult planeTouchCalibration(
     }
     p.push_back({q.x, q.y, q.z});
     rot.push_back(r);
+    original_index.push_back(i);
   }
   const std::size_t n = p.size();
   out.touches_used = n;
@@ -300,11 +310,19 @@ inline PlaneTouchResult planeTouchCalibration(
     double jtj6[6][7] = {};
     double jtj4[4][5] = {};
     double jfull[6][6] = {};
+    // The normal columns use the tips relative to their centroid, so the conditioning does not
+    // depend on where the base origin is. The plane offset absorbs the shift (undone below).
+    Vec3 centre{0, 0, 0};
+    for (std::size_t i = 0; i < n; ++i) {
+      centre = detail::add3(centre, detail::add3(p[i], detail::mulMat(rot[i], t)));
+    }
+    centre = detail::scale3(centre, 1.0 / static_cast<double>(n));
     for (std::size_t i = 0; i < n; ++i) {
       const Vec3 tip = detail::add3(p[i], detail::mulMat(rot[i], t));
+      const Vec3 rel = detail::sub3(tip, centre);
       const double r = detail::dot3(nrm, tip) + d;
       const Vec3 jt = detail::mulMatT(rot[i], nrm);
-      double row[6] = {jt[0], jt[1], jt[2], 1.0, detail::dot3(e1, tip), detail::dot3(e2, tip)};
+      double row[6] = {jt[0], jt[1], jt[2], 1.0, detail::dot3(e1, rel), detail::dot3(e2, rel)};
       if (known) {
         for (int a = 0; a < 4; ++a) {
           for (int c = 0; c < 4; ++c) {
@@ -361,6 +379,11 @@ inline PlaneTouchResult planeTouchCalibration(
     }
     t = detail::add3(t, Vec3{step[0], step[1], step[2]});
     d += step[3];
+    if (!known) {
+      // Column 3 multiplied the offset; with centred normal columns the true offset step is
+      // step[3] minus the normal-step's own displacement of the centroid.
+      d -= step[4] * detail::dot3(e1, centre) + step[5] * detail::dot3(e2, centre);
+    }
     double mag = std::fabs(step[0]) + std::fabs(step[1]) + std::fabs(step[2]) + std::fabs(step[3]);
     if (!known) {
       nrm = detail::normalized3(
@@ -380,7 +403,10 @@ inline PlaneTouchResult planeTouchCalibration(
   for (std::size_t i = 0; i < n; ++i) {
     const double r = detail::dot3(nrm, detail::add3(p[i], detail::mulMat(rot[i], t))) + d;
     sum_sq += r * r;
-    out.max_residual_m = std::max(out.max_residual_m, std::fabs(r));
+    if (std::fabs(r) > out.max_residual_m) {
+      out.max_residual_m = std::fabs(r);
+      out.worst_touch_index = original_index[i];
+    }
   }
   out.rms_m = std::sqrt(sum_sq / static_cast<double>(n));
   double best = 0.0;
@@ -408,6 +434,12 @@ inline PlaneTouchResult planeTouchCalibration(
       "): vary the orientation about two non-parallel axes";
     return out;
   }
+  if (out.max_residual_m > opt.max_residual_m) {
+    out.error = "touch " + std::to_string(out.worst_touch_index) + " is " +
+      std::to_string(out.max_residual_m * 1000.0) + " mm from the fitted plane, above the " +
+      std::to_string(opt.max_residual_m * 1000.0) + " mm limit: drop or redo it";
+    return out;
+  }
   out.ok = true;
   return out;
 }
@@ -417,9 +449,11 @@ struct ToolTiltTouch
 {
   Vec3 commanded_axis{0, 0, 1};  ///< Commanded tool axis (into the work), base frame, > 0 length.
   Vec3 measured_normal{0, 0, 1}; ///< Measured outward surface normal, base frame, > 0 length.
-  /// Flange (= tool) orientation at the touch. When set for every touch, the correction is
-  /// averaged in the tool frame (a fixed mounting error); otherwise in the base frame
-  /// (e.g. a wall-normal error).
+  /// Contact-frame pose of the tool at the touch (the frame whose Z is the nominal tool axis, i.e.
+  /// the flange pose composed with the tool's mounting angle, NOT the bare flange pose for an
+  /// angled tool). When set for every touch, the correction is averaged in that frame (a fixed
+  /// mounting error); otherwise in the base frame (e.g. a wall-normal error). The roll about the
+  /// commanded axis is removed whatever its direction in that frame.
   std::optional<Pose> tool_pose;
 };
 
@@ -481,9 +515,11 @@ inline ToolTiltFit fitToolTilt(const std::vector<ToolTiltTouch> & touches, std::
         out.error = "touch " + std::to_string(i) + ": zero quaternion";
         return out;
       }
+      // Tool_pose is the contact-frame pose, whose Z is the commanded axis only for an unangled
+      // tool. In general the axis in that frame is a = R^T c: remove the roll component along a.
+      const Vec3 a = detail::mulMatT(m, c);
       r = detail::mulMatT(m, r);
-      // Remove the roll about the tool axis (zero by construction up to noise in the pose).
-      r[2] = 0.0;
+      r = detail::sub3(r, detail::scale3(a, detail::dot3(r, a)));
     } else {
       r = detail::sub3(r, detail::scale3(c, detail::dot3(r, c)));
     }

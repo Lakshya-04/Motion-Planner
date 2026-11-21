@@ -350,5 +350,51 @@ TEST(ToolProfileYamlLoader, ZeroTiltIgnoresTheAxis)
   EXPECT_NO_THROW(loadToolProfile(f.path(), "t"));
 }
 
+TEST(ToolProfileYamlLoader, RefusesTiltOnAContactTool)
+{
+  TempYamlFile f(
+    "schema_version: 1\ntools:\n  pad:\n"
+    "    geometry: {tilt_deg: 20.0, tilt_axis: [1, 0, 0]}\n"
+    "    task: {contact: true, target_force_n: 20.0}\n"
+    "    control: {controller: admittance_chain, admittance: {wrench_reference_z_n: 20.0}}\n");
+  try {
+    loadToolProfile(f.path(), "pad");
+    FAIL() << "expected a refusal";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find("contact tool"), std::string::npos) << e.what();
+  }
+}
+
+TEST(ToolProfileYamlLoader, RefusesTiltTogetherWithNominalTilt)
+{
+  TempYamlFile f(
+    "schema_version: 1\ntools:\n  pad:\n"
+    "    geometry: {tilt_deg: 30.0, tilt_axis: [1, 0, 0]}\n"
+    "    task: {contact: true, target_force_n: 20.0}\n"
+    "    coverage: {contact_area: {pad_width_m: 0.2, nominal_tilt_deg: 30.0}}\n"
+    "    control: {controller: admittance_chain, admittance: {wrench_reference_z_n: 20.0}}\n");
+  try {
+    loadToolProfile(f.path(), "pad");
+    FAIL() << "expected a refusal";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find("nominal_tilt_deg"), std::string::npos) << e.what();
+  }
+}
+
+TEST(ToolProfileYamlLoader, RefusesFixedPlusEdgeTiltAtEightyFiveDegrees)
+{
+  const std::string head = "schema_version: 1\ntools:\n  t:\n    geometry: ";
+  TempYamlFile bad(
+    head + "{tilt_deg: 79.0, tilt_axis: [1, 0, 0]}\n"
+    "    task: {contact: false, standoff_m: 0.3, tool_normal_policy: tilt_at_edges,"
+    " max_edge_tilt_deg: 40.0}\n");
+  EXPECT_THROW(loadToolProfile(bad.path(), "t"), std::runtime_error);
+  TempYamlFile ok(
+    head + "{tilt_deg: 30.0, tilt_axis: [1, 0, 0]}\n"
+    "    task: {contact: false, standoff_m: 0.3, tool_normal_policy: tilt_at_edges,"
+    " max_edge_tilt_deg: 40.0}\n");
+  EXPECT_NO_THROW(loadToolProfile(ok.path(), "t"));
+}
+
 }  // namespace
 }  // namespace ros_adapters

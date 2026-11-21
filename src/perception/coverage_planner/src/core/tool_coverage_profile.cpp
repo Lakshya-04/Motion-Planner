@@ -30,9 +30,7 @@ double toolSwath(const ToolCoverageProfile & tool)
   if (tool.task.contact && tool.coverage.contact_area.enabled()) {
     const double w =
       core_types::contactEffectiveWidth(tool.coverage.contact_area, tool.task.target_force_n);
-    return tilt == 0.0 ? w :
-           core_types::tiltedSwathAcrossStroke(
-      w, tool.coverage.contact_area.pad_length_m, tilt, tiltDirectionFromStrokeDeg(tool));
+    return w;  // the loader refuses a fixed tilt on a contact tool; the pad keeps its cos model
   }
   return tool.coverage.swath_m;
 }

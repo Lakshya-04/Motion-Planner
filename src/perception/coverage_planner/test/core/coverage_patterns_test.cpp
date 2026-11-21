@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <random>
 #include <set>
@@ -181,6 +182,37 @@ TEST(Patterns, HorizontalTurnsTheToolByTheConfiguredAngle)
       return (Eigen::Quaterniond(q.w, q.x, q.y, q.z) * Eigen::Vector3d::UnitX()).eval();
     };
   EXPECT_NEAR(xAxis(a).dot(xAxis(b)), 0.0, 0.05);  // 90 degrees apart
+}
+
+TEST(Patterns, RowSpacingUsesTheToolAsTurnedForTheRows)
+{
+  // The horizontal-sweep sprayer, tilted 30 degrees about u (toward v), 0.2 m base swath. The rows
+  // run with the tool turned by 90 degrees, so the tilt then lies along the rows and the real
+  // coverage across them stays 0.2 m; the tool's own swath (tilt across its sweep) is 0.2309 m.
+  ToolCoverageProfile spray;
+  spray.name = "sprayer";
+  spray.task.contact = false;
+  spray.task.standoff_m = 0.3;
+  spray.task.tool_tilt_deg = 30.0;
+  spray.task.tool_tilt_axis = {1, 0, 0};
+  spray.coverage.spray_half_angle_deg = std::atan(1.0 / 3.0) * 180.0 / M_PI;
+  spray.coverage.effective_width_fraction = 1.0;
+  spray.coverage.overlap_pct = 0.0;
+  spray.coverage.sweep_direction = "horizontal";
+  spray.coverage.passes = {PassVariant{}};
+  ASSERT_NEAR(toolSwath(spray), 0.2 / std::cos(30.0 * M_PI / 180.0), 1e-9);
+
+  const auto r = planCoverageFromScan(wallScan(), scene_model::SceneModel(), spray,
+    options(WallPattern::kHorizontal));
+  ASSERT_TRUE(r.success) << r.message;
+  std::vector<double> zs;
+  for (const auto & row : rows(r)) {
+    if (row.panel == "panel_0") {zs.push_back(row.z0);}
+  }
+  ASSERT_GT(zs.size(), 5U);
+  std::sort(zs.begin(), zs.end());
+  const double mean_spacing = (zs.back() - zs.front()) / static_cast<double>(zs.size() - 1);
+  EXPECT_NEAR(mean_spacing, 0.2, 0.01);
 }
 
 TEST(Patterns, PanelsStayClearOfTheWallEndsAndTheFloor)

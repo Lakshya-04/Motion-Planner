@@ -280,6 +280,23 @@ inline void validateToolProfile(core_types::ToolProfile & profile)
       }
       g.tilt_deg = std::fabs(g.tilt_deg);
     }
+    if (g.tilt_deg != 0.0) {
+      // The contact-pad width model already carries its own tilt; both would double count.
+      if (profile.coverage.contact_area.nominal_tilt_deg != 0.0) {
+        fail("geometry.tilt_deg and coverage.contact_area.nominal_tilt_deg must not both be set");
+      }
+      // A contact tool presses along its own Z; until the force path honours a tilt (JTAC and the
+      // conditioner frame checks) a tilted contact tool would press with F cos and shear F sin.
+      if (profile.task.contact) {
+        fail("geometry.tilt_deg != 0 is not supported for a contact tool (task.contact == true)");
+      }
+      // The fixed tilt plus the largest edge tilt must keep the axis well toward the wall.
+      if (profile.task.tool_normal_policy == "tilt_at_edges" &&
+        !(g.tilt_deg + profile.task.max_edge_tilt_deg < 85.0))
+      {
+        fail("geometry.tilt_deg + task.max_edge_tilt_deg must stay below 85 degrees");
+      }
+    }
   }
 
   const bool is_admittance = profile.control.controller == "admittance_chain";

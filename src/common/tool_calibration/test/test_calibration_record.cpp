@@ -183,6 +183,48 @@ TEST(RequireValidCalibration, ContactToolWithValidRecordPasses)
     tool_calibration::requireValidCalibration(contactTool(), makeRecord(), kT0 + 3600, 3u));
 }
 
+TEST(RequireValidCalibration, ContactToolWithoutTheMountingCounterIsRefused)
+{
+  try {
+    tool_calibration::requireValidCalibration(contactTool(), makeRecord(), kT0 + 3600);
+    FAIL() << "expected a refusal";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find("mounting counter"), std::string::npos) << e.what();
+  }
+}
+
+TEST(CalibrationRecord, ReportSaysWhetherTheRemountCheckRan)
+{
+  const auto r = makeRecord();
+  const auto without = r.validityReport(kT0 + 60);
+  EXPECT_TRUE(without.valid);
+  EXPECT_FALSE(without.mounting_checked);
+  const auto with = r.validityReport(kT0 + 60, 3u);
+  EXPECT_TRUE(with.valid);
+  EXPECT_TRUE(with.mounting_checked);
+  const auto remounted = r.validityReport(kT0 + 60, 4u);
+  EXPECT_FALSE(remounted.valid);
+  EXPECT_TRUE(remounted.mounting_checked);
+  EXPECT_FALSE(remounted.error.empty());
+}
+
+TEST(ParseIso8601, RejectsImpossibleCalendarDates)
+{
+  using tool_calibration::parseIso8601Utc;
+  EXPECT_FALSE(parseIso8601Utc("2026-02-31T00:00:00Z"));
+  EXPECT_FALSE(parseIso8601Utc("2026-02-29T00:00:00Z"));  // 2026 is not a leap year
+  EXPECT_FALSE(parseIso8601Utc("2025-04-31T00:00:00Z"));
+  EXPECT_FALSE(parseIso8601Utc("2025-06-31T00:00:00Z"));
+  EXPECT_FALSE(parseIso8601Utc("2025-09-31T00:00:00Z"));
+  EXPECT_FALSE(parseIso8601Utc("2025-11-31T00:00:00Z"));
+  EXPECT_FALSE(parseIso8601Utc("1900-02-29T00:00:00Z"));  // century, not a leap year
+  EXPECT_TRUE(parseIso8601Utc("2024-02-29T00:00:00Z"));   // leap year
+  EXPECT_TRUE(parseIso8601Utc("2000-02-29T00:00:00Z"));   // divisible by 400
+  EXPECT_TRUE(parseIso8601Utc("2025-12-31T23:59:59Z"));
+  EXPECT_FALSE(parseIso8601Utc("2025-01-00T00:00:00Z"));
+  EXPECT_FALSE(parseIso8601Utc("2025-13-01T00:00:00Z"));
+}
+
 TEST(RequireValidCalibration, ExpiredRecordIsRefused)
 {
   try {
