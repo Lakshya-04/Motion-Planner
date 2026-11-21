@@ -18,3 +18,6 @@
 # Generated files: collapse in review, exclude from language stats
 src/manipulation/moveit_config/** linguist-generated=true
 docs/diagrams/*.svg                   linguist-generated=true
+
+# Append-only logs: parallel branches that each add a line must not conflict (keeps both sides)
+CHANGELOG.md merge=union
