@@ -7,6 +7,11 @@ Convention matches the target of a wrench conditioner: pressing along tool +z gi
 
   in : /tool_contact/contacts   (ros_gz_interfaces/Contacts, bridged from gz)
   out: /ft_sensor/ground_truth_wrench   (geometry_msgs/WrenchStamped, frame tcp_link)
+       /ft_sensor/ground_truth_info     (std_msgs/Float64MultiArray, one per Contacts message:
+            [pairs, points, filtered_pairs, sum_point_norm_N, max_point_norm_N, duplicate_points];
+            sum_point_norm >> |force| means points cancel or are counted twice, see docs/sim_gazebo.md)
+Parameters include_other / exclude_other (lists of substrings of the other collision's name, default empty =
+every pair): e.g. include_other:=['wall'] sums only tool-wall pairs. Behaviour is unchanged with the defaults.
 Never feed this to a controller: a real robot has no such signal.
 """
 import numpy as np
@@ -16,6 +21,8 @@ from geometry_msgs.msg import WrenchStamped
 from rclpy.node import Node
 from rclpy.time import Time
 from ros_gz_interfaces.msg import Contacts
+from sim_gazebo.contact_summary import tool_wrench_world
+from std_msgs.msg import Float64MultiArray
 from tf2_ros import Buffer, TransformListener
 
 TOOL_BODY = 'tool_tip_link'   # the tool's collision (spring-loaded tip, urdf/gazebo_tags.xacro)
@@ -29,36 +36,21 @@ def _quat_matrix(q):
         [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
-def tool_wrench_world(contacts, tcp_pos):
-    """(force, torque about tcp_pos), world axes, from a Contacts message."""
-    force, torque = np.zeros(3), np.zeros(3)
-    for c in contacts.contacts:
-        for pos, w in zip(c.positions, c.wrenches):
-            # gz leaves the body names of the wrench empty: the collision entities say which side is the tool
-            if TOOL_BODY in c.collision1.name:
-                wr = w.body_1_wrench
-            elif TOOL_BODY in c.collision2.name:
-                wr = w.body_2_wrench
-            else:
-                continue
-            f = np.array([wr.force.x, wr.force.y, wr.force.z])
-            t = np.array([wr.torque.x, wr.torque.y, wr.torque.z])
-            p = np.array([pos.x, pos.y, pos.z])
-            force += f
-            torque += t + np.cross(p - tcp_pos, f)
-    return force, torque
-
-
 class GroundTruth(Node):
     def __init__(self):
         super().__init__('contact_ground_truth')
         self.declare_parameter('tcp_frame', 'tcp_link')
         self.declare_parameter('world_frame', 'world')
+        self.declare_parameter('include_other', [''])
+        self.declare_parameter('exclude_other', [''])
+        self.include = [x for x in self.get_parameter('include_other').value if x]
+        self.exclude = [x for x in self.get_parameter('exclude_other').value if x]
         self.tcp = self.get_parameter('tcp_frame').value
         self.world = self.get_parameter('world_frame').value
         self.tf = Buffer()
         self.listener = TransformListener(self.tf, self)
         self.pub = self.create_publisher(WrenchStamped, '/ft_sensor/ground_truth_wrench', 10)
+        self.info_pub = self.create_publisher(Float64MultiArray, '/ft_sensor/ground_truth_info', 10)
         self.last = self.get_clock().now()
         self.create_subscription(Contacts, '/tool_contact/contacts', self.on_contacts, 10)
         self.create_timer(0.05, self.publish_zero)
@@ -79,7 +71,11 @@ class GroundTruth(Node):
             return
         R = _quat_matrix(t.transform.rotation)
         p = np.array([t.transform.translation.x, t.transform.translation.y, t.transform.translation.z])
-        f, tau = tool_wrench_world(msg, p)
+        f, tau, st = tool_wrench_world(msg, p, TOOL_BODY, self.include, self.exclude)
+        info = Float64MultiArray()
+        info.data = [float(st['contacts']), float(st['points']), float(st['filtered']),
+                     st['sum_point_norm'], st['max_point_norm'], float(st['dup_points'])]
+        self.info_pub.publish(info)
         out = WrenchStamped()
         out.header.stamp = self.get_clock().now().to_msg()
         out.header.frame_id = self.tcp

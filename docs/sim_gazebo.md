@@ -582,6 +582,69 @@ Same-session runs of `run_multi_stand_pass.sh` (two stands, ten columns, no cuRo
 - **Same network, two containers.** Mismatched `ROS_DOMAIN_ID`, RMW or SHM settings show up as `service is not available`.
 - Not verified: everything above was read from source; nothing was built or run.
 
+## Contact-force discrepancy (Gazebo 1240 to 1820 N scored, 40 to 70 N feedback, MuJoCo 22 N): hypotheses, not a diagnosis
+
+Found by reading the code and config only. Nothing was built or run for this section (no colcon, no Docker, no Gazebo): the cause is **not found**;
+the ranked list says what each suspect rests on and which run would confirm or kill it. Two traces are compared and they are not the same signal:
+
+| | feedback peak (`peak_force_n`) | scored trace (`run.csv` -> `score_run`) |
+|---|---|---|
+| source | `/ft_conditioner/wrench_conditioned` (the gz `force_torque` sensor on the flange joint, payload removed), `|F|` of all three axes | `/ft_sensor/ground_truth_wrench`: the gz `contact` sensor on `tool_tip_link_collision`, `|Fz|` along the tool |
+| window | only while `tracking_peak_` is set: the press and stroke segments of a column (`manipulation_manager_node.cpp`, `tracking_peak_ = true` before `_contact`, false after) | the whole run: dock, approach, retract, stow, and every stand change |
+| sampling | 200 Hz sensor, latest sample at each message | 200 Hz contact sensor on a 1 kHz physics step: one physics step's contact force per sample, no averaging |
+
+Ranked hypotheses:
+
+1. **Different windows (the scored trace includes motion the feedback never watches).** The recorder keeps every ground-truth sample, the manager's peak ignores dock,
+   approach, retract and stow. The same pass logs `dock failed` columns, IK branch flips and a wrist winding to -4.6 rad; a tool driven into the wall (or an obstacle) outside a
+   contact segment is in the trace and not in the feedback. MuJoCo passes finish every column and never leave the contact segments in contact. Evidence: the code above, and
+   the large scored peaks (583.9, 1240, 1820 N) all coming from runs that failed columns; the run with a 39.7 N feedback peak has no scored figure in this document. Does not by itself
+   explain a 20 to 40 fold ratio unless the tool really is pushed past its travel.
+2. **The tool is pushed past the compliant range and the contact is rigid there.** The tip is 5 N/mm over 20 mm, then 50 N/mm over 5 mm, then a joint limit (rigid). The wall,
+   obstacles and floor are rigid primitives. docs/sim_gazebo.md measured 106 N quasi-static at 35 mm and "contact impacts of 1.2 to 1.8 kN for a sample" on this model; the spike
+   is the constraint solver resolving a joint-limit plus contact impact inside one 1 ms step against a position-servoed arm (large effective mass, no compliance, joint effort limits
+   not enforced in `gz_ros2_control`). The F/T sensor behind it reports the same load but conditioned and at a different instant, so it can read lower. Evidence: `gazebo_tags.xacro`
+   (`stop_travel` 5 mm then rigid limit; damping 100 and 500 N s/m), the Limits section.
+3. **Contact solver parameters are not what the SDF reads like.** The world sets only `mu`/`mu2` (and, since this change, explicit SDF-default `kp 1e12`, `kd 1`, `max_vel 0.01`,
+   `min_depth 0`, restitution 0). gz-sim 8 uses dartsim by default (`<physics type="ignored">`, no engine chosen in `sim.launch.py`: `gz sim -r -s <world>`); to our knowledge (unverified) it
+   solves contacts as hard LCP constraints and does not read `kp/kd/max_vel/min_depth`, so there is no soft-contact tuning knob in this world, and a contact force is whatever impulse
+   the solver needs to stop the penetration within a step. MuJoCo uses a soft contact model (solref/solimp), which is the plausible reason it stays near 22 N.
+4. **Step size and sampling of an impulsive force.** 1 ms step, force sampled for one step. The force of a hard impact is impulse / dt; a shorter step raises the peak, a longer
+   one lowers it, and a 5 ms controller period (200 Hz) cannot see it. A peak that is one sample wide and absent in the F/T sensor is this, not a sustained load.
+5. **Counting: several contact points summed, or points reported twice.** `contact_ground_truth.py` adds `body_N_wrench.force` over every point of every pair that involves the tool.
+   A cylinder face on a box gives several points; if gz reports the whole-pair force on each point (instead of its share), the sum is N times too large. Evidence for: the docs'
+   rigid-tool figure was 108 N for any penetration of 0.05 mm or more, i.e. independent of depth, as a constant per-point impulse would be; evidence against: none either way, the
+   per-point values were never logged. This change makes it visible (see below).
+6. **Other collisions on the tool link.** The sensor is on `tool_tip_link_collision` only, so the ground and other links are included only if they touch the tip: the tip against the
+   obstacle boxes (the 0.04 m radius edge on a 0.1 m wall-front box), the floor (stow near the floor is not expected at z 1.0 to 1.3), or a robot link if self-collision were on (not
+   checked; `self_collide` is not set). The include/exclude filter below and `contact_summary`'s `others` (not published) are there to rule it in or out.
+7. **Frame and sign.** `abs(force.z)` in `tcp_link` throws away x and y; this can only make the trace lower than `|F|`, so it does not explain a larger value. Not a suspect for the size.
+
+What this change adds (all opt-in or evaluation-only; the default sum is unchanged):
+
+- `sim_gazebo/contact_summary.py` (ROS-free, unit-tested): the tool wrench sum with per-message statistics.
+- `contact_ground_truth.py` publishes `/ft_sensor/ground_truth_info` (`[pairs, points, filtered_pairs, sum_point_norm, max_point_norm, duplicate_points]`) and takes
+  `include_other` / `exclude_other` (substrings of the other collision's name; empty = every pair). Example: `ros2 run sim_gazebo contact_ground_truth.py --ros-args -p include_other:="['wall']"`
+  (the launch starts the node itself: pass the parameter in `sim.launch.py` to change it for a pass).
+- `record_run.py` writes `PATH.contacts.csv` beside `PATH` (`t,force_norm,pairs,points,sum_point_norm,max_point_norm,dup_points`), same time base as `run.csv`.
+- The ground and the generated wall carry an explicit `<surface>` (friction, restitution 0, contact ode with the SDF defaults), commented as believed ignored by dartsim; a test
+  (`test_wall_world.py`) checks every collision of both worlds has positive friction and contact parameters, a step of at most 1 ms and the Contact system.
+
+What to run to confirm or reject each (all in the `sim-gazebo` image; none of these has been run):
+
+| hypothesis | run | observation that confirms it | observation that rejects it |
+|---|---|---|---|
+| 1 windows | a normal `run_multi_stand_pass.sh`; join `run.csv` with the manager's state/segment log by time (`segment_exec` lines carry labels) | the samples above 100 N fall in dock, approach, retract or stow segments | the largest samples are inside `press`/`stroke` segments |
+| 2 past the travel | `ros2 topic echo /joint_states` during a pass and read `tool_tip_joint` and `tool_tip_stop_joint` (whether the broadcaster lists these uncontrolled joints was not checked; if not, `gz topic -e -t /world/<world>/model/<robot>/joint_state` does) | at the force peak `tool_tip_joint` is at -0.020 and `tool_tip_stop_joint` at about -0.005 (both limits) | the peak occurs with the tip joints mid-travel |
+| 3 solver parameters | `gz sim -r -s --physics-engine gz-physics-bullet-plugin <world>` (or `gz-physics-bullet-featherstone-plugin` if installed) with the same pass, then again with explicit large `kp` and `kd` in the SDF | peak force changes by a large factor when the engine or `kp/kd` changes | identical trace for both engines and for different kp/kd (dartsim ignores them, as believed, and the engine is not the cause) |
+| 4 step size | `max_step_size` 0.0005 and 0.002 in the world (`wall_world_gen.py` `step_size`, and `empty.sdf`), the same press script `contact_control_test.py` | the peak scales roughly with 1/step | the peak does not move with the step |
+| 5 counting | the pass with the new recorder; look at `PATH.contacts.csv` | `points` > 1 with `max_point_norm` ~ `force_norm` and `dup_points` > 0, or `sum_point_norm` several times `force_norm` | `points` is 1 to 2, `force_norm` ~ `max_point_norm` at the peaks |
+| 6 other collisions | the same pass with `include_other:=['wall']`, and again with `exclude_other:=['wall']` | the peak survives only without the wall filter, and `others` names something else (obstacle, ground, a robot link) | the filtered peak equals the unfiltered one |
+| (sanity) quasi-static | `contact_control_test.py` as in the table above | 8.0 N at 5 mm, 105.6 N at 35 mm (unchanged by this change) | a different value means the SDF change altered the contact |
+
+`others` (the names of the collisions summed) is returned by `contact_summary.tool_wrench_world` but is not published; to read it, call it from a short script on `/tool_contact/contacts`,
+or run the include/exclude pair above. The cheapest first step is hypothesis 1 and 5: both need only a normal pass and the new `PATH.contacts.csv`.
+
 ## Limits
 
 - Contact is compliant only through the tool tip spring (5 N/mm, 20 mm travel) and the bump stage behind it (50 N/mm, 5 mm). Past the travel the tool is

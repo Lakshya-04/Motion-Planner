@@ -1672,7 +1672,9 @@ private:
     const auto ik = pipeline_.ik();
     const auto & seed = !dock_seed_.empty() ? dock_seed_ :
       (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
-    if (!ik || seed.empty()) {
+    // with the continuity choice the live state is a seed of its own, so an empty remembered seed (the first dock of a
+    // run) must not stop it
+    if (!ik || (seed.empty() && !dock_ik_continuity_)) {
       return {};
     }
     motion_planner::IkRequest req;
