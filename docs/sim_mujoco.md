@@ -710,6 +710,14 @@ What this shows:
 - The manager now checks, before the press, that the tool is within `dock_tolerance_m` (0.02 m) and
   `dock_tolerance_rad` (0.17 rad) of the standoff pose (`verify_dock`), and it has a TF buffer in every run (it had one only
   with a `world_frame`, which made the first-column arm-state log dereference a null buffer).
+- Repeats of the final variant with the shipped defaults (two more runs, same build): both 4 of 4 columns, coverage 1.0, zero
+  refused samples, but the force differs a lot between runs. Run 1: peak 16.9 N, force RMS error 2.1 N, tilt at most 1.0 degree,
+  gap at most 0.96 mm. Repeat 1: peak **159 N**, force RMS error 13.8 N, tilt at most 9.3 degrees, gap at most 4.7 mm; the
+  force spikes (113 to 159 N, under one second) are in all four columns, each at the moment the contact stroke hands over to the
+  retract. Repeat 2: peak 22.9 N, force RMS error 2.3 N, tilt at most 0.99 degrees, gap at most 0.8 mm. So the alignment
+  holds in all three runs, but whether the end-of-column force spike occurs depends on the run (probably on which arm
+  configuration the dock lands on); it is not understood or fixed, and the tool's 60 N overload threshold is not enforced
+  on this path. The two-stand UR10e pass had a 49 N peak and one 3 s episode of tilt just over 10 degrees (10.85) at the second stand.
 - One run per variant is not a distribution: the xArm 7 result is a first working run, not a reliability figure. Not
   checked: other 7-DOF arms, multi-stand, the unconfirmed tool yaw of -90 degrees, the guessed wall distance.
 
