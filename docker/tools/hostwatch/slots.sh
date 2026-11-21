@@ -21,7 +21,7 @@ verdict=${verdict:-HOLD}; avail=${avail_mb:-0}
 ok() { [ "$verdict" = GO ] && [ $((avail - $1)) -ge "$RESERVE" ]; }
 say() { printf '%-6s %-3s %s\n' "$1" "$2" "$3"; }
 echo "$line running: sim=$n_sim node=$n_node build=$n_build gpu_used_mb=$gpu_used"
-if [ "$n_sim" -ge 1 ]; then say sim NO "a simulation container is already running"
+if [ "$n_sim" -ge 2 ]; then say sim NO "two simulation containers are already running"
 elif ok 3000; then say sim YES "cores 0-7"; else say sim NO "verdict=$verdict avail=${avail}MB"; fi
 if [ "$n_node" -ge 1 ]; then say node NO "already running"
 elif [ "$gpu_used" -gt 1500 ]; then say node NO "GPU busy (${gpu_used} MB used)"
