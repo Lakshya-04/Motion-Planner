@@ -107,9 +107,36 @@ def tcp_z(profile):
     return float(t[2])
 
 
+XACRO_TELESCOPIC_COLUMN_M = 0.8      # lift.xacro: column_height when `mount_height` is empty (telescopic)
+XACRO_ARM_MOUNT_Z_M = 0.02           # mobile_manipulator.urdf.xacro: default arm_mount_xyz z
+
+
+def lift_mount_height(profile):
+    """Height of lift_output_link above lift_base_link, retracted: `lift.mount_height_m`, else the xacro default for a
+    telescopic lift (column 0.8 m + arm mount z, or the profile's xacro arg `lift_mount_height` / `arm_mount_xyz`).
+    Raises ValueError naming the key (main() adds the profile) when neither is available."""
+    lift = profile.get('lift') or {}
+    if 'mount_height_m' in lift:
+        return float(lift['mount_height_m'])
+    args = (profile.get('robot') or {}).get('xacro_args') or {}
+    if str(args.get('lift_mount_height', '')).strip():
+        return float(args['lift_mount_height'])
+    if lift.get('type') == 'telescopic':
+        arm_z = XACRO_ARM_MOUNT_Z_M
+        if str(args.get('arm_mount_xyz', '')).strip():
+            arm_z = float(str(args['arm_mount_xyz']).split()[2])
+        return XACRO_TELESCOPIC_COLUMN_M + arm_z
+    raise ValueError(f"lift.mount_height_m is missing and the xacro default is "
+                     f"only known for a telescopic lift (lift.type {lift.get('type')!r})")
+
+
 def mount_z(profile):
     """Arm base height above base_footprint with the lift retracted."""
-    return float(profile['base']['lift_mount_height_m']) + float(profile['lift']['mount_height_m'])
+    try:
+        base = float(profile['base']['lift_mount_height_m'])
+    except KeyError as e:
+        raise ValueError("missing key base.lift_mount_height_m") from e
+    return base + lift_mount_height(profile)
 
 
 def lift_stroke(profile):
@@ -226,7 +253,7 @@ def main():
     try:
         d = derive(load_profile(args.profile), args.standoff, args.reach)
     except (ValueError, KeyError, OSError) as e:
-        print(f'profile_reach: {e}', file=sys.stderr)
+        print(f'profile_reach: profile {args.profile}: {e}', file=sys.stderr)
         return 2
     for w in d['warnings']:
         print(f'profile_reach: warning: {w}', file=sys.stderr)

@@ -636,8 +636,9 @@ pose in `ready_pose.py` and the manager's default profile. Another profile, for 
 
 What `profile_reach.py` derives, and what is a guess:
 
-- Derived from the profile: arm base height (`base.lift_mount_height_m` + `lift.mount_height_m`, 1.17 m for every shipped
-  telescopic profile), lift stroke, tcp offset along z, footprint front, joint names, group and tcp link.
+- Derived from the profile: arm base height (`base.lift_mount_height_m` + `lift.mount_height_m`; the ur10e profiles on the
+  Husky, MiR100, MPO-500, Ranger Mini, Scout and Scout Mini bases have no `lift.mount_height_m`, so the xacro default of a
+  telescopic lift is used, 0.8 m column + 0.02 m arm mount, and a non-telescopic lift without the key is an error), lift stroke, tcp offset along z, footprint front, joint names, group and tcp link.
 - Wall distance: the stock UR10e wall defines the ratio (distance from the arm base to the patch's far corner over the arm's
   published reach, about 0.69); the same ratio is applied to the published reach of the arm (`ARM_REACH_M`: xArm 7 0.70 m,
   Panda and FR3 0.855, iiwa 7 0.80, Gen3 0.902, UR3e 0.50 which is too short for a 0.3 m band). **Guesses to confirm by
@@ -651,6 +652,12 @@ What `profile_reach.py` derives, and what is a guess:
 - The 7-DOF `home` postures are unchecked (docs/robot_description.md); the passes no longer use them, the pre-contact pose
   is planned.
 
+Profiles that are refused: `profile_reach.py` exits 2 with `profile_reach: profile NAME: ...` on stderr and the pass scripts
+stop with `profile NAME is not supported`, never running against the UR10e defaults. Shipped profiles that fail: `ur3e_telescopic`
+(published reach 0.5 m, too short for a 0.3 m band) and `generic_6dof_telescopic`, `generic_6dof_turtlebot3_burger_telescopic`,
+`generic_6dof_turtlebot3_waffle_telescopic` (no published reach: pass `--reach` to `profile_reach.py` to inspect them, the passes
+have no way to give one). All other shipped profiles derive a wall.
+
 Not run: none of this was run in a simulator, for any profile. `bash -n`, `py_compile` and the unit tests of
 `profile_reach.py` and `shift_wall_scene.py` (`test/test_profile_reach.py`, `test/test_shift_wall_scene.py`) are the
 only checks. `smoke_test.py` and `contact_test.py` stay UR10e-only (joint-space poses) and exit with a message for another
@@ -659,7 +666,11 @@ only checks. `smoke_test.py` and `contact_test.py` stay UR10e-only (joint-space 
 #### Scoring gates
 
 `MANAGER_PASS_SCORE_ARGS` (default empty) is passed to every `score_run` call of these scripts (also the spray, wall,
-multi-stand and scenario scripts). The recommended tool-pose gates are
+multi-stand and scenario scripts). For the spray pass `--max-wall-gap` is ignored by `score_run` (a non-contact run, the nozzle
+is 0.30 m from the wall by design), so the variable is safe to export; `--max-tilt` still applies.
+The gated tilt and gap statistics (`tilt_mean_deg`, `tilt_max_deg`, `wall_gap_*`) cover every would-be-working sample, also the
+ones the gate refused, so a run that fails the gate still shows how far off it was. `score_run` exits 2 when `--max-bad-pose` is given
+without a gate that can produce bad poses (`--max-wall-gap` on a contact run, or `--max-tilt`) and when `--nominal-tilt` is given without `--max-tilt`. The recommended tool-pose gates are
 
 ```bash
 MANAGER_PASS_SCORE_ARGS="--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.05" run_manager_pass.sh

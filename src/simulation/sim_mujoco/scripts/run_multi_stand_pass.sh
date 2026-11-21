@@ -36,7 +36,11 @@ PROFILE=$DESC/config/profiles/$STAND_PROFILE.yaml
 MP_WALL_DX=0.0; MP_WALL_DZ=0.0; MP_Z_LO=1.0; MP_Z_HI=1.3; MP_TOOL_YAW=-90.0; MP_ARM=ur10e; MP_ARM_MOUNT_Z=1.17; MP_LIFT_STROKE=1.5
 MP_TCP_XYZ=; DOCK_SEED='[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]'
 if [ "$STAND_PROFILE" != ur10e_telescopic ]; then
-  eval "$(python3 "$PKG/lib/sim_mujoco/profile_reach.py" --profile "$PROFILE" --shell)" || exit 2
+  vars=$(python3 "$PKG/lib/sim_mujoco/profile_reach.py" --profile "$PROFILE" --shell) || {
+    echo "run_multi_stand_pass: profile $STAND_PROFILE is not supported (profile_reach.py failed, message above); not running with the UR10e defaults" >&2
+    exit 2
+  }
+  eval "$vars"
   DOCK_SEED='[]'   # the default seed is a UR10e-on-lift configuration
 fi
 OUT=${MULTI_STAND_OUT:-/tmp/multi_stand_pass}

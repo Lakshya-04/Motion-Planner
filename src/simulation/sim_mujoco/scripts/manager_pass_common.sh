@@ -46,7 +46,12 @@ mp_profile_init() {
     echo "MP_PROFILE=$MP_PROFILE with MANAGER_PASS_DATA: a custom wall is not shifted for another profile; unset one of them"
     return 2
   fi
-  eval "$(python3 "$PKG/lib/sim_mujoco/profile_reach.py" --profile "$MP_PROFILE" --standoff "${MP_FREE_STANDOFF:-0.03}" --shell)" || return 2
+  local vars
+  vars=$(python3 "$PKG/lib/sim_mujoco/profile_reach.py" --profile "$MP_PROFILE" --standoff "${MP_FREE_STANDOFF:-0.03}" --shell) || {
+    echo "profile $MP_PROFILE is not supported (profile_reach.py failed, message above)" >&2
+    return 2
+  }
+  eval "$vars"
   python3 "$PKG/lib/sim_mujoco/shift_wall_scene.py" "$src" "$OUT/profile_data" "$MP_WALL_DX" 0 0.3 "$MP_WALL_DZ" || return 2
   MP_DATA=$OUT/profile_data
   echo "profile $MP_PROFILE: wall x $MP_WALL_X, z $MP_Z_LO..$MP_Z_HI, tool yaw $MP_TOOL_YAW (derived by profile_reach.py, unconfirmed)"
