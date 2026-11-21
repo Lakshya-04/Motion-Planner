@@ -1728,7 +1728,7 @@ private:
   std::vector<double> recoveryGoalIk(const core_types::Pose & pose)
   {
     const auto ik = pipeline_.ik();
-    const auto live = readCurrentJointState(shared_from_this(), group_joint_names_);
+    const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_);
     if (!ik || live.empty()) {
       return {};
     }
