@@ -55,8 +55,8 @@ before opening a pull request. The commands are collected in
    `ros2 run sim_gazebo smoke_test.py` and `contact_control_test.py` ([docs/sim_gazebo.md](docs/sim_gazebo.md)),
    `scripts/run_smoke.sh` and `run_contact.sh` of `sim_mujoco` ([docs/sim_mujoco.md](docs/sim_mujoco.md)).
    These are not part of `colcon test` yet (roadmap section 10).
-4. `python3 docker/tools/check_public_readiness.py` and a link check over the Markdown you touched
-   (relative links must resolve). Before a release: [docs/release_checklist.md](docs/release_checklist.md).
+4. `python3 docker/tools/check_public_readiness.py`, `python3 docker/tools/check_params.py` (every parameter the manager and reachability nodes declare is documented, every config key is declared) and a link check over the Markdown you touched
+   (relative links must resolve). Before a release: [docs/release_checklist.md](docs/release_checklist.md). Reading the output of a simulated pass: [docs/how_to_read_a_run.md](docs/how_to_read_a_run.md).
 
 ## Code style
 
