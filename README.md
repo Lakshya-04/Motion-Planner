@@ -32,7 +32,7 @@ sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware
 
 ## Packages
 
-Under `src/`, by area (layout rules: [docs/package_layout.md](docs/package_layout.md)).
+Under `src/`, by area (layout rules: [docs/package_layout.md](docs/package_layout.md); every package has a README, and [docs/modules.md](docs/modules.md) maps them all: tier, what each needs, dependency layers, recipes for reusing a part).
 
 | Area | Packages | What they do |
 |---|---|---|
@@ -57,7 +57,9 @@ Inside a shell: `docker/build.sh test` builds the workspace and prints the test 
 (`gpu`, `full`: cuRobo v2, VAMP) and the simulator images are described in [docs/docker.md](docs/docker.md).
 Building outside Docker needs ROS 2, MoveIt 2, `ros2_control` and the packages in `docker/apt-extra.txt`.
 The last full run recorded in the roadmap: 736 colcon tests in 26 packages, no failures. There is
-deliberately no CI; [CONTRIBUTING.md](CONTRIBUTING.md) lists how to run every check locally.
+CI runs the build, the colcon tests and the repository checks on free GitHub-hosted runners
+([.github/workflows/ci.yml](.github/workflows/ci.yml)). It does not run simulators, GPU planners or hardware; those
+are run locally, and [CONTRIBUTING.md](CONTRIBUTING.md) lists every check.
 
 ## Showcase
 
