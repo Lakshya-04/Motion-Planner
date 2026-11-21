@@ -451,6 +451,30 @@ no collision, no obstacles) unless the verifier is given; the thresholds are sta
 run was involved. The adapter has gtests against a hand-made map (whole, approach / retract / low-margin limits, split, lift heights,
 unknown stand); the node wiring (parameters, TF stand provider, the log) was written without a build and has not been run.
 
+### How splits are avoided
+
+A column that is "whole" in the map can still have no continuous joint path: IK solved pose by pose may land on another branch
+(elbow or wrist flip, a lift jump) for the next pose. Implemented (ROS-free, `core/column_ik_chain.hpp`, `ColumnIkChain`): it
+solves a column's pose sequence in order through an injected IK callable, seeding each pose from the previous solution and then
+from caller-supplied folded seeds; per step it computes the continuity ratio `max |dq_i| / jump` (jump is the Cartesian distance
+of the two poses), compares each joint with the limit of its type (continuous and revolute in rad per m, prismatic lift in m per
+m; continuous joints wrapped) and a branch signature (signs of chosen joints, a deadband around zero). A step that stays
+discontinuous after reseeding is `PoseFailure::kBranchBreak`. It reports `split_count`, `branch_changes`, `max_continuity_ratio`,
+`reseeds` and `lift_travel_m`. Tested only against a fake 2-link planar IK; no real arm, no adapter, no build run yet.
+
+Planned, not implemented: an IK adapter over the stand verifier, the whole-column check before a column is committed, the
+escalation (change lift height, then re-stand, then re-order columns, split only last), and the split numbers in the column
+analysis, scorecard, verify result and the execution-time count. See `docs/development_plan.md` section 4.
+
+### Singularities and joint limits
+
+Implemented (`reachability/core/pose_quality.hpp`, `path_quality_audit.hpp`; ROS-free, gtested with planar 2- and 3-link fakes, not run against a real arm or a sim):
+
+- `minSingularValue`, `conditionNumber` and `manipulability` (Yoshikawa product of singular values) of a Jacobian, and of an `ArmModel` at a joint vector (`armJacobian`, finite differences); `jointLimitMargin` as before.
+- `auditPathQuality`: takes stroke joint trajectories plus injected `JacobianFn` / `LimitMarginFn` (`armJacobianFn`, `armLimitMarginFn`, `limitMarginFromBounds` build them) and returns per stroke the min sigma, min limit margin, the worst waypoint index and a reason `near_singular` / `near_limit` / `ok`, with aggregate counts. `PathQualityConfig` defaults are `min_sigma = 0.02` and `min_limit_margin = 0.02` (share of the joint range); 0 switches a check off. The Jacobian is unscaled, so these are starting values, not calibrated. It only reports; it does not change a path.
+
+Planned, not built: calling the audit from the Cartesian planner and a `manipulation_manager` gate (opt-in parameter, default off, report and flag only); profile-level thresholds into the stand verifier and the cuRobo guard (which checks velocity and acceleration only); a damped least-squares / null-space IK decorator; an opt-in monitor that slows and then faults; per-pass reporting and an A/B on one wall.
+
 ## Limits and next steps
 
 - **Request validation.** Search grids are checked before they are enumerated: `grid_step` must be finite and

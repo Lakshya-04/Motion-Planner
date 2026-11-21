@@ -501,6 +501,7 @@ Same-session runs of `run_multi_stand_pass.sh` (two stands, ten columns, no cuRo
 | main with the seeded dock IK (no Gazebo changes) | 0 / 10 | coverage 0.0 |
 | main, seeded dock IK off for Gazebo (`dock_ik_seeded: false`) | 4 / 6 | coverage 0.42, peak 39.7 N |
 | main, seeded dock IK off and the live start state clamped into the joint bounds (this change) | 6 / 4 | coverage 0.66, peak force 68.6 N in the feedback, 1820 N in the scored contact trace |
+| main after #157 (the Cartesian planner start state clamped too), same script | 1 / 9 | coverage 0.16, peak 41.6 N in the feedback, 1240 N in the scored trace; stand 1 not reached (the arm could not stow) |
 
 - **Cause of the regression:** the seeded dock IK (a joint goal on the previous dock's branch, added for the second-stand fix in MuJoCo) gives a configuration
   MoveIt calls an invalid goal in Gazebo, and the arm ends in poses from which later plans fail; with it off the Gazebo script uses the planner's pose goal
@@ -512,6 +513,12 @@ Same-session runs of `run_multi_stand_pass.sh` (two stands, ten columns, no cuRo
   2e-14 even with the clamp, so some request path still sends an unclamped start state (not found; the only caller of `MoveGroupInterface::plan` is `OmplPlanner`);
   force peaks of 1820 N in the scored trace (583.9 N before the second-stand fix) are an unrelated problem of the Gazebo contact model that this pass shows and
   does not explain. The Gazebo two-stand pass is therefore still failing; the numbers above are single runs.
+
+- **Run after #157 (2026-11-21):** no `Start state out of bounds` error at all (0 of the 19 earlier ones), so the unclamped path was the Cartesian planner. The pass is still
+  failing and was worse in this single run (1 / 9; the earlier run was 6 / 4, so the pass varies a lot between runs). What the log shows: the first dock approach on stand 0
+  ends in one IK branch (`q2 = -0.62`), the next attempt jumps to another (`q2 = +2.49`, shoulder folded back) and every column after it fails `dock failed` from that
+  pose, with the wrist joint winding down to -4.6 rad on the one column that docks (column 9); the stow then fails 36 times (`OMPL plan failed`). That is the IK-branch and
+  wrist-winding problem of `docs/development_plan.md` section 4 (`ColumnIkChain` is the first piece; it is not yet in the manager). Not caused by cuRobo (this is the MoveIt pass).
 
 ### Log lines that show it
 
