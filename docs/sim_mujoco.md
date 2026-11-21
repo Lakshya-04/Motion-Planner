@@ -718,6 +718,23 @@ What this shows:
   holds in all three runs, but whether the end-of-column force spike occurs depends on the run (probably on which arm
   configuration the dock lands on); it is not understood or fixed, and the tool's 60 N overload threshold is not enforced
   on this path. The two-stand UR10e pass had a 49 N peak and one 3 s episode of tilt just over 10 degrees (10.85) at the second stand.
+- End-of-column force spike (cause and fix, xArm 7, MuJoCo): at the end of a column the force target goes to 0 and the
+  admittance is switched off. The tool lags its reference along the wall (friction and the admittance's own time constant:
+  still creeping up the wall at about 9 mm/s when the stroke is reported done), and switching the admittance off lets it jump
+  to the reference with the pad on the wall: z +6 mm in 0.1 s, tilt rising to 4 degrees, 88 to 175 N. Waiting for the force to
+  decay alone made it worse (peaks 231 to 248 N in three runs: the admittance had retreated further before the snap);
+  `unload_m: 0.01` alone reduced it (137 to 175 N in three runs). The manager now backs the reference off the wall
+  (`unload_m`, default 0.01 m) and releases the admittance only when the force is below `unload_release_force_n` (2 N) and the
+  tool speed has stayed below `unload_release_speed_mps` (1 mm/s) for 0.3 s, at most `unload_timeout_s` (4 s) after it starts
+  waiting (then it releases anyway and says so in the log together with the force and the speed). With this, three xArm 7
+  runs: run 1 peak 21.2 N, run 3 peak 18.1 N with tilt at most 1.3 degrees and gap under 0.7 mm; run 2 failed three columns
+  for a different reason (below). The tool speed at release was 0.8 to 4 mm/s and the 4 s timeout ended most waits, so the
+  speed criterion is mostly the timeout in practice and a longer or smarter settle may still be worth trying.
+- A tilted pad edge can still graze the wall before the manager starts (run 2 above: tilt 67 degrees, gap 29 mm, 102 N,
+  before the first manager event, and the arm state was damaged for the rest of the run). Likely cause, not yet fixed: the
+  planner's tool (`generic_tool.xacro`) is a 0.1 m mount cylinder with a bare TCP frame at 0.165 m and no pad, while the simulator
+  adds a 3 cm radius pad disc at the TCP, so the planner thinks the tool ends 6.5 cm short of it. The contact gaps seen (23
+  to 29 mm at tilts of 54 to 67 degrees) are what a 3 cm radius pad gives: gap = 0.03 sin(tilt) = 24 and 28 mm.
 - One run per variant is not a distribution: the xArm 7 result is a first working run, not a reliability figure. Not
   checked: other 7-DOF arms, multi-stand, the unconfirmed tool yaw of -90 degrees, the guessed wall distance.
 

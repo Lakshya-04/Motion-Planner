@@ -284,7 +284,17 @@ public:
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
     press_settle_s_ = this->declare_parameter<double>("press_settle_s", 2.0);
-    unload_m_ = this->declare_parameter<double>("unload_m", 0.0);
+    unload_m_ = this->declare_parameter<double>("unload_m", 0.01);
+    // After a column the force target is set to 0 and the admittance is switched off only once the measured force has
+    // decayed below unload_release_force_n (0 = the old fixed 1.5 s wait), at most unload_timeout_s later: switching it
+    // off while the tool still presses releases the offset at once and the arm snaps (100 to 160 N spikes at the
+    // contact-to-retract handover on some arm configurations, docs/sim_mujoco.md).
+    unload_release_force_n_ = this->declare_parameter<double>("unload_release_force_n", 2.0);
+    unload_timeout_s_ = this->declare_parameter<double>("unload_timeout_s", 4.0);
+    // ... and the tool has stopped: it lags its reference along the wall (friction, the admittance's own time constant)
+    // and switching the admittance off while it still creeps makes it jump to the reference with the pad on the wall
+    // (a 6 mm jump in 0.1 s gave 90 to 175 N). 0 = do not wait for the tool to settle.
+    unload_release_speed_mps_ = this->declare_parameter<double>("unload_release_speed_mps", 0.001);
     // Tool kind. true (default): the contact flow above. false: a non-contact (spray) tool -- no force
     // engage, no press, no wall-contact allowance, strokes at the plan's stand-off (+ spray_extra_standoff_m
     // further from the wall) and the valve (std_msgs/Bool on valve_topic) is open during the stroke only.
@@ -428,11 +438,12 @@ public:
       force_sub_ = this->create_subscription<geometry_msgs::msg::WrenchStamped>(
         force_topic, rclcpp::SensorDataQoS(),
         [this](const geometry_msgs::msg::WrenchStamped::SharedPtr msg) {
+          const auto & f = msg->wrench.force;
+          const double mag = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
+          force_now_ = mag;   // always: the release of the admittance waits for it to decay
           if (!tracking_peak_) {
             return;
           }
-          const auto & f = msg->wrench.force;
-          const double mag = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
           peak_force_ = std::max(peak_force_, mag);
           column_peak_ = std::max(column_peak_, mag);
         });
@@ -2094,7 +2105,55 @@ private:
       zero.data = 0.0;
       force_pub_->publish(zero);
     }
-    waitFor(1.5, false);
+    if (unload_release_force_n_ <= 0.0 || force_now_ < 0.0) {
+      waitFor(1.5, false);   // no force signal (or switched off): the old fixed wait
+    } else {
+      waitFor(0.5, false);   // the target has to reach the admittance and the tool start to move off
+      const auto t0 = std::chrono::steady_clock::now();
+      const auto elapsed = [&]() {
+          return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        };
+      // the tool speed from TF: the position change over the last sample; settled = below the limit for 0.3 s
+      FrameTransform prev_tcp;
+      bool have_prev = lookup(frame_id_, "tcp_link", prev_tcp);
+      double prev_t = elapsed(), still_since = -1.0, speed = 0.0;
+      const bool watch_speed = unload_release_speed_mps_ > 0.0 && have_prev;
+      while (elapsed() < unload_timeout_s_) {
+        waitFor(0.05, false);
+        bool settled = true;
+        if (watch_speed) {
+          FrameTransform cur;
+          const double now_t = elapsed();
+          if (lookup(frame_id_, "tcp_link", cur) && now_t > prev_t) {
+            speed = std::sqrt(
+              std::pow(cur.t[0] - prev_tcp.t[0], 2) + std::pow(cur.t[1] - prev_tcp.t[1], 2) +
+              std::pow(cur.t[2] - prev_tcp.t[2], 2)) / (now_t - prev_t);
+            prev_tcp = cur;
+            prev_t = now_t;
+          }
+          if (speed > unload_release_speed_mps_) {
+            still_since = -1.0;
+          } else if (still_since < 0.0) {
+            still_since = now_t;
+          }
+          settled = still_since >= 0.0 && now_t - still_since >= 0.3;
+        }
+        if (force_now_ <= unload_release_force_n_ && settled) {
+          break;
+        }
+      }
+      const double waited = 0.5 + elapsed();
+      if (force_now_ > unload_release_force_n_ || elapsed() >= unload_timeout_s_) {
+        RCLCPP_WARN(
+          this->get_logger(),
+          "%s: force %.1f N (limit %.1f N), tool speed %.1f mm/s after %.1f s, releasing the admittance anyway",
+          intent.label.c_str(), force_now_, unload_release_force_n_, speed * 1000.0, waited);
+      } else {
+        RCLCPP_INFO(
+          this->get_logger(), "%s: force %.1f N, tool speed %.1f mm/s after %.1f s, releasing the admittance",
+          intent.label.c_str(), force_now_, speed * 1000.0, waited);
+      }
+    }
     setAdmittanceEngaged(false);
 
     setState("retracting");
@@ -2333,7 +2392,11 @@ private:
   double target_force_n_{0.0};
   std::string controller_name_{"combined_arm_lift_controller"};
   double press_settle_s_{2.0};
-  double unload_m_{0.0};
+  double unload_m_{0.01};
+  double unload_release_force_n_{2.0};
+  double unload_release_speed_mps_{0.001};
+  double unload_timeout_s_{4.0};
+  double force_now_{-1.0};   // latest conditioned force magnitude, -1 until one arrived
 };
 
 }  // namespace manipulation_manager
