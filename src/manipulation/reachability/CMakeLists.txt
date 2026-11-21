@@ -50,6 +50,11 @@ target_link_libraries(rm4d_tool reachability_core)
 add_executable(column_reach_tool apps/column_reach_tool.cpp)
 target_link_libraries(column_reach_tool reachability_core)
 
+# Monte Carlo split-avoidance benchmark on planar fake arms (header-only model, shared with its gtest).
+add_executable(split_benchmark apps/split_benchmark.cpp)
+target_link_libraries(split_benchmark reachability_core)
+target_include_directories(split_benchmark PRIVATE apps)
+
 # ros/: services over a loaded map. Optional: the core builds without rclcpp.
 find_package(rclcpp QUIET)
 find_package(reachability_msgs QUIET)
@@ -72,7 +77,7 @@ install(TARGETS ${REACHABILITY_TARGETS}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
-install(TARGETS rm4d_tool column_reach_tool DESTINATION lib/${PROJECT_NAME})
+install(TARGETS rm4d_tool column_reach_tool split_benchmark DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/urdf_to_chain.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 
@@ -89,6 +94,9 @@ if(BUILD_TESTING)
   else()
     message(WARNING "reachability: ${_profiles} not found, the shipped-profile schema test will be skipped")
   endif()
+  ament_add_gtest(split_benchmark_test test/core/split_benchmark_test.cpp)
+  target_link_libraries(split_benchmark_test reachability_core)
+  target_include_directories(split_benchmark_test PRIVATE apps)
   if(TARGET reachability_ros)
     ament_add_gtest(reachability_node_test test/ros/reachability_node_test.cpp)
     target_link_libraries(reachability_node_test reachability_ros)

@@ -466,6 +466,60 @@ Planned, not implemented: an IK adapter over the stand verifier, the whole-colum
 escalation (change lift height, then re-stand, then re-order columns, split only last), and the split numbers in the column
 analysis, scorecard, verify result and the execution-time count. See `docs/development_plan.md` section 4.
 
+### Split avoidance, measured
+
+`reachability/apps/split_benchmark.cpp` (model and runner in `apps/split_benchmark.hpp`, gtest `split_benchmark_test` with N = 50) is a Monte Carlo
+check of the claim above. Per column it draws a wall standoff (0.40 to 0.95 m), a stroke start and length (0.3 to 0.9 m, 3 cm steps, an approach and
+a retract pose 0.15 m off the wall) and, for 3 links, a tool angle (+-0.4 rad), and solves it with a planar arm: a vertical lift (it tracks half the pose
+height, so lift travel is the same for every method) plus 2 revolute links (0.55, 0.50 m) or 3 (0.45, 0.40, 0.20 m, tool angle held), closed-form IK
+returning both elbow branches within the joint limits ("loose" or "tight" limits). Columns with a pose no branch reaches are discarded (86 to 1924
+per setting), so every kept column is whole in the reachability sense and only the joint path can break. All methods are scored by the same
+`ColumnIkChain` yardstick (break = normalised continuity ratio over 1, limit 6 rad/m, or an elbow sign change). Methods: per-pose IK taking the
+first solution (`first_fixed`: elbow + first, always the same order; `first_random`: random order per pose, a solver that lands in either basin),
+per-pose lowest cost (`lowest_cost`: sum of |q|), and the chain (previous-solution seeding plus two folded seeds). 1000 kept columns per setting,
+fixed seeds (`--seed 20240611`), `g++ -O2`, under a second on the host:
+
+| setting | method | whole | breaks | branch changes | mean / p95 ratio | near singular | near limit | columns worse than chain |
+|---|---|---|---|---|---|---|---|---|
+| 2link_loose | first_fixed | 996 | 4 | 0 | 2.58 / 3.67 | 1 | 0 | 0 |
+| 2link_loose | first_random | 0 | 10582 | 10580 | 112.6 / 150.0 | 1 | 0 | 1000 |
+| 2link_loose | lowest_cost | 414 | 586 | 582 | 65.7 / 148.3 | 1 | 0 | 582 |
+| 2link_loose | chain | 996 | 4 | 0 | 2.58 / 3.67 | 1 | 0 | - |
+| 2link_tight | first_fixed | 648 | 352 | 343 | 18.7 / 118.2 | 1 | 148 | 343 |
+| 2link_tight | first_random | 0 | 10529 | 10525 | 96.8 / 122.6 | 1 | 114 | 1000 |
+| 2link_tight | lowest_cost | 374 | 626 | 617 | 60.4 / 121.9 | 1 | 0 | 617 |
+| 2link_tight | chain | 991 | 9 | 0 | 2.81 / 3.74 | 1 | 0 | - |
+| 3link_loose | first_fixed | 962 | 46 | 7 | 3.52 / 5.23 | 1 | 0 | 6 |
+| 3link_loose | first_random | 0 | 10536 | 10514 | 114.5 / 147.6 | 1 | 0 | 1000 |
+| 3link_loose | lowest_cost | 890 | 136 | 98 | 9.25 / 69.9 | 1 | 0 | 88 |
+| 3link_loose | chain | 966 | 40 | 1 | 3.36 / 4.99 | 1 | 0 | - |
+| 3link_tight | first_fixed | 518 | 495 | 471 | 20.1 / 111.0 | 1 | 150 | 451 |
+| 3link_tight | first_random | 0 | 10165 | 10154 | 94.9 / 117.7 | 1 | 113 | 1000 |
+| 3link_tight | lowest_cost | 638 | 406 | 382 | 18.1 / 107.0 | 1 | 110 | 347 |
+| 3link_tight | chain | 969 | 34 | 10 | 3.64 / 5.05 | 1 | 0 | - |
+
+What it shows, and what it does not:
+
+- Where the IK order is fixed and the limits are loose (`2link_loose`) the chain gives **no gain**: it is identical to `first_fixed` (996 whole, 4 breaks).
+  Always taking the elbow + solution already stays on one branch, so only the few columns that stretch the arm (ratio blow-up near the reach limit) break, and
+  the chain cannot fix those: a break there is geometry, not a branch choice. In `3link_loose` the gain is small (966 against 962 whole columns, 40 against 46
+  breaks; the chain was never worse than `first_fixed` and better on 6 columns).
+- With limits that take one branch away for part of the workspace (`*_tight`) a fixed order is forced onto the other branch mid-column: 52 to 65 % whole
+  against 97 to 99 % for the chain. A chain break that remains is mostly a branch change the limits force (10 in `3link_tight`), which no seeding can avoid.
+- A random order per pose or the lowest-cost pick breaks almost every column. `first_random` is a worst case, not a realistic solver; `lowest_cost` is a cost
+  that has no continuity term, so its poor result says "do not pick per pose by a pose-only cost", not that it is a typical planner. Because the per-pose
+  methods here are scored by the chain's own break rule, the comparison is only as honest as that rule.
+- `lowest_cost` beat the chain on 1 column in `3link_loose` and 10 in `3link_tight` (per-column `better_than_chain` in the CSV): the chain is not dominant per column.
+- Lift travel (0.26 m mean) does not discriminate: the lift policy ignores the branch. Near-singular strokes do not either (1 column in 1000 in every
+  method): the singular value of a planar arm does not depend on the elbow side, so it is a property of the geometry, not of the method. Near-limit counts
+  are zero for the chain because it was never started near a limit here, not because it avoids limits.
+
+Limits of the model: planar fake arms with a closed-form IK that returns exactly two branches, a lift tied to the height, hand-picked link lengths and
+joint limits, one break rule, tool position (and angle for 3 links) only, no collision, no obstacles, no real IK solver basin behaviour, no wrist flips,
+no redundancy resolution. It is not a real arm and not hardware; the numbers say that the chain logic behaves as designed on a fake with real branches,
+not how many columns of a real wall would split. Run: `split_benchmark [--n 1000] [--seed S] [--csv out.csv]`. Written and run with host `g++` and gtest only;
+the colcon build, the new CMake targets and the ROS install were not built here.
+
 ### Singularities and joint limits
 
 Implemented (`reachability/core/pose_quality.hpp`, `path_quality_audit.hpp`; ROS-free, gtested with planar 2- and 3-link fakes, not run against a real arm or a sim):
