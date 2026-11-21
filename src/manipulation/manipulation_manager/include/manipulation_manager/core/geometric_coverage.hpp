@@ -68,6 +68,17 @@ struct GeometricCoverageConfig
   GeoPoint plane_origin;            ///< A point on the wall plane.
   GeoPoint wall_normal{1.0, 0.0, 0.0};   ///< Plane normal (any length; normalised here).
   size_t max_cells{4000000};        ///< The grid is coarsened to stay within this.
+  /// Optional groups of planned columns (e.g. the columns of one stand): group id -> column ids. Each group gets the
+  /// coverage of the UNION of its columns' cells (columns may overlap). Unknown column ids are ignored.
+  std::map<size_t, std::vector<size_t>> groups;
+};
+
+/// Coverage of one group of columns.
+struct GeometricGroupResult
+{
+  size_t planned_cells{0};
+  size_t covered_cells{0};
+  double percent{0.0};   ///< 0 when the group has no planned cell.
 };
 
 struct GeometricCoverageResult
@@ -77,6 +88,7 @@ struct GeometricCoverageResult
   size_t covered_cells{0};
   double percent{0.0};              ///< 100 * covered / planned.
   std::map<size_t, double> column_percent;   ///< Per planned column.
+  std::map<size_t, GeometricGroupResult> group;   ///< Per `groups` entry of the config (empty without groups).
   size_t samples{0};                ///< Samples given.
   size_t working_samples{0};        ///< Samples that counted as working.
   size_t off_plane_samples{0};      ///< Samples refused for standoff.
@@ -317,6 +329,25 @@ inline GeometricCoverageResult computeGeometricCoverage(
       }
     }
     r.column_percent[kv.first] = p == 0 ? 0.0 : 100.0 * static_cast<double>(c) / static_cast<double>(p);
+  }
+  for (const auto & kv : cfg.groups) {
+    std::vector<std::uint8_t> u(n, 0);
+    for (const size_t col : kv.second) {
+      const auto it = column_mask.find(col);
+      if (it == column_mask.end()) {continue;}
+      for (size_t i = 0; i < n; ++i) {
+        if (it->second[i]) {u[i] = 1;}
+      }
+    }
+    GeometricGroupResult gr;
+    for (size_t i = 0; i < n; ++i) {
+      if (u[i]) {
+        ++gr.planned_cells;
+        if (covered_mask[i]) {++gr.covered_cells;}
+      }
+    }
+    gr.percent = gr.planned_cells == 0 ? 0.0 : 100.0 * static_cast<double>(gr.covered_cells) / static_cast<double>(gr.planned_cells);
+    r.group[kv.first] = gr;
   }
   if (r.planned_cells == 0) {
     r.note = "the planned patch covers no grid cell (swath or cell size too small)";

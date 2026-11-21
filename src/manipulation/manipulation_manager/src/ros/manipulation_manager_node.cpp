@@ -75,6 +75,7 @@
 #include "manipulation_manager/core/recovery_branch.hpp"
 #include "manipulation_manager/core/recovery_jog.hpp"
 #include "manipulation_manager/core/stand_check.hpp"
+#include "manipulation_manager/core/stand_gate.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
 #include "manipulation_manager/core/joint_names.hpp"
 #include "manipulation_manager/core/travel_pose.hpp"
@@ -801,6 +802,7 @@ private:
   TaskResult executeTask(const TaskRequest & req)
   {
     column_peaks_.clear();
+    verify_stand_columns_.clear();
     trace_.reset();
     const TaskResult out = executeTaskImpl(req);
     if (!verify_result_path_.empty()) {
@@ -816,6 +818,7 @@ private:
       in.max_peak_force_n = verify_max_peak_n_;
       in.message = out.message;
       in.report_path = ledger_.path();
+      in.stand_columns = verify_stand_columns_;
       addTraceToVerify(in);
       const auto result = buildMissionVerify(in);
       if (writeMissionVerify(verify_result_path_, missionVerifyToJson(result, in))) {
@@ -1053,6 +1056,12 @@ private:
       return false;
     }
     RCLCPP_INFO(this->get_logger(), "%zu stand(s) to visit", visit.size());
+    verify_stand_columns_.clear();
+    for (size_t vs = 0; vs < visit_columns.size(); ++vs) {
+      for (const size_t c : visit_columns[vs]) {
+        verify_stand_columns_[vs].push_back(ids[c]);
+      }
+    }
 
     while (!machine.terminal()) {
       if (stop()) {
@@ -1083,10 +1092,7 @@ private:
         if (stop()) {
           break;
         }
-        auto verdict = machine.navigationResult(ok);
-        while (gate_abort && verdict == NavVerdict::kRetry) {
-          verdict = machine.navigationResult(false);   // the gate gave this stand up: no further navigation tries
-        }
+        const auto verdict = resolveNavigation(machine, ok, gate_abort);   // a stand the gate gave up is not retried
         if (verdict == NavVerdict::kRun) {
           tracker_.standReached(s, true, "");
           if (!arrival_command_.empty()) {
@@ -1313,28 +1319,24 @@ private:
   /// the caller then marks it failed). A failed re-drive returns false with `message` and the normal retry applies.
   bool gateStand(const StanceStand & st, std::string & message, bool & abort)
   {
-    int redocks = 0;
-    for (;;) {
-      const auto r = stand_check_.evaluate(
-        {last_arrival_pos_err_m_, last_arrival_yaw_err_rad_}, stand_check_reach_margin_, redocks);
-      if (r.decision == StandDecision::kGo) {
-        RCLCPP_INFO(this->get_logger(), "%s", r.message.c_str());
-        return true;
-      }
-      RCLCPP_WARN(this->get_logger(), "%s [%s]", r.message.c_str(), toString(r.reason));
-      if (r.decision == StandDecision::kAbort) {
-        message = std::string("stand check: ") + toString(r.reason);
-        abort = r.stand_failed;
-        return false;
-      }
-      ++redocks;
-      if (stop() || !navigateToStand(st, message)) {
-        if (message.empty()) {
-          message = "canceled";
-        }
-        return false;
-      }
+    struct Port final : StandNavigatorPort
+    {
+      Port(ManipulationManagerNode & n, const StanceStand & s) : node(n), stand(s) {}
+      bool navigate(std::string & m) override {return node.navigateToStand(stand, m);}
+      StandAchieved achieved() const override {return {node.last_arrival_pos_err_m_, node.last_arrival_yaw_err_rad_};}
+      bool stopRequested() const override {return node.stop();}
+      ManipulationManagerNode & node;
+      const StanceStand & stand;
+    } port(*this, st);
+    const auto o = runStandGate(port, stand_check_, stand_check_reach_margin_);
+    if (o.ok) {
+      RCLCPP_INFO(this->get_logger(), "%s", o.message.c_str());
+    } else {
+      RCLCPP_WARN(this->get_logger(), "stand gate: %s (re-docks %d)", o.message.c_str(), o.redocks);
+      message = o.message;
     }
+    abort = o.abort;
+    return o.ok;
   }
 
   void cancelNavigation()
@@ -1949,6 +1951,7 @@ private:
     if (verify_geometric_) {
       GeometricCoverageConfig cfg = verify_geo_cfg_;
       cfg.contact_force_n = contact_ ? verify_contact_force_n_ : -1.0;
+      cfg.groups = verify_stand_columns_;
       cfg.wall_normal = {wall_dir_.d[0], wall_dir_.d[1], wall_dir_.d[2]};
       const auto plan = trace_.plan();
       if (!plan.empty() && !plan.front().points.empty()) {
@@ -2669,6 +2672,7 @@ private:
   std::vector<int64_t> column_ik_branch_joints_, column_ik_prismatic_joints_, column_ik_continuous_joints_;
   std::unique_ptr<ReachabilityColumnIkPort> column_ik_port_;
   ColumnIkGate column_ik_gate_;
+  std::map<size_t, std::vector<size_t>> verify_stand_columns_;   // stand -> column ids of the last multi-stand run
   bool verify_trace_{false};
   bool verify_geometric_{false};
   bool verify_path_quality_{false};

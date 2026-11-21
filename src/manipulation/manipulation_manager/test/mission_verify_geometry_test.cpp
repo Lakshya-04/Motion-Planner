@@ -117,3 +117,43 @@ TEST(MissionVerifyGeometry, UnavailablePathQualityIsOneWarning)
   ASSERT_EQ(r.warnings.size(), 1u);
   EXPECT_NE(r.warnings[0].find("no joint samples"), std::string::npos);
 }
+
+TEST(MissionVerifyStands, NoStandsBlockForASingleStandRun)
+{
+  const auto in = clean();
+  EXPECT_FALSE(missionVerifyToJson(buildMissionVerify(in), in).contains("stands"));
+}
+
+TEST(MissionVerifyStands, PerStandColumnsAndGeometry)
+{
+  auto in = clean();
+  in.done = {0, 1};
+  in.partial = {2};
+  in.failed = {3};
+  in.stand_columns = {{0, {0, 1}}, {1, {2, 3, 4}}};
+  in.geometric = geo(80.0);
+  in.geometric.group = {{0, {100, 100, 100.0}}, {1, {200, 100, 50.0}}};
+  const auto j = missionVerifyToJson(buildMissionVerify(in), in);
+  ASSERT_EQ(j["stands"].size(), 2u);
+  const auto & s0 = j["stands"][0];
+  EXPECT_EQ(s0["stand"], 0);
+  EXPECT_DOUBLE_EQ(s0["column_percent"].get<double>(), 100.0);
+  EXPECT_DOUBLE_EQ(s0["geometric_coverage_percent"].get<double>(), 100.0);
+  const auto & s1 = j["stands"][1];
+  EXPECT_EQ(s1["partial"].size(), 1u);
+  EXPECT_EQ(s1["failed"].size(), 1u);
+  EXPECT_EQ(s1["not_run"].size(), 1u);   // column 4 has no outcome
+  EXPECT_NEAR(s1["column_percent"].get<double>(), 0.0, 1e-9);
+  EXPECT_DOUBLE_EQ(s1["geometric_coverage_percent"].get<double>(), 50.0);
+  EXPECT_EQ(s1["planned_cells"], 200);
+}
+
+TEST(MissionVerifyStands, GeometryNullWhenNotComputed)
+{
+  auto in = clean();
+  in.stand_columns = {{0, {0, 1}}};
+  const auto j = missionVerifyToJson(buildMissionVerify(in), in);
+  ASSERT_EQ(j["stands"].size(), 1u);
+  EXPECT_TRUE(j["stands"][0]["geometric_coverage_percent"].is_null());
+  EXPECT_DOUBLE_EQ(j["stands"][0]["column_percent"].get<double>(), 100.0);
+}

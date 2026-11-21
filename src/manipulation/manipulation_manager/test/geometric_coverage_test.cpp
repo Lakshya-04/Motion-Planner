@@ -197,3 +197,31 @@ TEST(GeometricCoverage, CeilingPlaneWorksToo)
   ASSERT_TRUE(r.available);
   EXPECT_GT(r.percent, 99.0);
 }
+
+TEST(GeometricCoverage, GroupsReportTheUnionPerStand)
+{
+  // Stand 0 owns columns 0 and 1 (columns 0.04 m apart: their swaths overlap), stand 1 owns column 2 far away.
+  auto c = cfg();
+  c.groups = {{0, {0, 1}}, {1, {2}}};
+  const std::vector<PlannedStroke> plan = {column(0, 0.0), column(1, 0.04), column(2, 1.0)};
+  auto s = trace(0, 0.0, 0.5, 1.5, 5.0);
+  const auto s1 = trace(1, 0.04, 0.5, 1.5, 5.0);
+  s.insert(s.end(), s1.begin(), s1.end());   // stand 1's column 2 is never run
+  const auto r = computeGeometricCoverage(plan, s, c);
+  ASSERT_TRUE(r.available);
+  ASSERT_EQ(r.group.size(), 2u);
+  EXPECT_GT(r.group.at(0).percent, 95.0);
+  EXPECT_NEAR(r.group.at(1).percent, 0.0, 1e-9);
+  EXPECT_GT(r.group.at(0).planned_cells, r.group.at(1).planned_cells);   // union of two overlapping bands, wider than one
+  // the union is smaller than the sum of the per-column cells
+  EXPECT_EQ(r.group.at(0).planned_cells + r.group.at(1).planned_cells, r.planned_cells);
+}
+
+TEST(GeometricCoverage, UnknownColumnInAGroupIsIgnored)
+{
+  auto c = cfg();
+  c.groups = {{0, {0, 99}}};
+  const auto r = computeGeometricCoverage({column(0, 0.0)}, trace(0, 0.0, 0.5, 1.5, 5.0), c);
+  ASSERT_TRUE(r.available);
+  EXPECT_GT(r.group.at(0).percent, 95.0);
+}
