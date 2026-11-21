@@ -13,7 +13,8 @@ import threading
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from geometry_msgs.msg import WrenchStamped
+import math
+from geometry_msgs.msg import PoseStamped, WrenchStamped
 from rclpy.qos import qos_profile_sensor_data
 
 
@@ -50,6 +51,17 @@ def main():
         force[0] = abs(msg.wrench.force.z)
         force[1] = max(force[1], force[0])
     node.create_subscription(WrenchStamped, '/sim_mujoco/ft_ground_truth', on_ft, qos_profile_sensor_data)
+    # the driven base: /joint_states carries only the lift and the arm, the base pose (x, y, yaw in the odom frame) comes
+    # from the plugin as a PoseStamped; without it the arm is drawn at the origin with yaw 0, away from the wall
+    base_adr = [int(model.jnt_qposadr[j]) if j >= 0 else -1 for j in (
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, n) for n in ('base_x_joint', 'base_y_joint', 'base_yaw_joint'))]
+
+    def on_base(msg):
+        p, o = msg.pose.position, msg.pose.orientation
+        for adr, v in zip(base_adr, (p.x, p.y, math.atan2(2.0 * (o.w * o.z + o.x * o.y), 1.0 - 2.0 * (o.y * o.y + o.z * o.z)))):
+            if adr >= 0:
+                data.qpos[adr] = v
+    node.create_subscription(PoseStamped, '/sim_mujoco/base_pose', on_base, qos_profile_sensor_data)
     threading.Thread(target=rclpy.spin, args=(node,), daemon=True).start()
     with mujoco.viewer.launch_passive(model, data) as viewer:
         while viewer.is_running() and rclpy.ok():
