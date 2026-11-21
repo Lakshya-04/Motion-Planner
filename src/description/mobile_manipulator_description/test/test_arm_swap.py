@@ -135,9 +135,69 @@ def test_seven_dof_acm_is_up_to_date(name, lift, suffix):
     adjacent = module.adjacent_pairs(robot)
     generated = adjacent | (module.lift_pairs(robot, mounted=lift != 'scissor') - adjacent)
     text = (PKG / 'srdf' / f'acm_{p.arm}{suffix}.xacro').read_text()
-    committed = {tuple(sorted(m)) for m in re.findall(r'link1="([^"]+)" link2="([^"]+)"', text)}
+    # the sampled "Always" entries have their own test below
+    committed = {tuple(sorted(m)) for m in re.findall(r'link1="([^"]+)" link2="([^"]+)" reason="(?!Always)', text)}
     assert generated == committed, (
         f'run scripts/generate_acm.py --arm {p.arm} --lift {lift} --out srdf/acm_{p.arm}{suffix}.xacro')
+
+
+def _acm():
+    spec = importlib.util.spec_from_file_location('generate_acm', PKG / 'scripts' / 'generate_acm.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _always_in_file(name, suffix=''):
+    p = load_profile(name)
+    text = (PKG / 'srdf' / f'acm_{p.arm}{suffix}.xacro').read_text()
+    return {tuple(sorted(m)) for m in re.findall(r'link1="([^"]+)" link2="([^"]+)" reason="Always"', text)}
+
+
+@pytest.mark.parametrize('name', ['xarm7_telescopic', 'panda_telescopic'])
+def test_always_colliding_primitive_pairs_are_the_committed_ones(name):
+    """The sampled test (Setup Assistant's "always in collision"): the pairs whose primitives overlap in every
+    sampled configuration are exactly the Always entries of the committed files, for every lift variant."""
+    module = _acm()
+    p = load_profile(name)
+    robot = URDF.from_xml_string(_urdf(p))
+    adjacent = module.adjacent_pairs(robot)
+    lift = module.lift_pairs(robot) - adjacent
+    got = module.always_pairs(robot, 200, adjacent, lift)
+    assert got
+    assert got == _always_in_file(name)
+    assert got == _always_in_file(name, '_none') == _always_in_file(name, '_scissor')
+
+
+def test_xarm7_link2_link4_overlap_everywhere_but_other_pairs_do_not():
+    module = _acm()
+    robot = URDF.from_xml_string(_urdf(load_profile('xarm7_telescopic')))
+    frac = module.overlap_fractions(robot, 120, skip=lambda a, b: a.startswith(('lift_', 'base')) or b.startswith(('lift_', 'base')))
+    assert frac[('arm_link2', 'arm_link4')] == 1.0
+    # partial overlaps are real contacts the planner must avoid: they stay checked
+    partial = {k: v for k, v in frac.items() if 0.0 < v < 1.0}
+    assert partial
+    assert all(k not in module.always_pairs(robot, 120, set(), set()) for k in partial)
+
+
+def test_always_needs_every_sample_and_ignores_missing_geometry():
+    module = _acm()
+    urdf = """<robot name="t"><link name="a"><collision><geometry><cylinder radius="0.1" length="0.4"/></geometry></collision></link>
+    <link name="b"><collision><geometry><cylinder radius="0.1" length="0.4"/></geometry></collision></link>
+    <link name="c"><collision><geometry><cylinder radius="0.1" length="0.4"/></geometry></collision></link>
+    <link name="frame"/>
+    <joint name="arm_j1" type="revolute"><parent link="a"/><child link="b"/><origin xyz="0 0 0.05"/><axis xyz="0 0 1"/>
+      <limit lower="-3" upper="3" effort="1" velocity="1"/></joint>
+    <joint name="arm_j2" type="revolute"><parent link="a"/><child link="c"/><origin xyz="0.5 0 0"/><axis xyz="1 0 0"/>
+      <limit lower="-3" upper="3" effort="1" velocity="1"/></joint>
+    <joint name="f" type="fixed"><parent link="a"/><child link="frame"/></joint></robot>"""
+    robot = URDF.from_xml_string(urdf)
+    # b sits inside a whatever arm_j1 does (same axis); c is 0.5 m away from a and never touches it
+    got = module.always_pairs(robot, 30, set(), set())
+    assert ('a', 'b') in got
+    assert ('a', 'c') not in got
+    assert not any('frame' in p for p in got)
+    assert module.always_pairs(robot, 30, {('a', 'b')}, set()) == set()
 
 
 # Arm swap combined with other lifts and bases: the arm joints and the whole-body group follow
