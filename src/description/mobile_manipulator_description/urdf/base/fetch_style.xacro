@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!-- Fetch-style base: round ~0.56 m body (modelled as its bounding box), two drive wheels and passive casters.
+     Primitive model from nominal published dimensions (approximate, from memory of the public
+     spec sheets: check every default against your unit and override through the macro parameters;
+     no vendor mesh). The torso lift is NOT part of the base: it is the profile's lift (telescopic, stages 0). Wheels are fixed links: the base is driven by its vehicle controller, not
+     by the planner. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/wheeled_base_common.xacro"/>
+  <xacro:macro name="fetch_style_base" params="prefix:='' length:=0.56 width:=0.56 height:=0.26 ground_clearance:=0.04 mass:=70.0 rgba:='0.15 0.17 0.2 1' wheel_radius:=0.0605 wheel_width:=0.04 track:=0.3748 wheel_x:=0.0 casters:=both caster_radius:=0.03 caster_x:=0.22 caster_y:=0.0 mount_x:=0.0 mount_y:=0.0">
+    <xacro:two_wheel_base prefix="${prefix}"
+    length="${length}"
+    width="${width}"
+    height="${height}"
+    ground_clearance="${ground_clearance}"
+    mass="${mass}"
+    rgba="${rgba}"
+    wheel_radius="${wheel_radius}"
+    wheel_width="${wheel_width}"
+    track="${track}"
+    wheel_x="${wheel_x}"
+    casters="${casters}"
+    caster_radius="${caster_radius}"
+    caster_x="${caster_x}"
+    caster_y="${caster_y}"
+    mount_x="${mount_x}" mount_y="${mount_y}"/>
+  </xacro:macro>
+</robot>

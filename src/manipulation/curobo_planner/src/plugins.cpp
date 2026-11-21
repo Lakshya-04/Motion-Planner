@@ -3,6 +3,7 @@
 // from the context ("node", a std::shared_ptr<rclcpp::Node> that the composition root spins in an
 // executor thread); no node is created here. Without the cuRobo planner node running, calls
 // return failure_reason_code "unavailable".
+#include <cmath>
 #include <memory>
 #include <string>
 
@@ -66,6 +67,17 @@ bool limitPolicyFromParams(
   // inline entries add to or override the file's
   if (!parseInlineJointLimits(mp::paramOr(params, "joint_limits", std::string()), policy.limits, error)) {
     return false;
+  }
+  // optional jerk limit for every joint without its own (file max_jerk or inline 4th field); 0 = off
+  const double jerk_all = mp::paramOr(params, "limit_jerk", 0.0);
+  if (!(jerk_all >= 0.0) || !std::isfinite(jerk_all)) {
+    error = "limit_jerk must be finite and >= 0 (0 = no jerk limit)";
+    return false;
+  }
+  if (jerk_all > 0.0) {
+    for (auto & kv : policy.limits) {
+      if (!(kv.second.jerk > 0.0)) {kv.second.jerk = jerk_all;}
+    }
   }
   if (policy.limits.empty()) {
     error = "joint_limits_file / joint_limits given but no joint has both a velocity and an acceleration limit";
