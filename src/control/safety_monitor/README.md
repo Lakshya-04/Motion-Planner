@@ -15,7 +15,7 @@ status: experimental
 > (ISO 12100, ISO 10218-2, ISO/TS 15066). **This layer only slows the robot earlier**, so that the
 > hardware limits trip rarely; it never replaces them and nothing may rely on it to prevent harm.
 
-ROS-free core (Eigen only, no clock, no I/O) of the whole-robot collision monitor planned in
+ROS-free core (Eigen and yaml-cpp only, no clock, no I/O) of the whole-robot collision monitor planned in
 `docs/development_plan.md` section 9. The ROS node, the controller and manager consumers are later steps.
 
 ## What's here
@@ -32,7 +32,8 @@ All in namespace `safety_monitor`, headers under `include/safety_monitor/`:
   `query(point, t_ahead)`) with `StaticPrimitiveSource` (sphere, oriented box, half-space; may be flagged
   as the work surface), `EsdfGrid` (dense signed-distance grid, trilinear lookup, independent of
   `scene_model`; an adapter from its ESDF is a later step; points outside the grid answer "no
-  information") and `MovingCapsuleSource` (a person proxy: capsules with a velocity, predicted at
+  information" only when `setOutsideBehavior(OutsideGrid::kFree)` is chosen; the default answers a NaN
+  distance there and the monitor stops; a NaN or infinite voxel also stops) and `MovingCapsuleSource` (a person proxy: capsules with a velocity, predicted at
   constant velocity).
 - **`safety_monitor.hpp` -- `SafetyMonitor::evaluate()`** returns `Result{speed_scale, state, reason,
   worst_sphere, worst_link, min_distance}`.
@@ -62,29 +63,35 @@ at `sweep_samples + 1` times, radius inflated by `sweep_radius_inflation_m`, a m
 too):
 
 ```
-d_stop = v_human * T_stop + v_toward * T_reaction + margin
+d_stop = v_human * (T_stop + T_reaction) + v_toward * T_reaction + margin
 d_slow = d_stop + slow_band
 scale  = clamp((d - d_stop) / (d_slow - d_stop), 0, 1)
 ```
 
+The form is the ISO/TS 15066 separation distance: `v_human * (T_stop + T_reaction)` is the
+distance the person covers while the system reacts and stops (S_h), `v_toward * T_reaction` the robot's
+travel during the reaction time (S_r), the robot's stopping travel (S_s) is covered by the sweep over
+`[0, T_stop]`, and `margin` stands for C + Z.
 `v_human` is 0 for static sources and `max(human_speed, measured)` for a person; `margin` is intrusion
 plus uncertainty for a person and a smaller value for static obstacles; the person slow band is wider.
 Self-collision uses the same form with the pair closing speed. The result scale is the minimum; 0 is a
-protective stop. Defaults are in `Params` and are starting values, not calibrated.
+protective stop. Person sources are queried at `now - stamp` ahead, so their position is extrapolated
+over the age of their data. `Params` and `HeartbeatWatchdog` are validated in the constructors
+(finite, non-negative times, speeds, margins and bands; std::invalid_argument otherwise). Defaults are in `Params` and are starting values, not calibrated.
 
 - **Latch**: a protective stop holds until the hazard is gone, has stayed gone for `min_clear_time_s`
   and `reset()` was called after it cleared (a reset during the hazard is discarded).
-- **Fail-safe**: a missing, negative or NaN stamp, input older than `stale_timeout_s`, a stale or
+- **Fail-safe**: a missing, negative, NaN or future-dated (more than 1 ms ahead of now) stamp, input older than `stale_timeout_s`, a stale or
   unstamped source, a NaN in transforms, velocities or distances, or a size mismatch gives scale 0,
   `kProtectiveStop`, reason `kStaleData` or `kInvalidInput` (and latches).
 - **Contact exemption**: `contact_exempt` links are skipped against the source flagged as the work
-  surface only, never against persons or other obstacles.
+  surface only, never against persons (even a person source flagged as work surface) or other obstacles.
 
 ## Status and limits
 
 - Math only: no node, no `/safety/speed_scale` or `/safety/stop_request` topics, no consumers in the
   trajectory controller or the manager.
-- Unit-tested with synthetic poses (51 gtests); **not run in any simulator or on hardware**; thresholds
+- Unit-tested with synthetic poses (67 gtests); **not run in any simulator or on hardware**; thresholds
   and timings are not calibrated and no latency or false-stop metrics exist.
 - Constant-velocity prediction only; no braking model of the real arm; one frame; sphere
   approximations of the robot are conservative only as far as the spheres cover the links.

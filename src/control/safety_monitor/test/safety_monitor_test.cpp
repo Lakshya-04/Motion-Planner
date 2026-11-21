@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <string>
 
 #include "safety_monitor/heartbeat_watchdog.hpp"
 #include "safety_monitor/safety_monitor.hpp"
@@ -437,7 +438,7 @@ TEST(Monitor, TimingSanity60SpheresAgainst200Obstacles)
   for (int i = 0; i < 10; ++i) {res = run(m, T, v, {&obstacles}, 1.0);}
   const double ms_each =
     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / 10;
-  EXPECT_LT(ms_each, 500.0);  // generous: this guards against an accidental blow-up only
+  EXPECT_LT(ms_each, 10.0);  // 60 spheres x 200 obstacles must fit a 100 Hz loop with room to spare
   EXPECT_TRUE(std::isfinite(res.min_distance));
 }
 
@@ -463,4 +464,230 @@ TEST(Heartbeat, InvalidTimesAreExpiredAndNotBeats)
   EXPECT_TRUE(w.expired(kNaN));
   EXPECT_TRUE(w.expired(1.0));  // clock went backwards
   EXPECT_FALSE(w.expired(2.2));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Regression tests for the fail-safe review findings.
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+// A person source that is also flagged as the work surface (a misconfigured custom source).
+struct PersonWorkSurface : DistanceSource
+{
+  MovingCapsuleSource c;
+  DistanceQuery query(const Vec3 & p, double t) const override {return c.query(p, t);}
+  SourceKind kind() const override {return SourceKind::kPerson;}
+  bool isWorkSurface() const override {return true;}
+  double stamp() const override {return c.stamp();}
+};
+
+MovingCapsuleSource personAt(double x, double vx, double stamp)
+{
+  MovingCapsuleSource p;
+  p.update({{Vec3(x, 0, -1), Vec3(x, 0, 1), 0.2, Vec3(vx, 0, 0)}}, stamp);
+  return p;
+}
+}  // namespace
+
+TEST(Monitor, FutureDataStampFailsSafe)
+{
+  OneSphere r;
+  SafetyMonitor m(r.model, Params{});
+  const auto floor = floorPlane();
+  const auto res = m.evaluate(at(0, 0, 1), {}, {&floor}, 1e6, 1.0);
+  EXPECT_DOUBLE_EQ(res.speed_scale, 0.0);
+  EXPECT_EQ(res.reason, Reason::kInvalidInput);
+  // within the jitter epsilon is still accepted
+  SafetyMonitor m2(r.model, Params{});
+  EXPECT_EQ(m2.evaluate(at(0, 0, 1), {}, {&floor}, 1.0005, 1.0).state, State::kOk);
+}
+
+TEST(Monitor, FutureSourceStampFailsSafe)
+{
+  OneSphere r;
+  SafetyMonitor m(r.model, Params{});
+  const auto person = personAt(5.0, 0.0, 1e6);
+  const auto res = m.evaluate(at(0, 0, 1), {}, {&person}, 1.0, 1.0);
+  EXPECT_DOUBLE_EQ(res.speed_scale, 0.0);
+  EXPECT_EQ(res.reason, Reason::kInvalidInput);
+}
+
+TEST(Monitor, NaNSphereRadiusIsRejectedAtConstruction)
+{
+  SphereModel m;
+  m.addLink("tip", -1, {});
+  EXPECT_THROW(m.attachSphere("tip", "payload", {Vec3(0, 0, -0.3), kNaN}), std::invalid_argument);
+  EXPECT_THROW(m.addLink("x", -1, {{Vec3::Zero(), kNaN}}), std::invalid_argument);
+  EXPECT_THROW(
+    m.addLink("y", -1, {{Vec3(kNaN, 0, 0), 0.1}}), std::invalid_argument);
+}
+
+TEST(Monitor, NegativeSphereRadiusIsRejected)
+{
+  SphereModel m;
+  m.addLink("tip", -1, {});
+  EXPECT_THROW(m.attachSphere("tip", "p", {Vec3::Zero(), -0.1}), std::invalid_argument);
+  EXPECT_THROW(m.addLink("x", -1, {{Vec3::Zero(), -0.1}}), std::invalid_argument);
+  EXPECT_EQ(m.sphereCount(), 0);
+}
+
+namespace
+{
+// Bypasses model validation: a source whose answer has a NaN gradient-free distance.
+struct NaNScaleSource : DistanceSource
+{
+  DistanceQuery query(const Vec3 &, double) const override
+  {
+    DistanceQuery q;
+    q.valid = true;
+    q.distance = kNaN;
+    return q;
+  }
+};
+}  // namespace
+
+TEST(Monitor, NaNDistanceIsAStop)
+{
+  OneSphere r;
+  SafetyMonitor m(r.model, Params{});
+  NaNScaleSource s;
+  const auto res = m.evaluate(at(0, 0, 1), {}, {&s}, 1.0, 1.0);
+  EXPECT_DOUBLE_EQ(res.speed_scale, 0.0);
+  EXPECT_EQ(res.state, State::kProtectiveStop);
+}
+
+TEST(Monitor, EsdfNaNVoxelFailsSafe)
+{
+  OneSphere r;
+  EsdfGrid g(Vec3(-1, -1, -1), 0.1, 21, 21, 21);
+  g.fill([](const Vec3 &) {return -0.5;});  // robot inside an obstacle
+  g.set(10, 10, 10, static_cast<float>(kNaN));
+  g.set(11, 10, 10, std::numeric_limits<float>::infinity());
+  SafetyMonitor m(r.model, Params{});
+  const auto res = m.evaluate(at(0.05, 0, 0), {}, {&g}, 1.0, 1.0);
+  EXPECT_DOUBLE_EQ(res.speed_scale, 0.0);
+  EXPECT_EQ(res.reason, Reason::kInvalidInput);
+  const DistanceQuery q = g.query(Vec3(0.05, 0, 0), 0.0);
+  EXPECT_TRUE(q.valid);
+  EXPECT_TRUE(std::isnan(q.distance));
+}
+
+TEST(Monitor, EsdfOutsideGridDefaultStopsAndFreeIsOptIn)
+{
+  OneSphere r;
+  EsdfGrid g(Vec3(-1, -1, -1), 0.1, 21, 21, 21);
+  g.fill([](const Vec3 &) {return 5.0;});
+  SafetyMonitor m(r.model, Params{});
+  EXPECT_EQ(g.outsideBehavior(), OutsideGrid::kUnknownFailsSafe);
+  auto res = m.evaluate(at(10, 0, 0), {}, {&g}, 1.0, 1.0);
+  EXPECT_DOUBLE_EQ(res.speed_scale, 0.0);
+  EXPECT_EQ(res.reason, Reason::kInvalidInput);
+  g.setOutsideBehavior(OutsideGrid::kFree);
+  SafetyMonitor m2(r.model, Params{});
+  EXPECT_EQ(m2.evaluate(at(10, 0, 0), {}, {&g}, 1.0, 1.0).state, State::kOk);
+  EXPECT_EQ(m2.evaluate(at(0, 0, 0), {}, {&g}, 1.0, 1.0).state, State::kOk);
+}
+
+TEST(Monitor, EsdfSetStampImpliesStaleness)
+{
+  OneSphere r;
+  EsdfGrid g(Vec3(-1, -1, -1), 0.1, 21, 21, 21);
+  g.fill([](const Vec3 &) {return 5.0;});
+  g.setStamp(0.0);
+  SafetyMonitor m(r.model, Params{});
+  const auto res = m.evaluate(at(0, 0, 0), {}, {&g}, 100.0, 100.0);
+  EXPECT_DOUBLE_EQ(res.speed_scale, 0.0);
+  EXPECT_EQ(res.reason, Reason::kStaleData);
+  g.setStamp(100.0);
+  SafetyMonitor m2(r.model, Params{});
+  EXPECT_EQ(m2.evaluate(at(0, 0, 0), {}, {&g}, 100.0, 100.0).state, State::kOk);
+  g.setDynamic(false);  // explicit opt-out
+  SafetyMonitor m3(r.model, Params{});
+  EXPECT_EQ(m3.evaluate(at(0, 0, 0), {}, {&g}, 500.0, 500.0).state, State::kOk);
+}
+
+TEST(Monitor, ParamsValidation)
+{
+  OneSphere r;
+  auto bad = [&](auto && set) {
+      Params p;
+      set(p);
+      EXPECT_THROW(SafetyMonitor(r.model, p), std::invalid_argument);
+    };
+  bad([](Params & p) {p.stale_timeout_s = kNaN;});
+  bad([](Params & p) {p.stop_time_s = -1.0;});
+  bad([](Params & p) {p.reaction_time_s = -0.1;});
+  bad([](Params & p) {p.static_slow_band_m = kNaN;});
+  bad([](Params & p) {p.person_slow_band_m = -0.5;});  // inverted band
+  bad([](Params & p) {p.self_slow_band_m = -0.01;});
+  bad([](Params & p) {p.human_speed_mps = std::numeric_limits<double>::infinity();});
+  bad([](Params & p) {p.static_margin_m = kNaN;});
+  bad([](Params & p) {p.min_clear_time_s = -1.0;});
+  bad([](Params & p) {p.sweep_samples = -1;});
+  bad([](Params & p) {p.sweep_radius_inflation_m = kNaN;});
+  EXPECT_NO_THROW(SafetyMonitor(r.model, Params{}));
+}
+
+TEST(Heartbeat, ConstructorValidatesTimeout)
+{
+  EXPECT_THROW(HeartbeatWatchdog{kNaN}, std::invalid_argument);
+  EXPECT_THROW(HeartbeatWatchdog{-0.5}, std::invalid_argument);
+  EXPECT_THROW(
+    HeartbeatWatchdog{std::numeric_limits<double>::infinity()}, std::invalid_argument);
+  EXPECT_NO_THROW(HeartbeatWatchdog{0.5});
+}
+
+TEST(Monitor, PersonIsExtrapolatedOverDataAge)
+{
+  OneSphere r;
+  // Fresh data: the person is at x = 1.0 walking toward the robot at 1.6 m/s.
+  const auto fresh = personAt(1.0, -1.6, 1.0);
+  // The same person reported 0.25 s ago, when it was at x = 1.4.
+  const auto aged = personAt(1.4, -1.6, 0.75);
+  SafetyMonitor m1(r.model, Params{});
+  SafetyMonitor m2(r.model, Params{});
+  const auto a = m1.evaluate(at(0, 0, 0), {}, {&fresh}, 1.0, 1.0);
+  const auto b = m2.evaluate(at(0, 0, 0), {}, {&aged}, 1.0, 1.0);
+  EXPECT_DOUBLE_EQ(a.speed_scale, 0.0);
+  EXPECT_DOUBLE_EQ(b.speed_scale, a.speed_scale);
+  EXPECT_EQ(b.state, a.state);
+  EXPECT_EQ(b.reason, Reason::kPerson);
+}
+
+TEST(Monitor, IsoProtectiveDistanceIncludesHumanReactionTravel)
+{
+  OneSphere r;
+  // Standing person, surface distance 0.78 m (centre 1.10 - capsule 0.2 - sphere 0.1 - inflation
+  // 0.02). ISO form: 1.6 * (0.3 + 0.1) + 0.2 = 0.84 m > 0.78 m, so stop. (The old form without
+  // the reaction term gave d_stop = 0.68 m and scale 0.167.)
+  const auto person = personAt(1.10, 0.0, 1.0);
+  SafetyMonitor m(r.model, Params{});
+  const auto res = m.evaluate(at(0, 0, 0), {}, {&person}, 1.0, 1.0);
+  EXPECT_NEAR(res.min_distance, 0.78, 1e-9);
+  EXPECT_DOUBLE_EQ(res.speed_scale, 0.0);
+  EXPECT_EQ(res.reason, Reason::kPerson);
+  // just outside d_stop: 0.86 m slows but does not stop
+  const auto farther = personAt(1.18, 0.0, 1.0);
+  SafetyMonitor m2(r.model, Params{});
+  const auto r2 = m2.evaluate(at(0, 0, 0), {}, {&farther}, 1.0, 1.0);
+  EXPECT_GT(r2.speed_scale, 0.0);
+  EXPECT_LT(r2.speed_scale, 1.0);
+}
+
+TEST(Monitor, ContactExemptionNeverAppliesToPersons)
+{
+  SphereModel model;
+  model.addLink("tool", -1, {{Vec3::Zero(), 0.1}});
+  model.setContactExempt("tool");
+  PersonWorkSurface ps;
+  ps.c.update({{Vec3(0, 0, -1), Vec3(0, 0, 1), 0.2, Vec3::Zero()}}, 1.0);
+  SafetyMonitor m(model, Params{});
+  const auto res = m.evaluate(at(0, 0, 0), {}, {&ps}, 1.0, 1.0);
+  EXPECT_DOUBLE_EQ(res.speed_scale, 0.0);
+  EXPECT_EQ(res.reason, Reason::kPerson);
+  // a plain work surface still exempts
+  const auto floor = floorPlane(true);
+  SafetyMonitor m2(model, Params{});
+  EXPECT_EQ(m2.evaluate(at(0, 0, 0.05), {}, {&floor}, 1.0, 1.0).state, State::kOk);
 }

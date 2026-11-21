@@ -6,6 +6,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <cmath>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -15,13 +16,21 @@ namespace safety_monitor
 
 namespace
 {
+// Child of a map node, or a null node when `n` is not a map or has no such key. Never indexes a
+// missing key of a const node and then queries the result (that throws YAML::InvalidNode).
+YAML::Node child(const YAML::Node & n, const char * key)
+{
+  if (!n.IsMap()) {return YAML::Node();}
+  const YAML::Node c = n[key];
+  return c.IsDefined() ? c : YAML::Node();
+}
+
 YAML::Node findKey(const YAML::Node & doc, const char * key)
 {
-  for (const char * path : {"robot_cfg", ""}) {
-    YAML::Node n = *path ? doc[path] : doc;
+  for (const YAML::Node & n : {child(doc, "robot_cfg"), doc}) {
     if (!n.IsMap()) {continue;}
-    if (n["kinematics"].IsMap() && n["kinematics"][key]) {return n["kinematics"][key];}
-    if (n[key]) {return n[key];}
+    if (const YAML::Node k = child(child(n, "kinematics"), key); !k.IsNull()) {return k;}
+    if (const YAML::Node k = child(n, key); !k.IsNull()) {return k;}
   }
   return YAML::Node();
 }
@@ -52,12 +61,19 @@ SphereModel loadSphereModelFromCuroboYaml(
       const YAML::Node list = table[link];
       if (!list.IsSequence()) {return out;}
       for (const auto & s : list) {
-        const YAML::Node c = s["center"] ? s["center"] : s["position"];
-        if (!c.IsSequence() || c.size() != 3 || !s["radius"]) {
+        const YAML::Node c = child(s, "center").IsDefined() && !child(s, "center").IsNull() ?
+          child(s, "center") : child(s, "position");
+        const YAML::Node rad = child(s, "radius");
+        if (!c.IsSequence() || c.size() != 3 || rad.IsNull()) {
           throw std::runtime_error("cuRobo yml: malformed sphere on link " + link);
         }
-        out.push_back({Vec3(c[0].as<double>(), c[1].as<double>(), c[2].as<double>()),
-            s["radius"].as<double>()});
+        const Sphere sph{Vec3(c[0].as<double>(), c[1].as<double>(), c[2].as<double>()),
+          rad.as<double>()};
+        if (!sph.center.allFinite() || !std::isfinite(sph.radius) || sph.radius < 0.0) {
+          throw std::runtime_error(
+                  "cuRobo yml: non-finite centre or negative/non-finite radius on link " + link);
+        }
+        out.push_back(sph);
       }
       return out;
     };
