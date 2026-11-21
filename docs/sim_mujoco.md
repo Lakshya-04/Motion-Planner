@@ -467,7 +467,7 @@ approaches, 10 to 16 s each), 6 free-space segments by OMPL (cuRobo `unavailable
    start-up; the plugin fails to initialise if it cannot be read), `limit_safety_factor: 0.9` and `limit_use_file_scaling: true`
    (multiply by the file's 0.5 default scaling factors, as MoveIt's retiming does), so a 0.1 m tool step should now take seconds,
    like the MoveIt-retimed ones, instead of 0.4 s. That last claim is not measured: the 14x comparison above is the only measurement
-   and no pass was rerun. Limits are velocity and acceleration only (no jerk), the guard stretches the whole trajectory by one factor
+   and no pass was rerun. Limits are velocity and acceleration (an optional jerk limit exists, off by default: `docs/curobo_v2_notes.md`), the guard stretches the whole trajectory by one factor
    (not time-optimal), and it only runs inside the plugin: a trajectory that reaches a controller by another path is not checked.
    Leaving the three `joint_limits*` keys out restores cuRobo's own timing, which must not go to a real arm unchecked.
 

@@ -39,6 +39,9 @@ LimitCheck enforceJointLimits(core_types::Trajectory & trajectory, const JointLi
     {
       return fail("limits_invalid", "limits of joint '" + trajectory.joint_names[j] + "' must be finite and > 0");
     }
+    if (!(lim[j].jerk >= 0.0) || !std::isfinite(lim[j].jerk)) {
+      return fail("limits_invalid", "jerk limit of joint '" + trajectory.joint_names[j] + "' must be finite and >= 0");
+    }
   }
   const auto & pts = trajectory.points;
   out.duration_before_sec = out.duration_after_sec = pts.empty() ? 0.0 : pts.back().time_from_start_sec;
@@ -76,6 +79,24 @@ LimitCheck enforceJointLimits(core_types::Trajectory & trajectory, const JointLi
       amax = std::max(amax, std::abs((vel[i + 1][j] - vel[i][j]) / span) / lim[j].acceleration);
     }
   }
+  // jerk: a_i at waypoint i+1 (see above), j between a_i and a_(i+1) over the interval dt[i+1]
+  double jmax = 0.0;
+  for (size_t i = 0; i + 3 < pts.size(); ++i) {
+    const double span0 = 0.5 * (dt[i] + dt[i + 1]);
+    const double span1 = 0.5 * (dt[i + 1] + dt[i + 2]);
+    for (size_t j = 0; j < n; ++j) {
+      if (!(lim[j].jerk > 0.0)) {continue;}
+      const double a0 = (vel[i + 1][j] - vel[i][j]) / span0;
+      const double a1 = (vel[i + 2][j] - vel[i + 1][j]) / span1;
+      const double ratio = std::abs((a1 - a0) / dt[i + 1]) / lim[j].jerk;
+      if (ratio > jmax) {
+        jmax = ratio;
+        out.jerk_joint = trajectory.joint_names[j];
+        out.jerk_waypoint = static_cast<int>(i);
+      }
+    }
+  }
+  out.max_jerk_ratio = jmax;
   // the planner's own vectors count too (they may be tighter than the differences)
   for (const auto & p : pts) {
     for (size_t j = 0; j < p.velocities.size(); ++j) {
@@ -88,13 +109,26 @@ LimitCheck enforceJointLimits(core_types::Trajectory & trajectory, const JointLi
   out.max_velocity_ratio = vmax;
   out.max_acceleration_ratio = amax;
   const double f = policy.safety_factor;
-  const double scale = std::max({1.0, vmax / f, std::sqrt(amax / f)});
+  const double va_scale = std::max({1.0, vmax / f, std::sqrt(amax / f)});
+  double scale = std::max(va_scale, std::cbrt(jmax / f));
   if (scale <= 1.0) {return out;}  // inside limits * factor: untouched
 
   std::ostringstream detail;
   detail << "peak velocity " << vmax << " and acceleration " << amax << " of the limits (factor " << f << ")";
+  if (jmax > 0.0) {
+    detail << ", peak jerk " << jmax << " (joint '" << out.jerk_joint << "', waypoint " << out.jerk_waypoint << ")";
+  }
   if (policy.mode == LimitMode::kReject) {
+    if (va_scale <= 1.0) {
+      return fail("jerk_violation", "trajectory exceeds the jerk limit of joint '" + out.jerk_joint + "' at waypoint " +
+        std::to_string(out.jerk_waypoint) + ": " + detail.str());
+    }
     return fail("limit_violation", "trajectory exceeds the joint limits: " + detail.str());
+  }
+  // Uniform time scaling divides v by s, a by s^2 and j by s^3 exactly, so scale is already enough; the
+  // bounded loop only absorbs rounding at the boundary (it can lengthen, never shorten).
+  if (jmax > 0.0) {
+    for (int it = 0; it < 8 && jmax / (scale * scale * scale) > f * (1.0 + 1e-12); ++it) {scale *= 1.0 + 1e-9;}
   }
   for (auto & p : trajectory.points) {
     p.time_from_start_sec *= scale;
@@ -131,7 +165,9 @@ bool parseMoveItJointLimits(
       const bool has_v = v["has_velocity_limits"] && v["has_velocity_limits"].as<bool>() && v["max_velocity"];
       const bool has_a = v["has_acceleration_limits"] && v["has_acceleration_limits"].as<bool>() && v["max_acceleration"];
       if (!has_v || !has_a) {continue;}
+      const bool has_j = v["has_jerk_limits"] && v["has_jerk_limits"].as<bool>() && v["max_jerk"];
       mp::JointLimit l;
+      if (has_j) {l.jerk = v["max_jerk"].as<double>();}
       l.velocity = v["max_velocity"].as<double>();
       l.acceleration = v["max_acceleration"].as<double>();
       limits[kv.first.as<std::string>()] = l;
@@ -168,10 +204,11 @@ bool parseInlineJointLimits(const std::string & text, std::map<std::string, mp::
   while (std::getline(entries, entry, ',')) {
     if (entry.find_first_not_of(" \t") == std::string::npos) {continue;}
     std::stringstream parts(entry);
-    std::string name, v, a, extra;
+    std::string name, v, a, jk, extra;
     std::getline(parts, name, ':');
     std::getline(parts, v, ':');
     std::getline(parts, a, ':');
+    std::getline(parts, jk, ':');
     const bool extra_part = static_cast<bool>(std::getline(parts, extra, ':'));
     const auto trim = [](std::string s) {
         const auto b = s.find_first_not_of(" \t");
@@ -181,16 +218,21 @@ bool parseInlineJointLimits(const std::string & text, std::map<std::string, mp::
     name = trim(name);
     mp::JointLimit l;
     try {
-      size_t used_v = 0, used_a = 0;
+      size_t used_v = 0, used_a = 0, used_j = 0;
       l.velocity = std::stod(trim(v), &used_v);
       l.acceleration = std::stod(trim(a), &used_a);
+      if (!trim(jk).empty()) {
+        l.jerk = std::stod(trim(jk), &used_j);
+        if (used_j != trim(jk).size()) {throw std::invalid_argument("trailing");}
+      }
       if (used_v != trim(v).size() || used_a != trim(a).size()) {throw std::invalid_argument("trailing");}
     } catch (const std::exception &) {
-      error = "joint limit entry '" + entry + "' is not name:max_velocity:max_acceleration";
+      error = "joint limit entry '" + entry + "' is not name:max_velocity:max_acceleration[:max_jerk]";
       return false;
     }
     if (name.empty() || extra_part || !(l.velocity > 0.0) || !(l.acceleration > 0.0) || !std::isfinite(l.velocity) ||
-      !std::isfinite(l.acceleration))
+      !std::isfinite(l.acceleration) ||
+      !(l.jerk >= 0.0) || !std::isfinite(l.jerk) || (!trim(jk).empty() && !(l.jerk > 0.0)))
     {
       error = "joint limit entry '" + entry + "' needs a name and finite limits > 0";
       return false;
