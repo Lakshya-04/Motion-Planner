@@ -282,9 +282,7 @@ ColumnStandPlan planColumnStands(
   {
     std::vector<size_t> left(picks.size());
     std::iota(left.begin(), left.end(), 0);
-    Vec3 n = station.wall_normal.normalized();
-    Vec3 u = Vec3::UnitZ().cross(n);
-    if (u.norm() > 1e-9) {u.normalize();}
+    const Vec3 u = surfaceFrame(station.wall_normal).u;
     auto along = [&](size_t i) {
         const auto & xy = cands[picks[i].cand].stand.arm_xy;
         return Vec3(xy.x(), xy.y(), 0.0).dot(u);

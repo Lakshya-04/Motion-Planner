@@ -197,7 +197,7 @@ no Gazebo or MuJoCo run.
 
 ## Horizontal surfaces (ceiling, floor)
 
-`chooseStation` needs a wall plane and a free side, so it refuses a horizontal one. `planHorizontalStands(map,
+`chooseStation` also accepts a horizontal plane now (see "Plane-generic stands and base free space" below); `planHorizontalStands` is the older, separate planner. `planHorizontalStands(map,
 request)` (`core/horizontal_stands.hpp`) is the counterpart for a ceiling (tool pointing up) or a floor (tool
 pointing down). The tool axis is vertical, so the map has no azimuth: a cell depends only on the horizontal
 distance and the height between base and target, and one stand reaches a ring around itself.
@@ -437,6 +437,43 @@ Status: gtests with a synthetic map and fake verifiers (approach unreachable wit
 singular joint solution, split versus whole, totals and JSON, verifier downgrade, analyzer hook). All of it is RM4D-level (no IK,
 no collision, no obstacles) unless the verifier is given; the thresholds are starting values; no real arm map, sim run or hardware
 run was involved, and the node does not use it yet.
+
+## Plane-generic stands and base free space
+
+The stand search no longer assumes a vertical wall. `core/surface_frame.hpp` builds the in-plane axes for any normal
+(`surfaceFrame`): for a vertical or tilted plane `u = normalize(UnitZ x n)` exactly as before (every wall result is
+unchanged, tested bit for bit), for a horizontal plane `u` is +x projected into the plane and `v = n x u`.
+`chooseStation`, `makeCandidateStands`, the set-cover enumeration and the column-stand ordering all go through one
+grid generator, `stationGrid`.
+
+- **Ceiling and floor.** For a horizontal patch the grid covers the patch area (bounding box of the targets, plus
+  `lateral_margin`), the base stands under a ceiling or over a floor patch, `standoff` is 0 and `min_clearance` /
+  `max_standoff` do not apply (no plane clearance). `normal` points into the free side (down for a ceiling, up for a
+  floor). A zero or non-finite normal is still `invalid_request`.
+- **Free space.** `StationRequest::free_space` (`core/free_space.hpp`, default unset = no change) holds walls other
+  than the work plane (half-planes in the floor plane) and obstacle polygons (`FreeSpace::box` for axis-aligned
+  ones; a finite wall is a thin polygon). `footprintFree(pose, base, margin)` is a hard filter on every candidate
+  in `chooseStation`, `makeCandidateStands` and the set-cover candidates: all 24 yaw samples are tested with the full
+  footprint inflated by `free_space_margin` (default 0.05 m), a candidate is kept when at least one yaw fits and
+  takes the feasible yaw with the most work-plane clearance. At an inside corner the footprint is therefore kept off
+  the perpendicular wall; without a base model only the arm-base point is tested.
+- **Wall end and outside corner.** The work plane is infinite by default. With `FreeSpace::has_work_span` (a
+  `[work_span_lo, work_span_hi]` interval along `u` from `wall_point`) the work-plane clearance applies only to the
+  footprint points inside the span, so a stand beyond the end is allowed; put the wall's end in `obstacles` to keep the
+  footprint off it.
+- **Reason codes.** `Station::code` (`StationCode`: `ok`, `invalid_request`, `no_free_stand`, `no_reachable_stand`) and
+  `StandSelectionCode::kNoFreeStand` (`no_free_stand`) say that every candidate was removed by the footprint
+  (work-plane clearance or free space), as against "free stands exist but reach nothing". A too-narrow alcove ends in
+  `no_free_stand` with all targets in `unreachable`; no stand is invented.
+- **Non-planar surfaces: not done, the frame abstraction is the hook.** `SurfaceFrame` (origin, outward normal,
+  tangents u and v) is the local frame of the work surface at a point; a plane has one everywhere, a curved patch
+  could supply one per candidate point. The free-space filter only needs the other obstacles and the footprint, not
+  the surface type. Nothing here handles curvature yet (the grid, the work-plane clearance and the span are planar).
+- **Limits.** Obstacles are 2D (heights are not modelled); the stand stays on the free side of the work plane except
+  through the work span (the search does not go behind a wall end); the arm and tool are not checked against an
+  adjacent wall; there is no navigation-feasibility (connectivity) check, so a free stand may not be reachable by the
+  base; yaw samples are 24 fixed steps. Tested with hand-made maps (`test/core/plane_stands_test.cpp`: 13 tests, ceiling,
+  floor, inside corner, wall end, narrow alcove, determinism); not run in any simulation or on hardware.
 
 ## Limits and next steps
 
