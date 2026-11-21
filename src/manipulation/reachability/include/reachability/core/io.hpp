@@ -16,6 +16,10 @@ struct MapInfo
   std::string redundancy;      ///< How a redundant arm's null space was handled (see redundancy.hpp).
 };
 
+/// One line for a log or a service result: "7 joints, redundancy: <policy>", or a note that a version 1
+/// file did not record it. Says what null-space samples the map was built from.
+std::string describeMapInfo(const MapInfo & info);
+
 /// Versioned binary map file: magic, format version, MapParams, a fingerprint of the robot it was
 /// built for, the MapInfo, then the cell array. Throws std::runtime_error on any problem.
 void saveMap(const std::string & path, const Map4D & map, const std::string & robot_fingerprint = "",
