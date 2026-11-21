@@ -100,7 +100,7 @@ const std::vector<std::vector<std::string>> kJointNameCandidates = {
 /// An earlier version filled a missing joint with 0.0: with names that did not match the robot the "live" state
 /// was the all-zero pose, and moving the arm "back" to it stretched the UR10e out and put the lift on its stop.
 std::vector<double> readCurrentJointState(
-  const rclcpp::Node::SharedPtr & node, const std::vector<std::string> & configured_names,
+  const rclcpp::Node::SharedPtr & node, const std::vector<std::vector<std::string>> & candidates,
   std::vector<std::string> * names_out = nullptr)
 {
   std::map<std::string, double> latest;
@@ -110,12 +110,6 @@ std::vector<double> readCurrentJointState(
         latest[msg->name[i]] = msg->position[i];
       }
     });
-  std::vector<std::vector<std::string>> candidates;
-  if (!configured_names.empty()) {
-    candidates.push_back(configured_names);
-  } else {
-    candidates = kJointNameCandidates;
-  }
   std::vector<std::string> names;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
   while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
@@ -400,6 +394,27 @@ public:
     // lift names, then the earlier arm's), used to read the live arm state.
     group_joint_names_ = this->declare_parameter<std::vector<std::string>>(
       "group_joint_names", std::vector<std::string>{});
+    // Which names read the live state: the parameter when set (nothing else then), else the planning group's joints
+    // from the profile (a 7-DOF arm has arm_joint1..7, which the fixed list below does not know), then the fixed
+    // list (UR10e, an earlier arm) as the last resort.
+    if (!group_joint_names_.empty()) {
+      joint_name_candidates_ = {group_joint_names_};
+      RCLCPP_INFO(this->get_logger(), "live joint state: group_joint_names parameter (%zu joints)",
+        group_joint_names_.size());
+    } else {
+      const auto derived = manipulation_manager::groupJointNames(
+        planning_group_, profile.whole_body_group, profile.arm_group, profile.lift_joint, profile.arm_joints);
+      if (!derived.empty()) {
+        joint_name_candidates_.push_back(derived);
+      }
+      joint_name_candidates_.insert(
+        joint_name_candidates_.end(), kJointNameCandidates.begin(), kJointNameCandidates.end());
+      RCLCPP_INFO(this->get_logger(),
+        "live joint state: group_joint_names empty, %s (%zu joints from profile '%s', group '%s')",
+        derived.empty() ? "no profile joints for this group, using the fixed fallback lists" :
+        "using the profile's joints for the group, fixed lists as the last resort",
+        derived.size(), profile.name.c_str(), planning_group_.c_str());
+    }
     // Where the tool's force is read for the feedback's and result's peak ("" = not read, peak -1).
     const auto force_topic = this->declare_parameter<std::string>(
       "force_topic", "/ft_conditioner/wrench_conditioned");
@@ -858,7 +873,7 @@ private:
       for (size_t i = 0; i < all.size(); ++i) {
         all[i] = i;
       }
-      last_good_state_ = readCurrentJointState(shared_from_this(), group_joint_names_);
+      last_good_state_ = readCurrentJointState(shared_from_this(), joint_name_candidates_);
       for (const size_t i : orderColumns(all, sel)) {
         if (stop()) {
           break;
@@ -905,7 +920,7 @@ private:
     setState("planning_stands");
     // The arm's pose before it first moves: what it goes back to before every drive.
     travel_state_ = !travel_joint_state_.empty() ?
-      travel_joint_state_ : readCurrentJointState(shared_from_this(), group_joint_names_);
+      travel_joint_state_ : readCurrentJointState(shared_from_this(), joint_name_candidates_);
     if (travel_state_.empty()) {
       why = "no travel pose: /joint_states does not carry the planning group's joints (set group_joint_names or "
         "travel_joint_state)";
@@ -1552,7 +1567,7 @@ private:
     // idea of the current state. Needed with the cuRobo backend (it needs an explicit start); off by default.
     if (seed_start_from_live_state_) {
       manager_.setStartStateProvider(
-        [this]() {return readCurrentJointState(shared_from_this(), group_joint_names_);});
+        [this]() {return readCurrentJointState(shared_from_this(), joint_name_candidates_);});
     }
     RCLCPP_INFO(
       this->get_logger(), "planning backends from %s: cartesian=%s free_space=%s ik=%s collision=%s",
@@ -1576,7 +1591,7 @@ private:
     req.planning_group = planning_group_;
     req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
     if (dock_ik_continuity_) {
-      const auto live = readCurrentJointState(shared_from_this(), group_joint_names_);
+      const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_);
       const std::vector<double> & ref = !dock_branch_seed_.empty() ? dock_branch_seed_ : live;
       const auto choice = selectDockIk(
         [&](const std::vector<double> & sd) -> std::optional<std::vector<double>> {
@@ -1635,7 +1650,7 @@ private:
   /// One diagnostic line: the planning group's live joint values (lift first) with a tag, for comparing runs.
   void logArmState(const std::string & tag)
   {
-    const auto q = readCurrentJointState(shared_from_this(), group_joint_names_);
+    const auto q = readCurrentJointState(shared_from_this(), joint_name_candidates_);
     std::string txt;
     char buf[32];
     for (const double v : q) {
@@ -1655,7 +1670,7 @@ private:
   /// before the first real segment, see this file's own readCurrentJointState() comment for why.
   void primeContinuityFromLiveState()
   {
-    const auto live_state = readCurrentJointState(shared_from_this(), group_joint_names_);
+    const auto live_state = readCurrentJointState(shared_from_this(), joint_name_candidates_);
     if (live_state.empty()) {
       RCLCPP_WARN(
         this->get_logger(),
@@ -1759,7 +1774,7 @@ private:
   /// Remembers where the arm is as the configuration to jog back to.
   void markGoodState()
   {
-    const auto live = readCurrentJointState(shared_from_this(), group_joint_names_);
+    const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_);
     if (!live.empty()) {
       last_good_state_ = live;
     }
@@ -1775,7 +1790,7 @@ private:
       return false;
     }
     std::vector<std::string> names;
-    const auto live = readCurrentJointState(shared_from_this(), group_joint_names_, &names);
+    const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_, &names);
     if (live.empty()) {
       RCLCPP_WARN(this->get_logger(), "%s: recovery jog skipped, no live joint state", what);
       return false;
@@ -2172,6 +2187,7 @@ private:
   double nav_timeout_s_{240.0};
   std::vector<double> travel_joint_state_;
   std::vector<std::string> group_joint_names_;
+  std::vector<std::vector<std::string>> joint_name_candidates_;
   std::vector<double> travel_state_;
   std::vector<double> last_good_state_;   ///< the last arm configuration known to plan from (recovery target)
   bool arm_stuck_{false};                 ///< a retract or stow failed and no recovery got the arm out yet
