@@ -9,6 +9,13 @@
 # contact_allowed_links, a contact tool needs reachability_tilt_deg_max == 0, spray_half_angle_deg
 # only on non-contact tools. Every value below is a starting point to tune on the real tool.
 #
+# Contact frame: geometry.tcp_xyz / tcp_rpy are the CONTACT frame (tcp_link) relative to the flange,
+# +Z into the work at the nominal pose; an offset or angled tool folds its offset into them.
+# geometry.tilt_deg / tilt_axis (optional, default 0) are the intended angle of the tool axis to the
+# surface normal and the in-surface axis [x, y, 0] in the contact frame it tilts about; the loader
+# rejects non-finite values, |tilt_deg| >= 80, and a tilt without an in-surface axis. Both tools
+# below ship with no tilt (nothing changes for them). See docs/tools.md.
+#
 # Units: m, s, N, Nm, deg, percent. Fields that are not listed take the ToolProfile default (0).
 schema_version: 1
 
@@ -20,8 +27,10 @@ tools:
       mesh: ""                         # mesh file in the tool package; empty = none
       mesh_origin_xyz: [0.0, 0.0, 0.0] # m, mesh origin translation
       mesh_origin_rpy: [0.0, 0.0, 0.0] # rad, mesh origin rotation
-      tcp_xyz: [0.0, 0.0, 0.0]         # m, flange -> link_tcp; replace with the real mounting offset
-      tcp_rpy: [0.0, 0.0, 0.0]         # rad, flange -> link_tcp
+      tcp_xyz: [0.0, 0.0, 0.0]         # m, flange -> contact frame (link_tcp); replace with the real mounting offset
+      tcp_rpy: [0.0, 0.0, 0.0]         # rad, flange -> contact frame, +Z into the wall
+      tilt_deg: 0.0                    # deg, intended tool-axis tilt to the surface normal (|tilt| < 80)
+      tilt_axis: [0.0, 0.0, 0.0]       # in-surface axis [x, y, 0] in the contact frame; needed when tilt_deg != 0
       contact_allowed_links: [link_tcp] # links allowed to touch the wall (collision-matrix exclusion)
     task:
       contact: true                    # touches the wall; path stays on the surface
@@ -80,6 +89,8 @@ tools:
       mesh_origin_rpy: [0.0, 0.0, 0.0]
       tcp_xyz: [0.0, 0.0, 0.0]         # m, replace with the nozzle offset from the flange
       tcp_rpy: [0.0, 0.0, 0.0]
+      tilt_deg: 0.0                    # deg, intended spray-axis tilt to the wall normal; 0 = perpendicular
+      tilt_axis: [0.0, 0.0, 0.0]       # in-surface axis [x, y, 0] in the contact frame
       contact_allowed_links: []        # a non-contact tool must not touch the wall
     task:
       contact: false

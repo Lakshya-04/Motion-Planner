@@ -59,6 +59,46 @@ inline bool quatToMatrix(const Pose & p, std::array<double, 9> & r)
   return true;
 }
 
+
+/// Gauss-Jordan with partial pivoting on an augmented N x (N+1) system [A | b] (destroyed).
+/// Returns false when a pivot is below 1e-9 of the largest diagonal entry (rank-deficient).
+/// Shared by pivotCalibration and the plane-touch calibration.
+template<int N>
+inline bool solveAugmented(double (& m)[N][N + 1], double (& x)[N])
+{
+  double scale = 0.0;
+  for (int a = 0; a < N; ++a) {
+    scale = std::max(scale, std::fabs(m[a][a]));
+  }
+  for (int col = 0; col < N; ++col) {
+    int best = col;
+    for (int r = col + 1; r < N; ++r) {
+      if (std::fabs(m[r][col]) > std::fabs(m[best][col])) {
+        best = r;
+      }
+    }
+    if (std::fabs(m[best][col]) < 1e-9 * scale) {
+      return false;
+    }
+    for (int c = 0; c < N + 1; ++c) {
+      std::swap(m[col][c], m[best][c]);
+    }
+    for (int r = 0; r < N; ++r) {
+      if (r == col) {
+        continue;
+      }
+      const double f = m[r][col] / m[col][col];
+      for (int c = col; c < N + 1; ++c) {
+        m[r][c] -= f * m[col][c];
+      }
+    }
+  }
+  for (int a = 0; a < N; ++a) {
+    x[a] = m[a][N] / m[a][a];
+  }
+  return true;
+}
+
 }  // namespace detail
 
 /**
@@ -102,39 +142,11 @@ inline PivotCalibrationResult pivotCalibration(
       }
     }
   }
-  // Gauss-Jordan with partial pivoting; a tiny pivot means a rank-deficient (degenerate) pose set.
-  double scale = 0.0;
-  for (int a = 0; a < 6; ++a) {
-    scale = std::max(scale, std::fabs(ata[a][a]));
-  }
-  for (int col = 0; col < 6; ++col) {
-    int best = col;
-    for (int r = col + 1; r < 6; ++r) {
-      if (std::fabs(ata[r][col]) > std::fabs(ata[best][col])) {
-        best = r;
-      }
-    }
-    if (std::fabs(ata[best][col]) < 1e-9 * scale) {
-      out.error = "degenerate poses: the flange rotations do not span enough axes "
-        "(reorient about at least two non-parallel axes)";
-      return out;
-    }
-    for (int c = 0; c < 7; ++c) {
-      std::swap(ata[col][c], ata[best][c]);
-    }
-    for (int r = 0; r < 6; ++r) {
-      if (r == col) {
-        continue;
-      }
-      const double f = ata[r][col] / ata[col][col];
-      for (int c = col; c < 7; ++c) {
-        ata[r][c] -= f * ata[col][c];
-      }
-    }
-  }
   double x[6];
-  for (int a = 0; a < 6; ++a) {
-    x[a] = ata[a][6] / ata[a][a];
+  if (!detail::solveAugmented<6>(ata, x)) {
+    out.error = "degenerate poses: the flange rotations do not span enough axes "
+      "(reorient about at least two non-parallel axes)";
+    return out;
   }
   for (int k = 0; k < 3; ++k) {
     out.tcp_xyz[k] = x[k];
