@@ -677,9 +677,41 @@ MANAGER_PASS_SCORE_ARGS="--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.05" 
 ```
 
 (tool point within 1 cm of the wall while in contact, tool axis within 10 degrees of the wall normal, at most 5 percent of the
-contact samples off either). They are not on by default: the thresholds have not been checked against a measured run yet.
+contact samples off either). They are not on by default. Two measured passes (UR10e and xArm 7, below) both have zero refused samples at these thresholds, so `--max-bad-pose 0.0` is a usable demo gate.
 The `tilt_deg` column of `run.csv` comes from the recorder (`record_run.py`, `contact_test.py`), measured on the tool's z axis
 against the wall normal in the frame the wall is in.
+
+#### First 7-DOF run: xArm 7 (`MP_PROFILE=xarm7_telescopic`, one MuJoCo single-stand pass)
+
+Measured 2026-11-22, one run per variant, scored with `--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.0` (a single
+force-bearing sample with the tool tilted over 10 degrees or more than 1 cm off the wall fails the run). The UR10e pass
+is the reference: 4 of 4 columns, tool tilt at most 0.19 degrees, wall gap at most 0.9 mm, peak 19.3 N.
+
+| Variant | Columns done | Coverage | Bad samples | Peak force | Where the bad samples are |
+|---|---|---|---|---|---|
+| planning scene = contact patch only, ready pose | 4 of 4 | 1.0 | 91 | 34.8 N | the ready-pose transit (tilt to 62 degrees) |
+| + dock pose gate | 3 of 4 | 0.80 | 88 | 72 N | the manager's dock, pushed into the unmodelled wall |
+| patch only, no ready pose | 3 of 4 | 0.93 | 552 | 67 N | the manager's dock from the stowed pose |
+| full wall in the scene, ready pose | 4 of 4 | 1.0 | 116 | 57 N | only the ready-pose transit (before the manager starts) |
+| full wall, no ready pose | 3 of 4 | 0.93 | 3548 | 198 N | the dock from the stowed pose (tilt to 85 degrees) |
+| full wall, no ready pose, approach stage 0.15 m | 1 of 4 | 0.27 | 196 | 53 N | docks of columns 1 to 3 fail |
+| **full wall, two-stage ready pose (default for another profile)** | **4 of 4** | **1.0 (930 of 930 cells)** | **0** | **16.9 N** | tilt at most 1.0 degree, wall gap at most 0.96 mm, force RMS error 2.1 N |
+
+What this shows:
+
+- The planning scene was built from `walls.pcd`, the 0.4 x 0.4 m contact patch only, while the simulator wall is the
+  whole 1.8 x 2.6 m wall. Every tilted contact was in wall the planner did not know about. The UR10e's short ready-pose
+  move stays inside the patch, so it never showed. For another profile the pass now loads `walls_sim.pcd`
+  (`MANAGER_PASS_WORLD_PCD` overrides the file for any profile).
+- A single planned move from the stowed pose to a pose 3 cm from the wall swings the tool down the wall and grazes it
+  with the pad edge before the manager has started. The pass now reaches a pre-pose `MP_READY_PRE_M` (default 0.15 m)
+  further from the wall first. Skipping the ready pose, or the manager's own approach stage
+  (`dock_approach_extra_m`), were worse in these runs.
+- The manager now checks, before the press, that the tool is within `dock_tolerance_m` (0.02 m) and
+  `dock_tolerance_rad` (0.17 rad) of the standoff pose (`verify_dock`), and it has a TF buffer in every run (it had one only
+  with a `world_frame`, which made the first-column arm-state log dereference a null buffer).
+- One run per variant is not a distribution: the xArm 7 result is a first working run, not a reliability figure. Not
+  checked: other 7-DOF arms, multi-stand, the unconfirmed tool yaw of -90 degrees, the guessed wall distance.
 
 ### Spray pass (non-contact tool)
 

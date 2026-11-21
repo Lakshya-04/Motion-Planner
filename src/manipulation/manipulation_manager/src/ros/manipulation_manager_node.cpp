@@ -265,6 +265,12 @@ public:
     }
     verify_approach_ = this->declare_parameter<bool>("verify_approach", true);
     approach_tolerance_m_ = this->declare_parameter<double>("approach_tolerance_m", 0.05);
+    // true: after the dock the tool must be on the standoff pose (position and orientation) before the press;
+    // a tool that arrives tilted (a redundant arm's goal solved to the wrong orientation) would press on the wall
+    // with its edge. A column that fails the check is retried like a failed dock.
+    verify_dock_ = this->declare_parameter<bool>("verify_dock", true);
+    dock_tolerance_m_ = this->declare_parameter<double>("dock_tolerance_m", 0.02);
+    dock_tolerance_rad_ = this->declare_parameter<double>("dock_tolerance_rad", 0.17);
     // The seed of that IK: a configuration of the arm docked at the wall (planning group order, lift first). Every
     // dock is then solved from the same seed, so the lift / shoulder / wrist branch does not creep from one column to
     // the next (a chain of seeds drifted into upper arm <-> lift carriage self-collision at the last column of a
@@ -485,8 +491,9 @@ public:
     if (!buildPlanners()) {
       return false;
     }
-    if (!world_frame_.empty()) {
-      // its own spin thread: the node itself is only spun in bursts while a request waits
+    {
+      // TF is needed in every run (ARMSTATE tool pose, approach and dock verification), not only with a world
+      // frame; its own spin thread: the node itself is only spun in bursts while a request waits
       tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
       tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_, shared_from_this(), true);
     }
@@ -1647,6 +1654,28 @@ private:
     return err <= tol;
   }
 
+  /// Position error (m) and orientation error (rad, the angle of the relative rotation) of the tool frame against `pose`
+  /// (both in frame_id_). False when the tool frame is unknown: callers must not block a run that has no tcp_link.
+  bool tcpPoseError(const core_types::Pose & pose, double & pos_err, double & ang_err)
+  {
+    FrameTransform tcp;
+    if (!lookup(frame_id_, "tcp_link", tcp)) {
+      pos_err = 0.0;
+      ang_err = 0.0;
+      return false;
+    }
+    pos_err = std::sqrt(
+      std::pow(tcp.t[0] - pose.x, 2) + std::pow(tcp.t[1] - pose.y, 2) + std::pow(tcp.t[2] - pose.z, 2));
+    // lookup() stores the quaternion as (x, y, z, w)
+    const double dot = std::fabs(
+      tcp.q[0] * pose.qx + tcp.q[1] * pose.qy + tcp.q[2] * pose.qz + tcp.q[3] * pose.qw);
+    const double n1 = std::sqrt(tcp.q[0] * tcp.q[0] + tcp.q[1] * tcp.q[1] + tcp.q[2] * tcp.q[2] + tcp.q[3] * tcp.q[3]);
+    const double n2 = std::sqrt(pose.qx * pose.qx + pose.qy * pose.qy + pose.qz * pose.qz + pose.qw * pose.qw);
+    const double c = (n1 > 0.0 && n2 > 0.0) ? std::min(1.0, dot / (n1 * n2)) : 1.0;
+    ang_err = 2.0 * std::acos(c);
+    return true;
+  }
+
   /// One diagnostic line: the planning group's live joint values (lift first) with a tag, for comparing runs.
   void logArmState(const std::string & tag)
   {
@@ -1958,6 +1987,21 @@ private:
     if (stop()) {
       return ColumnOutcome::kFailed;
     }
+    if (verify_dock_) {
+      double pos_err = 0.0, ang_err = 0.0;
+      if (tcpPoseError(standoff_pose, pos_err, ang_err) &&
+        (pos_err > dock_tolerance_m_ || ang_err > dock_tolerance_rad_))
+      {
+        RCLCPP_WARN(
+          this->get_logger(),
+          "%s: docked %.3f m and %.1f deg off the standoff pose (limits %.3f m, %.1f deg), not pressing from there",
+          intent.label.c_str(), pos_err, ang_err * 180.0 / M_PI, dock_tolerance_m_,
+          dock_tolerance_rad_ * 180.0 / M_PI);
+        logArmState("dock_off_pose_" + intent.label);
+        column_reason_ = SkipReason::kDockFailed;
+        return ColumnOutcome::kFailed;
+      }
+    }
     markGoodState();
     dock_branch_seed_ = last_good_state_;
     logArmState("docked_" + intent.label);
@@ -2262,6 +2306,9 @@ private:
   bool dock_ik_continuity_{false};
   DockIkSelectorParams dock_ik_sel_;
   bool verify_approach_{true};
+  bool verify_dock_{true};
+  double dock_tolerance_m_{0.02};
+  double dock_tolerance_rad_{0.17};
   double approach_tolerance_m_{0.05};
   std::vector<double> dock_seed_;
   std::vector<double> dock_branch_seed_;   ///< the last docked configuration: the IK seed of the next dock
