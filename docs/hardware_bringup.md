@@ -7,6 +7,7 @@ is a starting value to be lowered or tuned, and a step that fails on your robot 
 in the procedure. Hardware brings a hardware safety function (e-stop, speed and force limits of the robot
 controller) that this software does not replace: no abort threshold here is tied to an e-stop path yet
 ([ROADMAP.md](ROADMAP.md) section 8).
+The `safety_monitor` core in this repository is not a certified safety function: ordinary software on a general-purpose OS cannot reach an ISO 13849 performance level, and a deployment needs a safety-rated e-stop and protective stop, controller-level safety, safety-rated people sensing and a risk assessment (ISO 12100, ISO 10218-2, ISO/TS 15066); it only slows the robot earlier.
 
 Related: [ft_sensing.md](ft_sensing.md) (the conditioning maths and services),
 [tools.md](tools.md) (tool profile fields), [sim_mujoco.md](sim_mujoco.md) and

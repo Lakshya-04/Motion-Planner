@@ -1,0 +1,20 @@
+name: Feature request
+description: A robot, tool, backend or workflow the stack should support
+labels: [enhancement]
+body:
+  - type: textarea
+    id: use
+    attributes:
+      label: What are you trying to do?
+      description: The task and the robot (arm, lift, base, tool). Check docs/ROADMAP.md first.
+    validations: {required: true}
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to see?
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contribution
+      options:
+        - label: I can help implement or test this

@@ -84,7 +84,7 @@ Set a different distro with `ROS_DISTRO=humble` (the packages build as C++17 on 
 
 ## Run all checks
 
-There is no CI by decision ([CONTRIBUTING.md](../CONTRIBUTING.md)). One script runs lines 1 to 3 below:
+CI ([`ci.yml`](../.github/workflows/ci.yml)) runs the build, the colcon tests and the readiness scan on free runners; simulators and GPU stay local ([CONTRIBUTING.md](../CONTRIBUTING.md)). One script runs lines 1 to 3 below:
 
 ```bash
 docker/run_all_checks.sh                 # colcon build + test, pytest, public-readiness scan
@@ -175,8 +175,8 @@ first build is recorded in the notes of the documents that use them ([curobo_v2_
 ## Publishing prebuilt images (manual)
 
 `docker/tools/publish_images.sh` tags and pushes `deps`, `build` and `sim` (and with `--gpu` the `full` image) to
-`ghcr.io/<owner>/motion-planner:<target>`. It is a dry run unless `--push` is given. There is no CI, so publishing is a
-deliberate manual step, done after a full end-to-end workflow test passes. Notes:
+`ghcr.io/<owner>/motion-planner:<target>`. It is a dry run unless `--push` is given. Publishing is a
+deliberate manual step (CI does not push images), done after a full end-to-end workflow test passes. Notes:
 
 - `sim` is built on `gpu`, so it contains the 12 GB torch and cuRobo layers; layers shared with `full` upload once.
 - Push images built from the Dockerfile (`docker build --target <name>`), not a hand-committed container: the

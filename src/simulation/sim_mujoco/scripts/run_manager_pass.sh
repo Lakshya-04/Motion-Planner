@@ -12,15 +12,20 @@
 # MANAGER_PASS_REC_ARGS goes to record_run.py (--wall-y .. .. --scene .. for a wall that is not the stock one).
 # MANAGER_PASS_PLANNING_CONFIG=/path/planning_curobo.yaml: the manager builds its planners from that file (planning_config
 # parameter, written into manager.yaml; unset = the packaged planning.yaml). Needs the cuRobo node: docs/sim_*.md.
+# MP_PROFILE=xarm7_telescopic (any profile, default ur10e_telescopic) runs the pass on another robot: the wall is moved to
+# a distance and height derived from the profile (profile_reach.py), the pre-contact pose is planned, and the manager
+# gets profile:=. docs/sim_mujoco.md, "Running another robot profile". MANAGER_PASS_SCORE_ARGS adds score_run arguments.
 set -u
 PKG=$(ros2 pkg prefix sim_mujoco)
 SHARE=$PKG/share/sim_mujoco
 DATA=${MANAGER_PASS_DATA:-$SHARE/data}
 . "$PKG/lib/sim_mujoco/manager_pass_common.sh"
 mp_init "${MANAGER_PASS_OUT:-/tmp/manager_pass}"
+mp_profile_init "$DATA" || exit $?
+DATA=$MP_DATA
 trap mp_stop_all EXIT
 
-mp_start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=ur10e_telescopic controller:=jtac conditioner:=true \
+mp_start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$MP_PROFILE controller:=jtac conditioner:=true \
   payload_mass_kg:=0.5 move_group:=true scene:=$DATA/smoke_wall_scene.json ${MANAGER_PASS_LAUNCH_ARGS:-}
 # the demo rasterizes the obstacle clearance into the grid itself; the service node would add its own 0.3 m default
 mp_start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0 ${MANAGER_PASS_PLANNER_PARAMS:-}

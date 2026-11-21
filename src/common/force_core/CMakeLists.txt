@@ -19,6 +19,7 @@ add_library(${PROJECT_NAME}
   src/wrench_conditioning.cpp
   src/payload_excitation.cpp
   src/bias_tracker.cpp
+  src/contact_free_gate.cpp
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -68,6 +69,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(bias_tracker_test test/bias_tracker_test.cpp)
   target_link_libraries(bias_tracker_test ${PROJECT_NAME})
+
+  ament_add_gtest(contact_free_gate_test test/contact_free_gate_test.cpp)
+  target_link_libraries(contact_free_gate_test ${PROJECT_NAME})
 
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)

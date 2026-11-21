@@ -12,6 +12,7 @@
 
 #include "core_types/contact_area.hpp"
 #include "coverage_planner/core/types.hpp"
+#include <array>
 #include <string>
 #include <vector>
 
@@ -49,6 +50,13 @@ struct ToolTask
   /// Rotates the commanded tool frame's X/Y axes about the tool's own Z (contact-normal, into
   /// the wall) axis, in degrees. 0.0 (default): X aligned to the wall's basis_u, Y to basis_v.
   double tool_frame_yaw_deg{0.0};
+
+  /// Intended fixed tool tilt (core_types::ToolGeometry::tilt_deg / tilt_axis): angle of the tool
+  /// axis to the surface normal and the in-surface axis it tilts about, given in the contact frame
+  /// (x, y, 0; the lift rotates it with tool_frame_yaw_deg). 0 (default) = tool axis along -normal,
+  /// poses and swath unchanged.
+  double tool_tilt_deg{0.0};
+  std::array<double, 3> tool_tilt_axis{0.0, 0.0, 0.0};
 };
 
 /**
@@ -101,9 +109,16 @@ struct ToolCoverageProfile
 
 /// Swath the planner must use for this tool: the stand-off dependent cone model for a non-contact
 /// tool with spray_half_angle_deg > 0, the contact-area width at the target force for a contact
-/// tool with contact_area enabled, else coverage.swath_m.
+/// tool with contact_area enabled, else coverage.swath_m. With `task.tool_tilt_deg` > 0 the first two
+/// are projected across the stroke for the tilted footprint (core_types/tool_footprint.hpp); tilt 0
+/// and a fixed swath_m are unchanged.
 /// @throws std::invalid_argument if the cone parameters or the stand-off are out of range.
 double toolSwath(const ToolCoverageProfile & tool);
+
+/// Angle (deg) from the stroke direction to the tilt direction (the in-surface direction
+/// perpendicular to the tilt axis), after rotating the axis by tool_frame_yaw_deg. Strokes run along
+/// the wall's v axis for "vertical" and along u for "horizontal". Meaningful only with a tilt.
+double tiltDirectionFromStrokeDeg(const ToolCoverageProfile & tool);
 
 /// Distance between adjacent strips: toolSwath * (1 - overlap_pct / 100).
 double toolLineSpacing(const ToolCoverageProfile & tool);

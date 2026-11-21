@@ -18,7 +18,14 @@
 # Output in SCEN_OUT (default /tmp/scenarios): per-run folders, results.tsv, and the table on stdout.
 # SCEN_DECOMP=cells runs the single-stand scenarios with the cell decomposition (MANAGER_PASS_PLANNER_PARAMS).
 # Needs the same ROS environment as run_manager_pass.sh / run_multi_stand_pass.sh (and their env switches apply).
+# MANAGER_PASS_SCORE_ARGS (extra score_run arguments, e.g. the tool pose gates) is added to both scoring calls.
+# The scenario walls (make_scenario_scene.py) are placed for ur10e_telescopic; another MP_PROFILE is refused here, because
+# the scenes, obstacles and the recorder's wall would have to be shifted together (not implemented).
 set -u
+if [ "${MP_PROFILE:-ur10e_telescopic}" != ur10e_telescopic ]; then
+  echo "run_scenarios.sh: MP_PROFILE=$MP_PROFILE is not supported (scenario walls are placed for ur10e_telescopic)"
+  exit 2
+fi
 PKG=$(ros2 pkg prefix sim_mujoco)
 SHARE=$PKG/share/sim_mujoco
 LIB=$PKG/lib/sim_mujoco
@@ -47,7 +54,7 @@ printf 'scenario\trun\tmanager_rc\tcov_wall\tcov_reach\tpeak_n\trms_n\tcontacts\
 score() {   # score_run on a run; prints "cov peak rms contacts rc" ($1 = run dir, $2 = keepout margin)
   local json rc
   json=$(ros2 run coverage_planner score_run --samples "$1/run.csv" --wall "$1/run.csv.wall.json" --target-force "$TARGET" \
-    --band 1.5 --swath "$SWATH" --keepout-margin "$2" --max-obstacle-contacts 0 --min-coverage "$MINCOV" 2> "$1/score.err")
+    --band 1.5 --swath "$SWATH" --keepout-margin "$2" --max-obstacle-contacts 0 --min-coverage "$MINCOV" ${MANAGER_PASS_SCORE_ARGS:-} 2> "$1/score.err")
   rc=$?
   echo "$json" > "$1/score_$2.json"
   python3 - "$1/score_$2.json" "$rc" <<'PY'

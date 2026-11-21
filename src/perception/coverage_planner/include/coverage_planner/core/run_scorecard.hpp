@@ -44,6 +44,9 @@ struct RunSample
   double x{0.0}, y{0.0}, z{0.0};
   double force_n{0.0};      ///< Force along the wall normal (positive pressing on the wall).
   bool tool_active{false};  ///< Valve open / pump on (non-contact tools).
+  /// Angle in degrees between the tool axis (pointing at the work) and the wall's inward normal, 0 = square to
+  /// the wall. Negative = not recorded (older CSVs), the tilt is then not checked.
+  double tilt_deg{-1.0};
 };
 
 struct ScorecardOptions
@@ -59,6 +62,12 @@ struct ScorecardOptions
   double keepout_margin_m{0.0};          ///< Obstacle footprints grown by this are left out of the coverage target.
   double obstacle_margin_m{0.0};         ///< Obstacle footprints grown by this for the contact check.
   double obstacle_contact_tol_m{0.003};  ///< Tool point within height + this above the wall counts as inside.
+  /// A sample only counts as working when the tool point is within this distance of the wall plane (either side,
+  /// so a pad pressed into the surface still counts) and, if the tilt was recorded, within `max_tilt_deg` of square.
+  /// Without it a link brushing the wall, or a tilted tool, scores as coverage. 0 = not checked (old behaviour).
+  double max_wall_gap_m{0.0};
+  double max_tilt_deg{0.0};              ///< Allowed deviation of the tilt from `nominal_tilt_deg`; 0 = not checked.
+  double nominal_tilt_deg{0.0};          ///< The tool's intended angle to the wall normal (0 for a flat pad, e.g. 30 for an angled tool).
 };
 
 struct ScorecardLimits
@@ -69,6 +78,9 @@ struct ScorecardLimits
   double min_in_band_fraction{0.0};    ///< 0 = not checked.
   double max_thickness_cov{0.0};       ///< Spray: 0 = not checked.
   int max_obstacle_contacts{-1};       ///< Negative = not checked; 0 = no contact allowed.
+  /// Fail when more than this fraction of the samples that would have worked (force or valve) are off the wall or
+  /// tilted. Negative = not checked. Needs `max_wall_gap_m` / `max_tilt_deg` in the options.
+  double max_bad_pose_fraction{-1.0};
 };
 
 struct RunScorecard
@@ -82,6 +94,14 @@ struct RunScorecard
   double in_band_fraction{0.0};     ///< Engaged samples within the force band.
   size_t obstacle_contact_samples{0};   ///< Samples with the tool point inside an obstacle.
   size_t obstacle_contacts{0};          ///< Episodes (consecutive such samples count once).
+  size_t bad_pose_samples{0};           ///< Would-be working samples refused: off the wall or tilted.
+  size_t off_wall_samples{0};           ///< ...of which farther than `max_wall_gap_m` from the wall plane.
+  size_t tilted_samples{0};             ///< ...of which tilted more than `max_tilt_deg`.
+  double bad_pose_fraction{0.0};        ///< bad_pose_samples over (working + bad pose) samples.
+  double tilt_mean_deg{0.0};            ///< Over working samples that carry a tilt.
+  double tilt_max_deg{0.0};
+  double wall_gap_mean_m{0.0};          ///< Signed tool-point height over the wall (+ = in front), working samples.
+  double wall_gap_max_abs_m{0.0};
   bool passed{false};
   std::vector<std::string> failures;
 };
