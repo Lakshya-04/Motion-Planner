@@ -267,7 +267,7 @@ public:
     approach_tolerance_m_ = this->declare_parameter<double>("approach_tolerance_m", 0.05);
     // true: after the dock the tool must be on the standoff pose (position and orientation) before the press;
     // a tool that arrives tilted (a redundant arm's goal solved to the wrong orientation) would press on the wall
-    // with its edge. A column that fails the check is retried like a failed dock.
+    // with its edge. A column that fails the check is skipped as a failed dock (retried only through column_retries).
     verify_dock_ = this->declare_parameter<bool>("verify_dock", true);
     dock_tolerance_m_ = this->declare_parameter<double>("dock_tolerance_m", 0.02);
     dock_tolerance_rad_ = this->declare_parameter<double>("dock_tolerance_rad", 0.17);
@@ -1515,9 +1515,9 @@ private:
   bool lookup(const std::string & parent, const std::string & child, FrameTransform & out)
   {
     if (!tf_buffer_) {
-      // the TF buffer exists only when `world_frame` is set (multi-stand); a single-stand run has none, and
-      // logArmState() asks for the tool pose anyway: report "no TF" instead of dereferencing a null buffer
-      RCLCPP_DEBUG_ONCE(this->get_logger(), "TF lookup %s <- %s skipped: no TF buffer (world_frame is empty)", parent.c_str(), child.c_str());
+      // init() creates the buffer in every run; this only guards a lookup before init() or after a failed one:
+      // report "no TF" instead of dereferencing a null buffer
+      RCLCPP_DEBUG_ONCE(this->get_logger(), "TF lookup %s <- %s skipped: no TF buffer", parent.c_str(), child.c_str());
       return false;
     }
     try {
@@ -1988,6 +1988,7 @@ private:
       return ColumnOutcome::kFailed;
     }
     if (verify_dock_) {
+      waitFor(0.5, false);   // let the controller and TF settle after the last point, as verify_approach does
       double pos_err = 0.0, ang_err = 0.0;
       if (tcpPoseError(standoff_pose, pos_err, ang_err) &&
         (pos_err > dock_tolerance_m_ || ang_err > dock_tolerance_rad_))

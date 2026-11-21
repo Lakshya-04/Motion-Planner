@@ -172,6 +172,9 @@ mp_run_and_score() {
     if [ -n "$pre" ]; then
       python3 "$PKG/lib/sim_mujoco/ready_pose.py" --pose $pre --scale "${MP_READY_SCALE:-0.3}" --tol-pos 0.02 --tol-ang 0.15 \
         | tee "$OUT/ready_pose_pre.log"
+      if [ "${PIPESTATUS[0]}" != 0 ]; then
+        echo "WARNING: the pre-pose move failed (see $OUT/ready_pose_pre.log): the single move to the FREE pose follows and may graze the wall" >&2
+      fi
     fi
   fi
   if [ "${MP_SKIP_READY:-0}" != 1 ]; then python3 "$PKG/lib/sim_mujoco/ready_pose.py" $ready_args | tee "$OUT/ready_pose.log"; fi

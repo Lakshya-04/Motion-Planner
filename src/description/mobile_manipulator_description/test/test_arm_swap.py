@@ -138,7 +138,7 @@ def test_seven_dof_acm_is_up_to_date(name, lift, suffix):
     # the sampled "Always" entries have their own test below
     committed = {tuple(sorted(m)) for m in re.findall(r'link1="([^"]+)" link2="([^"]+)" reason="(?!Always)', text)}
     assert generated == committed, (
-        f'run scripts/generate_acm.py --arm {p.arm} --lift {lift} --out srdf/acm_{p.arm}{suffix}.xacro')
+        f'run scripts/generate_acm.py --arm {p.arm} --lift {lift} --sample 200 --out srdf/acm_{p.arm}{suffix}.xacro')
 
 
 def _acm():

@@ -677,13 +677,13 @@ MANAGER_PASS_SCORE_ARGS="--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.05" 
 ```
 
 (tool point within 1 cm of the wall while in contact, tool axis within 10 degrees of the wall normal, at most 5 percent of the
-contact samples off either). They are not on by default. Two measured passes (UR10e and xArm 7, below) both have zero refused samples at these thresholds, so `--max-bad-pose 0.0` is a usable demo gate.
+contact samples off either). They are not on by default. Two measured passes (UR10e and xArm 7, below, one run each) both have zero refused samples at these thresholds, so `--max-bad-pose 0.0` is a candidate demo gate; it has been seen to pass once per robot, not tested over many runs.
 The `tilt_deg` column of `run.csv` comes from the recorder (`record_run.py`, `contact_test.py`), measured on the tool's z axis
 against the wall normal in the frame the wall is in.
 
 #### First 7-DOF run: xArm 7 (`MP_PROFILE=xarm7_telescopic`, one MuJoCo single-stand pass)
 
-Measured 2026-11-22, one run per variant, scored with `--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.0` (a single
+Measured 2026-11-22 on the branch of this change (it includes the single-stand crash fix; `main` crashes on a single-stand run without it; the run directories are not kept in the repository), one run per variant, scored with `--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.0` (a single
 force-bearing sample with the tool tilted over 10 degrees or more than 1 cm off the wall fails the run). The UR10e pass
 is the reference: 4 of 4 columns, tool tilt at most 0.19 degrees, wall gap at most 0.9 mm, peak 19.3 N.
 
@@ -702,7 +702,7 @@ What this shows:
 - The planning scene was built from `walls.pcd`, the 0.4 x 0.4 m contact patch only, while the simulator wall is the
   whole 1.8 x 2.6 m wall. Every tilted contact was in wall the planner did not know about. The UR10e's short ready-pose
   move stays inside the patch, so it never showed. For another profile the pass now loads `walls_sim.pcd`
-  (`MANAGER_PASS_WORLD_PCD` overrides the file for any profile).
+  (`MANAGER_PASS_WORLD_PCD` is a file name inside the pass's data directory, for example `walls.pcd`, and overrides the file for any profile; the manager pass and the spray pass honour it, the other passes still use the patch).
 - A single planned move from the stowed pose to a pose 3 cm from the wall swings the tool down the wall and grazes it
   with the pad edge before the manager has started. The pass now reaches a pre-pose `MP_READY_PRE_M` (default 0.15 m)
   further from the wall first. Skipping the ready pose, or the manager's own approach stage

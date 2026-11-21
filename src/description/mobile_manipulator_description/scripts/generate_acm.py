@@ -221,6 +221,9 @@ def main():
     ap.add_argument('--xacro', default=os.path.join(
         os.path.dirname(__file__), '..', 'urdf', 'mobile_manipulator.urdf.xacro'))
     args = ap.parse_args()
+    if 0 < args.sample < 100:
+        ap.error('--sample needs at least 100 configurations: with a handful of samples a pair that can really collide '
+                 'overlaps in all of them by chance and would be disabled (the committed files use 200)')
 
     mappings = {'arm': args.arm, 'lift': args.lift, 'base': args.base}
     mappings.update(kv.split('=', 1) for kv in args.set)
