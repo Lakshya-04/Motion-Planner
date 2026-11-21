@@ -1556,6 +1556,12 @@ private:
   /// Pose of `child` in `parent` from TF (latest), false when it does not resolve within 2 s.
   bool lookup(const std::string & parent, const std::string & child, FrameTransform & out)
   {
+    if (!tf_buffer_) {
+      // the TF buffer exists only when `world_frame` is set (multi-stand); a single-stand run has none, and
+      // logArmState() asks for the tool pose anyway: report "no TF" instead of dereferencing a null buffer
+      RCLCPP_DEBUG_ONCE(this->get_logger(), "TF lookup %s <- %s skipped: no TF buffer (world_frame is empty)", parent.c_str(), child.c_str());
+      return false;
+    }
     try {
       const auto tf = tf_buffer_->lookupTransform(
         parent, child, tf2::TimePointZero, tf2::durationFromSec(2.0));
