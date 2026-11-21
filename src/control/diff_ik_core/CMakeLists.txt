@@ -49,6 +49,9 @@ if(BUILD_TESTING)
   ament_add_gtest(diff_ik_test test/diff_ik_test.cpp)
   target_link_libraries(diff_ik_test ${PROJECT_NAME})
 
+  ament_add_gtest(diff_ik_alloc_test test/diff_ik_alloc_test.cpp)
+  target_link_libraries(diff_ik_alloc_test ${PROJECT_NAME})
+
   ament_add_gtest(pose_error_test test/pose_error_test.cpp)
   target_link_libraries(pose_error_test ${PROJECT_NAME})
 

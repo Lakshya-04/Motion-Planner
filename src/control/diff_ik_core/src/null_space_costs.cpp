@@ -20,10 +20,10 @@ double weightAt(const Eigen::VectorXd & w, Eigen::Index i)
 JointCenteringCost::JointCenteringCost(Eigen::VectorXd weights)
 : weights_(std::move(weights)) {}
 
-Eigen::VectorXd JointCenteringCost::ascent(
-  const Eigen::VectorXd & q, const Eigen::VectorXd & lower, const Eigen::VectorXd & upper) const
+JointVector JointCenteringCost::ascent(
+  const JointRef & q, const JointRef & lower, const JointRef & upper) const
 {
-  Eigen::VectorXd g = Eigen::VectorXd::Zero(q.size());
+  JointVector g = JointVector::Zero(q.size());
   for (Eigen::Index i = 0; i < q.size(); ++i) {
     if (i >= lower.size() || i >= upper.size() || !isLimitedJoint(lower(i), upper(i))) {continue;}
     const double range = upper(i) - lower(i);
@@ -35,10 +35,10 @@ Eigen::VectorXd JointCenteringCost::ascent(
 LimitAvoidanceCost::LimitAvoidanceCost(double zone, Eigen::VectorXd weights)
 : zone_(std::clamp(zone, 1e-6, 0.5)), weights_(std::move(weights)) {}
 
-Eigen::VectorXd LimitAvoidanceCost::ascent(
-  const Eigen::VectorXd & q, const Eigen::VectorXd & lower, const Eigen::VectorXd & upper) const
+JointVector LimitAvoidanceCost::ascent(
+  const JointRef & q, const JointRef & lower, const JointRef & upper) const
 {
-  Eigen::VectorXd g = Eigen::VectorXd::Zero(q.size());
+  JointVector g = JointVector::Zero(q.size());
   for (Eigen::Index i = 0; i < q.size(); ++i) {
     if (i >= lower.size() || i >= upper.size() || !isLimitedJoint(lower(i), upper(i))) {continue;}
     const double range = upper(i) - lower(i);
@@ -57,10 +57,10 @@ Eigen::VectorXd LimitAvoidanceCost::ascent(
 JointEndBiasCost::JointEndBiasCost(int joint_index, double onset)
 : index_(joint_index), onset_(std::clamp(onset, 0.0, 0.999)) {}
 
-Eigen::VectorXd JointEndBiasCost::ascent(
-  const Eigen::VectorXd & q, const Eigen::VectorXd & lower, const Eigen::VectorXd & upper) const
+JointVector JointEndBiasCost::ascent(
+  const JointRef & q, const JointRef & lower, const JointRef & upper) const
 {
-  Eigen::VectorXd g = Eigen::VectorXd::Zero(q.size());
+  JointVector g = JointVector::Zero(q.size());
   if (index_ < 0 || index_ >= q.size() || index_ >= lower.size() || index_ >= upper.size()) {
     return g;
   }
@@ -73,14 +73,14 @@ Eigen::VectorXd JointEndBiasCost::ascent(
   return g;
 }
 
-Eigen::VectorXd combinedAscent(
-  const std::vector<NullSpaceTerm> & terms, const Eigen::VectorXd & q,
-  const Eigen::VectorXd & lower, const Eigen::VectorXd & upper)
+JointVector combinedAscent(
+  const std::vector<NullSpaceTerm> & terms, const JointRef & q,
+  const JointRef & lower, const JointRef & upper)
 {
-  Eigen::VectorXd sum = Eigen::VectorXd::Zero(q.size());
+  JointVector sum = JointVector::Zero(q.size());
   for (const auto & t : terms) {
     if (!t.cost) {continue;}
-    const Eigen::VectorXd a = t.cost->ascent(q, lower, upper);
+    const JointVector a = t.cost->ascent(q, lower, upper);
     if (a.size() == q.size()) {sum += t.gain * a;}
   }
   return sum;
