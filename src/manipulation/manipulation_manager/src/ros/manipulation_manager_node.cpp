@@ -22,6 +22,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -51,10 +52,12 @@
 #include "motion_planner/core/planning_pipeline.hpp"
 #include "motion_planner/ros/planning_config.hpp"
 #include "mobile_manipulator_profile/profile.hpp"
+#include "reachability/core/io.hpp"
 #include "ros_adapters/rclcpp_logger.hpp"
 
 #include "manipulation_manager/ros/execution/retiming_wiring.hpp"
 #include "manipulation_manager/core/execution/tool_feed_execution_port.hpp"
+#include "manipulation_manager/adapters/reachability_column_port.hpp"
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/coverage_task.hpp"
 #include "manipulation_manager/core/column_ordering.hpp"
@@ -283,6 +286,18 @@ public:
     base_check_tol_xy_ = this->declare_parameter<double>("base_check_tol_xy_m", 0.15);
     base_check_tol_yaw_ = this->declare_parameter<double>("base_check_tol_yaw_rad", 0.1);
 
+    // Column pose sequence check (approach, contact, strokes, retract against an RM4D map). Off unless a map file
+    // is given. It uses the dock parameters above (dock_standoff_m, dock_approach_extra_m, dock_at_stroke_start,
+    // wall_direction) and base_check_lift_min_m / _max_m / base_check_arm_mount_z_m. Needs world_frame (the arm
+    // base position comes from TF). Advisory in a single-stand run: split and unreachable columns are logged,
+    // nothing is skipped; also handed to ManipulationManager::analyzeFeasibleSegments.
+    column_reach_map_file_ = this->declare_parameter<std::string>("column_reachability_map_file", "");
+    column_reach_min_score_ = this->declare_parameter<double>("column_reachability_min_score", 0.15);
+    column_reach_count_ref_ = this->declare_parameter<double>("column_reachability_count_ref", 8.0);
+    column_reach_lift_step_ = this->declare_parameter<double>("column_reachability_lift_step_m", 0.05);
+    // How far past the plan surface the tool presses; negative = contact_y_overshoot_m (0 for a non-contact tool).
+    column_reach_press_depth_ = this->declare_parameter<double>("column_reachability_press_depth_m", -1.0);
+
     // Which planning backends to use: a YAML selection (see docs/backend_selection.md), the
     // packaged default when empty. The planners are built in init().
     planning_config_ = this->declare_parameter<std::string>("planning_config", "");
@@ -418,6 +433,9 @@ public:
       // its own spin thread: the node itself is only spun in bursts while a request waits
       tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
       tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_, shared_from_this(), true);
+    }
+    if (!initColumnReachability()) {
+      return false;
     }
     execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
       shared_from_this(), "/" + controller_name_ + "/follow_joint_trajectory");
@@ -786,6 +804,7 @@ private:
     TaskStateMachine machine(nav_attempts_);
     if (!req.multi_stand) {
       machine.startSingle();
+      logColumnReach(sel);
       if (!baseStanceAllowsRun(sel)) {
         out.message = "base stance check failed (base_check enforce)";
         restore();
@@ -1233,6 +1252,91 @@ private:
     req->lift_max = base_check_lift_max_;
     req->arm_mount_offset_z = base_check_arm_mount_z_;
     return req;
+  }
+
+  /// Loads the RM4D map named by column_reachability_map_file and builds the column reachability port. Off (true)
+  /// without a file; false when the file does not load, or world_frame is not set (no way to place the arm base).
+  bool initColumnReachability()
+  {
+    if (column_reach_map_file_.empty()) {
+      return true;
+    }
+    if (world_frame_.empty()) {
+      RCLCPP_ERROR(
+        this->get_logger(), "column_reachability_map_file needs world_frame (the arm base position comes from TF)");
+      return false;
+    }
+    std::shared_ptr<reachability::Map4D> map;
+    try {
+      map = std::make_shared<reachability::Map4D>(reachability::loadMap(column_reach_map_file_));
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(
+        this->get_logger(), "column_reachability_map_file %s: %s", column_reach_map_file_.c_str(), e.what());
+      return false;
+    }
+    ReachabilityColumnConfig cfg;
+    cfg.sequence.wall_normal = reachability::Vec3(-wall_dir_.d[0], -wall_dir_.d[1], -wall_dir_.d[2]);
+    cfg.sequence.standoff_m = dock_standoff_;
+    cfg.sequence.approach_extra_m = std::fabs(dock_approach_extra_m_);
+    cfg.sequence.press_depth_m =
+      column_reach_press_depth_ >= 0.0 ? column_reach_press_depth_ : (contact_ ? contact_y_overshoot_ : 0.0);
+    cfg.sequence.dock_at_first_stroke = dock_at_stroke_start_;
+    cfg.margin.min_score = column_reach_min_score_;
+    cfg.margin.count_ref = std::max(1.0, column_reach_count_ref_);
+    cfg.lift_heights = liftHeights(base_check_lift_min_, base_check_lift_max_, column_reach_lift_step_);
+    cfg.arm_mount_offset_z = base_check_arm_mount_z_;
+    column_reach_ = std::make_unique<ReachabilityColumnPort>(
+      map, cfg, [this]() -> std::optional<Eigen::Vector2d> {
+        FrameTransform arm_in_world;
+        if (!lookup(world_frame_, arm_base_frame_, arm_in_world)) {
+          return std::nullopt;
+        }
+        return Eigen::Vector2d(arm_in_world.t[0], arm_in_world.t[1]);
+      });
+    manager_.setColumnReachability(column_reach_.get());
+    RCLCPP_INFO(
+      this->get_logger(), "column reachability check on: map %s, %zu lift height(s)",
+      column_reach_map_file_.c_str(), cfg.lift_heights.size());
+    return true;
+  }
+
+  /// Logs, per contact column, whether the arm base where it stands does the column's whole pose sequence
+  /// (approach, contact, strokes, retract). Advisory: nothing is skipped or refused.
+  void logColumnReach(const std::vector<CoverageSegmentIntent> & intents)
+  {
+    if (!column_reach_) {
+      return;
+    }
+    std::vector<ColumnReachInput> inputs;
+    for (const auto & it : intents) {
+      if (it.requires_contact && !it.poses.empty()) {
+        inputs.push_back({it.label, it.poses});
+      }
+    }
+    const auto verdicts = column_reach_->check(inputs);
+    if (verdicts.size() != inputs.size()) {
+      RCLCPP_WARN(this->get_logger(), "column reachability: not checked (no arm base pose from TF)");
+      return;
+    }
+    size_t whole = 0;
+    for (size_t i = 0; i < verdicts.size(); ++i) {
+      const auto & v = verdicts[i];
+      if (v.status == ColumnReachStatus::kWhole) {
+        ++whole;
+        continue;
+      }
+      size_t usable = 0;
+      for (size_t k = 0; k < inputs[i].strokes.size(); ++k) {
+        usable += v.strokeUsable(k) ? 1 : 0;
+      }
+      RCLCPP_WARN(
+        this->get_logger(), "column reachability: %s is %s from here (%zu/%zu strokes usable), limited by %s: %s",
+        inputs[i].label.c_str(), v.status == ColumnReachStatus::kSplit ? "split" : "unreachable", usable,
+        inputs[i].strokes.size(), v.limiting_pose.c_str(), v.limiting_reason.c_str());
+    }
+    RCLCPP_INFO(
+      this->get_logger(), "column reachability: %zu of %zu column(s) whole (RM4D estimate)", whole,
+      verdicts.size());
   }
 
   /// Asks the reachability planner whether the base, where it stands, reaches the whole plan.
@@ -2036,6 +2140,12 @@ private:
   double base_check_arm_mount_z_{0.0};
   double base_check_tol_xy_{0.15};
   double base_check_tol_yaw_{0.1};
+  std::string column_reach_map_file_;
+  double column_reach_min_score_{0.15};
+  double column_reach_count_ref_{8.0};
+  double column_reach_lift_step_{0.05};
+  double column_reach_press_depth_{-1.0};
+  std::unique_ptr<ReachabilityColumnPort> column_reach_;
   double contact_y_overshoot_{0.0};
   double max_wall_penetration_{0.0};
   double target_force_n_{0.0};

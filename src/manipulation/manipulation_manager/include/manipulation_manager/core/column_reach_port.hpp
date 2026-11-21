@@ -6,9 +6,9 @@
  *          position, lift range) and the dock parameters (`dock_standoff_m`, `dock_approach_extra_m`, press depth) and
  *          answers per column: whole, split (some strokes unusable) or unreachable, which strokes are usable, and the
  *          pose (approach, contact, stroke, retract) that limits it with the reason (out_of_reach, low_margin, refused,
- *          singular, joint_limit). CoverageFeasibilityAnalyzer::setColumnReachability takes one; the node can build the
- *          reachability-backed implementation later (docs/reachability.md, "Column pose sequences"). Nothing in the node
- *          uses this port yet.
+ *          singular, joint_limit). CoverageFeasibilityAnalyzer::setColumnReachability takes one; the node builds the
+ *          reachability-backed one (adapters/reachability_column_port.hpp) when column_reachability_map_file is set
+ *          (docs/reachability.md, "Column pose sequences").
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 

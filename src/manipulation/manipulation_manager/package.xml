@@ -37,6 +37,9 @@
   <depend>moveit_ros_planning</depend>
   <depend>ament_index_cpp</depend>
   <depend>mobile_manipulator_profile</depend>
+  <!-- RM4D map and column pose sequences: only the optional column-reach adapter and the node use it.
+       reachability does not depend on this package, so there is no cycle. -->
+  <depend>reachability</depend>
   <depend>nlohmann-json-dev</depend>
   <!-- manipulation_manager.launch.py builds the node's MoveIt parameters -->
   <exec_depend>mobile_manipulator_moveit_config</exec_depend>

@@ -29,6 +29,7 @@ find_package(motion_planner REQUIRED)
 find_package(moveit_ros_planning REQUIRED)
 find_package(motion_planner_moveit REQUIRED)  # only the tests still link the MoveIt adapter directly
 find_package(mobile_manipulator_profile REQUIRED)
+find_package(reachability REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
 # core/ (zero ROS deps -- verified: only stdlib + core_types/motion_planner headers)
@@ -69,6 +70,19 @@ ament_target_dependencies(${PROJECT_NAME}_core
   control_msgs
 )
 
+# RM4D-backed ColumnReachabilityPort (adapters/): its own library so manipulation_manager_core stays free of
+# the reachability package. Only the node and its test link it.
+add_library(${PROJECT_NAME}_column_reach src/adapters/reachability_column_port.cpp)
+target_link_libraries(${PROJECT_NAME}_column_reach PUBLIC
+  ${PROJECT_NAME}_core
+  reachability::reachability_core
+)
+target_include_directories(${PROJECT_NAME}_column_reach PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_compile_features(${PROJECT_NAME}_column_reach PUBLIC cxx_std_17)
+
 # Opt-in retiming (retime:=true): the one place the node touches the MoveIt adapter.
 add_library(${PROJECT_NAME}_retiming src/ros/execution/retiming_wiring.cpp)
 target_link_libraries(${PROJECT_NAME}_retiming PUBLIC ${PROJECT_NAME}_core
@@ -100,6 +114,7 @@ ament_target_dependencies(manipulation_manager_node
 target_link_libraries(manipulation_manager_node
   ${PROJECT_NAME}_core
   ${PROJECT_NAME}_retiming
+  ${PROJECT_NAME}_column_reach
   ros_adapters::ros_adapters
   motion_planner::motion_planner_ros
   mobile_manipulator_profile::mobile_manipulator_profile
@@ -118,6 +133,7 @@ install(TARGETS tool_actuation_node DESTINATION lib/${PROJECT_NAME})
 install(TARGETS
   ${PROJECT_NAME}_core
   ${PROJECT_NAME}_retiming
+  ${PROJECT_NAME}_column_reach
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -147,6 +163,11 @@ if(BUILD_TESTING)
   if(TARGET manipulation_manager_test)
     target_link_libraries(manipulation_manager_test ${PROJECT_NAME}_core core_types::core_types
       motion_planner_moveit::motion_planner_moveit_lib)
+  endif()
+
+  ament_add_gtest(reachability_column_port_test test/reachability_column_port_test.cpp)
+  if(TARGET reachability_column_port_test)
+    target_link_libraries(reachability_column_port_test ${PROJECT_NAME}_column_reach core_types::core_types)
   endif()
 
   ament_add_gtest(motion_exec_reporter_test test/motion_exec_reporter_test.cpp)
@@ -274,8 +295,9 @@ ament_export_dependencies(
   core_types
   ros_adapters
   motion_planner
+  reachability
 )
 ament_export_include_directories(include)
-ament_export_libraries(${PROJECT_NAME}_core)
+ament_export_libraries(${PROJECT_NAME}_core ${PROJECT_NAME}_column_reach)
 
 ament_package()

@@ -428,15 +428,28 @@ column_reach_tool map.rm4d plan.json [--out report.json] [--base-profile profile
 **Manager hook.** `manipulation_manager/core/column_reach_port.hpp` defines `ColumnReachabilityPort` (columns in, a verdict per column
 out) without depending on this package. `CoverageFeasibilityAnalyzer::setColumnReachability(port)` makes the analyzer send every
 contact column to it before any IK: an unreachable column is excluded whole (reason `approach_out_of_reach`, ...), a split one loses its
-unusable strokes (`stroke_low_margin`), and the verdicts come back in `FeasibilityReport::column_reach`. Nothing implements the port
-over this module yet and `manipulation_manager_node.cpp` does not set one: the node author adds the adapter (build a
-`ColumnPoseSequence` per column from `dock_standoff_m`, `dock_approach_extra_m`, the contact overshoot, call `evaluateColumn` or
-`planColumnStands`).
+unusable strokes (`stroke_low_margin`), and the verdicts come back in `FeasibilityReport::column_reach`. `ReachabilityColumnPort`
+(`manipulation_manager/adapters/reachability_column_port.hpp`, library `manipulation_manager_column_reach`) implements the port over a
+loaded `Map4D`: per column it runs `buildColumnSequence` (from `dock_standoff_m`, `dock_approach_extra_m`, the press depth,
+`dock_at_stroke_start`, the negated `wall_direction`) and `evaluateColumn` for the arm base position and the lift heights it is given.
+It sits in the manager package, outside `manipulation_manager_core`, so the core stays free of this package; `reachability` does not
+depend on `manipulation_manager`, so the dependency is one-way and there is no cycle.
+
+The node builds it only when `column_reachability_map_file` (an RM4D `.rm4d` file, default empty = off) is set; `world_frame` must be
+set too, the arm base position comes from TF (`world_frame` <- `arm_base_frame`). Other parameters: `column_reachability_min_score`
+(0.15), `column_reachability_count_ref` (8), `column_reachability_lift_step_m` (0.05, steps between `base_check_lift_min_m` and
+`base_check_lift_max_m`), `column_reachability_press_depth_m` (negative = `contact_y_overshoot_m`; 0 for a non-contact tool);
+`base_check_arm_mount_z_m` is the arm mount height. With a map loaded the port is handed to `ManipulationManager::setColumnReachability`
+(used by `analyzeFeasibleSegments`) and, in a single-stand `execute_coverage` run, every contact column is checked from where the arm
+base stands before the run and split / unreachable ones are logged with the limiting pose and reason. That log is advisory: nothing is
+skipped or refused. The multi-stand loop does not use it (the stand is not known before the drive; `plan_stands` already decides there).
+Poses go to the map as the plan has them (as in the base check), z measured from the floor.
 
 Status: gtests with a synthetic map and fake verifiers (approach unreachable with reachable strokes, retract, low-margin pose,
 singular joint solution, split versus whole, totals and JSON, verifier downgrade, analyzer hook). All of it is RM4D-level (no IK,
 no collision, no obstacles) unless the verifier is given; the thresholds are starting values; no real arm map, sim run or hardware
-run was involved, and the node does not use it yet.
+run was involved. The adapter has gtests against a hand-made map (whole, approach / retract / low-margin limits, split, lift heights,
+unknown stand); the node wiring (parameters, TF stand provider, the log) was written without a build and has not been run.
 
 ## Limits and next steps
 
