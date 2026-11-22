@@ -38,12 +38,17 @@ gz_init "${MULTI_STAND_OUT:-/tmp/multi_stand_pass}"
 trap gz_stop_all EXIT
 
 python3 "$PKG/lib/sim_gazebo/shift_wall_scene.py" "$DATA" "$OUT/data" 0.0 "$DY" "$WIDTH" || exit 2
-# the sim wall: the stock scene with its obstacle out of the patch (the shifted copy would be re-centred by the generator)
+# the sim wall: the stock scene without its obstacle (MULTI_STAND_OBSTACLES=1 keeps it, moved out of the patch; the planner's scene never has it,
+# so with it the arm drives into an obstacle the planner does not know about)
 python3 - "$DATA/smoke_wall_scene.json" "$OUT/data/smoke_wall_scene.json" <<'PY' || exit 2
 import json, sys
+import os
 scene = json.load(open(sys.argv[1]))
-for ob in scene['obstacles']:
-    ob['uv_on_wall']['u'] = [-0.9, -0.6]
+if os.environ.get('MULTI_STAND_OBSTACLES', '0') == '1':
+    for ob in scene['obstacles']:
+        ob['uv_on_wall']['u'] = [-0.9, -0.6]
+else:
+    scene['obstacles'] = []   # a plain wall like the MuJoCo pass (two_panels_plain); the planner's scene has no obstacle either
 json.dump(scene, open(sys.argv[2], 'w'), indent=2)
 PY
 WALL_X=0.98
