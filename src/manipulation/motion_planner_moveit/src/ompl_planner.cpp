@@ -12,6 +12,7 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include "motion_planner_moveit/moveit_planning_backend.hpp"
+#include "motion_planner_moveit/start_state_source.hpp"
 #include "motion_planner/core/planners/wall_penetration_check.hpp"
 #include "ros_adapters/ros_conversions.hpp"
 
@@ -179,11 +180,20 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
     std::string scene_error;
     if (backend_->ensurePlanningSceneMonitor(move_group_name_, scene_error)) {
       const auto monitor = backend_->planningSceneMonitor();
-      if (monitor) {
+      // Trust the monitor only while its joint state is complete and at most 1 s old; otherwise warn and take the
+      // MoveGroupInterface state below, as before.
+      const auto state_monitor = monitor ? monitor->getStateMonitor() : nullptr;
+      const bool fresh = state_monitor && state_monitor->haveCompleteState(rclcpp::Duration::from_seconds(1.0));
+      if (chooseStartStateSource(monitor != nullptr, fresh) == StartStateSource::kPlanningSceneMonitor) {
         planning_scene_monitor::LockedPlanningSceneRO scene(monitor);
         if (scene) {
           current = std::make_shared<moveit::core::RobotState>(scene->getCurrentState());
         }
+      } else if (node_) {
+        RCLCPP_WARN(
+          node_->get_logger(),
+          "OmplPlanner: planning scene monitor joint state is missing or older than 1 s; "
+          "falling back to the MoveGroupInterface current state.");
       }
     }
     if (!current) {
