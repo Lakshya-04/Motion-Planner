@@ -28,6 +28,13 @@
   <!-- Empty = moving lift. A number (m) pins the lift at that extension: an arm-only robot
        (lift:=fixed does the same and defaults to 0.4 m). -->
   <xacro:arg name="lift_fixed_height" default=""/>
+  <!-- Column geometry from primitives, all empty = the legacy cylinders (telescopic_lift.xacro):
+       shape cylinder|box, "x y h" of the fixed column, "x y h" per stage, rest z per stage, "x y z" of the carriage. -->
+  <xacro:arg name="lift_shape" default="cylinder"/>
+  <xacro:arg name="lift_column_size" default=""/>
+  <xacro:arg name="lift_stage_sizes" default=""/>
+  <xacro:arg name="lift_stage_rest_z" default=""/>
+  <xacro:arg name="lift_carriage_size" default=""/>
   <xacro:arg name="lift_mount_xyz" default="0 0 0"/>
   <xacro:arg name="arm_mount_xyz" default="0 0 0.02"/>
   <xacro:arg name="arm_mount_rpy" default="0 0 0"/>
@@ -78,6 +85,8 @@
     stroke="$(arg lift_stroke)" stages="$(arg lift_stages)" max_velocity="$(arg lift_max_velocity)"
     max_acceleration="$(arg lift_max_acceleration)" mount_height="$(arg lift_mount_height)"
     fixed_height="$(arg lift_fixed_height)"
+    shape="$(arg lift_shape)" column_size="$(arg lift_column_size)" stage_sizes="$(arg lift_stage_sizes)"
+    stage_rest_z="$(arg lift_stage_rest_z)" carriage_size="$(arg lift_carriage_size)"
     arm_mount_xyz="$(arg arm_mount_xyz)" arm_mount_rpy="$(arg arm_mount_rpy)">
     <origin xyz="$(arg lift_mount_xyz)" rpy="0 0 0"/>
   </xacro:lift>

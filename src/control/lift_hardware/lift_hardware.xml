@@ -1,0 +1,12 @@
+<library path="lift_hardware_ros">
+  <class name="lift_hardware/PrismaticLiftSystem"
+         type="lift_hardware::PrismaticLiftSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      One prismatic lift joint (position command, position and velocity state) driven through a
+      LiftTransport: a simulated one (transport=mock) or a device one supplied by the deployment.
+      Homes after every connect, clamps to the stroke, limits velocity and acceleration, holds on
+      a fault and reconnects with backoff.
+    </description>
+  </class>
+</library>

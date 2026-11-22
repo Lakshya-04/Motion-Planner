@@ -1,0 +1,39 @@
+# Hardware parameters for the `lift_system` ros2_control block, shown as the <param> entries they
+# become (docs/lift.md lists every key). The values are examples, not the built-in defaults
+# (docs/lift.md); set them from the lift profile (config/profiles/ur10e_lift_reference.yaml).
+#
+#   <hardware>
+#     <plugin>lift_hardware/PrismaticLiftSystem</plugin>
+#     <param name="transport">mock</param>
+#     <param name="mock_stroke_m">0.8</param>
+#     <param name="max_velocity_mps">0.1</param>
+#     <param name="max_acceleration_mps2">0.08</param>
+#   </hardware>
+#
+# Optional status and reset interfaces (read-only except reset_fault):
+#
+#   <gpio name="lift_status">
+#     <state_interface name="homed"/>
+#     <state_interface name="phase"/>
+#     <state_interface name="fault_code"/>
+#     <state_interface name="stop_confirmed"/>
+#     <command_interface name="reset_fault"/>
+#   </gpio>
+parameters:
+  transport: mock            # mock | device (device is an unimplemented skeleton)
+  mock_stroke_m: 0.8
+  mock_initial_height_m: 0.25
+  stroke_m: 0.0              # 0 = use what the transport reports; a smaller value limits travel
+  max_velocity_mps: 0.1
+  max_acceleration_mps2: 0.08
+  home_height_m: 0.0
+  home_timeout_s: 60.0
+  tolerance_m: 0.005
+  move_timeout_s: 20.0
+  send_period_s: 0.05
+  resend_deadband_m: 0.0005
+  reconnect_initial_s: 0.5
+  reconnect_max_s: 8.0
+  reconnect_factor: 2.0
+  max_io_failures: 5
+  velocity_filter_s: 0.1
