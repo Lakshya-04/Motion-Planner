@@ -355,6 +355,23 @@ The MuJoCo twin is coverage 1.0.
 about 9 minutes, `base_motion:=true`, contact pass at 10 N). The reachability map is built once (`STAND_MAP`). The Gazebo world wall
 is the stock 3 m wall centred on the robot (the generator always centres the wall), its one obstacle moved out of the patch.
 
+Env knobs, the same names and defaults as the MuJoCo script (the header of each script lists them; `docker/tools/tests/test_multi_stand_script_parity.py`
+checks that the header and the variables the script reads agree in both): `MULTI_STAND_DOUBLE_PASS` (default `false`, every strip once;
+`true` = up and back down, passed to the coverage demo as `double_pass`), `MULTI_STAND_REACH_FRACTION` / `MULTI_STAND_ARM_REACH` /
+`MULTI_STAND_LIFT_STROKE` (manager `dock_ik_reach_fraction` 0 = off, `dock_ik_reach_m` 1.3, `dock_ik_lift_max_m` 1.5; the fraction needs
+`MULTI_STAND_DOCK_IK_CONTINUITY=true`), `MULTI_STAND_MIN_CLEARANCE` (reachability node `stand_min_clearance_m`, 0 = off),
+`MULTI_STAND_COVERAGE_EXTRA`, `MULTI_STAND_TOOL_YAW`. Both scripts end with one line `multi_stand knobs: sim=... patch_z=... double_pass=...`
+so a run's output says which knobs it used.
+
+Tall wall: `MULTI_STAND_PATCH_Z="0.6,2.0"` moves the patch (coverage scene, `walls.pcd`, the manager's `coverage_z_min_m`/`_max_m`, the
+recorder's wall band) and makes the sim wall `hi + 0.3` m high (`shift_wall_scene.py`, argument 6; the stock wall is 2 m and the world
+generator puts its bottom on the floor). `MULTI_STAND_SCENARIO` (`make_scenario_scene.py`, obstacles and named walls) is MuJoCo only and
+stops the Gazebo script with exit 2. NOT verified in Gazebo (no run): the 2.3 m wall in the generated world, the tool reaching z 2.0 with the
+lift near its top (the tool sits 6.5 cm short of the tcp, see above), the MoveIt octomap, which is only the patch plus a 5 cm rim here (MuJoCo
+pushes the whole sim wall as `walls_sim.pcd` and a curtain), and the reach settings that go with a tall wall (MuJoCo needed `MULTI_STAND_MIN_CLEARANCE`
+about 0.42 and `MULTI_STAND_REACH_FRACTION` 0.8). Command:
+`MULTI_STAND_PATCH_Z=0.6,2.0 MULTI_STAND_DOCK_IK_CONTINUITY=true MULTI_STAND_REACH_FRACTION=0.8 MULTI_STAND_MIN_CLEARANCE=0.42 bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_multi_stand_pass.sh`.
+
 | run | columns | coverage | peak (score) | RMS error | in band | result |
 |---|---|---|---|---|---|---|
 | a | 9 of 9 (stand 0: 6, stand 1: 3) | 0.997 (2782/2790) | 922 N | 13.9 N | 0.82 | scorer passes |

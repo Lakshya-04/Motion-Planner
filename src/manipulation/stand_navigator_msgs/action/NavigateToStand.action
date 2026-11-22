@@ -12,6 +12,10 @@ uint16 INVALID_GOAL=2
 uint16 TIMEOUT=3
 uint16 NO_ODOM=4
 uint16 CANCELED=5
+uint16 NAVIGATION_STUCK=6   # safety layer: no progress toward the goal for stuck_window_s
+uint16 OBSTACLE=7           # safety layer: obstacle ahead (or obstacle sensor data missing) while obstacle stop is on
+uint16 BAD_COMMAND=8        # safety layer: non-finite or over-limit velocity command
+uint16 NO_NAV2=9            # backend:=nav2 and the Nav2 navigate_to_pose server is not available
 uint16 error_code
 string error_msg
 # final error of the arm base against the goal

@@ -120,6 +120,8 @@ uses (in one sim pass they ran about 14x faster than the same move retimed by Mo
 checks each returned trajectory (`curobo_planner/joint_limit_guard.hpp`) and either slows it down or refuses it. Without any of
 these params the trajectory is returned as cuRobo timed it (unchanged behaviour; `planning_curobo.yaml` sets them).
 
+For the shortest/fastest free-space path regardless of planning time, the cuRobo node has an opt-in optimal mode (`free_space_optimize`, N candidates plus the straight joint-space line, best by path quality; see [curobo_free_space_optimal.md](curobo_free_space_optimal.md)).
+
 | Param | Meaning |
 |---|---|
 | `joint_limits_file` | MoveIt `joint_limits.yaml` (reads `max_velocity` / `max_acceleration` where `has_*_limits` is true), a path or `package://<pkg>/<path>` |
