@@ -71,6 +71,11 @@ cross a blocked cell), a rectangular boundary pass, nearest-neighbour component 
 honours the same parameters and adds `ensure_coverage_within_boundary` (a last pass flush with the far
 edge).
 
+## Plan redundancy
+
+`plan_redundancy_report` and `score_run --plan` measure jumps, double sweeps, alternation and the end of the plan; see
+[docs/coverage_planner.md](../../../docs/coverage_planner.md).
+
 ## Tests
 
 69 gtest cases (counted from the `TEST` macros): `boustrophedon_planner_test` (15),
