@@ -12,6 +12,15 @@
 // Same idea as reachability::ColumnIkChain (reseed, wrapped dq, branch signature) for one pose at a time; this
 // header does not depend on that package so it can be tested alone. No acceptable candidate: ok is false and the
 // caller keeps its previous behaviour. Not an IK, not a planner: it only chooses among what the IK returns.
+//
+// Reach preference (opt-in, reach_target_fraction > 0 with reach_m > 0 and a DockReachContext): with the lift free, the
+// IK often docks with the lift near its start and the tool far out on the arm (87% of reach on a tall wall). The
+// tool-to-arm-base distance of a candidate is sqrt(h^2 + (z_rel - lift)^2), h being the horizontal distance from the
+// arm base to the tool and z_rel the tool height above the arm base at zero lift; its reach fraction is that over
+// reach_m. Every seed is then also tried with its lift entry moved to the lift nearest the reference lift that keeps
+// the fraction at or under the target (idealLift), and a candidate at or under the target beats any above it whatever
+// its cost; the cost orders candidates on the same side of the target. No candidate under the target: the cheapest
+// one as without the preference (reach_over_target is set). Off by default; nothing here changes then.
 #pragma once
 
 #include <algorithm>
@@ -33,6 +42,19 @@ struct DockIkSelectorParams
   double wrist_min_rad{-3.2};
   double wrist_max_rad{3.2};
   double max_dq_rad{3.2};                   ///< candidates with a larger cost are rejected
+  // Reach preference (see the header comment); reach_target_fraction <= 0 or reach_m <= 0 = off.
+  double reach_target_fraction{0.0};        ///< wanted upper bound of tool distance / reach_m
+  double reach_m{0.0};                      ///< arm reach from the arm base frame origin (m)
+  size_t lift_joint{0};                     ///< index of the lift joint in a solution
+  double lift_min_m{0.0};                   ///< lift stroke limits the proposed lift is clamped into
+  double lift_max_m{1.5};
+};
+
+/// Where the tool goal lies relative to the arm base, for the reach preference.
+struct DockReachContext
+{
+  double horizontal_m{0.0};   ///< horizontal distance arm base -> tool goal
+  double z_rel_m{0.0};        ///< tool goal height minus the arm base height at zero lift
 };
 
 struct DockIkChoice
@@ -45,6 +67,8 @@ struct DockIkChoice
   size_t rejected_branch{0};
   size_t rejected_wrist{0};
   size_t rejected_cost{0};
+  double reach_fraction{-1.0};   ///< tool distance / reach_m of the choice; -1 when the preference is off
+  bool reach_over_target{false}; ///< preference on, but no acceptable candidate was at or under the target
 };
 
 /// IK solution for the target starting at `seed`, nullopt when there is none.
@@ -95,16 +119,62 @@ inline bool dockBranchChanged(
   return false;
 }
 
+inline bool dockReachPreferenceOn(const DockIkSelectorParams & p)
+{
+  return p.reach_target_fraction > 0.0 && p.reach_m > 0.0;
+}
+
+/// Tool distance from the arm base over reach_m for the lift value `lift`. Infinity without a reach.
+inline double dockReachFraction(double lift, const DockReachContext & c, const DockIkSelectorParams & p)
+{
+  if (p.reach_m <= 0.0) {
+    return INFINITY;
+  }
+  const double dz = c.z_rel_m - lift;
+  return std::sqrt(c.horizontal_m * c.horizontal_m + dz * dz) / p.reach_m;
+}
+
+/// The lift value nearest `current` that keeps the reach fraction at or under the target, clamped into
+/// [lift_min_m, lift_max_m]. When the horizontal distance alone is over the target no lift can help, and the lift
+/// that puts the tool level with the arm base (the smallest fraction) is returned, clamped.
+inline double idealLift(double current, const DockReachContext & c, const DockIkSelectorParams & p)
+{
+  const double lo = std::min(p.lift_min_m, p.lift_max_m);
+  const double hi = std::max(p.lift_min_m, p.lift_max_m);
+  const double r = p.reach_target_fraction * p.reach_m;
+  const double dz2 = r * r - c.horizontal_m * c.horizontal_m;
+  double v = c.z_rel_m;
+  if (dz2 > 0.0) {
+    const double dz = std::sqrt(dz2);
+    v = std::min(std::max(current, c.z_rel_m - dz), c.z_rel_m + dz);
+  }
+  return std::min(std::max(v, lo), hi);
+}
+
 /// Runs `ik` from every seed (empty seeds are skipped) and returns the cheapest acceptable solution relative to
-/// `reference`. Ties go to the earlier seed.
+/// `reference`. Ties go to the earlier seed. With `reach` set and the preference on (see the header comment) the
+/// seeds are followed by one lift-adjusted copy of each, and candidates at or under the target reach fraction win.
 inline DockIkChoice selectDockIk(
-  const DockIkFn & ik, const std::vector<std::vector<double>> & seeds, const std::vector<double> & reference,
-  const DockIkSelectorParams & p)
+  const DockIkFn & ik, const std::vector<std::vector<double>> & seeds_in, const std::vector<double> & reference,
+  const DockIkSelectorParams & p, const DockReachContext * reach = nullptr)
 {
   DockIkChoice best;
   if (!ik || reference.empty()) {
     return best;
   }
+  const bool prefer = reach != nullptr && dockReachPreferenceOn(p) && p.lift_joint < reference.size();
+  std::vector<std::vector<double>> seeds = seeds_in;
+  if (prefer) {
+    for (const auto & sd : seeds_in) {
+      if (sd.size() == reference.size()) {
+        auto adj = sd;
+        adj[p.lift_joint] = idealLift(sd[p.lift_joint], *reach, p);
+        seeds.push_back(std::move(adj));
+      }
+    }
+    best.reach_fraction = INFINITY;
+  }
+  bool best_under = false;
   for (size_t s = 0; s < seeds.size(); ++s) {
     if (seeds[s].empty()) {
       continue;
@@ -130,12 +200,26 @@ inline DockIkChoice selectDockIk(
       ++best.rejected_cost;
       continue;
     }
-    if (!best.ok || cost < best.cost) {
+    bool under = true;
+    double frac = -1.0;
+    if (prefer) {
+      frac = dockReachFraction((*sol)[p.lift_joint], *reach, p);
+      under = frac <= p.reach_target_fraction + 1e-9;
+    }
+    // under the target beats over it; the cost orders the rest
+    const bool better = !best.ok || (under && !best_under) || (under == best_under && cost < best.cost);
+    if (better) {
       best.ok = true;
       best.q = *sol;
       best.seed_index = s;
       best.cost = cost;
+      best.reach_fraction = prefer ? frac : -1.0;
+      best_under = under;
     }
+  }
+  best.reach_over_target = prefer && best.ok && !best_under;
+  if (prefer && !best.ok) {
+    best.reach_fraction = -1.0;
   }
   return best;
 }

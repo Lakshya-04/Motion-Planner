@@ -47,6 +47,7 @@ private:
     reachability_msgs::srv::PlanStands::Response & response);
   std::shared_ptr<StandVerifier> verifier_;
   bool verify_by_default_{false};
+  double stand_min_clearance_m_{0.0};   ///< Parameter `stand_min_clearance_m`: floor for the request clearance, 0 = off.
   VerifyOptions verify_options_;
   std::shared_ptr<Map4D> map_;
   MapInfo map_info_;   ///< Header of the loaded map: joint count and redundancy policy (reported by ~/plan_stands).

@@ -64,6 +64,9 @@ ReachabilityNode::ReachabilityNode(const rclcpp::NodeOptions & options)
     RCLCPP_WARN(get_logger(), "stand_strategy '%s' is not greedy or set_cover; using greedy", strategy.c_str());
   }
 
+  // Opt-in floor for the chassis-to-wall clearance of every plan_stands request (m); 0 = off, requests as sent.
+  stand_min_clearance_m_ = declare_parameter<double>("stand_min_clearance_m", 0.0);
+
   using namespace reachability_msgs::srv;
   is_reachable_ = create_service<IsReachable>(
     "~/is_reachable",
@@ -216,7 +219,7 @@ void ReachabilityNode::handlePlanStands(
     r.wall_normal = n.normalized();
     auto pos = [](double v, double dflt) {return v > 0.0 ? v : dflt;};
     const StationRequest d;
-    r.min_clearance = pos(req->min_clearance, d.min_clearance);
+    r.min_clearance = effectiveMinClearance(pos(req->min_clearance, d.min_clearance), stand_min_clearance_m_);
     r.max_standoff = pos(req->max_standoff, d.max_standoff);
     r.grid_step = pos(req->grid_step, d.grid_step);
     r.lateral_margin = pos(req->lateral_margin, d.lateral_margin);

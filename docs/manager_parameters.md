@@ -28,6 +28,19 @@ These shape the candidate filter of `core/dock_ik_selector.hpp`. They have no ef
 | `dock_ik_linear_joints` | [0] | Indices (in the planning group, lift first) of prismatic joints. Their joint change is not wrapped to [-pi, pi] when the cost is computed. |
 | `dock_ik_max_dq_rad` | 3.2 | A candidate whose cost (largest joint change from the reference configuration) is above this is rejected. |
 
+### Reach preference (opt-in, `dock_ik_reach_fraction` > 0)
+
+With the lift free the IK tends to dock with the lift near its start and the tool far out on the arm (tall-wall MuJoCo run: lift docked range -0.002..0.099 m of a 1.5 m stroke, tool up to 87% of reach). With the preference on, every seed is also tried with its lift moved to the value nearest the reference lift that keeps the tool at or under the target fraction, and a candidate at or under the target beats one above it whatever its cost. Needs `dock_ik_continuity:=true` and the TF `frame_id` <- `arm_base_frame`. No candidate under the target: the cheapest one as without the preference (logged as "over the target"). Gtested on the host with a fake IK; not run in a simulation.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `dock_ik_reach_fraction` | 0.0 | Wanted upper bound of tool distance from the `arm_base_frame` origin over `dock_ik_reach_m`. 0 = off. |
+| `dock_ik_reach_m` | 0.0 | Arm reach (m) from the `arm_base_frame` origin. Must be > 0 for the preference to act. |
+| `dock_ik_lift_joint` | 0 | Index of the lift joint in the planning group. |
+| `dock_ik_lift_min_m`, `dock_ik_lift_max_m` | 0.0, 1.5 | Stroke the proposed lift is clamped into. |
+
+The reachability node has a matching opt-in for stand planning, `stand_min_clearance_m` (default 0 = off), described in [reachability.md](reachability.md): a floor for the chassis-to-wall clearance of every `~/plan_stands` request.
+
 ## Recovery jog
 
 The jog moves the arm a few centimetres of joint space back toward the last good configuration before a retract or stow is retried.

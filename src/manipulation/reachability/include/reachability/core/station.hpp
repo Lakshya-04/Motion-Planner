@@ -6,6 +6,8 @@
 // is to the wall's work area.
 #pragma once
 
+#include <cmath>
+
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -52,6 +54,14 @@ struct StationRequest
   std::optional<FreeSpace> free_space;
   double free_space_margin{0.05};
 };
+
+/// Minimum chassis-to-wall clearance of a request: the requested value, raised to `floor_m` when that is positive
+/// (the node parameter `stand_min_clearance_m`; 0 or negative = off, the request is used as is). A non-finite floor
+/// is ignored.
+inline double effectiveMinClearance(double requested, double floor_m)
+{
+  return (std::isfinite(floor_m) && floor_m > requested) ? floor_m : requested;
+}
 
 /// True when `xy` lies within the request's avoid radius of an avoided station.
 inline bool stationAvoided(const StationRequest & q, const Eigen::Vector2d & xy)
