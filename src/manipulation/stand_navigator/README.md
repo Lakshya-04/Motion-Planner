@@ -1,6 +1,6 @@
 # stand_navigator
 
-Drives the mobile base to a stand chosen by the reachability planner, and servos it to a standoff and yaw against the fitted wall plane. A small stand-in until Nav2 is used.
+Drives the mobile base to a stand chosen by the reachability planner, and servos it to a standoff and yaw against the fitted wall plane. A small stand-in until Nav2 is used; with a wall scene it can plan a collision-free base path around the scene's walls and obstacles.
 
 ## Tier
 
@@ -8,9 +8,9 @@ ROS node (Python, `rclpy`) with a ROS-free core (`core.py`, `wall_docking.py`).
 
 ## Inputs and outputs
 
-- Node `stand_navigator_node`: action server `navigate_to_stand` (`stand_navigator_msgs/NavigateToStand`); subscribes `odom_topic` (default `odom`); publishes `geometry_msgs/Twist` on `cmd_vel_topic` (default `cmd_vel`). Parameters: `base_profile` (a profile YAML with a `base:` section, required), `tolerance_xy_m`, `tolerance_yaw_rad`, `timeout_s`, `rate_hz`, `odom_timeout_s`.
+- Node `stand_navigator_node`: action server `navigate_to_stand` (`stand_navigator_msgs/NavigateToStand`); subscribes `odom_topic` (default `odom`); publishes `geometry_msgs/Twist` on `cmd_vel_topic` (default `cmd_vel`). Parameters: `base_profile` (a profile YAML with a `base:` section, required), `tolerance_xy_m`, `tolerance_yaw_rad`, `timeout_s`, `rate_hz`, `odom_timeout_s`, and the planner ones: `use_path_planner`, `wall_scene_json`, `wall_scene_topic`, `planner_resolution_m`, `planner_margin_m`, `planner_lookahead_m`.
 - Node `wall_docking_node`: action server `wall_dock` (`WallDock`); also subscribes the wall scene (`wall_scene_topic`, default `/wall_detector/wall_scene`, `std_msgs/String`, transient local). Parameters include `base_profile`, `ref_xy`, `facing_rad`, `tolerance_standoff_m`, `tolerance_yaw_rad`, `max_linear_mps`, `max_angular_radps`, `plane_max_age_s`.
-- ROS-free API: `core.py` (`BaseProfile`, `load_profile`, `arm_to_footprint`, `footprint_to_arm`, `StandController`), `wall_docking.py` (`measure_wall`, `WallDockController`, optional lateral term `LateralConfig` with `PlannedStandLateral` / `WallEdgeLateral`, typed `DockOutcome`, `DockResult`, `plan_lateral_manoeuvre`), `dock_montecarlo.py` (noise Monte Carlo of the controller logic).
+- ROS-free API: `path_planner.py` (`scene_obstacles`, `straight_line_free`, `plan_path`, `time_parametrize`, `PathFollower`), `core.py` (`BaseProfile` incl. `footprint`, `load_profile`, `arm_to_footprint`, `footprint_to_arm`, `StandController`), `wall_docking.py` (`measure_wall`, `WallDockController`, optional lateral term `LateralConfig` with `PlannedStandLateral` / `WallEdgeLateral`, typed `DockOutcome`, `DockResult`, `plan_lateral_manoeuvre`), `dock_montecarlo.py` (noise Monte Carlo of the controller logic).
 - Controller: speed and acceleration limited, for omni and differential bases (profile `base.drive_type`).
 
 ## Dependencies
@@ -30,7 +30,7 @@ ros2 run stand_navigator wall_docking_node --ros-args -p base_profile:=/path/pro
 
 ## Tests
 
-`test/test_core.py`, `test/test_wall_docking.py`, `test/test_wall_docking_lateral.py` and `test/test_dock_montecarlo.py` (95 tests in the last host run).
+`test/test_core.py`, `test/test_path_planner.py`, `test/test_wall_docking.py`, `test/test_wall_docking_lateral.py` and `test/test_dock_montecarlo.py` (106 tests in the last host run).
 
 ```bash
 colcon test --packages-select stand_navigator
@@ -38,9 +38,13 @@ colcon test --packages-select stand_navigator
 
 ## Status and limits
 
-- Open-loop on `/odom`: no obstacle avoidance, no map; the goal frame must be the odometry frame (no frame transform).
+- Open-loop on `/odom`: no sensor-based obstacle avoidance; the optional planner uses a static wall scene (grid A* plus shortcutting, host-tested only); the goal frame must be the odometry frame (no frame transform).
 - Exercised in the MuJoCo simulation (`run_stand_navigation.sh`, `run_wall_docking.sh`); nothing here has run on hardware.
 - Wheels are not modelled in the simulations; the base is a planar velocity-commanded body there.
+
+## Path planning
+
+Straight line stays the default. With `wall_scene_json` / `wall_scene_topic` set, the straight drive is checked against the scene's walls and obstacles with the profile footprint; when blocked (or with `use_path_planner:=true`) a grid A* path with line-of-sight smoothing is followed waypoint by waypoint, and the result message reports `planned path X m vs straight Y m`. Details, limits and the MuJoCo switches `MULTI_STAND_PATH_PLANNER=1` and `MULTI_STAND_WALL_DOCK=1`: [stand_navigation.md](../../../docs/stand_navigation.md) "Path planning".
 
 ## Dock Monte Carlo
 

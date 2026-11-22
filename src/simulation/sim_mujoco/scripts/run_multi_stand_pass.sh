@@ -16,6 +16,12 @@
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
 #                                  configuration docked at the wall, [] chains the seeds from the previous dock
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
+#   MULTI_STAND_WALL_DOCK=1        also start wall_docking_node (action `wall_dock`) and latch the pass's wall scene, with its frame set to
+#                                  odom, on /wall_detector/wall_scene (no wall_detector runs in this pass). Default 0 = off. Only the
+#                                  server is added: the manager does not send WallDock goals yet, so send one by hand
+#                                  (`ros2 action send_goal /wall_dock stand_navigator_msgs/action/WallDock "{standoff_m: 0.55}"`)
+#   MULTI_STAND_PATH_PLANNER=1     give stand_navigator the pass's wall scene (wall_scene_json) and use_path_planner:=true; default 0 = the
+#                                  straight line unless it is blocked (docs/stand_navigation.md "Path planning")
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented), e.g. `stand_nav_timeout_s: 2.0` to make
 #                                  the navigation fail and watch the skip
@@ -104,7 +110,22 @@ start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$STAND_PRO
 start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0
 start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
   -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0}
-start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE
+NAV_ARGS=()
+if [ "${MULTI_STAND_PATH_PLANNER:-0}" = 1 ]; then
+  NAV_ARGS=(-p wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json -p use_path_planner:=true)
+fi
+start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE ${NAV_ARGS[@]+"${NAV_ARGS[@]}"}
+if [ "${MULTI_STAND_WALL_DOCK:-0}" = 1 ]; then
+  start wall_docking ros2 run stand_navigator wall_docking_node --ros-args -p base_profile:=$PROFILE
+  python3 - "$OUT/data/wall_pass_coverage_scene.json" "$OUT/wall_scene_odom.yaml" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d['frame_id'] = 'odom'
+open(sys.argv[2], 'w').write(json.dumps({'data': json.dumps(d)}))
+PYEOF
+  start wall_scene_pub ros2 topic pub -r 1 --qos-durability transient_local --qos-reliability reliable \
+    /wall_detector/wall_scene std_msgs/msg/String "$(cat "$OUT/wall_scene_odom.yaml")"
+fi
 
 # 1. coverage plan for the wall's contact region, in the world frame
 rm -f "$COV"

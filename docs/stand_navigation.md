@@ -39,8 +39,9 @@ agrees, wall gap 0.803 m, arm deviation 0.0016, F/T change 0.49 N, no drift at t
 
 Overview of what is real versus stubbed across navigation and perception: [navigation_and_perception.md](navigation_and_perception.md).
 
-- Obstacle avoidance. The controller drives a straight line; there is no costmap and no planning. The wall is
-  avoided only because the stand keeps the footprint clear and the approach is parallel to it.
+- Obstacle avoidance from live sensing. The controller drives a straight line unless a wall scene is given, then a base
+  path planner can go around the scene's walls and obstacles ("Path planning" below); there is no costmap from a sensor
+  and no dynamic obstacle handling.
 - Diff drive in the sim (the controller is unit-tested for it; the sim run used the omni profile).
 - Several stands in a loop is done in the manager's `execute_coverage` action (see "Several stands in a loop" below); not
   done there: replanning a failed column, choosing another stand when navigation fails.
@@ -67,6 +68,38 @@ default. Not verified in a sim; RM4D estimates only.
 checking confirmed (`reachability_verified_node`, `docs/reachability.md`) instead of RM4D's promise alone. That service takes
 minutes on a wall, so raise `stand_service_timeout_s` (default 60 s, the wait for the stand planner's reply) to match. Only
 the parameter is new and the manager build passes; a mission has not been run this way.
+
+## Path planning (opt-in, scene based)
+
+`stand_navigator/path_planner.py` is a ROS-free planner for the base footprint (the `base.footprint` rectangle of the profile).
+It builds a 2D grid from a wall scene (the wall_detector JSON: `walls`, `obstacles`; vertical planes become 2 cm thick floor
+segments, obstacles become boxes protruding from their wall; heights are ignored, so anything blocks), inflates it by the
+footprint's circumscribed radius plus `planner_margin_m`, runs 8-connected A*, shortcuts the path by line of sight and
+follows it with `StandController` aimed at a carrot point `planner_lookahead_m` ahead (waypoint following, no stop at corners;
+`PathFollower`). It is plain grid A* plus shortcutting, not hybrid-A*: the diff base turns in place. `time_parametrize`
+turns a path into a speed- and acceleration-limited pose sequence (trapezoidal speed profile, yaw rate capped).
+The cells near the start and the goal, which the inflation would close (a stand is near the wall by design), are opened
+only where the exact footprint at that endpoint's yaw is collision-free; away from them the guarantee holds for every heading.
+
+Behaviour of `navigate_to_stand` (action definition unchanged):
+
+- No scene (`wall_scene_json` and `wall_scene_topic` empty): exactly the old straight-line drive.
+- With a scene, the straight drive is checked with the exact footprint (yaw interpolated for omni, along the line for diff).
+  If it is free the old controller runs unchanged; if it is blocked the planned path is followed, and if there is no path the goal
+  is rejected (`INVALID_GOAL`, reason in `error_msg`). `use_path_planner:=true` plans even when the straight line is free
+  (and falls back to the straight line if no path is found).
+- The result's `error_msg` carries the length, e.g. `arrived (planned path 3.10 m vs straight 2.40 m)` or
+  `arrived (straight line 2.40 m)`.
+
+Parameters: `use_path_planner` (false), `wall_scene_json` (file), `wall_scene_topic` (String JSON, transient local, e.g.
+`/wall_detector/wall_scene`), `planner_resolution_m` (0.05), `planner_margin_m` (0.02), `planner_lookahead_m` (0 = from the
+profile). The scene must be in the odom frame (nothing is transformed). Limits: host-tested on a kinematic base only
+(`test/test_path_planner.py`), not run in a simulator; no dynamic obstacles; one scene snapshot per goal.
+
+MuJoCo multi-stand pass switches (`run_multi_stand_pass.sh`): `MULTI_STAND_PATH_PLANNER=1` gives the navigator the pass's wall scene
+and `use_path_planner:=true`; `MULTI_STAND_WALL_DOCK=1` also starts `wall_docking_node` and latches the pass's scene
+(frame set to odom) on `/wall_detector/wall_scene` (the pass runs no wall_detector). Both default off. The manager does not send
+`WallDock` goals yet, so with the flag only the server is up (send a goal by hand, see the script header).
 
 ## Wall docking: standoff and yaw from the fitted plane
 
