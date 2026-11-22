@@ -1,0 +1,11 @@
+# Intentional exceptions to docker/tools/check_params.py. One rule per line:
+#
+#   undocumented <package> <name-glob>   a declared parameter that needs no doc, config or launch mention
+#   undeclared   <package> <name-glob>   a ros__parameters key in the package's config yaml that the C++ never declares
+#
+# <package> is manipulation_manager, reachability or * ; <name-glob> is an fnmatch pattern on the dotted name.
+# Every rule needs a comment saying why. Keep this list empty if you can: the point of the check is that a
+# parameter nobody can look up, or a config key nothing reads, is a bug.
+#
+# Currently empty: the first run of the check found 28 undocumented manager parameters, all fixed in
+# docs/manager_parameters.md, and no yaml key without a declaration (neither package has a ros__parameters yaml).
