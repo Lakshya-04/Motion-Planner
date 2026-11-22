@@ -6,6 +6,9 @@
 # The wall is MULTI_STAND_WALL_WIDTH wide (default 0.9 m, the stock patch is 0.3) starting at y = MULTI_STAND_WALL_DY,
 # at x = 0.98 + MULTI_STAND_WALL_DX (shift_wall_scene.py). Run, record in odom and score like run_stand_pass.sh.
 #   MULTI_STAND_SCENARIO=name      a wall from make_scenario_scene.py (size, position and obstacles) instead of the DX/DY/WIDTH ones
+#   MULTI_STAND_PATCH_Z="lo,hi"    contact patch height in m (needs MULTI_STAND_SCENARIO; the wall grows 0.3 m above and below it);
+#                                  the scenario's own patch is used otherwise (two_panels_tall: 0.6,2.0); sets MP_Z_LO / MP_Z_HI,
+#                                  the manager's coverage z range and the recorder's wall band
 #   MULTI_STAND_COVERAGE_EXTRA     more ros arguments of the coverage demo (-p obstacle_inflation_radius_m:=0.07)
 #   MULTI_STAND_DOCK_IK_CONTINUITY=true  choose the dock joint goal among IK solutions by continuity (manager `dock_ik_continuity`, default false)
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
@@ -55,8 +58,11 @@ REC=$OUT/run.csv
 # MULTI_STAND_SCENARIO=name takes the wall and its obstacles from make_scenario_scene.py (it sets DX, DY and WIDTH)
 if [ -n "${MULTI_STAND_SCENARIO:-}" ]; then
   [ "$STAND_PROFILE" != ur10e_telescopic ] && { echo "MULTI_STAND_SCENARIO walls are placed for ur10e_telescopic; not shifted for $STAND_PROFILE"; exit 2; }
-  eval "$(python3 "$PKG/lib/sim_mujoco/make_scenario_scene.py" "$SHARE/data" "$OUT/data" "$MULTI_STAND_SCENARIO")" || exit 2
+  PATCH_ARGS=(); [ -n "${MULTI_STAND_PATCH_Z:-}" ] && PATCH_ARGS=(--patch-z "$MULTI_STAND_PATCH_Z")
+  eval "$(python3 "$PKG/lib/sim_mujoco/make_scenario_scene.py" ${PATCH_ARGS[@]+"${PATCH_ARGS[@]}"} "$SHARE/data" "$OUT/data" "$MULTI_STAND_SCENARIO")" || exit 2
+  MP_Z_LO=$PATCH_Z_LO; MP_Z_HI=$PATCH_Z_HI   # the scenario's patch height (stock 1.0..1.3 unless it is a tall wall)
 else
+  [ -n "${MULTI_STAND_PATCH_Z:-}" ] && { echo "MULTI_STAND_PATCH_Z needs MULTI_STAND_SCENARIO (make_scenario_scene.py builds the tall wall)"; exit 2; }
   python3 "$PKG/lib/sim_mujoco/shift_wall_scene.py" "$SHARE/data" "$OUT/data" "$(python3 -c "print(round($DX + $MP_WALL_DX, 3))")" "$DY" "$WIDTH" "$MP_WALL_DZ" || exit 2
 fi
 WALL_X=$(python3 -c "print(round(0.98 + $DX + $MP_WALL_DX, 3))")
@@ -183,6 +189,9 @@ fi
 kill -INT "$REC_PID" 2>/dev/null; wait "$REC_PID" 2>/dev/null; REC_PID=
 if [ -n "${FILM_PID:-}" ]; then kill -INT "$FILM_PID" 2>/dev/null; wait "$FILM_PID" 2>/dev/null; cat "$OUT/film.log"; fi
 cat "$OUT/record.log"
+# lift range, chassis-to-wall clearance, tool reach fraction (a report; run_metrics.py RUN_DIR prints it again)
+echo "run metrics:"
+python3 "$PKG/lib/sim_mujoco/run_metrics.py" "$OUT" --profile "$PROFILE" || echo "run_metrics failed (not a gate)"
 SC=0
 if [ -f "$REC" ]; then
   ros2 run coverage_planner score_run --samples "$REC" --wall "$REC.wall.json" --target-force "${MULTI_STAND_TARGET:-10}" \

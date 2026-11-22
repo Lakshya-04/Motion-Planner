@@ -146,3 +146,36 @@ def test_score_run_counts_obstacle_contacts(tmp_path):
     _, a = score()
     _, b = score('--keepout-margin', '0.07')
     assert b['coverage']['target_cells'] < a['coverage']['target_cells']
+
+
+# ---- tall wall: the patch is high enough that the lift must telescope
+def test_two_panels_tall_has_a_tall_wall_a_wide_patch_and_a_matching_curtain(tmp_path):
+    info = mss.build(str(DATA), str(tmp_path), 'two_panels_tall')
+    assert (info['PATCH_Z_LO'], info['PATCH_Z_HI']) == (0.6, 2.0) and (info['WALL_Z_LO'], info['WALL_Z_HI']) == (0.3, 2.3)
+    sim = json.loads((tmp_path / 'smoke_wall_scene.json').read_text())['walls'][0]
+    cov = json.loads((tmp_path / 'wall_pass_coverage_scene.json').read_text())['walls'][0]
+    assert sim['origin_xyz'][2] == cov['origin_xyz'][2] == pytest.approx(1.3)
+    # basis_v = -z: z = origin z - v
+    assert [1.3 - v for v in sim['v_range_m']] == pytest.approx([2.3, 0.3])
+    assert [1.3 - v for v in cov['v_range_m']] == pytest.approx([2.0, 0.6])
+    prims, _ = load_scene(tmp_path / 'smoke_wall_scene.json')
+    wall = [p for p in prims if not p.name.startswith('obstacle_')][0]
+    assert wall.pos[2] == pytest.approx(1.3) and wall.size[1] == pytest.approx(1.0)   # half height of the 2 m wall
+    pts = pcd_points(tmp_path / 'walls.pcd')
+    zs = [p[2] for p in pts]
+    assert min(zs) == pytest.approx(0.55) and max(zs) == pytest.approx(2.05)
+    sim_pts = pcd_points(tmp_path / 'walls_sim.pcd')
+    assert max(p[2] for p in sim_pts) >= 2.6 - 0.02 and min(p[2] for p in sim_pts) <= 0.02   # curtain covers the wall
+
+
+def test_stock_scenarios_keep_the_stock_patch_and_z_override_widens_the_wall(tmp_path):
+    info = mss.build(str(DATA), str(tmp_path / 'a'), 'two_panels_plain')
+    assert (info['PATCH_Z_LO'], info['PATCH_Z_HI'], info['WALL_Z_LO']) == (1.0, 1.3, 'default')
+    cov = json.loads((tmp_path / 'a' / 'wall_pass_coverage_scene.json').read_text())['walls'][0]
+    assert cov['origin_xyz'][2] == 1.15 and cov['v_range_m'] == [-0.15, 0.15]
+    info = mss.build(str(DATA), str(tmp_path / 'b'), 'two_panels_plain', patch_z=(0.8, 1.9))
+    assert (info['WALL_Z_LO'], info['WALL_Z_HI']) == (0.5, 2.2)
+    with pytest.raises(ValueError):
+        mss.build(str(DATA), str(tmp_path / 'c'), 'two_panels_plain', patch_z=(1.9, 0.8))
+    with pytest.raises(ValueError):
+        mss.patch_and_wall_z(dict(patch_z=(0.6, 2.0), wall_z=(0.8, 2.3)))
