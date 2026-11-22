@@ -111,6 +111,10 @@ std::string stationGridProblem(const StationRequest & q)
     return "min_clearance, max_standoff and lateral_margin must be finite";
   }
   if (!surfaceFrame(q.wall_normal).ok || q.targets_world.empty()) {return "";}   // reported elsewhere
+  for (const auto & t : q.targets_world) {
+    // a NaN along the wall normal passes the grid-size test below and then reads as "no free stand"
+    if (!t.translation().allFinite()) {return "a target position is not finite";}
+  }
   const double points = stationGridPointCount(q);
   if (!std::isfinite(points)) {return "a target position is not finite";}
   if (!(points <= static_cast<double>(kMaxGridPoints))) {
