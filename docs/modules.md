@@ -1,6 +1,6 @@
 # Module map
 
-The repository holds 32 ROS 2 packages under `src/`. This page says what each one is, what it needs and how the packages depend on each other, so you can lift one part out without taking the rest. Each package has its own README (inputs, outputs, tests, limits); the rules the layering follows are in [architecture.md](architecture.md) and [package_layout.md](package_layout.md).
+The repository holds 33 ROS 2 packages under `src/`. This page says what each one is, what it needs and how the packages depend on each other, so you can lift one part out without taking the rest. Each package has its own README (inputs, outputs, tests, limits); the rules the layering follows are in [architecture.md](architecture.md) and [package_layout.md](package_layout.md).
 
 Nothing here has run on hardware. Behaviour was checked in unit tests and in the MuJoCo and Gazebo simulations ([sim_vs_real.md](sim_vs_real.md)).
 
@@ -39,6 +39,7 @@ Column meanings. **ROS-free**: the library at the core of the package has no `rc
 | [`compliant_trajectory_controller`](../src/control/compliant_trajectory_controller/README.md) | control | ROS node or plugin (controller) | no | no | no | `core_types`, `force_core`, `ft_bridge_hardware`, `mobile_manipulator_description`, `mobile_manipulator_profile`, `ros_adapters` |
 | [`ft_bridge_hardware`](../src/control/ft_bridge_hardware/README.md) | control | ROS node or plugin (hardware component) | no | no | no | none |
 | [`ft_conditioner`](../src/control/ft_conditioner/README.md) | control | ROS node | no | no | no | `core_types`, `force_core` |
+| [`lift_hardware`](../src/control/lift_hardware/README.md) | control | ROS node or plugin (hardware component) over a ROS-free core | partly | no | no | none |
 | [`sim_gazebo`](../src/simulation/sim_gazebo/README.md) | simulation | Simulator | no | no | is the simulator | `mobile_manipulator_description` |
 | [`sim_isaac`](../src/simulation/sim_isaac/README.md) | simulation | Simulator (stub) | n/a | no | is the simulator | none |
 | [`sim_mujoco`](../src/simulation/sim_mujoco/README.md) | simulation | Simulator | partly | no | is the simulator | `coverage_planner`, `coverage_planner_msgs`, `coverage_task_msgs`, `ft_bridge_hardware`, `ft_conditioner`, `manipulation_manager`, `mobile_manipulator_description`, `mobile_manipulator_moveit_config`, `motion_planner_moveit`, `reachability`, `reachability_msgs`, `stand_navigator`, `stand_navigator_msgs`, `wall_detector` |
