@@ -2702,7 +2702,12 @@ private:
     // in about half the runs, even after the force had decayed and the reference had been backed off).
     setState("retracting");
     // Back off at the end of the stroke for a serpentine plan (the next column starts there), else at its start.
-    const core_types::Pose retract_pose = chooseRetractPose(serpentine_columns_, standoff_pose, intent.poses);
+    core_types::Pose retract_pose = chooseRetractPose(serpentine_columns_, standoff_pose, intent.poses);
+    if (serpentine_columns_ && contact_exec.waypoints_completed < intent.poses.size()) {
+      // a stroke that stopped early: back off from where the tool really is, not from the planned end of the stroke
+      FrameTransform here;
+      if (lookup(frame_id_, "tcp_link", here)) {retract_pose.z = here.t[2];}
+    }
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
     // a serpentine retract leaves the wall from the stroke's end (often the top of the reach): the straight move away
@@ -2726,8 +2731,11 @@ private:
           }
           return false;
         };
-      bool freed = false;
-      if (!stop() && recoverArm("retract")) {
+      // a failed straight retract is first tried as one plain free-space plan from where the arm is; the jog is the
+      // next resort
+      bool freed = serpentine_columns_ && !stop() && manager_.executeMotionSegments(
+        frame_id_, {retract_seg}, {retract_pose}, planning_group_).success;
+      if (!freed && !stop() && recoverArm("retract")) {
         freed = retract_again();
       }
       if (!freed && !stop() && canRecoverWithoutWall()) {
@@ -2799,7 +2807,12 @@ private:
     setState("retracting");
 
     // Back off at the end of the stroke for a serpentine plan (the next column starts there), else at its start.
-    const core_types::Pose retract_pose = chooseRetractPose(serpentine_columns_, standoff_pose, intent.poses);
+    core_types::Pose retract_pose = chooseRetractPose(serpentine_columns_, standoff_pose, intent.poses);
+    if (serpentine_columns_ && stroke_exec.waypoints_completed < intent.poses.size()) {
+      // a stroke that stopped early: back off from where the tool really is, not from the planned end of the stroke
+      FrameTransform here;
+      if (lookup(frame_id_, "tcp_link", here)) {retract_pose.z = here.t[2];}
+    }
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
     // a serpentine retract leaves the wall from the stroke's end (often the top of the reach): the straight move away
@@ -2813,9 +2826,11 @@ private:
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
       retract_seg.mode_hint = retractFallbackHint();
       // a start state the planners refuse: jog it free, then try the retract again
-      if (!stop() && recoverArm("retract") &&
+      const bool plain_fsp_ok = serpentine_columns_ && !stop() && manager_.executeMotionSegments(
+        frame_id_, {retract_seg}, {retract_pose}, planning_group_).success;
+      if (plain_fsp_ok || (!stop() && recoverArm("retract") &&
         manager_.executeMotionSegments(
-          frame_id_, {retract_seg}, {retract_pose}, planning_group_).success)
+          frame_id_, {retract_seg}, {retract_pose}, planning_group_).success))
       {
         arm_stuck_ = false;
       } else {
