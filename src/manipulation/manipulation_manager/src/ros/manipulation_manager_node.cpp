@@ -70,6 +70,7 @@
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/coverage_task.hpp"
 #include "manipulation_manager/core/column_ordering.hpp"
+#include "manipulation_manager/core/column_retry.hpp"
 #include "manipulation_manager/core/frame_transform.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
 #include "manipulation_manager/core/mission_fsm.hpp"
@@ -402,6 +403,15 @@ public:
     // Failure handling. A column that failed (dock or contact stroke did nothing) is retried this many times, then
     // skipped and the run goes on; the result lists it under columns_failed.
     column_retries_ = std::max<int>(0, this->declare_parameter<int>("column_retries", 1));
+    // Second pass over the columns that are still failed or partial after the main pass (core/column_retry.hpp): each gets
+    // max_column_retries more attempts from a fresh stow + prime, docking with a dock IK solution other than the earlier
+    // ones; retry_replan_stand also re-plans a nearby stand for a navigation or dock failure (multi-stand runs).
+    // Off by default; the verify result gets a column_retries block.
+    retry_cfg_.enabled = this->declare_parameter<bool>("retry_failed_columns", false);
+    retry_cfg_.max_retries = std::max<int>(0, this->declare_parameter<int>("max_column_retries", 1));
+    retry_cfg_.replan_stand = this->declare_parameter<bool>("retry_replan_stand", false);
+    retry_cfg_.allow_branch_change = this->declare_parameter<bool>("retry_allow_branch_change", false);
+    retry_cfg_.stop_after_failed_columns = std::max<int>(0, this->declare_parameter<int>("retry_stop_after_failed", 3));
     // A start state the planners refuse (the arm in self-collision at the end of its reach, a joint on its limit)
     // is moved a few centimetres of joint space back toward the last configuration known to be good (a stand's
     // stow pose, a column's dock pose) before the retract or stow is tried again. recovery_jog_max_rad refuses a
@@ -884,6 +894,8 @@ private:
     column_peaks_.clear();
     verify_stand_columns_.clear();
     verify_wall_dock_.clear();
+    retry_report_ = ColumnRetryReport{};
+    column_dock_q_.clear();
     trace_.reset();
     const TaskResult out = executeTaskImpl(req);
     if (!verify_result_path_.empty()) {
@@ -901,6 +913,7 @@ private:
       in.report_path = ledger_.path();
       in.stand_columns = verify_stand_columns_;
       in.wall_dock = verify_wall_dock_;
+      in.column_retry = retry_report_;
       addTraceToVerify(in);
       const auto result = buildMissionVerify(in);
       if (writeMissionVerify(verify_result_path_, missionVerifyToJson(result, in))) {
@@ -1055,6 +1068,7 @@ private:
         }
         tracker_.columnFinished(0, ids[i], runColumnWithRetry(sel[i], ids[i]));
       }
+      retryFailedColumns(sel, ids, nullptr);
       if (!stop()) {
         machine.singleFinished();
       }
@@ -1221,6 +1235,7 @@ private:
         break;
       }
     }
+    retryFailedColumns(sel, ids, &visit);
     return true;
   }
 
@@ -1861,14 +1876,15 @@ private:
       (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
     // with the continuity choice the live state is a seed of its own, so an empty remembered seed (the first dock of a
     // run) must not stop it
-    if (!ik || (seed.empty() && !dock_ik_continuity_)) {
+    const bool exclude = dock_ik_exclude_on_;   // a column retry: a solution other than the earlier ones
+    if (!ik || (seed.empty() && !dock_ik_continuity_ && !exclude)) {
       return {};
     }
     motion_planner::IkRequest req;
     req.frame_id = frame_id_;
     req.planning_group = planning_group_;
     req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
-    if (dock_ik_continuity_) {
+    if (dock_ik_continuity_ || exclude) {
       const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_);
       const std::vector<double> & ref = !dock_branch_seed_.empty() ? dock_branch_seed_ : live;
       // reach preference: where the tool goal lies relative to the arm base (TF frame_id <- arm_base_frame, the live lift
@@ -1897,8 +1913,10 @@ private:
           }
           return res.joint_solution;
         },
-        {dock_branch_seed_, live, dock_seed_}, ref, dock_ik_sel_, reach_ptr);
+        {dock_branch_seed_, live, dock_seed_, last_good_state_}, ref, dock_ik_sel_, reach_ptr,
+        exclude ? &dock_ik_exclude_ : nullptr);
       if (choice.ok) {
+        column_dock_q_[static_cast<size_t>(std::max(0, column_))].push_back(choice.q);
         RCLCPP_INFO(
           this->get_logger(),
           "DOCKGOAL continuity: seed %zu of %zu candidates, max dq %.3f rad (dropped: branch %zu, wrist %zu, jump %zu)",
@@ -1913,8 +1931,11 @@ private:
       }
       RCLCPP_WARN(
         this->get_logger(),
-        "DOCKGOAL continuity: no acceptable solution (%zu candidates; branch %zu, wrist %zu, jump %zu), seeded IK as before",
-        choice.candidates, choice.rejected_branch, choice.rejected_wrist, choice.rejected_cost);
+        "DOCKGOAL continuity: no acceptable solution (%zu candidates; branch %zu, wrist %zu, jump %zu, already used %zu), seeded IK as before",
+        choice.candidates, choice.rejected_branch, choice.rejected_wrist, choice.rejected_cost, choice.rejected_excluded);
+      if (exclude) {
+        return {};   // a retry must not dock with the solution that failed: the planner samples its own
+      }
     }
     req.joint_seed = seed;
     const auto res = ik->ik(req);
@@ -1929,6 +1950,7 @@ private:
       txt += buf;
     }
     RCLCPP_INFO(this->get_logger(), "DOCKGOAL seeded IK q=[%s]", txt.c_str());
+    column_dock_q_[static_cast<size_t>(std::max(0, column_))].push_back(res.joint_solution);
     return res.joint_solution;
   }
 
@@ -2325,6 +2347,146 @@ private:
       }
     }
     return outcome;
+  }
+
+  /// Opt-in second pass (retry_failed_columns): every column still failed or partial gets up to max_column_retries more
+  /// attempts, each from a fresh stow + prime and with a dock IK solution other than the earlier ones; for a
+  /// navigation or dock failure retry_replan_stand re-plans the stand from the column's cells (multi-stand runs; `visit`
+  /// is the stand list of the run, null for a single stand). The policy is core/column_retry.hpp; this only moves.
+  void retryFailedColumns(
+    const std::vector<CoverageSegmentIntent> & sel, const std::vector<size_t> & ids,
+    const std::vector<StanceStand> * visit)
+  {
+    retry_report_.enabled = retry_cfg_.enabled;
+    retry_report_.max_retries = retry_cfg_.max_retries;
+    if (!retry_cfg_.enabled || stop()) {
+      return;
+    }
+    std::map<size_t, size_t> index_of;   // column id -> index in sel
+    for (size_t i = 0; i < ids.size(); ++i) {
+      index_of[ids[i]] = i;
+    }
+    std::vector<ColumnFailure> failures;
+    const auto add = [&](size_t col, ColumnOutcome o) {
+        const auto e = ledger_.get(col);
+        if (index_of.find(col) == index_of.end() || (e.state != LedgerState::kFailed && e.state != LedgerState::kSkipped)) {
+          return;   // never ran (no stand reaches it) or not tracked: not a retry candidate
+        }
+        ColumnFailure f;
+        f.column = col;
+        f.stand = visit ? e.stand : -1;
+        f.outcome = o;
+        f.kind = e.reason == SkipReason::kNavFailed ? RetryFailure::kNav :
+          e.reason == SkipReason::kDockFailed ? RetryFailure::kDock :
+          e.reason == SkipReason::kPlanFailed ? RetryFailure::kPlan :
+          e.reason == SkipReason::kContactOverload ? RetryFailure::kOverload : RetryFailure::kOther;
+        failures.push_back(f);
+      };
+    for (const size_t c : tracker_.failed()) {add(c, ColumnOutcome::kFailed);}
+    for (const size_t c : tracker_.partial()) {add(c, ColumnOutcome::kPartial);}
+    const auto plan = planColumnRetries(failures, retry_cfg_, &retry_report_.not_retried);
+    if (plan.empty()) {
+      return;
+    }
+    RCLCPP_INFO(
+      this->get_logger(), "column retry pass: %zu column(s), up to %d attempt(s) each", plan.size(), retry_cfg_.max_retries);
+    int at_stand = (visit && stand_index_ < tracker_.stands().size() && tracker_.stands()[stand_index_].reached) ?
+      static_cast<int>(stand_index_) : -1;
+    const auto attempt = [&](const ColumnRetryPlan & p, int n, const RetryVariant & v) {
+        RetryAttemptResult r;
+        const size_t i = index_of.at(p.column);
+        RCLCPP_WARN(
+          this->get_logger(), "column %zu retry %d (%s): %s", p.column, n, v.label().c_str(), p.first_outcome ==
+          ColumnOutcome::kPartial ? "was partial" : "failed before");
+        if (!travel_state_.empty() && arm_deployed_) {
+          setState("stowing", -1);
+          if (!stowArm()) {
+            r.fatal = true;
+            r.kind = RetryFailure::kOther;
+            r.note = stop() ? "canceled" : "could not stow the arm";
+            return r;
+          }
+          arm_deployed_ = false;
+        }
+        if (visit && p.stand >= 0 && static_cast<size_t>(p.stand) < visit->size()) {
+          StanceStand target = (*visit)[static_cast<size_t>(p.stand)];
+          bool need_drive = at_stand != p.stand;
+          if (v.restand) {
+            std::vector<StanceStand> ns;
+            std::vector<std::vector<size_t>> nt;
+            std::string why;
+            if (planStands({sel[i]}, ns, nt, why) && !ns.empty()) {
+              size_t best = 0;
+              for (size_t k = 1; k < ns.size(); ++k) {
+                if (nt[k].size() > nt[best].size()) {best = k;}
+              }
+              target = ns[best];
+              need_drive = true;
+              r.note = "new stand (" + std::to_string(target.x) + ", " + std::to_string(target.y) + ")";
+            } else {
+              r.note = "stand re-plan failed (" + why + "), kept the old stand";
+            }
+          }
+          if (need_drive) {
+            std::string msg;
+            setState("navigating", -1);
+            bool ok = navigateToStand(target, msg);
+            if (ok && stand_check_enabled_) {
+              bool gate_abort = false;
+              ok = gateStand(target, msg, gate_abort);
+            }
+            if (stop()) {
+              r.fatal = true;
+              r.note = "canceled";
+              return r;
+            }
+            if (!ok) {
+              at_stand = -1;
+              r.kind = RetryFailure::kNav;
+              r.note += (r.note.empty() ? "" : "; ") + std::string("navigation failed: ") + msg;
+              ledger_.markSkipped(p.column, p.stand, SkipReason::kNavFailed);
+              return r;
+            }
+            at_stand = p.stand;
+            if (!arrival_command_.empty()) {
+              if (std::system(arrival_command_.c_str()) != 0) {
+                RCLCPP_WARN(this->get_logger(), "stand_arrival_command failed");
+              }
+              waitFor(1.0);
+            }
+          }
+        }
+        setState("priming", -1);
+        primeContinuityFromLiveState();
+        if (!travel_state_.empty()) {
+          last_good_state_ = travel_state_;
+        }
+        dock_branch_seed_.clear();   // clean pose: the continuity reference is the live state again
+        arm_stuck_ = false;
+        dock_ik_exclude_.used = column_dock_q_[p.column];
+        dock_ik_exclude_.allow_branch_change = v.allow_branch_change;
+        dock_ik_exclude_on_ = v.vary_ik && !dock_ik_exclude_.used.empty();
+        arm_deployed_ = true;
+        const auto outcome = runColumnWithRetry(sel[i], p.column);
+        dock_ik_exclude_on_ = false;
+        r.outcome = outcome;
+        if (outcome != ColumnOutcome::kDone) {
+          const auto e = ledger_.get(p.column);
+          r.kind = e.reason == SkipReason::kNavFailed ? RetryFailure::kNav :
+            e.reason == SkipReason::kDockFailed ? RetryFailure::kDock :
+            e.reason == SkipReason::kPlanFailed ? RetryFailure::kPlan :
+            e.reason == SkipReason::kContactOverload ? RetryFailure::kOverload : RetryFailure::kOther;
+        }
+        r.fatal = stop();
+        tracker_.columnRetried(
+          p.stand >= 0 ? static_cast<size_t>(p.stand) : tracker_.stands().size(), p.column, outcome);
+        return r;
+      };
+    auto rep = runColumnRetries(plan, retry_cfg_, attempt, [this]() {return stop();});
+    rep.not_retried.insert(
+      rep.not_retried.begin(), retry_report_.not_retried.begin(), retry_report_.not_retried.end());
+    retry_report_ = rep;
+    RCLCPP_INFO(this->get_logger(), "column retry pass done: %s", tracker_.summary().c_str());
   }
 
   /// Remembers where the arm is as the configuration to jog back to.
@@ -2885,6 +3047,11 @@ private:
   std::vector<double> last_good_state_;   ///< the last arm configuration known to plan from (recovery target)
   bool arm_stuck_{false};                 ///< a retract or stow failed and no recovery got the arm out yet
   int column_retries_{1};
+  ColumnRetryConfig retry_cfg_;                    ///< retry_failed_columns & co (column_retry.hpp)
+  ColumnRetryReport retry_report_;                 ///< what the second pass did, for the verify result
+  DockIkExclusion dock_ik_exclude_;                ///< dock solutions a retry must differ from (empty used = off)
+  bool dock_ik_exclude_on_{false};
+  std::map<size_t, std::vector<std::vector<double>>> column_dock_q_;   ///< column -> the dock solutions chosen so far
   bool recovery_jog_{true};
   RecoveryJogParams jog_params_;
   std::string column_order_{"input"};

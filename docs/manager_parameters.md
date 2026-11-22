@@ -41,6 +41,18 @@ With the lift free the IK tends to dock with the lift near its start and the too
 
 The reachability node has a matching opt-in for stand planning, `stand_min_clearance_m` (default 0 = off), described in [reachability.md](reachability.md): a floor for the chassis-to-wall clearance of every `~/plan_stands` request.
 
+## Column retry pass (`retry_failed_columns:=true`)
+
+Off by default. After the main pass, every column that ended failed or partial gets up to `max_column_retries` more attempts. The policy (what, in which order, which variant, when to stop, what is recorded) is `core/column_retry.hpp`, gtested on the host with a fake attempt function; the node function `retryFailedColumns` only moves the robot. Each attempt: stow the arm and prime the continuity from the live state with the dock reference cleared (a clean pose); dock with the next-best dock IK solution that differs from the ones the earlier attempts docked with (`DockIkExclusion` in `core/dock_ik_selector.hpp`; when none is left the planner samples its own goal); for a navigation failure, or a dock failure on the second attempt, optionally a stand re-planned with the `plan_stands` service from that column's cells (`retry_replan_stand`). Columns are retried by stand (fewest drives), then by id. A contact overload is never retried. The pass stops on cancel, an unrecoverable stow, or `retry_stop_after_failed` columns in a row that did not recover. The verify result gets a `column_retries` block: per attempt the column, stand, attempt number, variant (for example `fresh_stow+next_ik+restand`), the failure before and after, the outcome and a note; per column the attempts and the final outcome; the columns not retried and why. Not run in a simulation yet.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `retry_failed_columns` | false | Enable the second pass. |
+| `max_column_retries` | 1 | Extra attempts per failed or partial column (0 = none). |
+| `retry_replan_stand` | false | Allow a re-planned nearby stand (multi-stand runs): at once after a navigation failure, from the second attempt after a dock failure. |
+| `retry_allow_branch_change` | false | From the second attempt on, the different dock solution may be on the other IK branch (the wrist and jump limits still apply). |
+| `retry_stop_after_failed` | 3 | Stop the pass after this many columns in a row used all attempts without recovering (0 = never stop). |
+
 ## Recovery jog
 
 The jog moves the arm a few centimetres of joint space back toward the last good configuration before a retract or stow is retried.

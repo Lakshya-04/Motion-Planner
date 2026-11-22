@@ -298,6 +298,12 @@ if(BUILD_TESTING)
     target_include_directories(dock_ik_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   endif()
 
+  ament_add_gtest(column_retry_test test/column_retry_test.cpp)
+  if(TARGET column_retry_test)
+    target_include_directories(column_retry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(column_retry_test nlohmann_json::nlohmann_json)
+  endif()
+
   ament_add_gtest(recovery_branch_test test/recovery_branch_test.cpp)
   if(TARGET recovery_branch_test)
     target_include_directories(recovery_branch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
