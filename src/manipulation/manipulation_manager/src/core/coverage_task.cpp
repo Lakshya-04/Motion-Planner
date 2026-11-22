@@ -234,6 +234,20 @@ void TaskTracker::columnFinished(size_t stand, size_t column, ColumnOutcome outc
   }
 }
 
+void TaskTracker::columnRetried(size_t stand, size_t column, ColumnOutcome outcome)
+{
+  const auto drop = [column](std::vector<size_t> & v) {
+      v.erase(std::remove(v.begin(), v.end(), column), v.end());
+    };
+  drop(partial_);
+  drop(failed_);
+  for (auto & s : stands_) {
+    drop(s.partial);
+    drop(s.failed);
+  }
+  columnFinished(stand, column, outcome);
+}
+
 void TaskTracker::columnSkipped(size_t column)
 {
   failed_.push_back(column);

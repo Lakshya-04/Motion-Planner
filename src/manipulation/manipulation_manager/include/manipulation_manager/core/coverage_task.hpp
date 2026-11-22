@@ -134,6 +134,9 @@ public:
 
   void standReached(size_t stand, bool reached, const std::string & message);
   void columnFinished(size_t stand, size_t column, ColumnOutcome outcome);
+  /// A retry of a column that ended partial or failed: the earlier entry is replaced by the new outcome (stand >= stands count
+  /// for a single-stand run). A column that is in neither list is just added.
+  void columnRetried(size_t stand, size_t column, ColumnOutcome outcome);
   /// Columns that were not run for a reason that is not a stand (no stand covers them).
   void columnSkipped(size_t column);
   /// A column the mission ledger already holds as done (resume): counts as done, ran on no stand this time.
