@@ -1,6 +1,7 @@
 #include "manipulation_manager/core/coverage_task.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <sstream>
 
 namespace manipulation_manager
@@ -73,6 +74,35 @@ std::vector<std::vector<size_t>> groupByLateralSpan(const std::vector<double> & 
     groups.back().push_back(i);
   }
   return groups;
+}
+
+size_t mergeNearDuplicateStands(std::vector<MergeableStand> & stands, double tol_m, const StandMerger & merge)
+{
+  size_t merged = 0;
+  if (!(tol_m > 0.0) || !merge) {
+    return 0;
+  }
+  size_t i = 0;
+  while (i + 1 < stands.size()) {
+    if (std::hypot(stands[i].x - stands[i + 1].x, stands[i].y - stands[i + 1].y) > tol_m) {
+      ++i;
+      continue;
+    }
+    std::vector<size_t> all = stands[i].targets;
+    all.insert(all.end(), stands[i + 1].targets.begin(), stands[i + 1].targets.end());
+    std::sort(all.begin(), all.end());
+    all.erase(std::unique(all.begin(), all.end()), all.end());
+    auto one = merge(all);
+    if (!one) {
+      ++i;
+      continue;
+    }
+    one->targets = all;
+    stands[i] = *one;
+    stands.erase(stands.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+    ++merged;   // stay on i: the merged stand may now be next to another duplicate
+  }
+  return merged;
 }
 
 const char * toString(TaskState s)
