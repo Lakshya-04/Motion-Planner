@@ -13,6 +13,9 @@ x-common: &common
     - build-cache:/ws/build
     - install-cache:/ws/install
     - log-cache:/ws/log
+    # Compiler cache (ccache), shared by every service. Default: the named volume `ccache`. To share one
+    # cache with other worktrees or scripts use a host dir instead:  MP_CCACHE_DIR=$HOME/.cache/mp-ccache
+    - ${MP_CCACHE_DIR:-ccache}:/ccache
   environment:
     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
     RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
@@ -80,3 +83,4 @@ volumes:
   build-cache:
   install-cache:
   log-cache:
+  ccache:
