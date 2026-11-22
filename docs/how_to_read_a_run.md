@@ -109,6 +109,24 @@ How to read B:
 - **277 s engaged of 551 s.** Most of the rest is approach, docking, the stow and the drive between stands, not working time.
 - **Run A against run B.** Same pass, same code family, different load and viewer; both 10 of 10. Single runs; no statistics.
 
+## One command
+
+```bash
+python3 docker/tools/run_report.py /tmp/multi_stand_pass          # writes the report there (md, png, json)
+python3 docker/tools/run_report.py RUN_DIR --out /tmp/report_out  # or elsewhere
+```
+
+ROS-free (numpy, matplotlib). It reads the files above and prints a `VERDICT:` line plus one `FLAG:` line per finding. Missing files skip
+their section with a note. The report holds: columns done, partial and failed (manager log `columns_done` line, else a verify json);
+peak, RMS and in-band force (the score card when a card json is in the directory, else computed from `run.csv` against `--target-force 10`
+and `--band 1.5`); a per-column peak force table (columns found along the wall's u axis); the time split into contact stroke, free-space
+motion (`traj_s` of the non-cartesian `segment_exec` lines), other motion and idle; free-space joint and TCP path efficiency per gap
+(straight distance over path length, needs `run_film.npz`); coverage percent and the done map (`sim_overlay.coverage_paint`); plan
+redundancy (the `plan_redundancy_report` binary when on `PATH`, else a python mirror); lift range, chassis-wall clearance and reach fraction
+(`sim_mujoco/run_metrics.py`). Flags: peak over 40 N, tool reach over 85 %, chassis under 0.3 m, free-space share over 25 %, failed or
+partial columns, a force spike at the first sample after a stroke (the retract start) over 40 N and twice the stroke median, plan jumps
+over 2x pitch. The exit code is always 0: a report, not a gate. Test: `python3 -m pytest docker/tools/tests/test_run_report.py`.
+
 ## Related
 
 [sim_mujoco.md](sim_mujoco.md) (scripts, gates, other passes), [coverage_patterns.md](coverage_patterns.md) (the scorer), [manager_parameters.md](manager_parameters.md).
