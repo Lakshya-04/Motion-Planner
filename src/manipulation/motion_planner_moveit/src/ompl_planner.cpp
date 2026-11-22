@@ -12,6 +12,7 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include "motion_planner_moveit/moveit_planning_backend.hpp"
+#include "motion_planner_moveit/moveit_time_parameterizer.hpp"
 #include "motion_planner/core/planners/wall_penetration_check.hpp"
 #include "ros_adapters/ros_conversions.hpp"
 
@@ -21,6 +22,83 @@ namespace motion_planner
 OmplPlanner::OmplPlanner(std::shared_ptr<MoveItPlanningBackend> backend)
 : backend_(std::move(backend))
 {
+}
+
+void OmplPlanner::setDirectFirst(
+  bool enabled, const DirectJointPathConfig & config, double default_acceleration)
+{
+  direct_first_ = enabled;
+  direct_config_ = config;
+  direct_default_acceleration_ = default_acceleration;
+}
+
+bool OmplPlanner::tryDirectJointPath(
+  const std::vector<double> & start, const std::vector<double> & goal,
+  moveit_msgs::msg::RobotTrajectory & out)
+{
+  const auto robot_model = move_group_->getRobotModel();
+  const auto * jmg = robot_model ? robot_model->getJointModelGroup(move_group_name_) : nullptr;
+  const auto log = node_ ? node_->get_logger() : rclcpp::get_logger("ompl_planner");
+  if (!jmg) {
+    return false;
+  }
+  DirectJointPathConfig config = direct_config_;
+  if (config.prismatic.empty()) {
+    for (const auto * joint : jmg->getActiveJointModels()) {
+      config.prismatic.push_back(joint->getType() == moveit::core::JointModel::PRISMATIC);
+    }
+  }
+
+  std::string scene_error;
+  if (!backend_->ensurePlanningSceneMonitor(move_group_name_, scene_error) ||
+    !backend_->planningSceneMonitor())
+  {
+    RCLCPP_WARN(log, "direct path unavailable (no planning scene: %s), falling back to OMPL", scene_error.c_str());
+    return false;
+  }
+  DirectJointPathResult path;
+  {
+    planning_scene_monitor::LockedPlanningSceneRO scene(backend_->planningSceneMonitor());
+    if (!scene) {
+      return false;
+    }
+    moveit::core::RobotState state(scene->getCurrentState());
+    path = buildDirectJointPath(
+      start, goal, config, [&](const std::vector<double> & q) {
+        state.setJointGroupPositions(jmg, q);
+        state.update();
+        return scene->isStateValid(state, move_group_name_);
+      });
+  }
+  if (path.status == DirectJointPathResult::Status::kInvalidSample) {
+    RCLCPP_INFO(log, "direct path invalid at sample %zu, falling back to OMPL", path.invalid_index);
+    return false;
+  }
+  if (path.status != DirectJointPathResult::Status::kOk) {
+    return false;  // no motion or bad input: let OMPL answer as before
+  }
+
+  core_types::Trajectory piece;
+  piece.joint_names = jmg->getActiveJointModelNames();
+  for (const auto & q : path.samples) {
+    core_types::TrajectoryPoint point;
+    point.positions = q;
+    piece.points.push_back(std::move(point));
+  }
+  MoveItTimeParameterizer retimer(robot_model, move_group_name_);
+  std::string message;
+  if (!retimer.retime(
+      piece, SegmentRole::kTransition, retimer.modelLimits(direct_default_acceleration_, 0.0), 0.0,
+      message))
+  {
+    RCLCPP_WARN(log, "direct path retiming failed (%s), falling back to OMPL", message.c_str());
+    return false;
+  }
+  out.joint_trajectory = ros_adapters::toRos(piece);
+  RCLCPP_INFO(
+    log, "direct joint path: %zu points, %.2f s", piece.points.size(),
+    piece.points.empty() ? 0.0 : piece.points.back().time_from_start_sec);
+  return true;
 }
 
 std::string OmplPlanner::name() const
@@ -82,6 +160,8 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
   // Joint-space goal takes priority when given -- it isn't a Cartesian-path
   // concept, so there's no pose to fall back to reading here anyway.
   bool used_joint_target = false;
+  std::vector<double> direct_goal;
+  geometry_msgs::msg::Pose direct_goal_pose;
   if (!request.target_joint_state.empty()) {
     const auto robot_model = move_group_->getRobotModel();
     const auto * joint_model_group =
@@ -91,6 +171,7 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
     {
       move_group_->setJointValueTarget(request.target_joint_state);
       used_joint_target = true;
+      direct_goal = request.target_joint_state;
     } else {
       PlanningResult invalid_target;
       invalid_target.success = false;
@@ -135,8 +216,10 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
       goal_pose = resolved_pose;
     }
     move_group_->setPoseTarget(goal_pose);
+    direct_goal_pose = goal_pose;
   }
 
+  std::vector<double> direct_start;
   bool used_explicit_start_state = false;
   if (!request.start_joint_state.empty()) {
     const auto robot_model = move_group_->getRobotModel();
@@ -156,6 +239,12 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
       start_state.update();
       move_group_->setStartState(start_state);
       used_explicit_start_state = true;
+      start_state.copyJointGroupPositions(joint_model_group, direct_start);
+      if (direct_goal.empty() && direct_first_) {
+        if (start_state.setFromIK(joint_model_group, direct_goal_pose, 0.1)) {
+          start_state.copyJointGroupPositions(joint_model_group, direct_goal);
+        }
+      }
     } else if (node_) {
       RCLCPP_WARN(
         node_->get_logger(),
@@ -194,13 +283,23 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
       start_state.enforceBounds(joint_model_group);
       start_state.update();
       move_group_->setStartState(start_state);
+      start_state.copyJointGroupPositions(joint_model_group, direct_start);
+      if (direct_goal.empty() && direct_first_) {
+        if (start_state.setFromIK(joint_model_group, direct_goal_pose, 0.1)) {
+          start_state.copyJointGroupPositions(joint_model_group, direct_goal);
+        }
+      }
     } else {
       move_group_->setStartStateToCurrentState();
     }
   }
 
   moveit::planning_interface::MoveGroupInterface::Plan moveit_plan;
-  const auto plan_result = move_group_->plan(moveit_plan);
+  bool direct_ok = false;
+  if (direct_first_ && !direct_start.empty() && direct_goal.size() == direct_start.size()) {
+    direct_ok = tryDirectJointPath(direct_start, direct_goal, moveit_plan.trajectory);
+  }
+  const bool plan_result = direct_ok ? true : static_cast<bool>(move_group_->plan(moveit_plan));
 
   result.success = static_cast<bool>(plan_result);
   result.status = result.success ? "planned" : "failed";
