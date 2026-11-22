@@ -1,0 +1,33 @@
+# The Gazebo smoke wall as a whole: 3 m x 2 m, one 5 cm obstacle, and the whole wall is the work patch.
+# Numbers from src/simulation/sim_gazebo/test/data/smoke_wall_scene.json (u -1.5..1.5, v 0..2 from z = 2.0, the
+# obstacle u 0.6..0.9, v 0.5..0.8, 5 cm), moved onto the plane the tool touches (0.98 m in front of the base, as every
+# manager pass uses it) and into the world frame odom, where the base starts at the origin. The shipped file has the
+# plane at x = 2.0 in frame `map`; docs/scenario_sync.md lists what that costs.
+schema_version: 1
+name: gazebo_smoke_full
+description: Gazebo smoke wall, full 3 x 2 m wall planned and executed.
+world_frame: odom
+wall:
+  point: [0.98, 0.0, 2.0]
+  normal: [-1.0, 0.0, 0.0]
+  u_range: [-1.5, 1.5]
+  v_range: [0.0, 2.0]
+patch:
+  mode: full
+obstacles:
+  - {kind: box, u: [0.6, 0.9], v: [0.5, 0.8], depth: 0.05}
+base:
+  x: 0.0
+  y: 0.0
+  yaw: 0.0
+  standoff_m: 0.98
+robot_profile: ur10e_telescopic
+tool_profile: spray_gun
+lift_range_m: [0.0, 1.5]
+consumers:
+  gazebo:
+    # the tool tip ends 6.5 cm short of the tcp, so the world wall is at 0.915 (docs/sim_gazebo.md)
+    sim_wall_offset_m: 0.065
+  mujoco: {}
+  rviz:
+    fixed_frame: odom
