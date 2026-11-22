@@ -1,5 +1,7 @@
 # Documentation
 
+Status of the newest additions (coverage paint, reach report, stand navigation planner, perception-in-the-loop mode, plan redundancy report, chained columns), each tagged verified in sim, host-tested only or unbuilt: see the table in the [top-level README](../README.md). At present all of them are host-tested only; the per-area evidence is in [ROADMAP.md](ROADMAP.md).
+
 | Document | What it covers |
 |---|---|
 | [ROADMAP.md](ROADMAP.md) | Status checklist for the whole workflow (done / partial / not done), the reuse map of open source and recent papers, the milestone order and the open decisions |
