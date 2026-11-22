@@ -81,6 +81,28 @@ All need `verify_result_path` (the file written when a task ends); without it th
 | `verify_path_min_sigma` | 0.02 | Smallest Jacobian singular value along the path below which a column is warned about. |
 | `verify_path_min_limit_margin` | 0.02 | Smallest joint-limit margin along the path (a share of the joint's range, 0 to 0.5) below which a column is warned about. |
 
+## Wall dock after navigate (`wall_dock_after_navigate:=true`)
+
+Off by default. After a successful `navigate_to_stand` (and the `stand_check` gate when on) and before priming or docking, the manager sends the
+stand navigator's `WallDock` goal (servo to a standoff from, and square to, the fitted wall plane). The measured standoff error (measured minus
+goal) and yaw error go through the stand-check logic (`core/wall_dock_gate.hpp`, built on `StandCheck`): within tolerance goes on, outside sends
+the goal again until `wall_dock_max_attempts` goals are used, then the stand is given up (columns not run, as for `stand_check`). A goal that
+fails (no fresh plane, timeout) is retried inside the same budget and then counts as a failed navigation attempt (the normal `stand_nav_attempts`
+retry applies). The log line is "wall dock: standoff error .. mm, yaw error .. rad", and with `verify_result_path` the result carries a
+`wall_dock` list (per stand: `ok`, `abort`, `attempts`, `wall_gap_error_m`, `wall_yaw_error_rad`, `message`). The action has no tolerance
+fields of its own (the dock node's `tolerance_standoff_m` and `tolerance_yaw_rad` decide when it reports success); the two tolerances below are the manager's.
+Host gtest: `wall_dock_gate_test`; not built in the ROS image and not run in a sim.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `wall_dock_after_navigate` | false | Enables the step. |
+| `wall_dock_action` | "wall_dock" | Name of the WallDock action. |
+| `wall_dock_standoff_m` | 0.30 | Goal standoff from the reference point to the plane. |
+| `wall_dock_timeout_s` | 0.0 | Goal timeout; 0 uses the dock node's default. |
+| `wall_dock_max_attempts` | 2 | WallDock goals sent per stand arrival at most (minimum 1). |
+| `wall_dock_standoff_tol_m` | 0.02 | Largest accepted absolute standoff error. |
+| `wall_dock_yaw_tol_rad` | 0.05 | Largest accepted absolute yaw error. |
+
 ## Column IK check (`column_ik_check:=true`)
 
 The check itself is described in [reachability.md](reachability.md); these select the joints of the planning group (lift first).

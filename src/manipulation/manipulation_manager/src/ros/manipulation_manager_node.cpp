@@ -41,6 +41,7 @@
 #include "coverage_task_msgs/srv/mission_command.hpp"
 #include "manipulation_manager/core/mission_verify.hpp"
 #include "stand_navigator_msgs/action/navigate_to_stand.hpp"
+#include "stand_navigator_msgs/action/wall_dock.hpp"
 #include "reachability_msgs/srv/plan_stands.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float64.hpp"
@@ -79,6 +80,7 @@
 #include "manipulation_manager/core/stand_check.hpp"
 #include "manipulation_manager/core/column_chain.hpp"
 #include "manipulation_manager/core/stand_gate.hpp"
+#include "manipulation_manager/core/wall_dock_gate.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
 #include "manipulation_manager/core/joint_names.hpp"
 #include "manipulation_manager/core/travel_pose.hpp"
@@ -441,6 +443,16 @@ public:
       sc.max_redocks = this->declare_parameter<int>("stand_check_max_redocks", sc.max_redocks);
       stand_check_ = StandCheck(sc);
     }
+    // Wall dock step (default off): after a successful navigate_to_stand, servo to the standoff and square to the wall
+    // with the WallDock action; the measured standoff/yaw error goes through the stand-check logic (go / dock again /
+    // give the stand up) and into the verify result.
+    wall_dock_enabled_ = this->declare_parameter<bool>("wall_dock_after_navigate", false);
+    wall_dock_action_ = this->declare_parameter<std::string>("wall_dock_action", "wall_dock");
+    wall_dock_standoff_m_ = this->declare_parameter<double>("wall_dock_standoff_m", 0.30);
+    wall_dock_timeout_s_ = this->declare_parameter<double>("wall_dock_timeout_s", 0.0);
+    wall_dock_cfg_.max_attempts = this->declare_parameter<int>("wall_dock_max_attempts", wall_dock_cfg_.max_attempts);
+    wall_dock_cfg_.standoff_tol_m = this->declare_parameter<double>("wall_dock_standoff_tol_m", wall_dock_cfg_.standoff_tol_m);
+    wall_dock_cfg_.yaw_tol_rad = this->declare_parameter<double>("wall_dock_yaw_tol_rad", wall_dock_cfg_.yaw_tol_rad);
     travel_joint_state_ = this->declare_parameter<std::vector<double>>(
       "travel_joint_state", std::vector<double>{});
     // The planning group's joints in the group's order as /joint_states names them (empty = the repo's UR10e and
@@ -549,6 +561,9 @@ public:
           r.accepted ? "accepted" : "rejected", r.state.c_str());
       });
     nav_client_ = rclcpp_action::create_client<NavigateToStand>(this, "navigate_to_stand");
+    if (wall_dock_enabled_) {
+      wall_dock_client_ = rclcpp_action::create_client<WallDock>(this, wall_dock_action_);
+    }
     action_server_ = rclcpp_action::create_server<ExecuteCoverage>(
       this, "execute_coverage",
       [this](const rclcpp_action::GoalUUID &, std::shared_ptr<const ExecuteCoverage::Goal>) {
@@ -692,6 +707,7 @@ private:
   using MissionCommandSrv = coverage_task_msgs::srv::MissionCommand;
   using GoalHandle = rclcpp_action::ServerGoalHandle<ExecuteCoverage>;
   using NavigateToStand = stand_navigator_msgs::action::NavigateToStand;
+  using WallDock = stand_navigator_msgs::action::WallDock;
 
   /// What a task is asked to do; the defaults are the parameters' (the old one-shot behaviour).
   struct TaskRequest
@@ -867,6 +883,7 @@ private:
   {
     column_peaks_.clear();
     verify_stand_columns_.clear();
+    verify_wall_dock_.clear();
     trace_.reset();
     const TaskResult out = executeTaskImpl(req);
     if (!verify_result_path_.empty()) {
@@ -883,6 +900,7 @@ private:
       in.message = out.message;
       in.report_path = ledger_.path();
       in.stand_columns = verify_stand_columns_;
+      in.wall_dock = verify_wall_dock_;
       addTraceToVerify(in);
       const auto result = buildMissionVerify(in);
       if (writeMissionVerify(verify_result_path_, missionVerifyToJson(result, in))) {
@@ -1152,6 +1170,9 @@ private:
           if (ok && stand_check_enabled_) {
             ok = gateStand(visit[s], msg, gate_abort);
           }
+          if (ok && wall_dock_enabled_) {
+            ok = wallDockStand(s, msg, gate_abort);
+          }
         }
         if (stop()) {
           break;
@@ -1402,6 +1423,104 @@ private:
     }
     abort = o.abort;
     return o.ok;
+  }
+
+  /// Wall dock step after an arrival (opt-in): sends WallDock goals, judges the measured wall gap and yaw error with
+  /// the stand-check logic (core/wall_dock_gate.hpp) and keeps the outcome for the verify result. False with `message`
+  /// when the arm must not move; `abort` = true when the stand is given up.
+  bool wallDockStand(size_t stand, std::string & message, bool & abort)
+  {
+    struct Port final : WallDockPort
+    {
+      explicit Port(ManipulationManagerNode & n) : node(n) {}
+      WallDockMeasured dock() override {return node.sendWallDock();}
+      bool stopRequested() const override {return node.stop();}
+      ManipulationManagerNode & node;
+    } port(*this);
+    const auto o = runWallDock(port, wall_dock_cfg_);
+    verify_wall_dock_[stand] = o;
+    if (o.ok) {
+      RCLCPP_INFO(
+        this->get_logger(), "wall dock: standoff error %.1f mm, yaw error %.3f rad (%d goal(s))",
+        o.standoff_error_m * 1000.0, o.yaw_error_rad, o.attempts);
+    } else {
+      RCLCPP_WARN(
+        this->get_logger(), "wall dock: %s (%d goal(s); standoff error %.1f mm, yaw error %.3f rad)",
+        o.message.c_str(), o.attempts, o.standoff_error_m * 1000.0, o.yaw_error_rad);
+      message = o.message;
+    }
+    abort = o.abort;
+    return o.ok;
+  }
+
+  /// One WallDock goal, waited for; `docked` only when the action succeeded.
+  WallDockMeasured sendWallDock()
+  {
+    WallDockMeasured m;
+    if (!wall_dock_client_->wait_for_action_server(std::chrono::seconds(5))) {
+      m.message = "wall dock action is not available";
+      return m;
+    }
+    WallDock::Goal goal;
+    goal.standoff_m = wall_dock_standoff_m_;
+    goal.timeout_s = wall_dock_timeout_s_;
+    auto outcome = std::make_shared<rclcpp_action::ClientGoalHandle<WallDock>::WrappedResult>();
+    auto done = std::make_shared<bool>(false);
+    rclcpp_action::Client<WallDock>::SendGoalOptions options;
+    options.result_callback = [outcome, done](const rclcpp_action::ClientGoalHandle<WallDock>::WrappedResult & w) {
+        *outcome = w;
+        *done = true;
+      };
+    auto sent = wall_dock_client_->async_send_goal(goal, options);
+    const auto t0 = std::chrono::steady_clock::now();
+    const double limit = (wall_dock_timeout_s_ > 0.0 ? wall_dock_timeout_s_ : 60.0) + 15.0;
+    const auto elapsed = [&]() {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+      };
+    while (rclcpp::ok() && sent.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+      rclcpp::spin_some(shared_from_this());
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      if (elapsed() > 10.0) {
+        m.message = "wall dock did not answer the goal";
+        return m;
+      }
+    }
+    auto handle = rclcpp::ok() ? sent.get() : nullptr;
+    if (!handle) {
+      m.message = "wall dock goal rejected";
+      return m;
+    }
+    bool cancel_sent = false;
+    while (rclcpp::ok() && !*done) {
+      rclcpp::spin_some(shared_from_this());
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      if (!cancel_sent && (cancel_requested_ || elapsed() > limit)) {
+        m.message = cancel_requested_ ? "canceled" : "wall dock timed out";
+        try {
+          wall_dock_client_->async_cancel_goal(handle);
+        } catch (const rclcpp_action::exceptions::UnknownGoalHandleError &) {
+        }
+        cancel_sent = true;
+      }
+      if (cancel_sent && elapsed() > limit + 10.0) {
+        break;
+      }
+    }
+    if (cancel_sent || !*done) {
+      if (m.message.empty()) {
+        m.message = "wall dock not finished";
+      }
+      return m;
+    }
+    const auto & r = outcome->result;
+    if (outcome->code != rclcpp_action::ResultCode::SUCCEEDED || !r || r->error_code != 0) {
+      m.message = r && !r->error_msg.empty() ? r->error_msg : "wall dock failed";
+      return m;
+    }
+    m.docked = true;
+    m.standoff_error_m = r->standoff_error_m;
+    m.yaw_error_rad = r->yaw_error_rad;
+    return m;
   }
 
   void cancelNavigation()
@@ -2752,6 +2871,13 @@ private:
   std::string arrival_command_;
   std::string wall_clear_command_;
   double nav_timeout_s_{240.0};
+  bool wall_dock_enabled_{false};
+  std::string wall_dock_action_{"wall_dock"};
+  double wall_dock_standoff_m_{0.30};
+  double wall_dock_timeout_s_{0.0};
+  WallDockConfig wall_dock_cfg_;
+  std::map<size_t, WallDockOutcome> verify_wall_dock_;   // stand -> last wall dock outcome of the run
+  rclcpp_action::Client<WallDock>::SharedPtr wall_dock_client_;
   std::vector<double> travel_joint_state_;
   std::vector<std::string> group_joint_names_;
   std::vector<std::vector<std::string>> joint_name_candidates_;

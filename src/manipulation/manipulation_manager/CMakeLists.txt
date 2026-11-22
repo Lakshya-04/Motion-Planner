@@ -235,6 +235,11 @@ if(BUILD_TESTING)
     target_link_libraries(stand_gate_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
+  ament_add_gtest(wall_dock_gate_test test/wall_dock_gate_test.cpp)
+  if(TARGET wall_dock_gate_test)
+    target_link_libraries(wall_dock_gate_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
   ament_add_gtest(coverage_output_json_source_test test/coverage_output_json_source_test.cpp)
   if(TARGET coverage_output_json_source_test)
     target_link_libraries(coverage_output_json_source_test ${PROJECT_NAME}_core core_types::core_types)
