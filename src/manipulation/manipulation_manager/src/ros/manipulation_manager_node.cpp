@@ -1880,7 +1880,9 @@ private:
             this->get_logger(), "DOCKGOAL reach fraction %.2f (target %.2f)%s", choice.reach_fraction,
             dock_ik_sel_.reach_target_fraction, choice.reach_over_target ? ", over the target" : "");
         }
-        return choice.q;
+        // the approach starts at the live state: of the 2*pi-equivalent representatives take the one nearest to IT, not
+        // to the remembered branch seed (which can be a turn away after a stow or a failed column)
+        return live.size() == choice.q.size() ? rebaseDockIk(choice.q, live, dock_ik_sel_) : choice.q;
       }
       RCLCPP_WARN(
         this->get_logger(),
@@ -1901,7 +1903,11 @@ private:
     }
     RCLCPP_INFO(this->get_logger(), "DOCKGOAL seeded IK q=[%s]", txt.c_str());
     // same pose, representative nearest the seed (the IK may return a joint 2*pi away)
-    return rebaseDockIk(res.joint_solution, seed, dock_ik_sel_);
+    {
+      const auto live_now = readCurrentJointState(shared_from_this(), joint_name_candidates_);
+      return rebaseDockIk(
+        res.joint_solution, live_now.size() == res.joint_solution.size() ? live_now : seed, dock_ik_sel_);
+    }
   }
 
   /// recovery_keeps_branch: the joint goal for `pose` chosen on the arm's live branch (selectRecoveryGoal, IK seeded
