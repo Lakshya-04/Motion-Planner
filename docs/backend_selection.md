@@ -59,7 +59,7 @@ planning:
 | Name | Base class | Package | Notes |
 |---|---|---|---|
 | `moveit_cartesian` | Planner | motion_planner_moveit | jump detection, reachability-tilt retry, wall-contact ACM |
-| `moveit_ompl` | Planner | motion_planner_moveit | pose and joint goals |
+| `moveit_ompl` | Planner | motion_planner_moveit | pose and joint goals; params `free_space_direct_first` (default false), `direct_revolute_step` (0.05 rad), `direct_prismatic_step` (0.01 m), `direct_default_acceleration` (2.0, used only by the direct path retiming) |
 | `moveit_ik` | Ik | motion_planner_moveit | params `ik_extra_seeds`, `ik_seed_perturbation` |
 | `moveit_collision` | Collision | motion_planner_moveit | |
 | `moveit_scene` | Scene | motion_planner_moveit | param `octomap_resolution` |
@@ -67,6 +67,20 @@ planning:
 | `curobo_ik`, `curobo_collision`, `curobo_scene` | Ik, Collision, Scene | curobo_planner | share the client of `curobo` |
 | `vamp` | Planner | vamp_planner | params `robot`, `max_iterations`, `range`, `point_radius`, `nominal_joint_speed`, `simplify`, `require_world`, `base_frame` |
 | `vamp_collision`, `vamp_scene` | Collision, Scene | vamp_planner | share the planner of `vamp` for the same robot (a `base_frame` param on any of them applies to the shared planner) |
+
+### Direct joint-space fast path (`moveit_ompl`, opt-in)
+
+With `plugin_params: {moveit_ompl: {free_space_direct_first: true}}` a free-space segment first tries the straight line in joint space
+from the start to the goal (a joint target as given, a pose goal solved by IK seeded from the start). The line is densified (at most
+`direct_revolute_step` per revolute joint and `direct_prismatic_step` per prismatic joint between samples), every sample is checked
+with `PlanningScene::isStateValid` (collision and joint bounds), and the result is retimed with the MoveIt TOTG time parameterizer
+(`MoveItTimeParameterizer`), so the duration is set by the slowest joint instead of by a wandering path. One invalid sample, a failed
+IK or a retiming failure falls back to the normal OMPL plan unchanged. Log lines: `direct joint path: N points, X s` and
+`direct path invalid at sample K, falling back to OMPL`. Pure logic: `motion_planner/core/direct_joint_path.hpp`.
+Why: the OMPL joint path was measured up to 16x longer than the straight-line joint distance (a stow took 37 s).
+
+Path shortcutting after OMPL: the MoveIt OMPL interface already simplifies each solution (`simplify_solutions`, default true, bounded
+by the planning time) and `ompl_planning.yaml` does not switch it off, so no extra shortcut stage was added.
 
 ### cuRobo: joint limits
 

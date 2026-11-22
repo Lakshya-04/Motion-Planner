@@ -23,14 +23,28 @@ std::shared_ptr<MoveItPlanningBackend> sharedBackend(PluginContext & context)
     "moveit_backend", [] {return std::make_shared<MoveItPlanningBackend>();});
 }
 
+void configure(CartesianPlanner &, const PluginParams &) {}
+
+/// Free-space fast path of the OMPL planner (all params optional, off by default).
+void configure(OmplPlanner & planner, const PluginParams & params)
+{
+  DirectJointPathConfig config;
+  config.revolute_step = paramOr(params, "direct_revolute_step", config.revolute_step);
+  config.prismatic_step = paramOr(params, "direct_prismatic_step", config.prismatic_step);
+  planner.setDirectFirst(
+    paramOr(params, "free_space_direct_first", false), config,
+    paramOr(params, "direct_default_acceleration", 2.0));
+}
+
 /// Wraps a MoveIt planner (built on the shared backend in initialize()) as a PlannerPlugin.
 template<typename PlannerT>
 class MoveItPlannerPlugin : public PlannerPlugin
 {
 public:
-  PluginStatus initialize(PluginContext & context, const PluginParams &) override
+  PluginStatus initialize(PluginContext & context, const PluginParams & params) override
   {
     planner_ = std::make_unique<PlannerT>(sharedBackend(context));
+    configure(*planner_, params);
     return PluginStatus::success();
   }
   std::string name() const override {return planner_ ? planner_->name() : "uninitialized";}

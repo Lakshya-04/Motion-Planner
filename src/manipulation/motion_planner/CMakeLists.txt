@@ -90,6 +90,9 @@ if(BUILD_TESTING)
   ament_add_gtest(time_parameterization_test test/core/time_parameterization_test.cpp)
   target_link_libraries(time_parameterization_test motion_planner_core)
 
+  ament_add_gtest(direct_joint_path_test test/core/direct_joint_path_test.cpp)
+  target_link_libraries(direct_joint_path_test motion_planner_core)
+
   ament_add_gtest(planning_pipeline_test test/core/planning_pipeline_test.cpp)
   target_link_libraries(planning_pipeline_test motion_planner_ros)
 

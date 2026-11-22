@@ -1,9 +1,12 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "geometry_msgs/msg/pose.hpp"
+#include "moveit_msgs/msg/robot_trajectory.hpp"
 
+#include "motion_planner/core/direct_joint_path.hpp"
 #include "motion_planner/core/planners/planner.hpp"
 
 namespace rclcpp
@@ -39,7 +42,21 @@ public:
   IkResult ik(const IkRequest & request) override;
   CollisionResult collision(const CollisionRequest & request) override;
 
+  /// Opt-in fast path (plugin param `free_space_direct_first`): try the straight joint-space line to the goal (joint
+  /// target, or a pose goal solved by IK from the start) before the OMPL pipeline. Every sample is checked through
+  /// the planning scene; one invalid sample falls back to OMPL unchanged.
+  void setDirectFirst(bool enabled, const DirectJointPathConfig & config, double default_acceleration);
+
 private:
+  /// Straight-line attempt; true when moveit_plan was filled with a timed, valid trajectory.
+  bool tryDirectJointPath(
+    const std::vector<double> & start, const std::vector<double> & goal,
+    moveit_msgs::msg::RobotTrajectory & out);
+
+  bool direct_first_{false};
+  DirectJointPathConfig direct_config_;
+  double direct_default_acceleration_{2.0};
+
   /// Delegates to backend_->ensureMoveGroup(), then refreshes node_/
   /// move_group_/move_group_name_ from the backend's own accessors.
   bool ensureMoveGroup(const std::string & planning_group, std::string & error_message);
