@@ -58,6 +58,13 @@ LimitCheck enforceJointLimits(core_types::Trajectory & trajectory, const JointLi
     for (double q : pts[i].positions) {
       if (!std::isfinite(q)) {return fail("invalid_trajectory", "non-finite position");}
     }
+    // a NaN in the planner's own vectors would be skipped by std::max below and hide a violation
+    for (double v : pts[i].velocities) {
+      if (!std::isfinite(v)) {return fail("invalid_trajectory", "non-finite velocity");}
+    }
+    for (double a : pts[i].accelerations) {
+      if (!std::isfinite(a)) {return fail("invalid_trajectory", "non-finite acceleration");}
+    }
   }
   if (pts.size() < 2) {return out;}
 
@@ -111,6 +118,12 @@ LimitCheck enforceJointLimits(core_types::Trajectory & trajectory, const JointLi
   const double f = policy.safety_factor;
   const double va_scale = std::max({1.0, vmax / f, std::sqrt(amax / f)});
   double scale = std::max(va_scale, std::cbrt(jmax / f));
+  if (!std::isfinite(scale) || !std::isfinite(vmax) || !std::isfinite(amax) || !std::isfinite(jmax) ||
+    !std::isfinite(scale * scale * scale))
+  {
+    // a finite difference overflowed (positions or time steps of absurd size): no honest scale exists
+    return fail("invalid_trajectory", "velocity / acceleration / jerk of the trajectory is not finite");
+  }
   if (scale <= 1.0) {return out;}  // inside limits * factor: untouched
 
   std::ostringstream detail;
@@ -129,6 +142,9 @@ LimitCheck enforceJointLimits(core_types::Trajectory & trajectory, const JointLi
   // bounded loop only absorbs rounding at the boundary (it can lengthen, never shorten).
   if (jmax > 0.0) {
     for (int it = 0; it < 8 && jmax / (scale * scale * scale) > f * (1.0 + 1e-12); ++it) {scale *= 1.0 + 1e-9;}
+  }
+  if (!std::isfinite(trajectory.points.back().time_from_start_sec * scale)) {
+    return fail("invalid_trajectory", "the retimed duration is not finite");
   }
   for (auto & p : trajectory.points) {
     p.time_from_start_sec *= scale;
