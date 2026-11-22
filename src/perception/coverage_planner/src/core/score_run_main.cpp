@@ -7,6 +7,7 @@
 //             --max-bad-pose needs a gate, --nominal-tilt needs --max-tilt, --max-wall-gap is ignored with --no-contact)
 //             [--min-coverage 0.95] [--max-rms 0] [--max-peak 0] [--min-in-band 0]
 //             [--mode contact|non_contact|spray]  (per-mode default limits; explicit flags override)
+//             [--plan coverage_output.json]  (adds a "plan_redundancy" field: see plan_redundancy.hpp)
 //             [--segments segments.json] [--result-out result.json] [--report-out card.json]
 // Prints the scorecard as JSON; --result-out writes the verify-result contract (passed, coverage_percent,
 // failed_segment_ids, report_path, source, failures). Exit code 0 = passed, 1 = failed a limit, 2 = bad input.
@@ -15,6 +16,7 @@
 #include <map>
 #include <string>
 
+#include "coverage_planner/core/plan_redundancy.hpp"
 #include "coverage_planner/core/run_scorecard_io.hpp"
 
 int main(int argc, char ** argv)
@@ -82,7 +84,15 @@ int main(int argc, char ** argv)
     coverage_planner::RunScorecard card;
     const auto result = coverage_planner::verifyFromTelemetry(
       wall, obstacles, samples, segments, o, l, a.count("--report-out") ? a["--report-out"] : "", &card);
-    const auto card_json = coverage_planner::scorecardToJson(card).dump(2);
+    auto card_obj = coverage_planner::scorecardToJson(card);
+    if (a.count("--plan")) {
+      std::ifstream pf(a["--plan"]);
+      if (!pf) {throw std::runtime_error("cannot read " + a["--plan"]);}
+      const auto plan = coverage_planner::expandedCoverageFromJson(nlohmann::json::parse(pf));
+      card_obj["plan_redundancy"] = coverage_planner::redundancyReportToJson(
+        coverage_planner::analyzePlanRedundancy(plan.path, plan.segments));
+    }
+    const auto card_json = card_obj.dump(2);
     std::cout << card_json << "\n";
     if (a.count("--report-out")) {std::ofstream(a["--report-out"]) << card_json << "\n";}
     if (a.count("--result-out")) {
