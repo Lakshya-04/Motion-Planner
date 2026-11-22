@@ -578,8 +578,14 @@ PlanningResult CartesianPlanner::plan(const PlanningRequest & request)
     // wall-penetration-bound FK check -- that's about the coverage path's controlled point, a
     // different concern). Falls back to tool_tcp_link only when the caller hasn't set
     // contact_link, preserving prior behavior for any not-yet-updated caller.
+    // Nobody sets contact_link, and tool_tcp_link is a frame without geometry: the exclusion did nothing until the tool
+    // had a collision pad. The link that carries the pad is the parent of the TCP frame, so that is the default.
+    std::string default_contact_link = tool_tcp_link;
+    if (tip_link_model != nullptr && tip_link_model->getParentLinkModel() != nullptr) {
+      default_contact_link = tip_link_model->getParentLinkModel()->getName();
+    }
     const std::string & contact_collision_link =
-      request.contact_link.empty() ? tool_tcp_link : request.contact_link;
+      request.contact_link.empty() ? default_contact_link : request.contact_link;
     std::string acm_error;
     if (setWallContactAcmEntry(
         contact_collision_link, request.target_collision_object_id, true,
@@ -629,15 +635,32 @@ PlanningResult CartesianPlanner::plan(const PlanningRequest & request)
       moveit::core::GroupStateValidityCallbackFn validity_callback;
       if (check_collisions && planning_scene_monitor_) {
         auto last_accepted = std::make_shared<moveit::core::RobotState>(seed);
+        // The scoped contact exclusion (see the ACM guard above) is applied to move_group's scene; this callback checks
+        // the planner's own mirror of it, which is updated later (or never in time). So the callback applies the
+        // exclusion itself, to a copy of the mirror's ACM, whenever the guard is active.
+        const std::string excl_link = acm_guard.active ? acm_guard.tool_link : std::string();
+        const std::string excl_object = acm_guard.active ? acm_guard.object_id : std::string();
         validity_callback = [this, last_accepted, revolute_jt, prismatic_jt, saw_collision_out,
-          saw_jump_out](
+          saw_jump_out, excl_link, excl_object](
           moveit::core::RobotState * robot_state, const moveit::core::JointModelGroup * jmg,
           const double * joint_positions) -> bool {
             robot_state->setJointGroupPositions(jmg, joint_positions);
             robot_state->update();
             bool collision_free = true;
             std::string error_message;
-            if (!backend_->isStateCollisionFree(
+            if (!excl_link.empty()) {
+              planning_scene_monitor::LockedPlanningSceneRO scene(planning_scene_monitor_);
+              if (!scene) {
+                return false;
+              }
+              collision_detection::AllowedCollisionMatrix acm = scene->getAllowedCollisionMatrix();
+              acm.setEntry(excl_link, excl_object, true);
+              collision_detection::CollisionRequest request_cc;
+              request_cc.group_name = move_group_name_;
+              collision_detection::CollisionResult result_cc;
+              scene->checkCollision(request_cc, result_cc, *robot_state, acm);
+              collision_free = !result_cc.collision;
+            } else if (!backend_->isStateCollisionFree(
                 *robot_state, move_group_name_, collision_free,
                 error_message))
             {
