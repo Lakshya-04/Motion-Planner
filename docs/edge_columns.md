@@ -93,8 +93,8 @@ stand is within 0.78 m laterally of every strip it serves (0.88 m at 0.60 m).**
 
 So pure kinematic reach does not explain strokes ending "partially completed" at stand edges or at the top
 of the reach, at 0.5 m spans. That is a finding, not a fix. The causes to check next are the things this
-model leaves out: IK branch continuity along the stroke (the approach flips branch near the lateral
-limit), the planner's orientation tolerance and the reachability-tilt tier (a contact tool must keep tilt
+model leaves out: IK branch continuity along the stroke (not measured here; a branch change near the lateral
+limit would break a stroke), the planner's orientation tolerance and the reachability-tilt tier (a contact tool must keep tilt
 0), joint-limit margins in the controller, self-collision between the forearm and the lift column when the
 arm folds for low strokes, and lift travel during a stroke. If the real stand sits farther from the wall
 than assumed or the mount height differs, rerun with `--standoff` and `--arm-base-z0`. An RM4D map
