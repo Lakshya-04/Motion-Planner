@@ -193,3 +193,43 @@ def test_srdf_includes_the_generated_matrix():
                               mappings={'arm': 'generic_6dof'}).toxml()
     assert 'lift_stage_2_link' in srdf and 'Adjacent' in srdf
     assert 'group name="lift_arm"' in srdf
+
+
+def _pad(urdf_text, link='tool_mount_link'):
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(urdf_text)
+    for lk in root.iter('link'):
+        if lk.get('name') == link:
+            return [c for c in lk.findall('collision') if c.get('name') == 'tool_pad']
+    return []
+
+
+def test_the_tool_has_the_pad_the_simulator_has():
+    """The planners must see the contact pad: a disc of radius 0.03 and thickness 0.01 ending at the TCP."""
+    import xml.etree.ElementTree as ET
+    pads = _pad(_render(arm='generic_6dof', lift='telescopic', tcp_xyz='0 0 0.165', tcp_rpy='0 0 0'))
+    assert len(pads) == 1
+    xyz = [float(v) for v in pads[0].find('origin').get('xyz').split()]
+    assert xyz == pytest.approx([0.0, 0.0, 0.165 - 0.005])
+    cyl = pads[0].find('geometry').find('cylinder')
+    assert float(cyl.get('radius')) == pytest.approx(0.03) and float(cyl.get('length')) == pytest.approx(0.01)
+    assert ET.fromstring(_render(arm='generic_6dof', lift='telescopic')) is not None
+
+
+def test_the_pad_follows_a_tilted_tcp():
+    import numpy as np
+    rpy = (0.3, 0.5, -0.4)
+    pads = _pad(_render(arm='generic_6dof', lift='telescopic', tcp_xyz='0.01 0.02 0.165',
+                        tcp_rpy=' '.join(str(v) for v in rpy)))
+    r, p, y = rpy
+    rot = (np.array([[np.cos(y), -np.sin(y), 0], [np.sin(y), np.cos(y), 0], [0, 0, 1]]) @
+           np.array([[np.cos(p), 0, np.sin(p)], [0, 1, 0], [-np.sin(p), 0, np.cos(p)]]) @
+           np.array([[1, 0, 0], [0, np.cos(r), -np.sin(r)], [0, np.sin(r), np.cos(r)]]))
+    expected = np.array([0.01, 0.02, 0.165]) - rot[:, 2] * 0.005
+    got = [float(v) for v in pads[0].find('origin').get('xyz').split()]
+    assert got == pytest.approx(list(expected), abs=1e-9)
+    assert [float(v) for v in pads[0].find('origin').get('rpy').split()] == pytest.approx(list(rpy))
+
+
+def test_the_pad_can_be_removed():
+    assert _pad(_render(arm='generic_6dof', lift='telescopic', pad_radius='0')) == []

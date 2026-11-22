@@ -354,3 +354,17 @@ def test_gravcomp_rejects_dicts_and_other_types(tmp_path, bad):
     with pytest.raises(TypeError):
         urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME,
                      commanded=COMMANDED, gravcomp=bad)
+
+
+def test_a_urdf_pad_replaces_the_generated_one(tmp_path):
+    # generic_tool.xacro carries the pad as a collision named tool_pad (so the planners see it): the generator must use
+    # that one and not add a second, identical geom (two contacts per touch double the force)
+    pad = ('<collision name="tool_pad"><origin xyz="0 0 0.16"/><geometry><cylinder radius="0.03" length="0.01"/>'
+           '</geometry></collision>')
+    text = URDF.read_text().replace('<link name="tool_mount_link">', '<link name="tool_mount_link">' + pad, 1)
+    root = ET.parse(urdf_to_mjcf(text, tmp_path, urdf_dir=DATA, commanded=COMMANDED)).getroot()
+    mount = [b for b in root.iter('body') if b.get('name') == 'tool_mount_link'][0]
+    pads = [g for g in mount.findall('geom') if g.get('name') == 'tool_pad']
+    assert len(pads) == 1
+    assert [float(v) for v in pads[0].get('size').split()] == pytest.approx([0.03, 0.005])
+    assert float(pads[0].get('pos').split()[2]) == pytest.approx(0.16)

@@ -3,7 +3,15 @@
      tool (sprayer, mop, sander) by providing the same two links. The TCP is what planners
      and coverage poses target. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <xacro:macro name="generic_tool" params="parent *origin prefix:='' tcp_xyz:='0 0 0.165' tcp_rpy:='0 0 0' body_length:=0.1 body_radius:=0.04 collision:=true">
+  <xacro:macro name="generic_tool" params="parent *origin prefix:='' tcp_xyz:='0 0 0.165' tcp_rpy:='0 0 0' body_length:=0.1 body_radius:=0.04 collision:=true pad_radius:=0.03 pad_thickness:=0.01">
+    <!-- The contact pad: a thin disc ending at the TCP, along the TCP's own z axis (the TCP may be tilted). The simulator
+         (sim_mujoco) uses the same disc; without it here the planners believe the tool ends at the mount cylinder, 6.5 cm
+         short of the TCP, and a tilted pad edge reaches the wall before they expect it. pad_radius:=0 removes it. -->
+    <xacro:property name="tcp_v" value="${[float(v) for v in tcp_xyz.split()]}"/>
+    <xacro:property name="tcp_a" value="${[float(v) for v in tcp_rpy.split()]}"/>
+    <xacro:property name="tcp_zx" value="${cos(tcp_a[2]) * sin(tcp_a[1]) * cos(tcp_a[0]) + sin(tcp_a[2]) * sin(tcp_a[0])}"/>
+    <xacro:property name="tcp_zy" value="${sin(tcp_a[2]) * sin(tcp_a[1]) * cos(tcp_a[0]) - cos(tcp_a[2]) * sin(tcp_a[0])}"/>
+    <xacro:property name="tcp_zz" value="${cos(tcp_a[1]) * cos(tcp_a[0])}"/>
     <link name="${prefix}tool_mount_link">
       <visual>
         <origin xyz="0 0 ${body_length / 2.0}" rpy="0 0 0"/>
@@ -15,6 +23,12 @@
           <origin xyz="0 0 ${body_length / 2.0}" rpy="0 0 0"/>
           <geometry><cylinder radius="${body_radius}" length="${body_length}"/></geometry>
         </collision>
+        <xacro:if value="${pad_radius > 0}">
+          <collision name="tool_pad">
+            <origin xyz="${tcp_v[0] - tcp_zx * pad_thickness / 2.0} ${tcp_v[1] - tcp_zy * pad_thickness / 2.0} ${tcp_v[2] - tcp_zz * pad_thickness / 2.0}" rpy="${tcp_rpy}"/>
+            <geometry><cylinder radius="${pad_radius}" length="${pad_thickness}"/></geometry>
+          </collision>
+        </xacro:if>
       </xacro:if>
       <inertial><mass value="0.5"/><inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.0005"/></inertial>
     </link>
