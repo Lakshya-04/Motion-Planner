@@ -336,7 +336,6 @@ TEST(CoveragePassExpander, DoublePassStripsAllStartAtTheSameEndSoJointsAreOnlyTh
   EXPECT_NEAR(start_x(strip1_pass0), 0.0, 1e-9);
   EXPECT_NEAR(end_x(strip1_pass0), 1.0, 1e-9);
   EXPECT_NEAR(end_x(strip1_pass1), 0.0, 1e-9);
-  (void)strip0_pass1;
 }
 
 TEST(CoveragePassExpander, SinglePassKeepsTheSerpentineDirections)
@@ -348,4 +347,74 @@ TEST(CoveragePassExpander, SinglePassKeepsTheSerpentineDirections)
   ASSERT_EQ(expanded.segments.size(), 2u);
   EXPECT_NEAR(expanded.path.poses[expanded.segments[1].start_index].pose.position.x, 1.0, 1e-9);
   EXPECT_NEAR(expanded.path.poses[expanded.segments[1].end_index].pose.position.x, 0.0, 1e-9);
+}
+
+namespace
+{
+
+// `n` serpentine strips: strip i runs u 0 -> 1 for even i and u 1 -> 0 for odd i, one pitch (0.1 m) above the last.
+void makeSerpentine(size_t n, Path & path, std::vector<MotionPlanSegment> & segments)
+{
+  for (size_t i = 0; i < n; ++i) {
+    const double v = 0.2 + 0.1 * static_cast<double>(i);
+    const double u_first = (i % 2 == 0) ? 0.0 : 1.0;
+    path.poses.push_back(makeFlatPose(u_first, v));
+    path.poses.push_back(makeFlatPose(1.0 - u_first, v));
+    MotionPlanSegment strip;
+    strip.label = "strip_" + std::to_string(i);
+    strip.start_index = static_cast<uint32_t>(2 * i);
+    strip.end_index = static_cast<uint32_t>(2 * i + 1);
+    strip.frame_id = "map";
+    strip.mode = "cartesian";
+    strip.planner = "cartesian";
+    segments.push_back(strip);
+  }
+}
+
+}  // namespace
+
+TEST(CoveragePassExpander, DoublePassThreeStripsFlipOnlyWhereTheSerpentineWouldJump)
+{
+  const auto wall = makeWall();
+  Path path;
+  std::vector<MotionPlanSegment> segments;
+  makeSerpentine(3, path, segments);
+  const auto expanded = expandCoveragePasses(path, segments, wall, makeDoublePassProfile());
+
+  ASSERT_EQ(expanded.segments.size(), 6u);
+  const auto x_at = [&](uint32_t i) {return expanded.path.poses[i].pose.position.x;};
+  for (size_t strip = 0; strip < 3; ++strip) {
+    const auto & pass0 = expanded.segments[2 * strip];
+    const auto & pass1 = expanded.segments[2 * strip + 1];
+    // Every strip starts at u=0 and its second pass returns there: joints are only the pitch.
+    EXPECT_NEAR(x_at(pass0.start_index), 0.0, 1e-9) << "strip " << strip;
+    EXPECT_NEAR(x_at(pass0.end_index), 1.0, 1e-9) << "strip " << strip;
+    EXPECT_NEAR(x_at(pass1.start_index), 1.0, 1e-9) << "strip " << strip;
+    EXPECT_NEAR(x_at(pass1.end_index), 0.0, 1e-9) << "strip " << strip;
+  }
+}
+
+TEST(CoveragePassExpander, DoublePassSingleStripGoesOutAndBack)
+{
+  const auto wall = makeWall();
+  Path path;
+  std::vector<MotionPlanSegment> segments;
+  makeSerpentine(1, path, segments);
+  const auto expanded = expandCoveragePasses(path, segments, wall, makeDoublePassProfile());
+
+  ASSERT_EQ(expanded.segments.size(), 2u);
+  const auto x_at = [&](uint32_t i) {return expanded.path.poses[i].pose.position.x;};
+  EXPECT_NEAR(x_at(expanded.segments[0].start_index), 0.0, 1e-9);
+  EXPECT_NEAR(x_at(expanded.segments[0].end_index), 1.0, 1e-9);
+  EXPECT_NEAR(x_at(expanded.segments[1].start_index), 1.0, 1e-9);
+  EXPECT_NEAR(x_at(expanded.segments[1].end_index), 0.0, 1e-9);
+}
+
+TEST(CoveragePassExpander, StripConnectorsConflictOnlyWithAReversedLastPass)
+{
+  EXPECT_TRUE(stripConnectorsConflictWithPasses(makeDoublePassProfile(), true));
+  EXPECT_FALSE(stripConnectorsConflictWithPasses(makeDoublePassProfile(), false));
+  EXPECT_FALSE(stripConnectorsConflictWithPasses(makeSinglePassProfile(), true));
+  coverage_planner::ToolCoverageProfile none;
+  EXPECT_FALSE(stripConnectorsConflictWithPasses(none, true));
 }

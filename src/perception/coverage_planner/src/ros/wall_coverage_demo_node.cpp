@@ -471,9 +471,7 @@ int main(int argc, char ** argv)
   // executor to jump the strip's full length at every strip/connector joint. Reconciling that
   // would mean re-deriving each connector's route against the actual post-expansion pose, which
   // is out of scope here; reject the combination instead of silently emitting an unexecutable plan.
-  if (
-    add_strip_connectors && !tool_profile.coverage.passes.empty() &&
-    tool_profile.coverage.passes.back().reverse_direction) {
+  if (coverage_planner::stripConnectorsConflictWithPasses(tool_profile, add_strip_connectors)) {
     RCLCPP_ERROR(
       node->get_logger(),
       "wall_coverage_demo: 'double_pass' and 'add_strip_connectors' cannot both be true -- "
