@@ -1,0 +1,30 @@
+# The MuJoCo tall-wall scenario `two_panels_tall` of sim_mujoco/scripts/make_scenario_scene.py: a 0.9 m wide patch
+# (y 0.3..1.2) and patch z 0.6..2.0 m, so the lift has to telescope; the sim wall has 0.25 m of margin each side and
+# 0.3 m above and below (y 0.05..1.45, z 0.3..2.3). Numbers are the generator's own output
+# (smoke_wall_scene.json: origin [0.98, 0.75, 1.3], u -0.7..0.7, v -1..1; coverage scene u -0.45..0.45, v -0.7..0.7).
+# Not run in the simulator yet (docs/sim_mujoco.md).
+schema_version: 1
+name: mujoco_tall_wall
+description: MuJoCo two_panels_tall, wall 1.4 x 2.0 m, patch 0.9 x 1.4 m.
+world_frame: odom
+wall:
+  point: [0.98, 0.75, 1.3]
+  normal: [-1.0, 0.0, 0.0]
+  u_range: [-0.7, 0.7]
+  v_range: [-1.0, 1.0]
+patch:
+  mode: crop
+  u_range: [-0.45, 0.45]   # y 0.3 .. 1.2
+  v_range: [-0.7, 0.7]     # z 2.0 .. 0.6
+base:
+  x: 0.0
+  y: 0.0
+  yaw: 0.0
+  standoff_m: 0.98
+robot_profile: ur10e_telescopic
+tool_profile: spray_gun
+lift_range_m: [0.0, 1.5]
+consumers:
+  mujoco: {}
+  rviz:
+    fixed_frame: odom
