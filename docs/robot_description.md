@@ -208,7 +208,8 @@ UR, provided the vendor frames are re-parented to the three contract links.
 Selected with `lift:=<type>`; the profile's `lift:` section is the one place that states the values
 (`scripts/profile_xacro_args.py` turns it into xacro args, and the asset command and the tests
 use it). Every variant has `lift_base_link`, `lift_carriage_link`, `lift_joint`, `lift_output_link`,
-so SRDF chains, reachability and planners do not change.
+so SRDF chains, reachability and planners do not change. Published lifts of known mobile manipulators and
+commercial columns, with sources, are in [lift_catalog.md](lift_catalog.md).
 
 | `lift:` | `lift_joint` | Extra links | Notes |
 |---|---|---|---|

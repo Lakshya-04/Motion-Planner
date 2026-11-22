@@ -40,6 +40,8 @@ lift:
   stages: 0
   max_acceleration_mps2: 0.5
   mount_height_m: 0.57   # lift_output_link above lift_base_link, retracted
+  # stroke 0.35 m and speed 0.05 m/s are published by the vendor (docs/lift_catalog.md); the stage count and
+  # payload are not, so stages stays 0 (one carriage)
 
 # Ready posture, lift part way up. Not checked for self-collision on this arm in a simulator.
 home:
