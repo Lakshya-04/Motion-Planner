@@ -89,3 +89,12 @@ The check itself is described in [reachability.md](reachability.md); these selec
 |---|---|---|
 | `column_ik_prismatic_joints` | [0] | Indices of prismatic joints (the lift). |
 | `column_ik_continuous_joints` | [] | Indices of unbounded revolute joints; their step is wrapped to [-pi, pi]. All other joints count as limited revolutes. |
+
+## Chained columns (`chain_columns:=true`)
+
+Between two columns of one stand the manager retracts and then plans an approach to the next column with OMPL and a joint goal, a randomized swing that differs every time even when the neighbour is 10 cm away. With `chain_columns` the approach is first tried as one straight Cartesian move from the previous column's dock pose; a failed or short move falls back to the normal approach. Needs `dock_approach_extra_m` > 0. Rule: `core/column_chain.hpp`.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `chain_columns` | false | Try the straight chained approach between columns of one stand. |
+| `chain_max_shift_m` | 0.4 | Longest distance (m) between the previous dock pose and the next approach pose that is still chained. |

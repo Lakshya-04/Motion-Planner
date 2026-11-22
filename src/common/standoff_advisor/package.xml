@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>standoff_advisor</name>
+  <version>0.1.0</version>
+  <description>
+    How far from the wall should the base dock: sweeps the arm base's distance to a wall over an RM4D map,
+    reports reachable fraction, pose quality, lift range and footprint fit per distance, and recommends a
+    robust standoff (the middle of the widest good plateau, shrunk by the navigation tolerance).
+  </description>
+  <maintainer email="100lakshyaagarwal@gmail.com">Lakshya Agarwal</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>eigen</depend>
+  <depend>yaml-cpp</depend>
+  <depend>reachability</depend>
+
+  <exec_depend>python3-numpy</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

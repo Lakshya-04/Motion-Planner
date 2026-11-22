@@ -3,7 +3,15 @@
 Parameters: `base_profile` (robot profile YAML with a `base:` section, required), `odom_topic`,
 `cmd_vel_topic`, `tolerance_xy_m`, `tolerance_yaw_rad`, `timeout_s`, `rate_hz`, `odom_timeout_s`.
 The goal frame must equal the odom frame id; nothing is transformed (no localisation here).
+
+Path planning (path_planner.py): with a wall scene (`wall_scene_json` file and/or `wall_scene_topic`, a
+std_msgs/String JSON in the odom frame) the node checks the straight drive against the scene; it keeps the
+straight line when that is free (default behaviour) and plans around the obstacles when it is blocked, or always
+when `use_path_planner` is true. Parameters: `use_path_planner` (false), `wall_scene_json` (''),
+`wall_scene_topic` ('', e.g. /wall_detector/wall_scene), `planner_resolution_m` (0.05), `planner_margin_m` (0.02),
+`planner_lookahead_m` (0 = from the profile). Without a scene, nothing changes.
 """
+import json
 import math
 import time
 
@@ -14,10 +22,14 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String
 from stand_navigator_msgs.action import NavigateToStand
 
 from stand_navigator.core import (
     StandController, Tolerance, arm_to_footprint, footprint_to_arm, load_profile)
+from stand_navigator.path_planner import (
+    PathFollower, plan_path, scene_obstacles, straight_line_free)
 
 
 def yaw_of(q):
@@ -36,11 +48,26 @@ class StandNavigator(Node):
         self.timeout = self.declare_parameter('timeout_s', 120.0).value
         self.rate = self.declare_parameter('rate_hz', 50.0).value
         self.odom_timeout = self.declare_parameter('odom_timeout_s', 1.0).value
+        self.use_planner = self.declare_parameter('use_path_planner', False).value
+        self.res = self.declare_parameter('planner_resolution_m', 0.05).value
+        self.margin = self.declare_parameter('planner_margin_m', 0.02).value
+        look = self.declare_parameter('planner_lookahead_m', 0.0).value
+        self.lookahead = look if look > 0.0 else None
+        self.obstacles = []
+        scene_file = self.declare_parameter('wall_scene_json', '').value
+        if scene_file:
+            with open(scene_file) as f:
+                self.obstacles = scene_obstacles(json.load(f))
         self.odom = None
         self.odom_stamp = 0.0
         cb = ReentrantCallbackGroup()
         self.create_subscription(Odometry, self.declare_parameter('odom_topic', 'odom').value,
                                  self._on_odom, 10, callback_group=cb)
+        scene_topic = self.declare_parameter('wall_scene_topic', '').value
+        if scene_topic:
+            latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                                 reliability=ReliabilityPolicy.RELIABLE)
+            self.create_subscription(String, scene_topic, self._on_scene, latched, callback_group=cb)
         self.pub = self.create_publisher(Twist, self.declare_parameter('cmd_vel_topic', 'cmd_vel').value, 10)
         self.server = ActionServer(
             self, NavigateToStand, 'navigate_to_stand', self._execute, callback_group=cb,
@@ -52,6 +79,12 @@ class StandNavigator(Node):
     def _on_odom(self, msg):
         self.odom = msg
         self.odom_stamp = time.monotonic()
+
+    def _on_scene(self, msg):
+        try:
+            self.obstacles = scene_obstacles(json.loads(msg.data))
+        except (ValueError, TypeError, AttributeError) as e:
+            self.get_logger().warn(f'wall scene ignored: {e}')
 
     def _goal(self, req):
         p = req.pose.pose.position
@@ -87,7 +120,25 @@ class StandNavigator(Node):
         gp = goal.pose
         gyaw = yaw_of(gp.orientation)
         fx, fy, fyaw = arm_to_footprint(gp.position.x, gp.position.y, gyaw, self.profile.arm_mount)
-        ctl = StandController(self.profile, (fx, fy, fyaw), self.tol)
+        start = self._pose()
+        goal_fp = (fx, fy, fyaw)
+        ctl = StandController(self.profile, goal_fp, self.tol)
+        note = ''
+        straight = math.hypot(fx - start[0], fy - start[1])
+        if self.obstacles:
+            fp = self.profile.footprint
+            free = straight_line_free(self.profile.holonomic, fp, start, goal_fp, self.obstacles, self.margin)
+            if self.use_planner or not free:
+                plan = plan_path(fp, start, goal_fp, self.obstacles, self.res, self.margin)
+                if plan.ok:
+                    ctl = PathFollower(self.profile, plan.path, goal_fp, self.tol, self.lookahead)
+                    note = f' (planned path {plan.length:.2f} m vs straight {plan.straight:.2f} m)'
+                    self.get_logger().info(f'navigate_to_stand:{note.strip()}, {len(plan.path)} waypoints')
+                elif not free:
+                    return self._result(handle, False, res.INVALID_GOAL,
+                                        f'straight line blocked and no path: {plan.reason}')
+        if not note:
+            note = f' (straight line {straight:.2f} m)'
         dt = 1.0 / self.rate
         t0 = time.monotonic()
         fb = NavigateToStand.Feedback()
@@ -110,7 +161,7 @@ class StandNavigator(Node):
             tw = self.odom.twist.twist
             if ctl.arrived(pose, math.hypot(tw.linear.x, tw.linear.y), abs(tw.angular.z)):
                 self._stop()
-                return self._result(handle, True, res.NONE, 'arrived', ctl)
+                return self._result(handle, True, res.NONE, 'arrived' + note, ctl)
             vx, vy, wz = ctl.step(pose, max(now - last, 1e-3))
             last = now
             cmd = Twist()

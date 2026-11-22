@@ -224,6 +224,12 @@ if(BUILD_TESTING)
     target_link_libraries(stand_check_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
+  ament_add_gtest(column_chain_test test/column_chain_test.cpp)
+  if(TARGET column_chain_test)
+    target_include_directories(column_chain_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_features(column_chain_test PRIVATE cxx_std_17)
+  endif()
+
   ament_add_gtest(stand_gate_test test/stand_gate_test.cpp)
   if(TARGET stand_gate_test)
     target_link_libraries(stand_gate_test ${PROJECT_NAME}_core core_types::core_types)
