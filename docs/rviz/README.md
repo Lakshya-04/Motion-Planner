@@ -114,3 +114,36 @@ and `joint_state_publisher` with it plus a static transform `map` to `base_footp
 - `view.launch.py` does not pass MoveIt's semantic/kinematics parameters to RViz; for the MotionPlanning panel start
   `demo.launch.py` with `rviz:=true` instead.
 - Fixed frames differ between modules (`base_footprint`, `map`, `world`, `link_base`); change it in RViz if a display is empty.
+
+## Plan-only playback
+
+`src/common/mp_rviz/scripts/plan_playback.sh` shows the plan itself, animated: the manipulation manager and its real
+planners run on ros2_control **mock hardware** (perfect tracking, `demo.launch.py`) instead of a simulator, so every
+executed trajectory is the planned one, played back at the planned speed. Nothing else is simulated.
+
+```bash
+PB_OUT=/path/to/run_dir PB_SRC=$PWD/src PB_RVIZ_WS=/path/to/ws_with_mp_rviz_built \
+  src/common/mp_rviz/scripts/plan_playback.sh      # containers plan_pb (stack) and plan_pb_rviz; both stay running
+```
+
+`PB_OUT` holds `coverage_output.json`, `data/walls.pcd` and `ur10e.rm4d` of an earlier run (reused, so the plan is
+reproducible); missing ones are built like `run_multi_stand_pass.sh` does. `data/smoke_wall_scene.json` there also draws the wall.
+`PB_BUILD_VOL` / `PB_INSTALL_VOL` (default `gzcols_b` / `gzcols_i`) are the colcon build and install of `PB_SRC`;
+`PB_DOMAIN` (92), `PB_IMAGE`, `PB_SPEED` (stroke speed, 0.01 m/s), `PB_EXTRA_STANDOFF` (0.02 m) tune the run. The script
+refuses to start without a free node slot (`docker/tools/hostwatch/slots.sh`).
+
+What runs: `demo.launch.py` (robot_state_publisher, mock ros2_control, plain joint_trajectory_controller, move_group), the
+real `reachability_node` and `stand_navigator`, `manipulation_manager` (`contact: false`, controller `lift_arm_controller`)
+with one multi-stand `ExecuteCoverage` goal, and `mp_fake_base.py`, which integrates `/cmd_vel` into `/odom` and the TF
+odom to base_footprint so the base "drives" to each stand. RViz uses `layers.rviz` with fixed frame `odom`; the tool trace
+is drawn from TF `tcp_link` in `odom`.
+
+Differences from the simulator pass, on purpose:
+
+- Perfect tracking: no controller lag, no settling, no recovery jogs caused by it. Execution time is the planned time.
+- No contact: the mock has no force sensor, so the run uses the manager's non-contact mode (`contact: false`, the spray
+  tool's flow): approach, dock at the stand-off, strokes 2 cm in front of the plan's plane, retract, per column. No press,
+  no force engage, no unload, and the trace is not coloured by force.
+- The mock plain controller rejects goals that end with a tiny nonzero velocity; the script sets
+  `allow_nonzero_velocity_at_trajectory_end` on `lift_arm_controller` at run time, nothing in the packages is changed.
+- The base is kinematic (no wheel slip, no odometry error), so the stand arrival is exact.
