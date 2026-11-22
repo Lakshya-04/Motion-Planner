@@ -1,6 +1,7 @@
 #include "coverage_planner/core/coverage_pass_expander.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 #include "coverage_planner/core/wall_pose_lift.hpp"
@@ -27,6 +28,14 @@ Path extractSubPath(
   return sub_path;
 }
 
+double distanceBetween(const PoseStamped & a, const PoseStamped & b)
+{
+  const double dx = a.pose.position.x - b.pose.position.x;
+  const double dy = a.pose.position.y - b.pose.position.y;
+  const double dz = a.pose.position.z - b.pose.position.z;
+  return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
 }  // namespace
 
 ExpandedCoverage expandCoveragePasses(
@@ -37,6 +46,12 @@ ExpandedCoverage expandCoveragePasses(
   expanded.path.header = flat_path.header;
 
   const auto & passes = tool_profile.coverage.passes;
+  // A tool whose last pass is reversed ends each strip where it started. The flat plan alternates
+  // strip directions (the next strip starts at this strip's END), so such a tool would jump the
+  // full strip length at every joint. Start every strip at the end nearest to where the previous
+  // strip finished instead: the joint is then only the pitch between strips.
+  const bool returns_to_start = passes.size() > 1 && passes.back().reverse_direction;
+  const PoseStamped * previous_finish = nullptr;
 
   for (const auto & segment : flat_segments) {
     if (segment.mode != "cartesian") {
@@ -54,10 +69,20 @@ ExpandedCoverage expandCoveragePasses(
       continue;
     }
 
+    bool flip = false;
+    if (returns_to_start) {
+      const auto & first = flat_path.poses.at(segment.start_index);
+      const auto & last = flat_path.poses.at(segment.end_index);
+      if (previous_finish != nullptr) {
+        flip = distanceBetween(last, *previous_finish) < distanceBetween(first, *previous_finish);
+      }
+      previous_finish = flip ? &last : &first;
+    }
+
     for (size_t pass_index = 0; pass_index < passes.size(); ++pass_index) {
       const auto & pass = passes[pass_index];
-      const auto sub_path =
-        extractSubPath(flat_path, segment.start_index, segment.end_index, pass.reverse_direction);
+      const auto sub_path = extractSubPath(
+        flat_path, segment.start_index, segment.end_index, pass.reverse_direction != flip);
 
       coverage_planner::ToolTask pass_task = tool_profile.task;
       pass_task.standoff_m += pass.standoff_delta_m;
