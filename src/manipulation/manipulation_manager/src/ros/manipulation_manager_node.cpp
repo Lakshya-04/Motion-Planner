@@ -270,6 +270,14 @@ public:
       dock_ik_sel_.wrist_min_rad = this->declare_parameter<double>("dock_ik_wrist_min_rad", -3.2);
       dock_ik_sel_.wrist_max_rad = this->declare_parameter<double>("dock_ik_wrist_max_rad", 3.2);
       dock_ik_sel_.max_dq_rad = this->declare_parameter<double>("dock_ik_max_dq_rad", 3.2);
+      // Reach preference of the continuity choice (needs dock_ik_continuity and the TF arm_base_frame
+      // in frame_id): > 0 keeps the tool at or below this fraction of dock_ik_reach_m from the arm base by using the
+      // lift joint (dock_ik_lift_joint, clamped into [dock_ik_lift_min_m, dock_ik_lift_max_m]). 0 = off (default).
+      dock_ik_sel_.reach_target_fraction = this->declare_parameter<double>("dock_ik_reach_fraction", 0.0);
+      dock_ik_sel_.reach_m = this->declare_parameter<double>("dock_ik_reach_m", 0.0);
+      dock_ik_sel_.lift_joint = static_cast<size_t>(std::max<int64_t>(0, this->declare_parameter<int>("dock_ik_lift_joint", 0)));
+      dock_ik_sel_.lift_min_m = this->declare_parameter<double>("dock_ik_lift_min_m", 0.0);
+      dock_ik_sel_.lift_max_m = this->declare_parameter<double>("dock_ik_lift_max_m", 1.5);
     }
     // recovery_keeps_branch: a recovery (jog after a short approach or a failed dock) stays on the IK branch the arm
     // is on. The jog goes toward the last good configuration only when that is on the live branch (else the last
@@ -1687,6 +1695,22 @@ private:
     if (dock_ik_continuity_) {
       const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_);
       const std::vector<double> & ref = !dock_branch_seed_.empty() ? dock_branch_seed_ : live;
+      // reach preference: where the tool goal lies relative to the arm base (TF frame_id <- arm_base_frame, the live lift
+      // taken out of the arm base height)
+      DockReachContext reach_ctx;
+      const DockReachContext * reach_ptr = nullptr;
+      if (dockReachPreferenceOn(dock_ik_sel_) && dock_ik_sel_.lift_joint < live.size()) {
+        FrameTransform arm_in_frame;
+        if (lookup(frame_id_, arm_base_frame_, arm_in_frame)) {
+          const double dx = pose.x - arm_in_frame.t[0];
+          const double dy = pose.y - arm_in_frame.t[1];
+          reach_ctx.horizontal_m = std::hypot(dx, dy);
+          reach_ctx.z_rel_m = pose.z - (arm_in_frame.t[2] - live[dock_ik_sel_.lift_joint]);
+          reach_ptr = &reach_ctx;
+        } else {
+          RCLCPP_WARN(this->get_logger(), "DOCKGOAL reach preference skipped: no TF %s <- %s", frame_id_.c_str(), arm_base_frame_.c_str());
+        }
+      }
       const auto choice = selectDockIk(
         [&](const std::vector<double> & sd) -> std::optional<std::vector<double>> {
           auto r = req;
@@ -1697,13 +1721,18 @@ private:
           }
           return res.joint_solution;
         },
-        {dock_branch_seed_, live, dock_seed_}, ref, dock_ik_sel_);
+        {dock_branch_seed_, live, dock_seed_}, ref, dock_ik_sel_, reach_ptr);
       if (choice.ok) {
         RCLCPP_INFO(
           this->get_logger(),
           "DOCKGOAL continuity: seed %zu of %zu candidates, max dq %.3f rad (dropped: branch %zu, wrist %zu, jump %zu)",
           choice.seed_index, choice.candidates, choice.cost, choice.rejected_branch, choice.rejected_wrist,
           choice.rejected_cost);
+        if (reach_ptr) {
+          RCLCPP_INFO(
+            this->get_logger(), "DOCKGOAL reach fraction %.2f (target %.2f)%s", choice.reach_fraction,
+            dock_ik_sel_.reach_target_fraction, choice.reach_over_target ? ", over the target" : "");
+        }
         return choice.q;
       }
       RCLCPP_WARN(

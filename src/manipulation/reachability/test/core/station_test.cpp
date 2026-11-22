@@ -188,3 +188,12 @@ TEST(Station, GridPointCountMatchesTheGridOnWallsAndCeilings)
   EXPECT_NEAR(stationGridPointCount(big), 101.0 * 101.0, 1.0);
   EXPECT_EQ(stationGridPointCount(StationRequest{}), 0.0);
 }
+
+TEST(Station, EffectiveMinClearanceIsAFloorAndOffByDefault)
+{
+  EXPECT_DOUBLE_EQ(effectiveMinClearance(0.3, 0.0), 0.3);                      // off
+  EXPECT_DOUBLE_EQ(effectiveMinClearance(0.3, -1.0), 0.3);
+  EXPECT_DOUBLE_EQ(effectiveMinClearance(0.3, 0.6), 0.6);                      // raised
+  EXPECT_DOUBLE_EQ(effectiveMinClearance(0.8, 0.6), 0.8);                      // a larger request is kept
+  EXPECT_DOUBLE_EQ(effectiveMinClearance(0.3, std::nan("")), 0.3);
+}
