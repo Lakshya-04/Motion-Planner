@@ -11,6 +11,8 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -50,6 +52,28 @@ StandAssignment assignColumnsToStands(
  *         of the group's first. Groups come in ascending order. `max_span` <= 0: one group of everything.
  */
 std::vector<std::vector<size_t>> groupByLateralSpan(const std::vector<double> & lateral, double max_span);
+
+/// A planned stand with the pose indices (into the plan's concatenated poses) it serves.
+struct MergeableStand
+{
+  double x{0.0};
+  double y{0.0};
+  double yaw{0.0};
+  std::vector<size_t> targets;
+};
+
+/// Asks for ONE stand that serves all of `targets` (the stand planner, over exactly those poses); nullopt when the
+/// planner needs more than one stand or leaves any of them unreachable.
+using StandMerger = std::function<std::optional<MergeableStand>(const std::vector<size_t> & targets)>;
+
+/**
+ * @brief Merge consecutive stands closer than `tol_m` (plan view) into one when `merge` finds a single stand for the union
+ *        of their targets, so coverage is exactly kept. Stands asked for group by group (stand_max_span_m) can come out
+ *        a few cm apart because each group's search grid is anchored on its own targets.
+ * @return how many merges were made. `tol_m` <= 0 or fewer than two stands: nothing is touched. A pair the merger
+ *         refuses stays as it is. Visiting order is kept.
+ */
+size_t mergeNearDuplicateStands(std::vector<MergeableStand> & stands, double tol_m, const StandMerger & merge);
 
 enum class TaskState
 {

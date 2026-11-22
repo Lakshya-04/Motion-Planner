@@ -39,6 +39,13 @@ With the lift free the IK tends to dock with the lift near its start and the too
 | `dock_ik_lift_joint` | 0 | Index of the lift joint in the planning group. |
 | `dock_ik_lift_min_m`, `dock_ik_lift_max_m` | 0.0, 1.5 | Stroke the proposed lift is clamped into. |
 
+## Multi-stand requests: near-duplicate stands and clearance
+
+With `stand_max_span_m` > 0 the manager asks `plan_stands` for the columns group by group. Each group's search grid is anchored on that group's own targets, so neighbouring groups can return stands a few cm apart (a 3 x 2 m wall gave arm-base stands at y = -0.61, -0.57, -0.53 m). Two parameters of `manipulation_manager`:
+
+- `stand_merge_tol_m` (default 0.15; 0 = off): consecutive stands closer than this (plan view) are merged when `plan_stands`, asked for the union of their targets alone, returns exactly one stand with nothing unreachable or unplanned. Coverage is therefore unchanged; a pair the planner cannot serve from one stand stays as it was. Costs one extra service call per close pair.
+- `stand_min_clearance_m` (default 0 = the planner's own default): written into the `min_clearance` field of every request the manager sends. The reachability node's `stand_min_clearance_m` is only a floor on that field, and applies on the node that answers `base_check_service`; `stand_strategy` is ignored by `~/plan_verified_stands` (selectStands, a weighted greedy cover), so `set_cover` has no effect when the manager points at the verified service.
+
 The reachability node has a matching opt-in for stand planning, `stand_min_clearance_m` (default 0 = off), described in [reachability.md](reachability.md): a floor for the chassis-to-wall clearance of every `~/plan_stands` request.
 
 ## Recovery jog

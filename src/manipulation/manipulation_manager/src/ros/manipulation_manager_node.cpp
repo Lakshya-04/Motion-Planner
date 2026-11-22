@@ -396,6 +396,12 @@ public:
     // self-collision or how badly it is conditioned at the edge of its reach, so plan_stands is asked for stands
     // group by group. 0 = the whole plan at once.
     stand_max_span_ = this->declare_parameter<double>("stand_max_span_m", 0.0);
+    // Consecutive stands closer than this (m, plan view) are merged when plan_stands finds one stand for both of
+    // their target sets (grouped requests can return stands a few cm apart). 0 = off.
+    stand_merge_tol_ = this->declare_parameter<double>("stand_merge_tol_m", 0.15);
+    // Minimum chassis-to-wall clearance (m) asked of plan_stands in every request (its min_clearance field); 0 = the
+    // planner's own default (and its stand_min_clearance_m floor).
+    stand_min_clearance_ = this->declare_parameter<double>("stand_min_clearance_m", 0.0);
     // A shell command run after each arrival at a stand, before its columns (empty = none).
     arrival_command_ = this->declare_parameter<std::string>("stand_arrival_command", "");
     // A shell command that takes the wall out of the planning scene. With it (and the arrival command, which
@@ -1301,6 +1307,52 @@ private:
       why = "plan_stands returned no stand";
       return false;
     }
+    if (stand_merge_tol_ > 0.0 && stands.size() > 1) {
+      std::vector<core_types::Pose> all_poses;
+      for (const auto & c : sel) {
+        all_poses.insert(all_poses.end(), c.poses.begin(), c.poses.end());
+      }
+      std::vector<MergeableStand> ms;
+      for (size_t i = 0; i < stands.size(); ++i) {
+        ms.push_back({stands[i].x, stands[i].y, stands[i].yaw, targets_per_stand[i]});
+      }
+      const auto merger = [&](const std::vector<size_t> & idx) -> std::optional<MergeableStand> {
+          std::vector<CoverageSegmentIntent> one(1);
+          for (const size_t k : idx) {
+            if (k >= all_poses.size()) {
+              return std::nullopt;
+            }
+            one[0].poses.push_back(all_poses[k]);
+          }
+          auto req = makeStandRequest(stanceWall(one));
+          auto future = client->async_send_request(req);
+          if (rclcpp::spin_until_future_complete(
+              shared_from_this(), future, std::chrono::duration<double>(stand_service_timeout_s_)) !=
+            rclcpp::FutureReturnCode::SUCCESS)
+          {
+            return std::nullopt;
+          }
+          const auto res = future.get();
+          if (!res->success || res->stands.size() != 1 || !res->unreachable.empty() || !res->not_planned.empty() ||
+            res->stands[0].target_indices.size() != idx.size())
+          {
+            return std::nullopt;
+          }
+          return MergeableStand{res->stands[0].x, res->stands[0].y, res->stands[0].yaw, {}};
+        };
+      const size_t n = mergeNearDuplicateStands(ms, stand_merge_tol_, merger);
+      if (n > 0) {
+        stands.clear();
+        targets_per_stand.clear();
+        for (const auto & m : ms) {
+          stands.push_back({m.x, m.y, m.yaw});
+          targets_per_stand.push_back(m.targets);
+        }
+        RCLCPP_INFO(
+          this->get_logger(), "merged %zu near-duplicate stand(s) (within %.2f m): %zu stand(s) left", n,
+          stand_merge_tol_, stands.size());
+      }
+    }
     return true;
   }
 
@@ -1523,6 +1575,9 @@ private:
     req->wall_normal.x = -wall_dir_.d[0];
     req->wall_normal.y = -wall_dir_.d[1];
     req->wall_normal.z = -wall_dir_.d[2];
+    if (stand_min_clearance_ > 0.0) {
+      req->min_clearance = stand_min_clearance_;
+    }
     req->lift_min = base_check_lift_min_;
     req->lift_max = base_check_lift_max_;
     req->arm_mount_offset_z = base_check_arm_mount_z_;
@@ -2790,6 +2845,8 @@ private:
   double last_arrival_pos_err_m_{0.0};
   double last_arrival_yaw_err_rad_{0.0};
   double stand_max_span_{0.0};
+  double stand_merge_tol_{0.15};
+  double stand_min_clearance_{0.0};
   std::string arrival_command_;
   std::string wall_clear_command_;
   double nav_timeout_s_{240.0};

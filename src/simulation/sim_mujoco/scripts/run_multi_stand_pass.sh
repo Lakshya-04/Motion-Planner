@@ -10,6 +10,8 @@
 #                                  the scenario's own patch is used otherwise (two_panels_tall: 0.6,2.0); sets MP_Z_LO / MP_Z_HI,
 #                                  the manager's coverage z range and the recorder's wall band
 #   MULTI_STAND_COVERAGE_EXTRA     more ros arguments of the coverage demo (-p obstacle_inflation_radius_m:=0.07)
+#   MULTI_STAND_REACH_FRACTION=0.7       keep the tool within this fraction of MULTI_STAND_ARM_REACH (default 1.3 m, UR10e) by moving the lift (needs DOCK_IK_CONTINUITY=true; default 0 = off)
+#   MULTI_STAND_MIN_CLEARANCE=0.5        stand planner floor on the chassis-to-wall clearance in m (default 0 = off)
 #   MULTI_STAND_DOCK_IK_CONTINUITY=true  choose the dock joint goal among IK solutions by continuity (manager `dock_ik_continuity`, default false)
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
 #                                  configuration docked at the wall, [] chains the seeds from the previous dock
@@ -101,7 +103,7 @@ start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$STAND_PRO
 # the demo rasterizes the obstacle clearance into the grid itself; the service node would add its own 0.3 m default
 start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0
 start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
-  -p base_profile:=$PROFILE
+  -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0}
 start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE
 
 # 1. coverage plan for the wall's contact region, in the world frame
@@ -144,6 +146,11 @@ manipulation_manager:
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
     dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-$DOCK_SEED}
     dock_ik_continuity: ${MULTI_STAND_DOCK_IK_CONTINUITY:-false}
+    dock_ik_reach_fraction: ${MULTI_STAND_REACH_FRACTION:-0.0}
+    dock_ik_reach_m: ${MULTI_STAND_ARM_REACH:-1.3}
+    dock_ik_lift_joint: 0
+    dock_ik_lift_min_m: 0.0
+    dock_ik_lift_max_m: ${MULTI_STAND_LIFT_STROKE:-1.5}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MULTI_STAND_PRESS:-0.0015}
