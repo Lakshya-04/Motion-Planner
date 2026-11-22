@@ -18,7 +18,7 @@ and `/mp_viz/tool_trace` (the tool path coloured by force). A wrong profile name
   `coverage_planner_msgs/CoveragePlan` on `/wall_coverage_service_node/coverage_plan` (parameter `coverage_topic`).
   Strips are coloured, connectors grey and thin.
 - `/mp_viz/stands`: call `ros2 service call /mp_viz_scene/refresh std_srvs/srv/Trigger`. The node calls
-  `reachability_msgs/PlanStands` on `/reachability_node/plan_stands` once, with the plan's path poses
+  `reachability_msgs/PlanStands` on `/reachability/plan_stands` once, with the plan's path poses
   (at most `max_targets`) as `targets_world` and a wall plane from `wall_point`/`wall_normal` (default: first target and
   the opposite of its tool z axis), then draws each stand as an arrow, a footprint rectangle and `#index n tgt travel`.
 - `/mp_viz/reach_slice`: nothing is published. `reachability_msgs` has only `IsReachable`, `GetBaseCandidates`,
@@ -35,6 +35,75 @@ Start the module you want to look at first (the exact command is in each table),
 | Description and planning | [description_planning.md](description_planning.md) | robot_model, moveit_planning, cartesian_validation, fsp_benchmark, planner_backends, self_filter |
 | Perception, coverage, reachability, stands, manager | [perception_coverage_reach.md](perception_coverage_reach.md) | wall_detector, scene_model, coverage_planner, reachability, reachability_moveit, stand_navigator, manipulation_manager, mission_overview |
 | Control and simulators | [control_sim.md](control_sim.md) | jtac_compliance, ft_sensor, safety_teleop, sim_mujoco, sim_gazebo, sim_isaac, tool_trace |
+
+## Layers
+
+`profiles/layers.rviz` (and the same wall and reachable displays in `mission_overview`) shows the plan as separate
+layers, each its own display inside the group "Plan layers", so the checkboxes toggle them:
+
+```bash
+rviz2 -d $(ros2 pkg prefix mp_rviz)/share/mp_rviz/profiles/layers.rviz -f map     # -f = frame of your data (map, odom, world)
+```
+
+| Layer | Topic | Shows |
+|---|---|---|
+| 1 Real wall | `/mp_viz/wall` | the whole wall rectangle from `wall_scene_json` (`origin_xyz + u*basis_u + v*basis_v` over `u_range_m` x `v_range_m`): translucent quad, outline and a size label |
+| 2 Full coverage plan | `/mp_viz/plan_columns` | every stroke of the plan (topic or `plan_file`), connectors grey |
+| 3 Reachable | `/mp_viz/reachable` | one cube per sampled plan pose, green when `reachability_msgs/IsReachable` says the arm reaches it from the base pose `base_x/base_y/base_yaw`, red when not; label gives the count |
+| 2b Transitions | `/mp_viz/transitions` | grey arrows from the end of each stroke to the start of the next (joins the plan itself has no connector segment for), and the visiting number at the start of each stroke group; drawn from `start_index`/`end_index` in execution order |
+| 4 Stands | `/mp_viz/stands` | `PlanStands` result (arrow, footprint, `#n tgt travel`) |
+| 5 Executed tool trace | `/mp_viz/tool_trace` | from `mp_viz_markers.py`, coloured by force |
+
+Start the node with the parameters you need (frame_id is the frame of the wall and plan; the wall JSON's own
+`frame_id` is the default for the wall):
+
+```bash
+ros2 run mp_rviz mp_viz_scene.py --ros-args -p wall_scene_json:=/path/wall_scene.json -p plan_file:=/path/coverage_output.json \
+  -p frame_id:=map -p base_x:=1.0 -p base_y:=0.0 -p base_yaw:=0.0 -p arm_base_z:=1.0 -p max_reach_targets:=150
+ros2 service call /mp_viz_scene/refresh std_srvs/srv/Trigger     # re-reads wall + plan file, redoes reachable and stands
+```
+
+Reachable details: the world pose is turned into the arm-base frame (`arm_base_z` is the world height of the arm base,
+`arm_dx/arm_dy` its offset in the base frame) and sent as async `IsReachable` requests, one in flight at a time (150 queued at once were answered at about one per
+second, sequentially in milliseconds), at most `max_reach_targets` evenly sampled poses after interpolating the strokes
+every `reach_step` m (the service answers one pose per call, there is no bulk query). The service names default to
+`/reachability/is_reachable` and `/reachability/plan_stands` (the node is called `reachability`). Moving to
+another stand means setting `base_x/base_y/base_yaw` (`ros2 param set /mp_viz_scene base_x 1.5`) and calling refresh.
+
+### A full-wall plan offline
+
+The Gazebo multi-stand test wall is 3.0 x 2.0 m (`smoke_wall_scene.json`: u -1.5..1.5, v 0..2, plane x = 2.0, frame
+`map`), but its plan used a cropped 0.9 x 0.3 m contact patch: about 0.5 m2 of strokes, about 4.5 % of the 6 m2 wall.
+To see a plan over the whole wall without a simulator:
+
+```bash
+python3 src/common/mp_rviz/scripts/make_full_wall_fixture.py /tmp/fw          # wall_scene.json + walls.pcd (3 x 2 m, 2 cm grid)
+ros2 launch coverage_planner wall_coverage_demo.launch.py wall_scene_json:=/tmp/fw/wall_scene.json tool_name:=contact_wiper show_rviz:=false
+```
+
+The coverage planner has no argument for the point cloud: it loads `walls.pcd` from the directory of the scene JSON
+(PCL `x y z label`, label = wall id), which the generator writes beside the JSON, and the scene JSON must carry all
+wall keys (`observed_area_m2`, `observed_fraction`, `plane_rms_mm`, `spread_p95_mm`, `spread_p99_mm`, `points`,
+`merged_layers`, `layer_offset_spread_mm`), which it also writes.
+
+Measured on the full 3 x 2 m fixture with `contact_wiper`: 20 vertical strips, 0.15 m apart, centres y -1.475 to 1.375
+(each 0.2 m wide, so the whole 3.0 m width), two passes each, 80 poses; the planner reports 41.85 m of path and 8.37 m2
+swept (overlap and the second pass counted), the unique strokes drawn are about 3.9 m2 of strip length x 0.2 m, and the
+wall is 6.0 m2 (the observed mask from the synthetic cloud is 2400/2400 cells). The strips run bottom-to-top and the
+planner joins one strip to the next with a straight diagonal (no connector segments unless `add_strip_connectors:=true`),
+which the transitions layer draws. At base (1.2, 0, yaw 0) with the arm base at 1.0 m: 39 of 150 sampled poses reachable.
+
+Robot model without a simulator: `xacro .../mobile_manipulator.urdf.xacro arm:=ur10e`, strip the XML comments and put
+the text in a parameters file (a multi-line `-p robot_description:=` fails to parse), then run `robot_state_publisher`
+and `joint_state_publisher` with it plus a static transform `map` to `base_footprint` at the base pose.
+
+### Layer limits
+
+- The point cloud is synthetic (a perfect grid), so the plan covers the whole rectangle with no scan holes.
+- Reachable uses one arm-base height (`arm_base_z`); the lift is not searched, so poses another lift height would
+  reach show red. It checks the arm only (RM4D map), not collisions, the base footprint or the wall standoff.
+- The reachable layer needs a running `reachability_node` with a map; without it the layer stays empty and refresh says so.
+- Only the sampled poses are tested; a layer of 150 cubes over a long plan is a sample, not every pose.
 
 ## Honest limits
 

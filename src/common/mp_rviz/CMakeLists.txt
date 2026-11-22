@@ -4,7 +4,7 @@ project(mp_rviz)
 find_package(ament_cmake REQUIRED)
 
 install(DIRECTORY launch profiles DESTINATION share/${PROJECT_NAME})
-install(PROGRAMS scripts/mp_viz_markers.py scripts/mp_viz_scene.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/mp_viz_markers.py scripts/mp_viz_scene.py scripts/make_full_wall_fixture.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/mp_viz_logic.py scripts/mp_viz_scene_logic.py DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

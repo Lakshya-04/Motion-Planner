@@ -115,3 +115,139 @@ def reach_rgb(value, vmax):
     if t < 0.5:
         return (0.0, 2 * t, 1.0 - 2 * t)
     return (2 * (t - 0.5), 1.0 - 2 * (t - 0.5), 0.0)
+
+
+# ---- wall layer -------------------------------------------------------------------------------------------------
+def wall_corners(wall):
+    """Four corners (x, y, z) of a wall_scene.json wall: origin + u*basis_u + v*basis_v over u_range_m x v_range_m.
+    Order is counter-clockwise in (u, v): (u0,v0) (u1,v0) (u1,v1) (u0,v1)."""
+    o, bu, bv = wall['origin_xyz'], wall['basis_u'], wall['basis_v']
+    (u0, u1), (v0, v1) = wall['u_range_m'], wall['v_range_m']
+    return [tuple(o[k] + u * bu[k] + v * bv[k] for k in range(3)) for u, v in ((u0, v0), (u1, v0), (u1, v1), (u0, v1))]
+
+
+def wall_quad_triangles(wall):
+    """Six points (two triangles) filling the wall rectangle, for a TRIANGLE_LIST."""
+    c = wall_corners(wall)
+    return [c[0], c[1], c[2], c[0], c[2], c[3]]
+
+
+def wall_outline(wall):
+    c = wall_corners(wall)
+    return c + [c[0]]
+
+
+def wall_area_m2(wall):
+    (u0, u1), (v0, v1) = wall['u_range_m'], wall['v_range_m']
+    return abs(u1 - u0) * abs(v1 - v0)
+
+
+def wall_from_scene(scene, wall_id=0):
+    """The wall dict with this id (or index) from a wall_scene.json dict; raises KeyError if none."""
+    walls = scene.get('walls') or []
+    for i, w in enumerate(walls):
+        if w.get('id', i) == wall_id:
+            return w
+    raise KeyError('wall %s not in scene' % wall_id)
+
+
+def plan_strip_area_m2(lines, strip_width):
+    """Rough area swept by the plan: summed length of the non-connector polylines (segment_polylines output) times the
+    tool strip width. Strokes drawn identically twice (return passes) count once; overlap between strips is not removed, so it is an upper bound."""
+    total = 0.0
+    seen = set()
+    for ln in lines:
+        if ln.get('connector'):
+            continue
+        pts = ln['points']
+        key = tuple(sorted(tuple(round(c, 4) for c in q) for q in pts))
+        if key in seen:  # a return pass drawn over the same render indices
+            continue
+        seen.add(key)
+        total += sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
+    return total * strip_width
+
+
+def densify_poses(poses, lines_idx, step):
+    """poses: (x, y, z, qx, qy, qz, qw) tuples; lines_idx: (a, b) inclusive index ranges of the strokes. Returns the
+    poses plus linearly interpolated positions (orientation of the first pose of each pair) every <= step metres
+    inside each stroke. Without ranges, the poses are returned unchanged."""
+    out = []
+    for a, b in lines_idx:
+        for k in range(a, b):
+            p, q = poses[k], poses[k + 1]
+            d = math.dist(p[:3], q[:3])
+            n = max(1, int(math.ceil(d / step))) if step > 0 else 1
+            for t in range(n):
+                f = t / n
+                out.append(tuple(p[m] + f * (q[m] - p[m]) if m < 3 else p[m] for m in range(7)))
+        out.append(tuple(poses[b]))
+    return out
+
+
+def plan_bbox_area_m2(points, wall):
+    """Area of the (u, v) bounding box of the plan points on the wall, clipped to nothing (informative only)."""
+    if not points:
+        return 0.0
+    o, bu, bv = wall['origin_xyz'], wall['basis_u'], wall['basis_v']
+    us = [sum((p[k] - o[k]) * bu[k] for k in range(3)) for p in points]
+    vs = [sum((p[k] - o[k]) * bv[k] for k in range(3)) for p in points]
+    return (max(us) - min(us)) * (max(vs) - min(vs))
+
+
+# ---- reachable layer --------------------------------------------------------------------------------------------
+def world_to_arm_base(pose, base_x, base_y, base_yaw, arm_base_z, arm_dx=0.0, arm_dy=0.0):
+    """Express a world pose (x, y, z, qx, qy, qz, qw) in the arm base frame.
+    The arm base sits at (base_x, base_y, arm_base_z) of the world, turned by base_yaw, shifted arm_dx/arm_dy in the
+    base frame. Returns the pose tuple in that frame."""
+    x, y, z, qx, qy, qz, qw = pose
+    c, s = math.cos(-base_yaw), math.sin(-base_yaw)
+    dx, dy = x - base_x, y - base_y
+    lx, ly = c * dx - s * dy - arm_dx, s * dx + c * dy - arm_dy
+    qb = yaw_to_quat(-base_yaw)
+    return (lx, ly, z - arm_base_z) + quat_mul(qb, (qx, qy, qz, qw))
+
+
+def quat_mul(a, b):
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz)
+
+
+def reach_colour(reachable):
+    """Green for reachable, red for not."""
+    return (0.1, 0.8, 0.2) if reachable else (0.9, 0.1, 0.1)
+
+
+def reach_summary(flags):
+    n = len(flags)
+    k = sum(1 for f in flags if f)
+    return '%d/%d reachable (%.0f%%)' % (k, n, 100.0 * k / n if n else 0.0)
+
+
+def transitions(segments, points, min_gap=0.01):
+    """Joins between consecutive non-connector segments in execution order (start_index..end_index poses).
+    Returns (joins, numbers): joins = [{'a','b'}] straight lines from the end of one stroke to the start of the next
+    when they are more than min_gap apart (a plan without connector segments has none of its own); numbers =
+    [{'n','at'}] visiting number at the start of each stroke that follows such a join (and the first stroke).
+    Segments out of range are skipped."""
+    joins, numbers = [], []
+    prev_end = None
+    n = 0
+    for seg in segments:
+        if is_connector(seg.get('label', ''), seg.get('mode', '')):
+            continue
+        a, b = int(seg.get('start_index', 0)), int(seg.get('end_index', 0))
+        if a < 0 or b < a or b >= len(points):
+            continue
+        start, end = points[a], points[b]
+        if prev_end is None or math.dist(prev_end, start) > min_gap:
+            n += 1
+            numbers.append({'n': n, 'at': start})
+            if prev_end is not None:
+                joins.append({'a': prev_end, 'b': start})
+        prev_end = end
+    return joins, numbers
