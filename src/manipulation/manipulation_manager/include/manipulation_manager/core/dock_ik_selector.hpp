@@ -84,7 +84,12 @@ inline double wrapToPi(double a)
   return a - M_PI;
 }
 
-/// max_i |dq_i| between `q` and `ref`, wrapping every joint that is not linear. Infinity on a size mismatch.
+inline bool allFiniteJoints(const std::vector<double> & q)
+{
+  return std::all_of(q.begin(), q.end(), [](double x) {return std::isfinite(x);});
+}
+
+/// max_i |dq_i| between `q` and `ref`, wrapping every joint that is not linear. Infinity on a size mismatch or a non-finite joint.
 inline double dockIkCost(
   const std::vector<double> & q, const std::vector<double> & ref, const DockIkSelectorParams & p)
 {
@@ -96,6 +101,9 @@ inline double dockIkCost(
     double d = q[i] - ref[i];
     if (std::find(p.linear_joints.begin(), p.linear_joints.end(), i) == p.linear_joints.end()) {
       d = wrapToPi(d);
+    }
+    if (std::isnan(d)) {
+      return INFINITY;   // std::max(worst, NaN) keeps `worst`, so a NaN joint would look free
     }
     worst = std::max(worst, std::fabs(d));
   }
@@ -159,7 +167,7 @@ inline DockIkChoice selectDockIk(
   const DockIkSelectorParams & p, const DockReachContext * reach = nullptr)
 {
   DockIkChoice best;
-  if (!ik || reference.empty()) {
+  if (!ik || reference.empty() || !allFiniteJoints(reference)) {
     return best;
   }
   const bool prefer = reach != nullptr && dockReachPreferenceOn(p) && p.lift_joint < reference.size();
@@ -169,15 +177,17 @@ inline DockIkChoice selectDockIk(
       if (sd.size() == reference.size()) {
         auto adj = sd;
         adj[p.lift_joint] = idealLift(sd[p.lift_joint], *reach, p);
-        seeds.push_back(std::move(adj));
+        if (std::isfinite(adj[p.lift_joint])) {
+          seeds.push_back(std::move(adj));
+        }
       }
     }
     best.reach_fraction = INFINITY;
   }
   bool best_under = false;
   for (size_t s = 0; s < seeds.size(); ++s) {
-    if (seeds[s].empty()) {
-      continue;
+    if (seeds[s].empty() || !allFiniteJoints(seeds[s])) {
+      continue;   // a NaN seed would send the IK nowhere
     }
     const auto sol = ik(seeds[s]);
     if (!sol || sol->size() != reference.size()) {
@@ -196,7 +206,7 @@ inline DockIkChoice selectDockIk(
       continue;
     }
     const double cost = dockIkCost(*sol, reference, p);
-    if (cost > p.max_dq_rad) {
+    if (!(cost <= p.max_dq_rad)) {   // also rejects a NaN cost or limit
       ++best.rejected_cost;
       continue;
     }

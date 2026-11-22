@@ -25,7 +25,10 @@ StandCheck::StandCheck(const StandCheckConfig & cfg) : cfg_(cfg)
   cfg_.min_tol_m = std::max(0.0, cfg_.min_tol_m);
   cfg_.max_tol_m = std::max(cfg_.min_tol_m, cfg_.max_tol_m);
   cfg_.margin_scale = std::max(0.0, cfg_.margin_scale);
-  cfg_.fallback_tol_m = std::clamp(cfg_.fallback_tol_m, cfg_.min_tol_m, cfg_.max_tol_m);
+  // std::clamp passes a NaN through, and a NaN tolerance makes every error compare as "within": fall back to the default
+  cfg_.fallback_tol_m = std::clamp(
+    std::isnan(cfg_.fallback_tol_m) ? StandCheckConfig{}.fallback_tol_m : cfg_.fallback_tol_m, cfg_.min_tol_m,
+    cfg_.max_tol_m);
   cfg_.yaw_tol_rad = std::max(0.0, cfg_.yaw_tol_rad);
   cfg_.max_redocks = std::max(0, cfg_.max_redocks);
 }
@@ -35,7 +38,11 @@ double StandCheck::toleranceM(double reach_margin_m) const
   if (!std::isfinite(reach_margin_m) || reach_margin_m < 0.0) {
     return cfg_.fallback_tol_m;
   }
-  return std::clamp(cfg_.margin_scale * reach_margin_m, cfg_.min_tol_m, cfg_.max_tol_m);
+  const double tol = cfg_.margin_scale * reach_margin_m;   // inf * 0 is NaN
+  if (std::isnan(tol)) {
+    return cfg_.fallback_tol_m;
+  }
+  return std::clamp(tol, cfg_.min_tol_m, cfg_.max_tol_m);
 }
 
 StandCheckResult StandCheck::evaluate(
