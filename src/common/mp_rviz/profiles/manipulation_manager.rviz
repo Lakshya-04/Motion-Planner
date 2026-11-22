@@ -1,0 +1,125 @@
+# generated once; edit freely. See docs/rviz/perception_coverage_reach.md
+Panels:
+- Class: rviz_common/Displays
+  Name: Displays
+  Property Tree Widget:
+    Expanded:
+    - /Global Options1
+    Splitter Ratio: 0.5
+  Tree Height: 400
+- Class: rviz_common/Views
+  Name: Views
+  Expanded:
+  - /Current View1
+  Splitter Ratio: 0.5
+Visualization Manager:
+  Class: ''
+  Displays:
+  - Class: rviz_default_plugins/Grid
+    Name: Grid
+    Enabled: true
+    Plane Cell Count: 10
+    Cell Size: 1
+  - Class: rviz_default_plugins/TF
+    Name: TF
+    Enabled: true
+    Show Names: true
+  - Class: rviz_default_plugins/RobotModel
+    Name: RobotModel
+    Enabled: true
+    Description Topic:
+      Value: /robot_description
+  - Class: rviz_default_plugins/Path
+    Name: Final coverage path (demo)
+    Enabled: false
+    Color: 0; 255; 0
+    Line Style: Lines
+    Line Width: 0.03
+    Pose Style: Axes
+    Pose Color: 255; 128; 0
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /wall_coverage_demo/final_coverage_path
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Final markers (demo)
+    Enabled: false
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /wall_coverage_demo/final_coverage_markers
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Plan columns
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/plan_columns
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Stands
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/stands
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Reach slice
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/reach_slice
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: base_footprint
+    Frame Rate: 30
+  Name: root
+  Tools:
+  - Class: rviz_default_plugins/Interact
+    Hide Inactive Objects: true
+  - Class: rviz_default_plugins/MoveCamera
+  - Class: rviz_default_plugins/Select
+  - Class: rviz_default_plugins/FocusCamera
+  - Class: rviz_default_plugins/Measure
+    Line color: 128; 128; 0
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 4
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Name: Current View
+      Near Clip Distance: 0.01
+      Pitch: 0.5
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz)
+      Yaw: 0.75
+    Saved: null
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 846
+  Width: 1200
+  X: 60
+  Y: 40
