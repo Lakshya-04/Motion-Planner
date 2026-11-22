@@ -9,6 +9,7 @@
 
 #include "moveit/move_group_interface/move_group_interface.h"
 #include "moveit/planning_scene_monitor/planning_scene_monitor.h"
+#include "moveit/robot_state/cartesian_interpolator.h"
 #include "moveit/robot_trajectory/robot_trajectory.h"
 #include "rclcpp/rclcpp.hpp"
 
@@ -95,6 +96,15 @@ bool OmplPlanner::planOptimized(
       addCandidate("direct", direct);
     }
   }
+  // The tool's straight line next: when it is clear and on the goal's branch it is usually far shorter in TCP space
+  // than any joint-space path, and the selection below decides by the objective (a joint-space straight line that
+  // is valid still beats it on weighted joint length).
+  if (optimize_.cartesian_candidate && goal.size() == start.size()) {
+    moveit_msgs::msg::RobotTrajectory line;
+    if (tryCartesianLine(start, goal, line)) {
+      addCandidate("cartesian", line);
+    }
+  }
   const int n_ompl = std::max(1, optimize_.num_candidates - static_cast<int>(candidates.size()));
   const double slice = std::max(0.1, optimize_.time_budget_s / n_ompl);
 
@@ -168,6 +178,77 @@ bool OmplPlanner::planOptimized(
     log, "%s",
     formatFreeSpaceLog(candidates.size(), optimize_.objective, selection, candidates[best].source).c_str());
   out = trajectories[best];
+  last_route_ = "optimal:" + candidates[best].source;
+  return true;
+}
+
+bool OmplPlanner::tryCartesianLine(
+  const std::vector<double> & start, const std::vector<double> & goal,
+  moveit_msgs::msg::RobotTrajectory & out)
+{
+  const auto robot_model = move_group_->getRobotModel();
+  const auto * jmg = robot_model ? robot_model->getJointModelGroup(move_group_name_) : nullptr;
+  const auto log = node_ ? node_->get_logger() : rclcpp::get_logger("ompl_planner");
+  const auto * tip = robot_model ? robot_model->getLinkModel(move_group_->getEndEffectorLink()) : nullptr;
+  if (!jmg || !tip) {
+    return false;
+  }
+  std::string scene_error;
+  if (!backend_->ensurePlanningSceneMonitor(move_group_name_, scene_error) || !backend_->planningSceneMonitor()) {
+    return false;
+  }
+  std::vector<std::shared_ptr<moveit::core::RobotState>> states;
+  double fraction = 0.0;
+  {
+    planning_scene_monitor::LockedPlanningSceneRO scene(backend_->planningSceneMonitor());
+    if (!scene) {
+      return false;
+    }
+    moveit::core::RobotState goal_state(scene->getCurrentState());
+    goal_state.setJointGroupPositions(jmg, goal);
+    goal_state.update();
+    const Eigen::Isometry3d goal_pose = goal_state.getGlobalLinkTransform(tip);
+    moveit::core::RobotState seed(scene->getCurrentState());
+    seed.setJointGroupPositions(jmg, start);
+    seed.update();
+    const moveit::core::GroupStateValidityCallbackFn valid =
+      [&](moveit::core::RobotState * rs, const moveit::core::JointModelGroup * g, const double * q) {
+        rs->setJointGroupPositions(g, q);
+        rs->update();
+        return scene->isStateValid(*rs, move_group_name_);
+      };
+    fraction = moveit::core::CartesianInterpolator::computeCartesianPath(
+      &seed, jmg, states, tip, goal_pose, true, moveit::core::MaxEEFStep(optimize_.cartesian_eef_step),
+      moveit::core::JumpThreshold::absolute(optimize_.cartesian_revolute_jump, optimize_.cartesian_prismatic_jump),
+      valid);
+  }
+  if (fraction < 0.999 || states.size() < 2) {
+    RCLCPP_INFO(log, "cartesian candidate: line reached %.0f%% only, dropped", 100.0 * fraction);
+    return false;
+  }
+  core_types::Trajectory piece;
+  piece.joint_names = jmg->getActiveJointModelNames();
+  for (const auto & st : states) {
+    core_types::TrajectoryPoint point;
+    st->copyJointGroupPositions(jmg, point.positions);
+    piece.points.push_back(std::move(point));
+  }
+  if (!reachesJointGoal(piece.points.back().positions, goal, optimize_.cartesian_goal_tolerance)) {
+    RCLCPP_INFO(log, "cartesian candidate: the line ends on another joint branch than the goal, dropped");
+    return false;
+  }
+  MoveItTimeParameterizer retimer(robot_model, move_group_name_);
+  std::string message;
+  if (!retimer.retime(
+      piece, SegmentRole::kTransition, retimer.modelLimits(direct_default_acceleration_, 0.0), 0.0, message))
+  {
+    RCLCPP_WARN(log, "cartesian candidate: retiming failed (%s), dropped", message.c_str());
+    return false;
+  }
+  out.joint_trajectory = ros_adapters::toRos(piece);
+  RCLCPP_INFO(
+    log, "cartesian candidate: %zu points, %.2f s", piece.points.size(),
+    piece.points.empty() ? 0.0 : piece.points.back().time_from_start_sec);
   return true;
 }
 
@@ -441,6 +522,11 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
     direct_ok = tryDirectJointPath(direct_start, direct_goal, moveit_plan.trajectory);
   }
   const bool plan_result = direct_ok ? true : static_cast<bool>(move_group_->plan(moveit_plan));
+  if (!direct_ok) {
+    last_route_ = "ompl";
+  } else if (!optimize_.enabled) {
+    last_route_ = "direct";
+  }  // optimal: planOptimized set it
 
   result.success = static_cast<bool>(plan_result);
   result.status = result.success ? "planned" : "failed";

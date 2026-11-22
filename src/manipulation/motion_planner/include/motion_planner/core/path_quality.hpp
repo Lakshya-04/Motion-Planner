@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -146,9 +147,37 @@ inline double efficiencyRatio(double baseline, double value)
   return std::min(1.0, baseline / value);
 }
 
+/// True when `end` is within `tolerance` of `goal` in every joint (raw units: rad and m). Used to accept a Cartesian
+/// line for a JOINT goal only when its inverse kinematics landed on the goal's own branch: a path to the same tool
+/// pose on another branch is not the move that was asked for (wrist winding, elbow flip).
+inline bool reachesJointGoal(const std::vector<double> & end, const std::vector<double> & goal, double tolerance)
+{
+  if (end.size() != goal.size() || end.empty()) {
+    return false;
+  }
+  for (std::size_t j = 0; j < end.size(); ++j) {
+    if (!(std::fabs(end[j] - goal[j]) <= tolerance)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Largest absolute joint step along the polyline (a Cartesian line that hides a branch jump shows up here).
+inline double maxJointStep(const std::vector<std::vector<double>> & points)
+{
+  double m = 0.0;
+  for (std::size_t i = 1; i < points.size(); ++i) {
+    for (std::size_t j = 0; j < points[i].size() && j < points[i - 1].size(); ++j) {
+      m = std::max(m, std::fabs(points[i][j] - points[i - 1][j]));
+    }
+  }
+  return m;
+}
+
 struct PathCandidate
 {
-  std::string source;                         ///< "direct", or the planner config name.
+  std::string source;                         ///< "direct", "cartesian", or the planner config name.
   std::vector<std::vector<double>> points;    ///< Joint-space polyline, start first.
   /// Measured duration (time-optimal parameterisation), seconds; negative = not measured, use the estimate.
   double duration_s{-1.0};

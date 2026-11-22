@@ -87,3 +87,43 @@ TEST(PathQuality, ObjectiveParseAndLog)
     formatFreeSpaceLog(5, FreeSpaceObjective::kLength, s, "BITstar"),
     "free-space plan: candidates 5, best length=1.500 (baseline straight 1.000, efficiency 0.67), BITstar used");
 }
+
+TEST(PathQuality, CartesianCandidateWinsOnlyWhenShorterAndTiesKeepOrder)
+{
+  const auto c = cfg();
+  PathCandidate direct{"direct", {{0, 0}, {1, 2}}, -1.0};
+  PathCandidate cartesian{"cartesian", {{0, 0}, {0.5, 1.5}, {1, 2}}, -1.0};
+  PathCandidate ompl{"RRTstar", {{0, 0}, {1, 0}, {1, 2}}, -1.0};
+  // The straight joint line is the shortest possible: direct wins, the Cartesian line and OMPL lose.
+  auto sel = selectBestCandidate({direct, cartesian, ompl}, FreeSpaceObjective::kLength, c);
+  EXPECT_EQ(sel.best_index, 0);
+  // Direct blocked: the Cartesian line (almost straight) beats the OMPL detour.
+  sel = selectBestCandidate({cartesian, ompl}, FreeSpaceObjective::kLength, c);
+  EXPECT_EQ(sel.best_index, 0);
+  EXPECT_LT(sel.length, weightedPathLength(ompl.points, c));
+  // An equal-length Cartesian candidate listed after direct does not displace it.
+  PathCandidate cart_same{"cartesian", direct.points, -1.0};
+  sel = selectBestCandidate({direct, cart_same}, FreeSpaceObjective::kLength, c);
+  EXPECT_EQ(sel.best_index, 0);
+}
+
+TEST(PathQuality, DurationObjectiveUsesMeasuredDurationOfCartesianCandidate)
+{
+  const auto c = cfg();
+  PathCandidate cartesian{"cartesian", {{0, 0}, {0.2, 1.0}, {1, 2}}, 9.0};   // slow: tool-speed limited
+  PathCandidate ompl{"BITstar", {{0, 0}, {1, 0}, {1, 2}}, 4.0};             // longer but fast
+  auto by_length = selectBestCandidate({cartesian, ompl}, FreeSpaceObjective::kLength, c);
+  auto by_duration = selectBestCandidate({cartesian, ompl}, FreeSpaceObjective::kDuration, c);
+  EXPECT_EQ(by_length.best_index, 0);
+  EXPECT_EQ(by_duration.best_index, 1);
+  EXPECT_DOUBLE_EQ(by_duration.duration, 4.0);
+}
+
+TEST(PathQuality, JointGoalBranchCheck)
+{
+  EXPECT_TRUE(reachesJointGoal({0.0, 1.0}, {0.01, 1.02}, 0.05));
+  EXPECT_FALSE(reachesJointGoal({0.0, 1.0}, {0.0, 1.0 + 6.28}, 0.05));  // same pose, wrist wound once
+  EXPECT_FALSE(reachesJointGoal({0.0}, {0.0, 1.0}, 0.05));
+  EXPECT_FALSE(reachesJointGoal({}, {}, 0.05));
+  EXPECT_NEAR(maxJointStep({{0, 0}, {0.1, 0.3}, {0.1, 3.5}}), 3.2, 1e-12);
+}

@@ -44,6 +44,13 @@ struct FreeSpaceOptimizeConfig
   std::vector<std::string> planners{
     "BITstarkConfigDefault", "RRTstarkConfigDefault", "AITstarkConfigDefault", "InformedRRTstarkConfigDefault"};
   PathShortcutConfig shortcut;
+  /// The Cartesian straight line (continuity IK, seeded with the start) as one more candidate (param
+  /// `free_space_cartesian_candidate`). Only accepted when it reaches the goal on the goal's own joint branch.
+  bool cartesian_candidate{true};
+  double cartesian_eef_step{0.01};          ///< m between interpolated tool poses.
+  double cartesian_goal_tolerance{0.05};    ///< rad or m per joint between the line's end and the goal state.
+  double cartesian_revolute_jump{0.3};      ///< rad, largest joint step between two samples.
+  double cartesian_prismatic_jump{0.05};    ///< m.
 };
 
 class OmplPlanner : public Planner
@@ -67,13 +74,26 @@ public:
   /// Optimal mode: asymptotically optimal OMPL runs plus the direct joint path, post-processed and the best chosen.
   void setFreeSpaceOptimize(const FreeSpaceOptimizeConfig & config, double default_acceleration);
 
+  /// How the last plan() was made: "ompl" (default pipeline), "direct", or "optimal:<candidate source>"
+  /// (candidate sources: direct, cartesian, or the OMPL planner config name). Empty before the first plan.
+  const std::string & lastRoute() const {return last_route_;}
+
 private:
+  std::string last_route_;
+
   /// Fills `out` with the best of the candidates; false when none was found (the caller then plans as before).
   bool planOptimized(
     const std::vector<double> & start, const std::vector<double> & goal,
     moveit_msgs::msg::RobotTrajectory & out);
 
   FreeSpaceOptimizeConfig optimize_;
+
+  /// The tool's straight line from the pose at `start` to the pose at `goal` (both joint states), IK seeded from
+  /// the previous sample, every sample checked through the planning scene. True when the whole line was found, it
+  /// ends on `goal` (same branch) and it was retimed into `out`.
+  bool tryCartesianLine(
+    const std::vector<double> & start, const std::vector<double> & goal,
+    moveit_msgs::msg::RobotTrajectory & out);
 
   /// Straight-line attempt; true when moveit_plan was filled with a timed, valid trajectory.
   bool tryDirectJointPath(

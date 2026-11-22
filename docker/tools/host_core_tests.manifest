@@ -68,6 +68,9 @@ test | self_filter_test | robot_self_filter_core | src/perception/robot_self_fil
 test | wall_detection_test | wall_detector_core | src/perception/wall_detector/test/core/wall_detection_test.cpp | 
 test | motion_planner_test | motion_planner_core | src/manipulation/motion_planner/test/core/motion_planner_test.cpp | 
 exclude | src/manipulation/motion_planner/test/core/planning_pipeline_test.cpp | needs src/ros/planning_config.cpp, which includes pluginlib (ROS)
+test | path_quality_test | motion_planner_core | src/manipulation/motion_planner/test/core/path_quality_test.cpp |
+test | path_shortcut_test | motion_planner_core | src/manipulation/motion_planner/test/core/path_shortcut_test.cpp |
+test | direct_joint_path_test | motion_planner_core | src/manipulation/motion_planner/test/core/direct_joint_path_test.cpp |
 test | reachability_tilt_test | motion_planner_core | src/manipulation/motion_planner/test/core/reachability_tilt_test.cpp | 
 test | seed_preferring_ik_test | motion_planner_core | src/manipulation/motion_planner/test/core/seed_preferring_ik_test.cpp | 
 test | time_parameterization_test | motion_planner_core | src/manipulation/motion_planner/test/core/time_parameterization_test.cpp | 

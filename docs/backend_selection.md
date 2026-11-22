@@ -58,8 +58,8 @@ planning:
 
 | Name | Base class | Package | Notes |
 |---|---|---|---|
-| `moveit_cartesian` | Planner | motion_planner_moveit | jump detection, reachability-tilt retry, wall-contact ACM |
-| `moveit_ompl` | Planner | motion_planner_moveit | pose and joint goals; params `free_space_direct_first` (default false), `direct_revolute_step` (0.05 rad), `direct_prismatic_step` (0.01 m), `direct_default_acceleration` (2.0, used only by the direct path retiming); optimal mode: `free_space_optimize` (false), `free_space_time_budget_s` (20), `free_space_num_candidates` (5), `free_space_objective` (`length`\|`duration`), `free_space_planners`, `free_space_shortcut_iterations` (300), `free_space_smoothing_rounds` (4) |
+| `moveit_cartesian` | Planner | motion_planner_moveit | jump detection, reachability-tilt retry, wall-contact ACM; opt-in `cartesian_joint_goal` (false) and `cartesian_joint_goal_tolerance` (0.05): the Cartesian-first attempt also for joint-goal segments (stow, seeded approach), see [free_space_comparison.md](free_space_comparison.md) |
+| `moveit_ompl` | Planner | motion_planner_moveit | pose and joint goals; params `free_space_direct_first` (default false), `direct_revolute_step` (0.05 rad), `direct_prismatic_step` (0.01 m), `direct_default_acceleration` (2.0, used only by the direct path retiming); optimal mode: `free_space_optimize` (false), `free_space_time_budget_s` (20), `free_space_num_candidates` (5), `free_space_objective` (`length`\|`duration`), `free_space_planners`, `free_space_shortcut_iterations` (300), `free_space_smoothing_rounds` (4), `free_space_cartesian_candidate` (true, in the optimal mode), `free_space_cartesian_eef_step` (0.01), `free_space_cartesian_goal_tolerance` (0.05), `free_space_cartesian_revolute_jump` (0.3), `free_space_cartesian_prismatic_jump` (0.05) |
 | `moveit_ik` | Ik | motion_planner_moveit | params `ik_extra_seeds`, `ik_seed_perturbation` |
 | `moveit_collision` | Collision | motion_planner_moveit | |
 | `moveit_scene` | Scene | motion_planner_moveit | param `octomap_resolution` |
@@ -108,6 +108,7 @@ the direct candidate exists only when IK from the start succeeds. When no candid
 The planning time of one free-space segment becomes about `free_space_time_budget_s` seconds (plus the direct path and the post-processing).
 Pure logic: `motion_planner/core/path_quality.hpp` (weighted length, duration estimate, baseline, efficiency, selection) and
 `motion_planner/core/path_shortcut.hpp` (shortcut and smoothing), both with host gtests (`path_quality_test`, `path_shortcut_test`).
+The straight tool line (Cartesian) is one more candidate, and the comparison harness and the recommended routing are in [free_space_comparison.md](free_space_comparison.md).
 Status: host gtests pass; the MoveIt part is syntax-checked only, not yet run in a simulator.
 
 Path shortcutting after OMPL in the default mode: the MoveIt OMPL interface already simplifies each solution (`simplify_solutions`, default true, bounded

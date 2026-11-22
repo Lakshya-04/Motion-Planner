@@ -418,6 +418,16 @@ MotionPlanner::SegmentPlanResult MotionPlanner::planSegmentWithStartState(
       planning_result = std::move(cartesian_attempt);
       mode_used = "cartesian";
       cartesian_preflight_succeeded = true;
+    } else {
+      // Silent before: nobody could tell why a transition ended up in the free-space planner.
+      std::ostringstream oss;
+      oss << "segment label=" << routing.label << ": Cartesian preflight rejected ("
+          << (cartesian_attempt.success ? "partial" : "failed") << ", reason=" << cartesian_attempt.failure_reason_code
+          << ", truncation=" << truncationReasonToString(cartesian_attempt.truncation_reason)
+          << ", path_fraction=" << cartesian_attempt.path_fraction << " < min " << request.min_path_fraction
+          << ", joint_goal=" << (request.target_joint_state.empty() ? "no" : "yes") << "): " << cartesian_attempt.message
+          << " -- using the free-space planner";
+      logger_->info(oss.str());
     }
   }
 

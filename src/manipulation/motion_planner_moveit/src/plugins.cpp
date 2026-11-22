@@ -24,7 +24,12 @@ std::shared_ptr<MoveItPlanningBackend> sharedBackend(PluginContext & context)
     "moveit_backend", [] {return std::make_shared<MoveItPlanningBackend>();});
 }
 
-void configure(CartesianPlanner &, const PluginParams &) {}
+/// Opt-in: a joint-goal free-space segment (stow, approach by joint goal) also gets the Cartesian-first attempt.
+void configure(CartesianPlanner & planner, const PluginParams & params)
+{
+  planner.setJointGoalMode(
+    paramOr(params, "cartesian_joint_goal", false), paramOr(params, "cartesian_joint_goal_tolerance", 0.05));
+}
 
 /// Free-space fast path of the OMPL planner (all params optional, off by default).
 void configure(OmplPlanner & planner, const PluginParams & params)
@@ -56,6 +61,14 @@ void configure(OmplPlanner & planner, const PluginParams & params)
     static_cast<std::size_t>(paramOr(params, "free_space_shortcut_iterations", 300.0));
   optimize.shortcut.smoothing_rounds =
     static_cast<std::size_t>(paramOr(params, "free_space_smoothing_rounds", 4.0));
+  optimize.cartesian_candidate = paramOr(params, "free_space_cartesian_candidate", true);
+  optimize.cartesian_eef_step = paramOr(params, "free_space_cartesian_eef_step", optimize.cartesian_eef_step);
+  optimize.cartesian_goal_tolerance =
+    paramOr(params, "free_space_cartesian_goal_tolerance", optimize.cartesian_goal_tolerance);
+  optimize.cartesian_revolute_jump =
+    paramOr(params, "free_space_cartesian_revolute_jump", optimize.cartesian_revolute_jump);
+  optimize.cartesian_prismatic_jump =
+    paramOr(params, "free_space_cartesian_prismatic_jump", optimize.cartesian_prismatic_jump);
   planner.setFreeSpaceOptimize(optimize, paramOr(params, "direct_default_acceleration", 2.0));
 }
 
