@@ -314,7 +314,10 @@ public:
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
     press_settle_s_ = this->declare_parameter<double>("press_settle_s", 2.0);
-    unload_m_ = this->declare_parameter<double>("unload_m", 0.01);
+    // 0.02 (was 0.01): after the unload the tool rests 5 to 11 mm above the backed-off reference and the joint-space
+    // retract then starts with a 2 to 4 mm move toward the wall; with 0.01 the pad reached the wall plane in one
+    // xArm 7 run (46 to 73 N at the first retract sample of every column, docs/sim_mujoco.md).
+    unload_m_ = this->declare_parameter<double>("unload_m", 0.02);
     // After a column the force target is set to 0 and the admittance is switched off only once the measured force has
     // decayed below unload_release_force_n (0 = the old fixed 1.5 s wait), at most unload_timeout_s later: switching it
     // off while the tool still presses releases the offset at once and the arm snaps (100 to 160 N spikes at the
@@ -2844,7 +2847,7 @@ private:
   double target_force_n_{0.0};
   std::string controller_name_{"combined_arm_lift_controller"};
   double press_settle_s_{2.0};
-  double unload_m_{0.01};
+  double unload_m_{0.02};
   double unload_release_force_n_{2.0};
   double unload_release_speed_mps_{0.001};
   double unload_timeout_s_{4.0};
