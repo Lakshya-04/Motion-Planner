@@ -230,6 +230,13 @@ if(BUILD_TESTING)
     target_compile_features(column_chain_test PRIVATE cxx_std_17)
   endif()
 
+  ament_add_gtest(serpentine_test test/serpentine_test.cpp)
+  if(TARGET serpentine_test)
+    target_include_directories(serpentine_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(serpentine_test core_types::core_types)
+    target_compile_features(serpentine_test PRIVATE cxx_std_17)
+  endif()
+
   ament_add_gtest(stand_gate_test test/stand_gate_test.cpp)
   if(TARGET stand_gate_test)
     target_link_libraries(stand_gate_test ${PROJECT_NAME}_core core_types::core_types)
