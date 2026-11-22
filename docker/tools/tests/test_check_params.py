@@ -103,3 +103,50 @@ def test_real_repo_is_clean():
         pytest.skip("docs/ not mounted")
     problems, _ = chk.scan()
     assert problems == [], names(problems)
+
+
+PY = '''
+class N:
+    def __init__(self):
+        # self.declare_parameter("commented_out", 1)
+        self.a = self.declare_parameter('single_quoted', 0.1).value
+        self.declare_parameter("double_quoted", False)
+        self.declare_parameter(
+            'wrapped', [1.0, 2.0])
+        self.declare_parameter(prefix + "_dyn", 1)
+'''
+
+
+def test_python_node_declarations_are_parsed(tmp_path):
+    root, pk = make(tmp_path, cpp="")
+    py = tmp_path / "src" / "pkg" / "scripts"
+    py.mkdir()
+    (py / "n.py").write_text(PY)
+    got, dyn = chk.declared(os.path.join(root, pk["pkg"]))
+    assert set(got) == {"single_quoted", "double_quoted", "wrapped"}
+    assert len(dyn) == 1
+
+
+def test_python_package_module_dir_is_scanned_and_undocumented_flagged(tmp_path):
+    root, pk = make(tmp_path, cpp="")
+    mod = tmp_path / "src" / "pkg" / "pkg"
+    mod.mkdir()
+    (mod / "node.py").write_text(PY)
+    problems, _ = chk.scan(root, pk, [])
+    text = names(problems)
+    assert "'single_quoted'" in text and "'wrapped'" in text
+    problems, _ = chk.scan(root, pk, [("undocumented", "pkg", "*")])
+    assert not problems
+
+
+def test_real_repo_covers_new_packages_and_is_clean():
+    for pkg in ("stand_navigator", "coverage_planner", "wall_detector"):
+        assert pkg in chk.PACKAGES
+    stand, _ = chk.declared(os.path.join(chk.ROOT, chk.PACKAGES["stand_navigator"]))
+    assert {"base_profile", "tolerance_xy_m", "ref_xy"} <= set(stand)
+    cov, _ = chk.declared(os.path.join(chk.ROOT, chk.PACKAGES["coverage_planner"]))
+    assert "swath" in cov and "obstacle_profile" in cov
+    wall, _ = chk.declared(os.path.join(chk.ROOT, chk.PACKAGES["wall_detector"]))
+    assert wall
+    problems, _ = chk.scan()
+    assert problems == []
