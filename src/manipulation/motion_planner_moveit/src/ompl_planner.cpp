@@ -184,7 +184,8 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
       // MoveGroupInterface state below, as before.
       const auto state_monitor = monitor ? monitor->getStateMonitor() : nullptr;
       const bool fresh = state_monitor && state_monitor->haveCompleteState(rclcpp::Duration::from_seconds(1.0));
-      if (chooseStartStateSource(monitor != nullptr, fresh) == StartStateSource::kPlanningSceneMonitor) {
+      if (motion_planner_moveit::chooseStartStateSource(monitor != nullptr, fresh) ==
+          motion_planner_moveit::StartStateSource::kPlanningSceneMonitor) {
         planning_scene_monitor::LockedPlanningSceneRO scene(monitor);
         if (scene) {
           current = std::make_shared<moveit::core::RobotState>(scene->getCurrentState());
