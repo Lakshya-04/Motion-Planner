@@ -37,6 +37,8 @@ agrees, wall gap 0.803 m, arm deviation 0.0016, F/T change 0.49 N, no drift at t
 
 ## Not done
 
+Overview of what is real versus stubbed across navigation and perception: [navigation_and_perception.md](navigation_and_perception.md).
+
 - Obstacle avoidance. The controller drives a straight line; there is no costmap and no planning. The wall is
   avoided only because the stand keeps the footprint clear and the approach is parallel to it.
 - Diff drive in the sim (the controller is unit-tested for it; the sim run used the omni profile).

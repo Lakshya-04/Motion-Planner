@@ -9,6 +9,8 @@ sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware
         -> navigation / docking -> motion planning -> execution (JTAC + F/T) -> monitoring
 ```
 
+What of the perception and base-navigation part is real, stubbed or simulator ground truth: [navigation_and_perception.md](navigation_and_perception.md).
+
 Last verified: 2026-11-19 on main at a2b5df9 (PRs up to #114): simulator-free checks green in the compile-only `build` image (29 packages, 1352 colcon tests, 0 failures, 226 skipped). Newer merges (#143 to #173) were each built and tested in a workspace build when merged (counts in their PRs: 455 to 1203 tests, 0 failures), and are listed with their evidence in section 19; sections 1 to 18 below were not all re-read for those changes, so an item can be older than the date suggests. Simulator, GPU and hardware items were not re-run for that date; their evidence is the earlier run each line cites. Legend: `[x]` done, `[~]` partial (what is
 missing is stated), `[ ]` not done (some are design-only). Each item names its evidence. Tick items as they land
 and update the date. **Policy:** reuse maintained open source before writing our own (section 17); ROS 2 distro
