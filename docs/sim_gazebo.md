@@ -665,3 +665,17 @@ or run the include/exclude pair above. The cheapest first step is hypothesis 1 a
   description's primitives.
 - Gazebo needs the `sim-gazebo` image; it is not a rosdep dependency of the package, so the
   common `deps` image stays small.
+
+
+### Two-stand pass: the obstacle in the world, and what remains (2026-11-22)
+
+Runs on `fix/gazebo-two-stand` (main plus the recovery option, the dock-continuity option with its seed fix, the contact diagnostics and the lift-stage fix), one run each:
+
+| run | columns done / failed | coverage | scored peak force | wall gap max | notes |
+|---|---|---|---|---|---|
+| stock wall with its obstacle left in the sim world | 0 / 10 | 0.0 | 1230.8 N | 81.7 mm | stand 1 not reached (the arm could not stow) |
+| plain wall (no obstacle, as in the MuJoCo pass) | 2 / 8 | 0.24 | 18.1 N (feedback 23.5 N) | 6.8 mm | both stands reached; 0 start-state bound errors |
+
+What the contact sidecar (`run.csv.contacts.csv`, 1.33 million samples over 1700 s) showed in the first run: no contact until sim time 76.6 s, then a 1400 N impact at 2 points, afterwards a constant 3 to 6 N for the remaining 1600 s (the tool stuck against something), 1.5 % of the samples above 100 N, per-sample point counts of 1 to 3 and a sum of per-point norms equal to the reported force within 1 % (so the points are not double counted). The Gazebo script kept the stock wall's obstacle in the simulated world (moved along the wall) while the planner's scene never contains it, and the MuJoCo pass uses the plain scenario: the arm drove into an obstacle the planner did not know about. The script now builds a plain wall (`MULTI_STAND_OBSTACLES=1` keeps the obstacle). This confirms hypothesis 6 of the contact analysis above (a collision other than the tool-wall pair) and rejects hypothesis 5 (counting); the 1400 N spike is a hard impact.
+
+Still failing in the plain-wall run (8 of 10 columns): `MoveGroupInterface::plan() failed or timeout` 23 times with 62 `Failed to fetch current robot state` and 107 `No state update received within 100ms` from the current state monitor (the joint states reach MoveIt late or not as a full set; a possible link to the new state-only stage joints is not checked); 16 times `docked N m off the standoff pose, not pressing from there` (the Cartesian dock path ends short); collision truncation at `arm_forearm_link <-> arm_wrist_{2,3}_link`. The dock continuity selector rejected the first dock of each stand (its reference is the stow pose, a different branch by construction) and fell back to the seeded IK; the recovery option refused its jog ("too far") in some cases. Not run yet: the same pass with PR #184 (tool pad in the planner model, a contact exclusion that works).
