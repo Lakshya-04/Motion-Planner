@@ -23,6 +23,14 @@
 #                                  and z band, the tool roll, the reachability map's arm, the dock seed (UR10e only: [] elsewhere,
 #                                  MULTI_STAND_DOCK_SEED overrides) and the arm mount height follow the profile
 #                                  (profile_reach.py, docs/sim_mujoco.md "Running another robot profile"; unconfirmed in a sim)
+#   MULTI_STAND_PERCEPTION=1       perception in the loop (default off): the wall scene the coverage planner plans comes from
+#                                  wall_detector run on the sim wall's point cloud (walls_sim.pcd, published as PointCloud2
+#                                  /perception/points in odom), cropped to the contact patch, instead of the baked
+#                                  wall_pass_coverage_scene.json; compare_wall_scene.py then prints the detected-vs-baked
+#                                  errors (normal angle, plane offset, extent, obstacle recall; MULTI_STAND_PERCEPTION_STRICT=1
+#                                  aborts when they are out of tolerance). The planning-scene octomap and the scorer's wall
+#                                  still use the files. wall_detector reports no obstacles: a scenario with obstacles is planned
+#                                  without them (warned). Needs wall_detector installed. The cloud is noise-free.
 #   MANAGER_PASS_SCORE_ARGS / MULTI_STAND_SCORE_ARGS  extra score_run arguments
 # Needs a sourced ROS environment with sim_mujoco, reachability, stand_navigator, ft_conditioner,
 # compliant_trajectory_controller, coverage_planner, manipulation_manager, coverage_task_msgs and
@@ -106,11 +114,40 @@ start reachability ros2 run reachability reachability_node --ros-args -r __node:
   -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0}
 start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE
 
+# 0. MULTI_STAND_PERCEPTION=1: the planner's wall scene is detected, not read from the baked file
+PLAN_SCENE=$OUT/data/wall_pass_coverage_scene.json
+if [ "${MULTI_STAND_PERCEPTION:-0}" = 1 ]; then
+  WD=$(ros2 pkg prefix wall_detector)/lib/wall_detector
+  PERC=$OUT/perception
+  mkdir -p "$PERC"; rm -f "$PERC/wall_scene.json" "$PERC/walls.pcd" "$PERC/wall_scene_crop.json"
+  if python3 -c "import json,sys; sys.exit(0 if json.load(open('$PLAN_SCENE')).get('obstacles') else 1)"; then
+    echo "WARNING: MULTI_STAND_PERCEPTION: the scenario has obstacles, wall_detector reports none: they are not planned around" >&2
+  fi
+  start perception_cloud python3 "$WD/pcd_to_cloud.py" "$OUT/data/walls_sim.pcd" --topic /perception/points --frame odom --rate 5
+  CLOUD_PID=${PIDS[-1]}
+  start wall_detector ros2 launch wall_detector wall_detector.launch.py cloud_topic:=/perception/points \
+    target_frame:=odom output_dir:=$PERC accumulate_frames:=5
+  DET_PID=${PIDS[-1]}
+  for _ in $(seq 240); do [ -s "$PERC/wall_scene.json" ] && [ -s "$PERC/walls.pcd" ] && break; sleep 0.5; done
+  if [ ! -s "$PERC/wall_scene.json" ]; then echo "no wall detected from the sim cloud (see $OUT/wall_detector.log)"; exit 4; fi
+  sleep 1
+  kill -INT -- "-$CLOUD_PID" "-$DET_PID" 2>/dev/null   # frozen: the plan must not change mid-run
+  grep -E "wall: n" "$OUT/wall_detector.log" | tail -1 | cut -c1-220
+  python3 "$PKG/lib/sim_mujoco/crop_wall_scene.py" "$PERC/wall_scene.json" "$PERC/wall_scene_crop.json" \
+    --y $WALL_Y0 $WALL_Y1 --z $MP_Z_LO $MP_Z_HI || exit 5
+  python3 "$WD/compare_wall_scene.py" "$PERC/wall_scene_crop.json" "$OUT/data/wall_pass_coverage_scene.json" \
+    --json "$PERC/compare.json" | tee "$PERC/compare.txt"
+  if [ "${MULTI_STAND_PERCEPTION_STRICT:-0}" = 1 ] && ! grep -q "perception check: OK" "$PERC/compare.txt"; then
+    echo "detected wall out of tolerance (MULTI_STAND_PERCEPTION_STRICT=1)"; exit 6
+  fi
+  PLAN_SCENE=$PERC/wall_scene_crop.json
+fi
+
 # 1. coverage plan for the wall's contact region, in the world frame
 rm -f "$COV"
 sleep 3
 timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args \
-  -p wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json -p output_json:=$COV \
+  -p wall_scene_json:=$PLAN_SCENE -p output_json:=$COV \
   -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${MULTI_STAND_TOOL_YAW:-$MP_TOOL_YAW} \
   -p swath_m:=${MULTI_STAND_SWATH:-0.14} -p overlap_pct:=${MULTI_STAND_OVERLAP:-15.0} -p double_pass:=${MULTI_STAND_DOUBLE_PASS:-false} ${MULTI_STAND_COVERAGE_EXTRA:-} > "$OUT/coverage_demo.log" 2>&1 &
 DEMO=$!
