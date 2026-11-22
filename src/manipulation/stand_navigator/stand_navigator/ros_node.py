@@ -2,6 +2,16 @@
 
 Parameters: `base_profile` (robot profile YAML with a `base:` section, required), `odom_topic`,
 `cmd_vel_topic`, `tolerance_xy_m`, `tolerance_yaw_rad`, `timeout_s`, `rate_hz`, `odom_timeout_s`.
+
+Safety layer (nav_safety.py): stale odometry stops and fails with NO_ODOM; every velocity command goes through a sanity
+gate (`safety_check_commands`, true; NaN/inf or over-limit -> BAD_COMMAND); no progress for `stuck_window_s` (20, 0 = off)
+aborts with NAVIGATION_STUCK; `obstacle_scan_topic` (LaserScan) or `obstacle_cloud_topic` (PointCloud2), both in the base
+frame, enable an obstacle stop inside a corridor ahead: `obstacle_stop_m` (0.30), `obstacle_hold_s` (5, then OBSTACLE),
+`obstacle_corridor_half_width_m` (0 = footprint half width + 0.05), `obstacle_data_timeout_s` (1), `obstacle_z_min_m` /
+`obstacle_z_max_m` (-0.2 / 1.5, cloud only). The reason is in the result `error_msg`.
+
+`backend` (`builtin` | `nav2`, default builtin): nav2 forwards the goal to a Nav2 NavigateToPose action
+(`nav2_action_name`, default navigate_to_pose) as a base_footprint goal; see nav2_adapter.py.
 The goal frame must equal the odom frame id; nothing is transformed (no localisation here).
 
 Path planning (path_planner.py): with a wall scene (`wall_scene_json` file and/or `wall_scene_topic`, a
@@ -22,12 +32,15 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from sensor_msgs.msg import LaserScan, PointCloud2
 from std_msgs.msg import String
 from stand_navigator_msgs.action import NavigateToStand
 
 from stand_navigator.core import (
     StandController, Tolerance, arm_to_footprint, footprint_to_arm, load_profile)
+from stand_navigator import nav_safety
+from stand_navigator.nav_safety import SafetyConfig, SafetyMonitor
 from stand_navigator.path_planner import (
     PathFollower, plan_path, scene_obstacles, straight_line_free)
 
@@ -53,6 +66,31 @@ class StandNavigator(Node):
         self.margin = self.declare_parameter('planner_margin_m', 0.02).value
         look = self.declare_parameter('planner_lookahead_m', 0.0).value
         self.lookahead = look if look > 0.0 else None
+        self.backend = self.declare_parameter('backend', 'builtin').value
+        if self.backend not in ('builtin', 'nav2'):
+            raise RuntimeError(f"parameter backend must be 'builtin' or 'nav2', got {self.backend!r}")
+        self.nav2_client = None
+        if self.backend == 'nav2':
+            from stand_navigator.nav2_adapter import RosNav2Client   # needs nav2_msgs
+            self.nav2_client = RosNav2Client(self, self.declare_parameter('nav2_action_name', 'navigate_to_pose').value)
+        half = self.declare_parameter('obstacle_corridor_half_width_m', 0.0).value
+        if half <= 0.0:
+            half = max((abs(p[1]) for p in self.profile.footprint), default=0.35) + 0.05
+        scan_topic = self.declare_parameter('obstacle_scan_topic', '').value
+        cloud_topic = self.declare_parameter('obstacle_cloud_topic', '').value
+        self.safety_cfg = SafetyConfig(
+            odom_timeout_s=self.odom_timeout,
+            check_commands=self.declare_parameter('safety_check_commands', True).value,
+            stuck_window_s=self.declare_parameter('stuck_window_s', 20.0).value,
+            stuck_min_progress=self.declare_parameter('stuck_min_progress_m', 0.02).value,
+            front_stop_m=self.declare_parameter('obstacle_stop_m', 0.30).value if (scan_topic or cloud_topic) else 0.0,
+            obstacle_hold_s=self.declare_parameter('obstacle_hold_s', 5.0).value,
+            obstacle_data_timeout_s=self.declare_parameter('obstacle_data_timeout_s', 1.0).value,
+            corridor_half_width_m=half)
+        self.z_range = (self.declare_parameter('obstacle_z_min_m', -0.2).value,
+                        self.declare_parameter('obstacle_z_max_m', 1.5).value)
+        self.points = []
+        self.points_stamp = None
         self.obstacles = []
         scene_file = self.declare_parameter('wall_scene_json', '').value
         if scene_file:
@@ -68,6 +106,11 @@ class StandNavigator(Node):
             latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                                  reliability=ReliabilityPolicy.RELIABLE)
             self.create_subscription(String, scene_topic, self._on_scene, latched, callback_group=cb)
+        if scan_topic:
+            self.create_subscription(LaserScan, scan_topic, self._on_scan, qos_profile_sensor_data, callback_group=cb)
+        if cloud_topic:
+            self.create_subscription(PointCloud2, cloud_topic, self._on_cloud, qos_profile_sensor_data,
+                                     callback_group=cb)
         self.pub = self.create_publisher(Twist, self.declare_parameter('cmd_vel_topic', 'cmd_vel').value, 10)
         self.server = ActionServer(
             self, NavigateToStand, 'navigate_to_stand', self._execute, callback_group=cb,
@@ -79,6 +122,20 @@ class StandNavigator(Node):
     def _on_odom(self, msg):
         self.odom = msg
         self.odom_stamp = time.monotonic()
+
+    def _on_scan(self, msg):
+        self.points = nav_safety.scan_to_points(msg.ranges, msg.angle_min, msg.angle_increment,
+                                                msg.range_min, msg.range_max)
+        self.points_stamp = time.monotonic()
+
+    def _on_cloud(self, msg):
+        off = {f.name: f.offset for f in msg.fields}
+        if not all(k in off for k in 'xyz'):
+            self.get_logger().warn('point cloud without x/y/z fields ignored')
+            return
+        self.points = nav_safety.cloud_to_points(bytes(msg.data), msg.point_step, (off['x'], off['y'], off['z']),
+                                                 not msg.is_bigendian, self.z_range)
+        self.points_stamp = time.monotonic()
 
     def _on_scene(self, msg):
         try:
@@ -106,7 +163,36 @@ class StandNavigator(Node):
         (handle.succeed if ok else handle.abort)()
         return res
 
+    def _execute_nav2(self, handle):
+        from stand_navigator.nav2_adapter import run_nav2_goal
+        goal = handle.request.pose
+        res = NavigateToStand.Result
+        gp = goal.pose
+        fb = NavigateToStand.Feedback()
+
+        def feedback(st):
+            fb.distance_remaining = st.distance_remaining
+            handle.publish_feedback(fb)
+        out = run_nav2_goal(self.nav2_client, (gp.position.x, gp.position.y, yaw_of(gp.orientation)),
+                            self.profile.arm_mount, goal.header.frame_id or 'odom', self.timeout,
+                            lambda: handle.is_cancel_requested, feedback)
+        if out.code == 'CANCELED':
+            handle.canceled()
+            r = NavigateToStand.Result()
+            r.error_code, r.error_msg = res.CANCELED, out.msg
+            return r
+        return self._result(handle, out.ok, getattr(res, out.code, res.UNKNOWN), out.msg)
+
+    def _clearance(self, cmd):
+        """Free distance ahead along the commanded direction of travel (None when not moving)."""
+        if math.hypot(cmd[0], cmd[1]) < 1e-3:
+            return None
+        return nav_safety.corridor_clearance(self.points, math.atan2(cmd[1], cmd[0]),
+                                             self.safety_cfg.corridor_half_width_m, self.safety_cfg.max_range_m)
+
     def _execute(self, handle):
+        if self.backend == 'nav2':
+            return self._execute_nav2(handle)
         goal = handle.request.pose
         res = NavigateToStand.Result
         t0 = time.monotonic()
@@ -143,6 +229,10 @@ class StandNavigator(Node):
         t0 = time.monotonic()
         fb = NavigateToStand.Feedback()
         last = time.monotonic()
+        mon = SafetyMonitor(self.safety_cfg, last)
+        sent = (0.0, 0.0, 0.0)
+        codes = {nav_safety.NO_ODOM: res.NO_ODOM, nav_safety.BAD_COMMAND: res.BAD_COMMAND,
+                 nav_safety.NAVIGATION_STUCK: res.NAVIGATION_STUCK, nav_safety.OBSTACLE: res.OBSTACLE}
         while rclpy.ok():
             if handle.is_cancel_requested:
                 self._stop()
@@ -151,19 +241,39 @@ class StandNavigator(Node):
                 r.error_code, r.error_msg = res.CANCELED, 'canceled'
                 return r
             now = time.monotonic()
-            if now - self.odom_stamp > self.odom_timeout:
+            pose = self._pose()
+            dist, yerr = ctl.errors(pose)
+            v = mon.check(now, self.odom_stamp, nav_safety.progress_metric(dist, yerr, self.safety_cfg),
+                          dist <= self.tol.xy and abs(yerr) <= self.tol.yaw, self._clearance(sent),
+                          self.points_stamp, math.hypot(sent[0], sent[1]), self.profile.max_lin_acc)
+            if v.action == nav_safety.ABORT:
                 self._stop()
-                return self._result(handle, False, res.NO_ODOM, 'odometry went stale', ctl)
+                self.get_logger().warn(f'navigate_to_stand aborted: {v.reason}')
+                return self._result(handle, False, codes[v.code], v.reason, ctl)
+            if v.action == nav_safety.HOLD:
+                self._stop()
+                sent = (0.0, 0.0, 0.0)
+                ctl.cmd = getattr(ctl, 'ctl', ctl).cmd = sent
+                last = now
+                time.sleep(dt)
+                continue
             if now - t0 > self.timeout:
                 self._stop()
                 return self._result(handle, False, res.TIMEOUT, f'not there after {self.timeout:.0f} s', ctl)
-            pose = self._pose()
             tw = self.odom.twist.twist
             if ctl.arrived(pose, math.hypot(tw.linear.x, tw.linear.y), abs(tw.angular.z)):
                 self._stop()
                 return self._result(handle, True, res.NONE, 'arrived' + note, ctl)
-            vx, vy, wz = ctl.step(pose, max(now - last, 1e-3))
+            step_dt = max(now - last, 1e-3)
+            vx, vy, wz = ctl.step(pose, step_dt)
             last = now
+            if self.safety_cfg.check_commands:
+                (vx, vy, wz), v = nav_safety.gate_command((vx, vy, wz), sent, step_dt, self.profile, self.safety_cfg)
+                if v.action == nav_safety.ABORT:
+                    self._stop()
+                    self.get_logger().warn(f'navigate_to_stand aborted: {v.reason}')
+                    return self._result(handle, False, res.BAD_COMMAND, v.reason, ctl)
+            sent = (vx, vy, wz)
             cmd = Twist()
             cmd.linear.x, cmd.linear.y, cmd.angular.z = vx, vy, wz
             self.pub.publish(cmd)

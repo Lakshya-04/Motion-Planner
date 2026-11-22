@@ -303,6 +303,33 @@ around the navigation, and the `TaskTracker` is the blackboard.
 Not done: replanning a failed column from another stand, a different stand chosen on the fly when navigation fails, pause and
 resume, a durable ledger (a restart reruns everything), `columns` given as a wall region instead of indices.
 
+## Base safety layer and the Nav2 backend
+
+`stand_navigator/nav_safety.py` (ROS-free, `test/test_nav_safety.py`) guards every `navigate_to_stand` run of the builtin
+backend; the reason of a stop is the result `error_msg`.
+
+| Check | Parameter(s) | Default | Result error code |
+|---|---|---|---|
+| Stale odometry: no odom for `odom_timeout_s`, stop | `odom_timeout_s` | 1.0 s (on) | `NO_ODOM` |
+| Velocity command gate: NaN/inf or over the profile limit refused, a hair over (5 %) clamped, acceleration re-clamped | `safety_check_commands` | true | `BAD_COMMAND` |
+| Stuck: progress metric (distance + 0.25 x yaw error) improved by less than `stuck_min_progress_m` for `stuck_window_s` | `stuck_window_s`, `stuck_min_progress_m` | 20 s, 0.02 m (on; 0 s = off) | `NAVIGATION_STUCK` |
+| Obstacle stop from a LaserScan or PointCloud2 (base frame): nearest point in a corridor along the commanded direction closer than `obstacle_stop_m` + v^2/(2 a) holds the base, abort after `obstacle_hold_s`; missing or stale sensor data aborts | `obstacle_scan_topic` or `obstacle_cloud_topic`, `obstacle_stop_m`, `obstacle_hold_s`, `obstacle_corridor_half_width_m` (0 = footprint), `obstacle_data_timeout_s`, `obstacle_z_min_m`, `obstacle_z_max_m` | off (no topic) | `OBSTACLE` |
+
+The default-on checks cannot change a healthy run: the controller output is already inside the limits (a host test runs
+`StandController` and `PathFollower` for omni and diff through the gate and monitor and requires identical commands and no
+verdict), and the stuck window is long and reset by any progress; it does not count inside the goal tolerance. The obstacle stop
+looks only along the direction of travel (not during pure rotation), assumes the scan or cloud is in the base frame (no TF), and
+is not a certified safety function: it is a software stop on top of the velocity limits, not a replacement for a safety lidar or e-stop.
+New error codes: `NAVIGATION_STUCK=6`, `OBSTACLE=7`, `BAD_COMMAND=8`, `NO_NAV2=9`.
+
+`backend:=nav2` (default `builtin`): `stand_navigator/nav2_adapter.py` converts the arm-base stand pose to a `base_footprint` goal
+with `core.arm_to_footprint`, sends it to the Nav2 `navigate_to_pose` action (`nav2_action_name`) and maps the outcome to the
+`NavigateToStand` codes (accepted/succeeded -> `NONE`, canceled, timeout after `timeout_s`, aborted -> `UNKNOWN` with Nav2's code and
+text, no server -> `NO_NAV2`). The action client sits behind the `Nav2Client` interface (tests use a fake); `nav2_msgs` is imported
+only when the node starts with `backend:=nav2`, so the package runs without Nav2. In this mode the path planner and the safety layer
+above are not used (Nav2 has its own costmaps, controller and recoveries). Not exercised against a real Nav2: no image has it (see
+"Nav2 swap path" for the setup); host-tested with a fake client only.
+
 ## Nav2 swap path
 
 Nav2 (`nav2_bringup`, `nav2_msgs`, `opennav_docking`) is not installed in the `build`, `full` or `sim` images, and adding it
@@ -313,7 +340,7 @@ is a large dependency set, so it was not added. To switch:
    obstacle layer from the sim lidar once one exists (none yet), `odom` as the global frame until localisation is added.
    Controller: MPPI with the `Omni` motion model for omni profiles, `DiffDrive` for diff; velocity and acceleration
    limits from the profile.
-3. Replace the node with a small bridge that keeps the `NavigateToStand` interface: convert the arm-base pose to a
+3. Set `backend:=nav2` (implemented, see above; or replace the node with a small bridge) that keeps the `NavigateToStand` interface: convert the arm-base pose to a
    `base_footprint` pose with `core.arm_to_footprint`, send it as `NavigateToPose` (`nav2_msgs`, same fields), and map the result.
    Callers do not change.
 4. For the last metres to the wall use `opennav_docking` with a custom `NonChargingDock` plugin (see the reuse map in `ROADMAP.md`).
