@@ -76,7 +76,11 @@ sensor reads minus the setpoint.
 
 - Joints: lift + six arm joints with the `jtac_mock` interfaces (position and velocity command,
   position, velocity and effort state). The base is pinned to the world through a `world` link
-  (static base). Mimic lift stages follow through `robot_state_publisher`.
+  (static base). The telescopic lift stages (`lift_stage_N_joint`) are declared in the ros2_control block
+  with `mimic` / `multiplier` (1/stages) / `offset` params, state interfaces only: gz-sim does not apply the URDF
+  `<mimic>`, so without them the stages stayed at 0 while `lift_joint` carried the arm up and the arm base floated
+  above the column. Scissor lift linkage joints are not declared yet (they still stay at 0 in Gazebo). Not run in
+  Gazebo here; check: move the lift and read `/joint_states`, `lift_stage_*_joint` must equal `lift_joint / stages`.
 - F/T sensor: link `ft_sensor_link` sits between the arm flange and the tool, at the flange pose
   (kinematics equal the other backends). The tool hangs behind it, offset by `tcp_xyz` along the
   tool axis. gz `force_torque` sensor on `ft_sensor_joint`, exposed as ros2_control sensor
