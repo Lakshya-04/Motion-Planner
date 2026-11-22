@@ -43,8 +43,9 @@ Overview of what is real versus stubbed across navigation and perception: [navig
   path planner can go around the scene's walls and obstacles ("Path planning" below); there is no costmap from a sensor
   and no dynamic obstacle handling.
 - Diff drive in the sim (the controller is unit-tested for it; the sim run used the omni profile).
-- Several stands in a loop is done in the manager's `execute_coverage` action (see "Several stands in a loop" below); not
-  done there: replanning a failed column, choosing another stand when navigation fails.
+- Several stands in a loop is done in the manager's `execute_coverage` action (see "Several stands in a loop" below); an opt-in
+  second pass (`retry_failed_columns`, see `docs/manager_parameters.md`) retries failed columns with another dock IK solution, a
+  fresh stow and optionally a re-planned stand (policy host-tested, not run in a simulation yet).
 - `NavigateThroughPoses`, a wall-plane servo for the last centimetres, localisation (odom only; the odom frame is the
   world frame, the base starts at the origin).
 - Found on the way and fixed: `manipulation_manager`'s default `base_check_service` was `/reachability_node/plan_stands`, but the
