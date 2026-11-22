@@ -77,6 +77,7 @@
 #include "manipulation_manager/core/recovery_branch.hpp"
 #include "manipulation_manager/core/recovery_jog.hpp"
 #include "manipulation_manager/core/stand_check.hpp"
+#include "manipulation_manager/core/column_chain.hpp"
 #include "manipulation_manager/core/stand_gate.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
 #include "manipulation_manager/core/joint_names.hpp"
@@ -310,6 +311,12 @@ public:
     // gap (0 = plan straight to the dock pose). Planning to a pose a few cm from the wall fails or times out
     // when the tool mount clips the wall voxels on the way in; see docs/sim_mujoco.md.
     dock_approach_extra_m_ = this->declare_parameter<double>("dock_approach_extra_m", 0.0);
+    // Chained columns (default off): after a column's retract the tool stands at that column's dock pose. When the
+    // next column of the same stand starts within chain_max_shift_m of it, the approach is first tried as one
+    // straight Cartesian move (deterministic, short) instead of a randomized OMPL plan with a joint goal; a failed or
+    // short chain move falls back to the normal approach, planned from where the tool really is.
+    chain_columns_ = this->declare_parameter<bool>("chain_columns", false);
+    chain_max_shift_m_ = this->declare_parameter<double>("chain_max_shift_m", 0.4);
     contact_y_overshoot_ = this->declare_parameter<double>("contact_y_overshoot_m", 0.045);
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
@@ -1178,6 +1185,7 @@ private:
         primeContinuityFromLiveState();
         last_good_state_ = travel_state_;   // the stowed arm: where a jog goes back to
         arm_stuck_ = false;
+        chain_valid_ = false;
         for (const size_t c : orderColumns(visit_columns[s], sel)) {
           if (stop()) {
             break;
@@ -2300,6 +2308,8 @@ private:
       return ColumnOutcome::kFailed;
     }
     logArmState("before_dock_" + intent.label);
+    const bool chain_ok = chain_valid_;   // only a column that finished right before this one can be chained from
+    chain_valid_ = false;
     const auto & rep = intent.poses.front();
     // Docking in the middle of the column is the original behaviour; at the stroke's first pose the
     // contact path starts from the arm configuration it docked in (no IK branch jump at the start).
@@ -2341,7 +2351,32 @@ private:
     bool pin_q = false;   // recovery_keeps_branch: after a short approach every attempt uses the joint goal
     for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
       const bool use_q = !goal_q.empty() && (attempt % 2 == 0 || pin_q);
-      if (dock_approach_extra_m_ > 0.0) {
+      bool did_chain = false;
+      if (attempt == 0) {
+        const auto cd = decideChain(
+          chain_columns_, chain_ok, arm_stuck_, dock_approach_extra_m_ > 0.0,
+          {chain_last_standoff_.x, chain_last_standoff_.y, chain_last_standoff_.z},
+          {first_goal.x, first_goal.y, first_goal.z}, chain_max_shift_m_);
+        if (cd.chain) {
+          MotionSegmentSpec chain_seg = dock_seg;
+          chain_seg.label = intent.label + "_chain";
+          chain_seg.mode_hint = "cartesian";
+          const auto chain_exec = manager_.executeMotionSegments(
+            frame_id_, {chain_seg}, std::vector<core_types::Pose>{first_goal}, planning_group_);
+          double chain_err = 0.0;
+          if (chain_exec.success && (waitFor(0.5, false), tcpNear(first_goal, approach_tolerance_m_, chain_err))) {
+            RCLCPP_INFO(
+              this->get_logger(), "%s: chained from the previous column in one straight move (%.3f m)",
+              intent.label.c_str(), cd.shift_m);
+            did_chain = true;
+          } else {
+            RCLCPP_WARN(
+              this->get_logger(), "%s: chain move %s, using the normal approach", intent.label.c_str(),
+              chain_exec.success ? "ended short" : "failed");
+          }
+        }
+      }
+      if (dock_approach_extra_m_ > 0.0 && !did_chain) {
         MotionSegmentSpec approach_seg = dock_seg;
         approach_seg.label = intent.label + "_approach";
         if (use_q) {
@@ -2617,6 +2652,8 @@ private:
       arm_stuck_ = false;
     }
 
+    chain_valid_ = contact_exec.success && contact_exec.waypoints_completed > 0 && !arm_stuck_;
+    chain_last_standoff_ = standoff_pose;
     if (!contact_exec.success || contact_exec.waypoints_completed == 0) {
       return ColumnOutcome::kFailed;
     }
@@ -2692,6 +2729,8 @@ private:
       arm_stuck_ = false;
     }
 
+    chain_valid_ = stroke_exec.success && stroke_exec.waypoints_completed > 0 && !arm_stuck_;
+    chain_last_standoff_ = standoff_pose;
     if (!stroke_exec.success || stroke_exec.waypoints_completed == 0) {
       return ColumnOutcome::kFailed;
     }
@@ -2826,6 +2865,10 @@ private:
   std::vector<double> dock_branch_seed_;   ///< the last docked configuration: the IK seed of the next dock
   double travel_lift_margin_{0.01};
   double dock_approach_extra_m_{0.0};
+  bool chain_columns_{false};
+  double chain_max_shift_m_{0.4};
+  bool chain_valid_{false};                 ///< the tool is at chain_last_standoff_ after a finished column of this stand
+  core_types::Pose chain_last_standoff_;
   std::string base_check_mode_{"off"};
   std::string base_check_service_;
   double base_check_lift_min_{0.0};
