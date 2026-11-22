@@ -110,7 +110,7 @@ sleep 3
 timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args \
   -p wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json -p output_json:=$COV \
   -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${MULTI_STAND_TOOL_YAW:-$MP_TOOL_YAW} \
-  -p swath_m:=${MULTI_STAND_SWATH:-0.14} -p overlap_pct:=${MULTI_STAND_OVERLAP:-15.0} ${MULTI_STAND_COVERAGE_EXTRA:-} > "$OUT/coverage_demo.log" 2>&1 &
+  -p swath_m:=${MULTI_STAND_SWATH:-0.14} -p overlap_pct:=${MULTI_STAND_OVERLAP:-15.0} -p double_pass:=${MULTI_STAND_DOUBLE_PASS:-false} ${MULTI_STAND_COVERAGE_EXTRA:-} > "$OUT/coverage_demo.log" 2>&1 &
 DEMO=$!
 for _ in $(seq 100); do [ -s "$COV" ] && break; sleep 0.5; done
 kill -INT $DEMO 2>/dev/null
