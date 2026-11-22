@@ -6,6 +6,7 @@
 # Environment: PB_OUT (output dir, has coverage_output.json, data/walls.pcd, ur10e.rm4d), PB_MP_RVIZ (this package).
 source /opt/ros/jazzy/setup.bash; source /ws/install/setup.bash
 set -u
+set +u; [ -f /ov/setup.bash ] && source /ov/setup.bash; set -u   # PB_OVERLAY: a partial install layered over the base workspace
 OUT=${PB_OUT:?}; MPR=${PB_MP_RVIZ:-/mp_rviz}
 PROFILE_NAME=${PB_PROFILE:-ur10e_telescopic}
 PKG=$(ros2 pkg prefix sim_gazebo)
@@ -45,7 +46,7 @@ if [ ! -s "$COV" ] || [ ! -s "$OUT/ur10e.rm4d" ] || [ ! -s "$OUT/data/walls.pcd"
   start coverage_planner ros2 run coverage_planner coverage_planner_node
   sleep 3
   timeout 300 ros2 run coverage_planner wall_coverage_demo_node --ros-args -p wall_scene_json:=$SCENE \
-    -p output_json:=$COV -p orientation_format:=quaternion -p tool_frame_yaw_deg:=-90.0 -p swath_m:=$SWATH -p overlap_pct:=$OVERLAP \
+    -p output_json:=$COV -p orientation_format:=quaternion -p tool_frame_yaw_deg:=-90.0 -p swath_m:=$SWATH -p overlap_pct:=$OVERLAP ${PB_COV_EXTRA:-} \
     > "$OUT/coverage_demo.log" 2>&1 &
   D=$!; for _ in $(seq 600); do [ -s "$COV" ] && break; sleep 0.5; done; kill -INT $D 2>/dev/null
   [ -s "$COV" ] || { echo "no coverage plan"; exit 3; }
@@ -54,8 +55,8 @@ fi
 
 start demo ros2 launch mobile_manipulator_moveit_config demo.launch.py profile:=$PROFILE_NAME rviz:=false
 start fake_base python3 "$MPR/scripts/mp_fake_base.py"
-start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$OUT/ur10e.rm4d -p base_profile:=$PROFILE
-start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE
+start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$OUT/ur10e.rm4d -p base_profile:=$PROFILE ${PB_REACH_EXTRA:-}
+start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE ${PB_REACH_EXTRA:-}
 
 cat > "$OUT/manager.yaml" <<YAML
 manipulation_manager:
