@@ -317,6 +317,11 @@ public:
     // short chain move falls back to the normal approach, planned from where the tool really is.
     chain_columns_ = this->declare_parameter<bool>("chain_columns", false);
     chain_max_shift_m_ = this->declare_parameter<double>("chain_max_shift_m", 0.4);
+    // Serpentine columns (default off): each column keeps the direction the coverage plan gave it (up, then down, ...)
+    // and the retract backs the tool off the wall at the END of the stroke, not at its start, so the next column starts
+    // where this one finished. Off: every column runs bottom to top and the retract returns to the column's start
+    // (a full-length trip back down the wall after every stroke).
+    serpentine_columns_ = this->declare_parameter<bool>("serpentine_columns", false);
     contact_y_overshoot_ = this->declare_parameter<double>("contact_y_overshoot_m", 0.045);
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
@@ -928,6 +933,7 @@ private:
       CoverageOutputJsonSource source(
         path, world_frame_.empty() ? frame_id_ : world_frame_, z_offset_, coverage_z_step_,
         coverage_z_min_, coverage_z_max_, coverage_eef_speed_, wall_dir_);
+      source.setFollowPlanDirection(serpentine_columns_);
       intents = source.getCoveragePlan();
     } catch (const std::exception & e) {
       out.message = std::string("cannot load the coverage plan ") + path + ": " + e.what();
@@ -1465,6 +1471,25 @@ private:
     }
     if (stop()) {
       return false;
+    }
+    // A serpentine stand ends with the tool backed off at the top of the wall, where the planning model has the arm
+    // touching the lift (the start state is refused). Come back down the standoff plane in one straight move, to
+    // the height a column starts from in the bottom-up order, and stow from there.
+    if (serpentine_columns_ && chain_valid_) {
+      core_types::Pose low = chain_last_standoff_;
+      low.z = coverage_z_min_;
+      MotionSegmentSpec down;
+      down.label = "stow_lower";
+      down.mode_hint = "cartesian";
+      down.waypoint_indices = {0};
+      down.min_path_fraction = 0.99;
+      down.target_eef_speed = coverage_eef_speed_;
+      if (manager_.executeMotionSegments(frame_id_, {down}, {low}, planning_group_).success) {
+        chain_valid_ = false;
+        if (stowAttempts()) {
+          return true;
+        }
+      }
     }
     if (recoverArm("stow") && stowAttempts()) {
       return true;
@@ -2615,20 +2640,28 @@ private:
     // it off while the pad is pressed on the wall lets the arm jump to its reference (88 to 233 N spikes on the xArm 7
     // in about half the runs, even after the force had decayed and the reference had been backed off).
     setState("retracting");
+    // Back off at the end of the stroke for a serpentine plan (the next column starts there), else at its start.
+    core_types::Pose retract_pose = standoff_pose;
+    if (serpentine_columns_ && !intent.poses.empty()) {
+      retract_pose.z = intent.poses.back().z;
+    }
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
-    retract_seg.mode_hint = "fsp";
+    // a serpentine retract leaves the wall from the stroke's end (often the top of the reach): the straight move away
+    // from the wall is deterministic, where a randomized joint-space plan from there failed; fsp stays the fallback
+    retract_seg.mode_hint = serpentine_columns_ ? "cartesian" : "fsp";
     retract_seg.waypoint_indices = {0};
     retract_seg.min_path_fraction = 0.99;  // see dock_seg's own comment above for why
     const auto retract_exec = manager_.executeMotionSegments(
-      frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
+      frame_id_, {retract_seg}, {retract_pose}, planning_group_);
     setAdmittanceEngaged(false);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
+      retract_seg.mode_hint = "fsp";
       const auto retract_again = [&]() {
           for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
             if (manager_.executeMotionSegments(
-                frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
+                frame_id_, {retract_seg}, {retract_pose}, planning_group_).success)
             {
               return true;
             }
@@ -2653,7 +2686,7 @@ private:
     }
 
     chain_valid_ = contact_exec.success && contact_exec.waypoints_completed > 0 && !arm_stuck_;
-    chain_last_standoff_ = standoff_pose;
+    chain_last_standoff_ = retract_pose;
     if (!contact_exec.success || contact_exec.waypoints_completed == 0) {
       return ColumnOutcome::kFailed;
     }
@@ -2707,19 +2740,27 @@ private:
     }
     setState("retracting");
 
+    // Back off at the end of the stroke for a serpentine plan (the next column starts there), else at its start.
+    core_types::Pose retract_pose = standoff_pose;
+    if (serpentine_columns_ && !intent.poses.empty()) {
+      retract_pose.z = intent.poses.back().z;
+    }
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
-    retract_seg.mode_hint = "fsp";
+    // a serpentine retract leaves the wall from the stroke's end (often the top of the reach): the straight move away
+    // from the wall is deterministic, where a randomized joint-space plan from there failed; fsp stays the fallback
+    retract_seg.mode_hint = serpentine_columns_ ? "cartesian" : "fsp";
     retract_seg.waypoint_indices = {0};
     retract_seg.min_path_fraction = 0.99;
     const auto retract_exec = manager_.executeMotionSegments(
-      frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
+      frame_id_, {retract_seg}, {retract_pose}, planning_group_);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
+      retract_seg.mode_hint = "fsp";
       // a start state the planners refuse: jog it free, then try the retract again
       if (!stop() && recoverArm("retract") &&
         manager_.executeMotionSegments(
-          frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
+          frame_id_, {retract_seg}, {retract_pose}, planning_group_).success)
       {
         arm_stuck_ = false;
       } else {
@@ -2730,7 +2771,7 @@ private:
     }
 
     chain_valid_ = stroke_exec.success && stroke_exec.waypoints_completed > 0 && !arm_stuck_;
-    chain_last_standoff_ = standoff_pose;
+    chain_last_standoff_ = retract_pose;
     if (!stroke_exec.success || stroke_exec.waypoints_completed == 0) {
       return ColumnOutcome::kFailed;
     }
@@ -2867,6 +2908,7 @@ private:
   double dock_approach_extra_m_{0.0};
   bool chain_columns_{false};
   double chain_max_shift_m_{0.4};
+  bool serpentine_columns_{false};
   bool chain_valid_{false};                 ///< the tool is at chain_last_standoff_ after a finished column of this stand
   core_types::Pose chain_last_standoff_;
   std::string base_check_mode_{"off"};

@@ -98,3 +98,4 @@ Between two columns of one stand the manager retracts and then plans an approach
 |---|---|---|
 | `chain_columns` | false | Try the straight chained approach between columns of one stand. |
 | `chain_max_shift_m` | 0.4 | Longest distance (m) between the previous dock pose and the next approach pose that is still chained. |
+| `serpentine_columns` | false | Keep the plan's up/down direction per column, retract (straight, fsp fallback) at the stroke END, lower the tool before a stow from the top; use with `double_pass:=false`. Mock playback 3 x 2 m: 16/19 columns, 1090 s vs 15/19, 1179 s. |
