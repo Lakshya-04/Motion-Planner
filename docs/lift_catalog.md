@@ -20,6 +20,8 @@ verified, the rest approximate; **approximate** = not found in a primary source,
 | Vention telescopic lift column (commercial) | `fr3_column870_lift` (FR3, `mpo_500`) | 0.87 m total travel (830 mm compressed, 1,700 mm extended) | not published (2 assumed; two lead screws) | 0.075 m/s nominal (up to 0.1 m/s unloaded) | 100 kg standard, 225 kg maximum | [Vention docs, telescopic lift column](https://docs.vention.com/docs/en/telescopic-lift-column) | verified (stroke, speed, payload, heights); stages assumed |
 | TiMOTION TL13S lifting column (commercial) | `xarm7_column500_lift` (xArm 7, `scout_mini`) | 0.50 m | 2 | 0.03 m/s at full load (0.038 unloaded) | 700 N push load (about 70 kg), push only | [TL13S datasheet](https://pre.timotion.com/_upload/files/DataSheet_TL13S-D_TN.pdf) (645 mm retracted, 70 x 70 mm outer tube, 24 V DC) | verified |
 
+To pick one for a task, see [Choosing a lift profile](lift.md#choosing-a-lift-profile).
+
 Candidates dropped for lack of a published figure: Robotnik RB-KAIROS (the 2024 datasheets describe a fixed-height
 platform, no lift found), Festo and Phoenix Mecano columns (no stroke, speed and payload page found), Clearpath
 lift options (none found). Other industrial columns seen but not added: Jiecang JC35EM2 (2 stages, 600 mm, 6,000 N, speed

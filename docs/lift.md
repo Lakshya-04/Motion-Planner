@@ -110,6 +110,29 @@ inconsistent value fails `on_init` with the reason.
 | `velocity_filter_s` | 0.1 | velocity estimate filter |
 | `mock_stroke_m`, `mock_initial_height_m` | 0.8, 0.25 | mock only |
 
+## Choosing a lift profile
+
+A profile fixes the lift model (`lift:` section) together with an arm and a base; the lift joint stays one
+prismatic `lift_joint` for all of them, so planners and this driver do not change. Pick by what you need:
+
+| You want | Start from | Notes |
+|---|---|---|
+| A generic tall column for planning work | `ur10e_telescopic`, `fr3_telescopic`, `xarm7_telescopic` (any `<arm>_telescopic`) | 1.5 m stroke, 2 stages, 0.2 m/s, mount height 0.82 m: nominal values, not a real lift |
+| Real, sourced numbers to size a lift | a row of [lift_catalog.md](lift_catalog.md), e.g. `fr3_column870_lift` (0.87 m) or `xarm7_column500_lift` (0.5 m) | stroke, speed and payload cite a datasheet; the arm is a supported one, not the vendor's |
+| A short torso like a service robot | `fr3_tiago_style_torso` (0.35 m), `generic_6dof_fetch_style_torso`, `generic_6dof_pr2_spine_lift` (0.31 m, 0.013 m/s) | small reach gain, low speed: expect the lift to matter little for coverage |
+| A tall mast | `generic_6dof_stretch_mast_lift` (1.10 m, 0.2 m/s) | one carriage on a fixed mast, no stages |
+| Measured geometry of one real column (tube sizes, drive limits) | `ur10e_lift_reference` | 0.8 m, 2 stages, see below |
+| A scissor linkage | `ur10e_scissor` | visual envelope only, 1.0 m, 3 levels |
+| No lift | `ur10e_nolift`, `kinova_gen3_jackal_nolift`, `xarm7_dingo_o_nolift` | `type: none`: pedestal, joint not commanded, `lift_arm` equals `arm` |
+
+Rules of thumb: choose the stroke from the highest and lowest height the tool must reach minus what the arm
+reaches on its own; check `max_velocity_mps` against the time you allow per column (a slow lift dominates
+cycle time); set the driver's `max_velocity_mps` and `max_acceleration_mps2` (below) to the profile's values
+so the rate-limited reference and the planned motion agree; and treat anything with status `approximate` in
+the catalog as a placeholder until you have measured your unit. `test_lift_catalog.py` keeps the catalog
+table and the profile files in step; a profile that is not in the catalog (the `<arm>_telescopic` family,
+base variants, scissor, no-lift) carries nominal numbers.
+
 ## The reference lift profile
 
 `mobile_manipulator_description/config/profiles/ur10e_lift_reference.yaml` carries the numbers of one real
