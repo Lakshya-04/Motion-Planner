@@ -107,6 +107,19 @@ TEST(BaseModel, ArmBaseHeightFollowsTheProfilesLiftMount)
   EXPECT_NEAR(*armBaseHeightAtLiftZero(m), 0.39 + 0.8 + 0.02, 1e-12);
 }
 
+TEST(BaseModel, ArmBaseHeightUsesTheProfilesLiftMountHeightWhenItHasOne)
+{
+  const auto dir = std::filesystem::temp_directory_path() / ("base_model_test_lift_" + std::to_string(::getpid()));
+  std::filesystem::create_directories(dir);
+  const auto path = (dir / "lift.yaml").string();
+  std::ofstream(path) << "base:\n  drive_type: skid\n  lift_mount_height_m: 0.39\n"
+                         "  footprint: [[-0.4, -0.2], [0.4, -0.2], [0.4, 0.2], [-0.4, 0.2]]\n"
+                         "lift:\n  type: telescopic\n  mount_height_m: 0.738\n";
+  const BaseModel m = loadBaseProfile(path);
+  ASSERT_TRUE(armBaseHeightAtLiftZero(m));
+  EXPECT_NEAR(*armBaseHeightAtLiftZero(m), 0.39 + 0.738, 1e-12);
+}
+
 TEST(BaseModel, CanStrafeDefaultsToTheDriveTypeAndRejectsContradictions)
 {
   const auto dir = std::filesystem::temp_directory_path() / ("base_model_test_" + std::to_string(::getpid()));
