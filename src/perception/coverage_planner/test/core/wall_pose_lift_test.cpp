@@ -279,3 +279,73 @@ TEST(CoveragePassExpander, ReversedPassActuallyReversesWaypointOrder)
   EXPECT_NEAR(second_pass_start.x, 1.0, 1e-9);
   EXPECT_NEAR(second_pass_end.x, 0.0, 1e-9);
 }
+
+namespace
+{
+
+// Two vertical strips side by side, planned as a serpentine: strip 0 runs u 0 -> 1, strip 1 runs
+// back u 1 -> 0 (it starts at strip 0's end).
+Path makeTwoStripPath()
+{
+  Path path;
+  path.poses.push_back(makeFlatPose(0.0, 0.2));
+  path.poses.push_back(makeFlatPose(1.0, 0.2));
+  path.poses.push_back(makeFlatPose(1.0, 0.3));
+  path.poses.push_back(makeFlatPose(0.0, 0.3));
+  return path;
+}
+
+std::vector<MotionPlanSegment> makeTwoStripSegments()
+{
+  std::vector<MotionPlanSegment> segments;
+  for (uint32_t i = 0; i < 2; ++i) {
+    MotionPlanSegment strip;
+    strip.label = "strip_" + std::to_string(i);
+    strip.start_index = 2 * i;
+    strip.end_index = 2 * i + 1;
+    strip.frame_id = "map";
+    strip.mode = "cartesian";
+    strip.planner = "cartesian";
+    segments.push_back(strip);
+  }
+  return segments;
+}
+
+}  // namespace
+
+TEST(CoveragePassExpander, DoublePassStripsAllStartAtTheSameEndSoJointsAreOnlyThePitch)
+{
+  const auto wall = makeWall();
+  const auto expanded = coverage_planner::expandCoveragePasses(
+    makeTwoStripPath(), makeTwoStripSegments(), wall, makeDoublePassProfile());
+
+  ASSERT_EQ(expanded.segments.size(), 4u);
+  const auto & strip0_pass0 = expanded.segments[0];
+  const auto & strip0_pass1 = expanded.segments[1];
+  const auto & strip1_pass0 = expanded.segments[2];
+  const auto & strip1_pass1 = expanded.segments[3];
+  const auto start_x = [&](const auto & seg) {
+      return expanded.path.poses[seg.start_index].pose.position.x;
+    };
+  const auto end_x = [&](const auto & seg) {
+      return expanded.path.poses[seg.end_index].pose.position.x;
+    };
+  // Strip 0 starts at u=0, comes back to u=0; strip 1 must start at u=0 as well (not at u=1).
+  EXPECT_NEAR(start_x(strip0_pass0), 0.0, 1e-9);
+  EXPECT_NEAR(end_x(strip0_pass1), 0.0, 1e-9);
+  EXPECT_NEAR(start_x(strip1_pass0), 0.0, 1e-9);
+  EXPECT_NEAR(end_x(strip1_pass0), 1.0, 1e-9);
+  EXPECT_NEAR(end_x(strip1_pass1), 0.0, 1e-9);
+  (void)strip0_pass1;
+}
+
+TEST(CoveragePassExpander, SinglePassKeepsTheSerpentineDirections)
+{
+  const auto wall = makeWall();
+  const auto expanded = coverage_planner::expandCoveragePasses(
+    makeTwoStripPath(), makeTwoStripSegments(), wall, makeSinglePassProfile());
+
+  ASSERT_EQ(expanded.segments.size(), 2u);
+  EXPECT_NEAR(expanded.path.poses[expanded.segments[1].start_index].pose.position.x, 1.0, 1e-9);
+  EXPECT_NEAR(expanded.path.poses[expanded.segments[1].end_index].pose.position.x, 0.0, 1e-9);
+}
