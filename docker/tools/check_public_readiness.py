@@ -28,7 +28,7 @@ import sys
 
 # Markdown names that are legitimately not tracked files (generic mentions,
 # files that exist only in a user's checkout).
-ALLOWED_MD = {"CLAUDE.md", "SKILL.md", "MEMORY.md"}
+ALLOWED_MD = {"CLAUDE.md", "SKILL.md", "MEMORY.md", "report.md"}  # report.md: the file run_report.py writes
 ALLOWED_HOME_USERS = {"user", "username", "ubuntu", "ros", "me", "you", "name", "your_name"}
 
 MD_RE = re.compile(r"(?<![A-Za-z0-9_.~/-])((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.md)\b")

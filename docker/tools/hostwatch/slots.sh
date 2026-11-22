@@ -15,7 +15,7 @@ line=$(bash "$here/memwatch.sh"); eval "$line"
 names=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null)
 n_sim=$(echo "$names" | grep -c -E ' motion-planner:(sim|sim-gazebo)$')
 n_node=$(echo "$names" | grep -c -E '^curobo-node ')
-n_build=$(echo "$names" | grep -v -E '^mp_rviz' | grep -c -E ' motion-planner:(build|build-fast|build-live|dev)$')
+n_build=$(echo "$names" | grep -v -E '^(mp_rviz|plan_pb)' | grep -c -E ' motion-planner:(build|build-fast|build-live|dev)$')
 gpu_used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1); gpu_used=${gpu_used:-0}
 verdict=${verdict:-HOLD}; avail=${avail_mb:-0}
 ok() { [ "$verdict" = GO ] && [ $((avail - $1)) -ge "$RESERVE" ]; }
