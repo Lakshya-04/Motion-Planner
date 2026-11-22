@@ -84,6 +84,21 @@ def lift_pairs(robot, mounted=True):
     return pairs
 
 
+def arm_never_pairs(robot, arm):
+    """Pairs of one arm family that cannot touch on the real arm, though their collision primitives overlap.
+
+    UR family: the forearm against wrist 2 and wrist 3. The wrist 1 link separates them, and the primitive
+    cylinders of the description overlap at wrist-1 angles the real arm reaches without touching. In the Gazebo
+    two-stand run that pair made the dock joint goal 'invalid' (OMPL: 'Unable to sample any valid states for goal
+    tree'), refused 79 of 140 plans from a start state with the pair overlapping, and truncated the Cartesian
+    segments. Only pairs between links that exist and carry geometry are returned."""
+    if not arm.startswith('ur'):
+        return set()
+    have = collision_links(robot)
+    pairs = {('arm_forearm_link', 'arm_wrist_2_link'), ('arm_forearm_link', 'arm_wrist_3_link')}
+    return {p for p in pairs if p[0] in have and p[1] in have}
+
+
 def _rot(rpy):
     r, p, y = rpy
     cr, sr, cp, sp, cy, sy = np.cos(r), np.sin(r), np.cos(p), np.sin(p), np.cos(y), np.sin(y)
@@ -249,7 +264,7 @@ def main():
     ]
     for a, b in sorted(adjacent):
         lines.append(f'  <disable_collisions link1="{a}" link2="{b}" reason="Adjacent"/>')
-    for a, b in sorted(lift):
+    for a, b in sorted(lift | arm_never_pairs(robot, args.arm)):
         lines.append(f'  <disable_collisions link1="{a}" link2="{b}" reason="Never"/>')
     if always:
         lines.append(f'  <!-- Overlap in all {args.sample} sampled configurations: a primitive-geometry artefact, not a contact. -->')

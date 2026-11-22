@@ -13,10 +13,12 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <deque>
 #include <fstream>
 #include <sstream>
 #include <functional>
@@ -293,6 +295,12 @@ public:
     verify_dock_ = this->declare_parameter<bool>("verify_dock", true);
     dock_tolerance_m_ = this->declare_parameter<double>("dock_tolerance_m", 0.02);
     dock_tolerance_rad_ = this->declare_parameter<double>("dock_tolerance_rad", 0.17);
+    // > 0: before the approach / dock checks the tool is waited on until it stops moving (its position changes by
+    // less than tcp_settle_tolerance_m over 0.4 s), at most this many seconds. A simulated arm that tracks a short
+    // trajectory with a lag of a second or more reports the trajectory done while the tool is still 3 to 6 cm short,
+    // and the fixed 0.5 s wait then fails a dock that would have arrived. 0 keeps the fixed wait only.
+    tcp_settle_timeout_s_ = this->declare_parameter<double>("tcp_settle_timeout_s", 0.0);
+    tcp_settle_tolerance_m_ = this->declare_parameter<double>("tcp_settle_tolerance_m", 0.002);
     // The seed of that IK: a configuration of the arm docked at the wall (planning group order, lift first). Every
     // dock is then solved from the same seed, so the lift / shoulder / wrist branch does not creep from one column to
     // the next (a chain of seeds drifted into upper arm <-> lift carriage self-collision at the last column of a
@@ -762,6 +770,47 @@ private:
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
     return true;
+  }
+
+  /// The fixed 0.5 s wait of the approach and dock checks, then (tcp_settle_timeout_s > 0) a wait until the tool
+  /// has stopped: its position moved less than tcp_settle_tolerance_m over the last 0.4 s, or the timeout passed.
+  void waitTcpSettled()
+  {
+    waitFor(0.5, false);
+    if (tcp_settle_timeout_s_ <= 0.0) {
+      return;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    const auto limit = start + std::chrono::duration<double>(tcp_settle_timeout_s_);
+    std::deque<std::pair<std::chrono::steady_clock::time_point, std::array<double, 3>>> hist;
+    while (std::chrono::steady_clock::now() < limit) {
+      FrameTransform tcp;
+      if (!lookup(frame_id_, "tcp_link", tcp)) {
+        return;
+      }
+      const auto now = std::chrono::steady_clock::now();
+      hist.emplace_back(now, std::array<double, 3>{tcp.t[0], tcp.t[1], tcp.t[2]});
+      while (hist.size() > 1 && now - hist[1].first >= std::chrono::milliseconds(400)) {
+        hist.pop_front();
+      }
+      if (now - hist.front().first >= std::chrono::milliseconds(400)) {
+        double moved = 0.0;
+        for (const auto & h : hist) {
+          moved = std::max(
+            moved, std::sqrt(
+              std::pow(h.second[0] - tcp.t[0], 2) + std::pow(h.second[1] - tcp.t[1], 2) +
+              std::pow(h.second[2] - tcp.t[2], 2)));
+        }
+        if (moved < tcp_settle_tolerance_m_) {
+          RCLCPP_INFO(
+            this->get_logger(), "tool settled after %.1f s",
+            std::chrono::duration<double>(now - start).count() + 0.5);
+          return;
+        }
+      }
+      waitFor(0.05, false);
+    }
+    RCLCPP_WARN(this->get_logger(), "tool still moving after %.1f s of settling", tcp_settle_timeout_s_);
   }
 
   void setState(const std::string & state, int column = -2)
@@ -2312,7 +2361,7 @@ private:
         // is a no-op) or that rests on the wall's top edge half way stops short of the pose, and the dock from
         // there starts a Cartesian path from the wrong place and ends on another branch. Check where the tool is.
         if (verify_approach_) {
-          waitFor(0.5, false);
+          waitTcpSettled();
           double err = 0.0;
           if (!tcpNear(first_goal, approach_tolerance_m_, err)) {
             RCLCPP_WARN(
@@ -2367,7 +2416,7 @@ private:
       return ColumnOutcome::kFailed;
     }
     if (verify_dock_) {
-      waitFor(0.5, false);   // let the controller and TF settle after the last point, as verify_approach does
+      waitTcpSettled(); // let the controller and TF settle after the last point, as verify_approach does
       double pos_err = 0.0, ang_err = 0.0;
       if (tcpPoseError(standoff_pose, pos_err, ang_err) &&
         (pos_err > dock_tolerance_m_ || ang_err > dock_tolerance_rad_))
@@ -2768,6 +2817,8 @@ private:
   bool recovery_keeps_branch_{false};
   bool verify_approach_{true};
   bool verify_dock_{true};
+  double tcp_settle_timeout_s_{0.0};
+  double tcp_settle_tolerance_m_{0.002};
   double dock_tolerance_m_{0.02};
   double dock_tolerance_rad_{0.17};
   double approach_tolerance_m_{0.05};

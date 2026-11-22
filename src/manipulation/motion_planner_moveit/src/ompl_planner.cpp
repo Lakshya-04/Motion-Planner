@@ -7,6 +7,7 @@
 #include <Eigen/Geometry>
 
 #include "moveit/move_group_interface/move_group_interface.h"
+#include "moveit/planning_scene_monitor/planning_scene_monitor.h"
 #include "moveit/robot_trajectory/robot_trajectory.h"
 #include "rclcpp/rclcpp.hpp"
 
@@ -170,7 +171,24 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
     const auto robot_model = move_group_->getRobotModel();
     const auto * joint_model_group =
       robot_model ? robot_model->getJointModelGroup(move_group_name_) : nullptr;
-    const auto current = move_group_->getCurrentState(1.0);
+    // The MoveGroupInterface's own state monitor lives on the backend node, which nothing spins: in Gazebo it never
+    // received a joint state ("latest received state has time 0"), so this fell through to the unclamped server
+    // state and 20 of 62 plans were refused as "Start state out of bounds" by 2e-14 m. The planning scene monitor
+    // has its own spinner and is what CartesianPlanner already reads its start from: use it first.
+    std::shared_ptr<moveit::core::RobotState> current;
+    std::string scene_error;
+    if (backend_->ensurePlanningSceneMonitor(move_group_name_, scene_error)) {
+      const auto monitor = backend_->planningSceneMonitor();
+      if (monitor) {
+        planning_scene_monitor::LockedPlanningSceneRO scene(monitor);
+        if (scene) {
+          current = std::make_shared<moveit::core::RobotState>(scene->getCurrentState());
+        }
+      }
+    }
+    if (!current) {
+      current = move_group_->getCurrentState(1.0);
+    }
     if (current && joint_model_group) {
       moveit::core::RobotState start_state(*current);
       start_state.enforceBounds(joint_model_group);
