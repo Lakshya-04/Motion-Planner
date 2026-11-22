@@ -29,6 +29,7 @@
 | [robot_assets.md](robot_assets.md) | One command from a robot profile to every per-robot artefact (URDF, SRDF, spheres, VAMP header, cuRobo config, reachability map, manifest); stages, images, skipping |
 | [ft_sensing.md](ft_sensing.md) | Force/torque sensing: sign, bias, payload gravity and the lever-arm move from a raw sensor wrench to the contact wrench at the tool; what JTAC does today; how others solve it |
 | [simulation.md](simulation.md) | Simulation backends behind ros2_control (`hardware:=` choice; `mock` and `mujoco` exist so far): the contract each must meet, layout, status; Isaac Sim is a stub |
+| [navigation_and_perception.md](navigation_and_perception.md) | What is real, stubbed or simulator ground truth in perception, scene, stands, base navigation and docking today; what MuJoCo and Gazebo feed `/odom` and take on `/cmd_vel`; the gap list and the order to close it |
 | [perception_live.md](perception_live.md) | Live perception slice: simulated ray-cast depth sensor in MuJoCo, `wall_detector` (point cloud to `wall_scene.json` and a MoveIt box), the check script and its limits |
 | [how_to_read_a_run.md](how_to_read_a_run.md) | The files a MuJoCo manager pass writes (`manager.log` segment lines, `run.csv`, the score card, the film npz), what each field means and where the code writes it, with the two-stand pass as the worked example |
 | [sim_mujoco.md](sim_mujoco.md) | MuJoCo 4 simulation backend: ros2_control plugin (hardware:=mujoco), MJCF and wall world generators, raw wrist F/T and ground truth, smoke test, limits |
