@@ -62,6 +62,117 @@ Measured on this machine (8 threads): 3 million samples in 0.5 s. UR10e, a 3 m w
 front of the base: **2 bands** (lift 0.95 m covers 25 of 30 targets, 1.45 m the other 5). The same
 wall 3 m away: all targets unreachable. Generic arm: 3 bands.
 
+## Reach report: what reach do we really get, top to bottom?
+
+`docker/tools/reach_report.py` (python3 + numpy, ROS-free; matplotlib only for `--png`) answers it from
+an RM4D map file. It places a vertical wall patch in front of the arm and, for every lift height,
+asks the map whether the tool can stand on each wall cell with its axis **normal to the wall**
+(approach axis horizontal, so polar angle pi/2 and azimuth +x: the cell key is `pz = wall z - arm
+base z`, `x* = arm-base-to-wall distance`, `y* = lateral offset`; no rotation needed).
+
+Inputs and geometry:
+
+- arm base to wall `D = --clearance + --arm-offset` (chassis edge to wall plus the arm base set back from the
+  chassis edge). Arm base height at lift q is `arm_base_z0 + q`, where `arm_base_z0` is the base's
+  `lift_mount_height_m` plus the profile's `lift.mount_height_m` (the `armBaseHeightAtLiftZero` of
+  the C++ `BaseModel`; 0.35 + 0.82 = 1.17 m for `ur10e_telescopic`). `--profile` reads it and the
+  stroke (`lift.stroke_m`) from the yaml; `--stroke` / `--arm-base-z0` override it.
+- `--reach R` is the reach the fractions refer to. Without it the tool uses the largest tool distance
+  stored in the map, which includes the tool offset past the arm flange (1.7 m for the UR10e map
+  with its tcp), so pass the datasheet reach (1.3 m) when you think in arm reach.
+- "Reachable at fraction f" = the map holds the cell AND the tool is within `f * R` of the arm base.
+  0.7 / 0.85 / 1.0 are the defaults (`--fractions`): the margin kept from the singular full stretch.
+- A warning is printed when the map's z window or xy half-width is narrower than the reach: cells
+  outside the window count as unreachable and the lowest/highest z would be clipped (build the map
+  with `--zmin -1.8 --zmax 2.0 --extent 2.0` as in "Try it").
+
+It reports, per reach fraction: the reachable fraction of the patch at every lift height; the lowest
+and highest reachable wall z at lift min and lift max (scanned over z 0..3 m on the patch's centre
+line, not clipped to the patch); the **minimum number of lift positions** that cover the patch bottom
+to top and which heights (exact search over the lift grid, ties broken by the least lift travel;
+`--lift-step`, default 0.05 m); a FLAG with the z runs when patch cells are never reachable at any
+lift; and a heat strip (ASCII; `--png` writes a matplotlib figure of reachable fraction over lift x
+wall height plus the strip). `--json` dumps the numbers. The older `rm4d_tool bands` answers the lift
+band question for arbitrary tool normals; this one adds the reach fractions, the extent at the ends of the
+stroke, the flags and the strip for the wall-normal case.
+
+### Worked example: UR10e tall wall
+
+Patch z 0.6..2.0 m, chassis clearance 0.42 m, arm base 0.3 m behind the chassis edge (D = 0.72 m),
+1.5 m stroke, datasheet reach 1.3 m, map built as in "Try it":
+
+```bash
+python3 docker/tools/reach_report.py --map ur10e.rm4d \
+  --profile src/description/mobile_manipulator_description/config/profiles/ur10e_telescopic.yaml \
+  --patch-z 0.6 2.0 --patch-y -0.5 0.5 --clearance 0.42 --arm-offset 0.3 --reach 1.3 --lift-step 0.1
+```
+
+Output (excerpt; the full per-lift table has 16 rows):
+
+```
+  arm base to wall 0.720 m (clearance 0.420 + arm offset 0.300), reach 1.300 m
+  arm base height at lift 0: 1.170 m, stroke 1.500 m, lift step 0.100 m
+At 70% of reach:
+  reachable wall z at lift min (0.00): 0.65 .. 1.70 m; at lift max (1.50): 2.15 .. 3.00 m
+  patch coverable by any lift: 90.3%; minimum lift positions: 4 at 0.00, 0.10, 0.40, 0.60 m
+  FLAG: 59 patch cells never reachable (z runs 0.60..0.90, y -0.50..0.50)
+At 85% of reach:
+  reachable wall z at lift min (0.00): 0.35 .. 2.00 m; at lift max (1.50): 1.85 .. 3.00 m
+  patch coverable by any lift: 100.0%; minimum lift positions: 2 at 0.00, 0.30 m
+At 100% of reach:
+  reachable wall z at lift min (0.00): 0.10 .. 2.25 m; at lift max (1.50): 1.60 .. 3.00 m
+  patch coverable by any lift: 100.0%; minimum lift positions: 2 at 0.30, 0.40 m
+```
+
+Check against the analytic sphere: with the arm base 0.72 m from the wall and reach 1.3 m, the tool can
+reach wall points up to `sqrt(1.3^2 - 0.72^2) = 1.08 m` above and below the arm base (on the line in front
+of it). At lift 0 the base is at 1.17 m, so the span is 0.09 .. 2.25 m; the report gives 0.10 .. 2.25 m
+(one 5 cm cell). At 0.7 of reach (0.91 m) the half-span is 0.556 m, span 0.61 .. 1.73 m; the report
+gives 0.65 .. 1.70 m. At lift max the span moves up by 1.5 m (1.6 .. 3.75 m, scan cut at 3.0 m). The
+same numbers come out of `test_reach_report.py` on an analytic sphere-shell map.
+
+What it says about the tall wall: the whole 0.6..2.0 m patch is reachable at 0.85 and 1.0 of reach
+from the lift range 0..0.3 m (a 1.4 m tall wall fits inside the 2.2 m span; the lift is needed for walls
+above about 2.25 m or below about 0.1 m, not for this one). Keeping 0.7 of reach is not possible at this
+stand: the bottom 0.6..0.9 m of a 1 m wide patch is never reachable at any lift (the lift cannot go
+below its zero, so the lowest reach is the arm base height minus the half-span). At 0.7 the arm base
+would have to be closer than 0.72 m or the patch narrower. Heat strip at 0.85 of reach (columns: lift
+min, mid, max, best lift):
+
+```
+Heat strip at 85% of reach: wall z vs patch width reachable (full bar = all, empty = none)
+  z[m]  lift 0.00               lift 0.80               lift 1.50               best lift             
+ 2.00    |#####               |  |##################  |  |################### |  |####################|
+ 1.95    |###########         |  |####################|  |################    |  |####################|
+ 1.90    |################    |  |####################|  |###########         |  |####################|
+ 1.85    |##################  |  |####################|  |#######             |  |####################|
+ 1.80    |################### |  |####################|  |                    |  |####################|
+ 1.75    |####################|  |####################|  |                    |  |####################|
+ 1.70    |####################|  |################### |  |                    |  |####################|
+ 1.65    |####################|  |#################   |  |                    |  |####################|
+ 1.60    |####################|  |####################|  |                    |  |####################|
+ 1.55    |##################  |  |####################|  |                    |  |####################|
+ 1.50    |####################|  |####################|  |                    |  |####################|
+ 1.45    |####################|  |####################|  |                    |  |####################|
+ 1.40    |####################|  |####################|  |                    |  |####################|
+ 1.35    |####################|  |################### |  |                    |  |####################|
+ 1.30    |################### |  |################### |  |                    |  |####################|
+ 1.25    |################### |  |################    |  |                    |  |####################|
+ 1.20    |##################  |  |###########         |  |                    |  |####################|
+ 1.15    |####################|  |#######             |  |                    |  |####################|
+ 1.10    |####################|  |                    |  |                    |  |####################|
+ 1.05    |####################|  |                    |  |                    |  |####################|
+ 1.00    |####################|  |                    |  |                    |  |####################|
+ 0.95    |####################|  |                    |  |                    |  |####################|
+ 0.90    |################### |  |                    |  |                    |  |####################|
+ 0.85    |#################   |  |                    |  |                    |  |####################|
+ 0.80    |####################|  |                    |  |                    |  |####################|
+ 0.75    |####################|  |                    |  |                    |  |####################|
+ 0.70    |####################|  |                    |  |                    |  |####################|
+ 0.65    |####################|  |                    |  |                    |  |####################|
+ 0.60    |####################|  |                    |  |                    |  |####################|
+```
+
 ## Redundant arms (7 or more joints)
 
 The builder, the chain model and the file format take any number of revolute joints; the joint count
