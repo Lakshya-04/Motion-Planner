@@ -42,6 +42,9 @@ struct DockIkSelectorParams
   double wrist_min_rad{-3.2};
   double wrist_max_rad{3.2};
   double max_dq_rad{3.2};                   ///< candidates with a larger cost are rejected
+  /// Skip the branch-change rejection (the reference is the stow/travel state, there is no working branch to keep);
+  /// the wrist and jump checks stay and the cheapest candidate by max |dq| wins. Off by default.
+  bool ignore_branch{false};
   // Reach preference (see the header comment); reach_target_fraction <= 0 or reach_m <= 0 = off.
   double reach_target_fraction{0.0};        ///< wanted upper bound of tool distance / reach_m
   double reach_m{0.0};                      ///< arm reach from the arm base frame origin (m)
@@ -226,7 +229,7 @@ inline DockIkChoice selectDockIk(
         continue;
       }
     }
-    if (dockBranchChanged(*sol, reference, p)) {
+    if (!p.ignore_branch && dockBranchChanged(*sol, reference, p)) {
       ++best.rejected_branch;
       continue;
     }

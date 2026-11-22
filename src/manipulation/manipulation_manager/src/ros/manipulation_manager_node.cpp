@@ -274,6 +274,9 @@ public:
       dock_ik_sel_.wrist_min_rad = this->declare_parameter<double>("dock_ik_wrist_min_rad", -3.2);
       dock_ik_sel_.wrist_max_rad = this->declare_parameter<double>("dock_ik_wrist_max_rad", 3.2);
       dock_ik_sel_.max_dq_rad = this->declare_parameter<double>("dock_ik_max_dq_rad", 3.2);
+      // The first dock after a stow (no remembered docked branch, e.g. each serpentine stand start) has no working
+      // branch to preserve: the branch-change rejection is skipped there and the smallest max |dq| wins. Off by default.
+      dock_first_ignores_branch_ = this->declare_parameter<bool>("dock_first_ignores_branch", false);
       // Reach preference of the continuity choice (needs dock_ik_continuity and the TF arm_base_frame
       // in frame_id): > 0 keeps the tool at or below this fraction of dock_ik_reach_m from the arm base by using the
       // lift joint (dock_ik_lift_joint, clamped into [dock_ik_lift_min_m, dock_ik_lift_max_m]). 0 = off (default).
@@ -1864,6 +1867,8 @@ private:
         dock_ik_sel_.joint_lower = jog_params_.lower;
         dock_ik_sel_.joint_upper = jog_params_.upper;
       }
+      DockIkSelectorParams first_sel = dock_ik_sel_;
+      first_sel.ignore_branch = dock_first_ignores_branch_ && dock_branch_seed_.empty();
       const auto choice = selectDockIk(
         [&](const std::vector<double> & sd) -> std::optional<std::vector<double>> {
           auto r = req;
@@ -1874,7 +1879,7 @@ private:
           }
           return res.joint_solution;
         },
-        {dock_branch_seed_, live, dock_seed_}, ref, dock_ik_sel_, reach_ptr);
+        {dock_branch_seed_, live, dock_seed_}, ref, first_sel, reach_ptr);
       if (choice.ok) {
         RCLCPP_INFO(
           this->get_logger(),
@@ -2982,6 +2987,7 @@ private:
   int dock_attempts_{3};
   bool dock_ik_seeded_{true};
   bool dock_ik_continuity_{false};
+  bool dock_first_ignores_branch_{false};  ///< skip the branch check for a dock with no remembered branch
   DockIkSelectorParams dock_ik_sel_;
   bool recovery_keeps_branch_{false};
   bool verify_approach_{true};

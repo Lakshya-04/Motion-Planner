@@ -26,6 +26,7 @@ These shape the candidate filter of `core/dock_ik_selector.hpp`. They have no ef
 | Parameter | Default | Meaning |
 |---|---|---|
 | `dock_ik_linear_joints` | [0] | Indices (in the planning group, lift first) of prismatic joints. Their joint change is not wrapped to [-pi, pi] when the cost is computed. |
+| `dock_first_ignores_branch` | false | When true and no docked branch is remembered (`dock_branch_seed_` empty: the arm is stowed, e.g. at each `serpentine_columns` stand start), the first dock skips the branch-change rejection and takes the candidate with the smallest largest joint change; the wrist and jump checks stay. Motivation: a MuJoCo tall-wall run rejected the two nearest candidates against the stow reference and docked one about pi away, then the approach ended short. Host gtested with a fake IK; not run in a simulator. |
 | `dock_ik_max_dq_rad` | 3.2 | A candidate whose cost (largest joint change from the reference configuration) is above this is rejected. |
 
 ### Reach preference (opt-in, `dock_ik_reach_fraction` > 0)

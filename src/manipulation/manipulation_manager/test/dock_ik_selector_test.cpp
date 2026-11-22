@@ -52,6 +52,55 @@ TEST(DockIkSelectorTest, RejectsTheFoldedBackBranch)
   EXPECT_EQ(c.rejected_branch, 1u);
 }
 
+// First dock from the stow state: the two nearest candidates are on the other shoulder branch, one ~pi away is on
+// the reference branch.
+TEST(DockIkSelectorTest, DefaultStillRejectsTheNearOtherBranchAndTakesTheFarOne)
+{
+  const V ref{0.5, 1.0, -0.6, 0.0};
+  const std::vector<V> seeds{{1, 0, 0, 0}, {2, 0, 0, 0}};
+  const auto ik = tableIk(seeds, {V{0.5, 1.0, 0.7, 0.1}, V{0.5, 1.0, -0.6, 3.0}});
+  DockIkSelectorParams p;
+  p.branch_joints = {2};
+  EXPECT_FALSE(p.ignore_branch);
+  const auto c = selectDockIk(ik, seeds, ref, p);
+  ASSERT_TRUE(c.ok);
+  EXPECT_EQ(c.seed_index, 1u);
+  EXPECT_EQ(c.rejected_branch, 1u);
+  EXPECT_NEAR(c.cost, 3.0, 1e-9);
+}
+
+TEST(DockIkSelectorTest, IgnoringTheBranchPicksTheNearCandidate)
+{
+  const V ref{0.5, 1.0, -0.6, 0.0};
+  const std::vector<V> seeds{{1, 0, 0, 0}, {2, 0, 0, 0}};
+  const auto ik = tableIk(seeds, {V{0.5, 1.0, 0.7, 0.1}, V{0.5, 1.0, -0.6, 3.0}});
+  DockIkSelectorParams p;
+  p.branch_joints = {2};
+  p.ignore_branch = true;
+  const auto c = selectDockIk(ik, seeds, ref, p);
+  ASSERT_TRUE(c.ok);
+  EXPECT_EQ(c.seed_index, 0u);
+  EXPECT_EQ(c.rejected_branch, 0u);
+  EXPECT_NEAR(c.cost, 1.3, 1e-9);
+}
+
+TEST(DockIkSelectorTest, IgnoringTheBranchStillAppliesTheWristCheck)
+{
+  const V ref{0.5, 1.0, -0.6, -2.0};
+  const std::vector<V> seeds{{1, 0, 0, 0}, {2, 0, 0, 0}};
+  // nearest candidate flips the branch but its wrist is wound past a turn: rejected; the other one stays
+  const auto ik = tableIk(seeds, {V{0.5, 1.0, 0.7, -4.6}, V{0.5, 1.0, 0.7, -2.5}});
+  DockIkSelectorParams p;
+  p.branch_joints = {2};
+  p.wrist_joint = 3;
+  p.ignore_branch = true;
+  const auto c = selectDockIk(ik, seeds, ref, p);
+  ASSERT_TRUE(c.ok);
+  EXPECT_EQ(c.seed_index, 1u);
+  EXPECT_EQ(c.rejected_wrist, 1u);
+  EXPECT_EQ(c.rejected_branch, 0u);
+}
+
 TEST(DockIkSelectorTest, RejectsWristWinding)
 {
   const V ref{0.5, 1.0, -0.6, -2.0};
