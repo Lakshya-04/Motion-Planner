@@ -1204,6 +1204,12 @@ private:
         last_good_state_ = travel_state_;   // the stowed arm: where a jog goes back to
         arm_stuck_ = false;
         chain_valid_ = false;
+        if (serpentine_columns_) {
+          // the arm was stowed for the drive and the base stands elsewhere: the docked branch of the last stand is no
+          // reference for the first dock here (it made every candidate 'wrong branch' and fell back to a raw IK solution a
+          // turn away from the stow pose)
+          dock_branch_seed_.clear();
+        }
         for (const size_t c : orderColumns(visit_columns[s], sel)) {
           if (stop()) {
             break;
