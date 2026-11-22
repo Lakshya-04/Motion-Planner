@@ -41,6 +41,16 @@ With the lift free the IK tends to dock with the lift near its start and the too
 
 The reachability node has a matching opt-in for stand planning, `stand_min_clearance_m` (default 0 = off), described in [reachability.md](reachability.md): a floor for the chassis-to-wall clearance of every `~/plan_stands` request.
 
+## Dock verification and tool settling
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `verify_dock` | true | Before the press, check that the tool is within the tolerances below of the standoff pose. A column that fails is skipped as a failed dock (retried only through `column_retries`). |
+| `dock_tolerance_m` | 0.02 | Largest position error (m) of the tool at the standoff pose for `verify_dock`. |
+| `dock_tolerance_rad` | 0.17 | Largest orientation error (rad) of the tool at the standoff pose for `verify_dock`. |
+| `tcp_settle_timeout_s` | 0.0 | Seconds. > 0: after the fixed 0.5 s wait of the approach and dock checks, wait at most this long until the tool has stopped moving. 0 keeps the fixed wait only. Negative values are replaced by 0 with a warning. A cancel ends the wait. A failed TF lookup of `tcp_link` ends it early with a warning. |
+| `tcp_settle_tolerance_m` | 0.002 | Metres. The tool counts as stopped when its position moved less than this over the last 0.4 s. Must be > 0, otherwise 0.002 is used with a warning. |
+
 ## Recovery jog
 
 The jog moves the arm a few centimetres of joint space back toward the last good configuration before a retract or stow is retried.

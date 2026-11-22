@@ -302,6 +302,17 @@ public:
     // and the fixed 0.5 s wait then fails a dock that would have arrived. 0 keeps the fixed wait only.
     tcp_settle_timeout_s_ = this->declare_parameter<double>("tcp_settle_timeout_s", 0.0);
     tcp_settle_tolerance_m_ = this->declare_parameter<double>("tcp_settle_tolerance_m", 0.002);
+    if (!(tcp_settle_timeout_s_ >= 0.0)) {
+      RCLCPP_WARN(
+        this->get_logger(), "tcp_settle_timeout_s %.3f is negative or NaN; using 0 (fixed wait only)",
+        tcp_settle_timeout_s_);
+      tcp_settle_timeout_s_ = 0.0;
+    }
+    if (!(tcp_settle_tolerance_m_ > 0.0)) {
+      RCLCPP_WARN(
+        this->get_logger(), "tcp_settle_tolerance_m %.6f is not positive; using 0.002", tcp_settle_tolerance_m_);
+      tcp_settle_tolerance_m_ = 0.002;
+    }
     // The seed of that IK: a configuration of the arm docked at the wall (planning group order, lift first). Every
     // dock is then solved from the same seed, so the lift / shoulder / wrist branch does not creep from one column to
     // the next (a chain of seeds drifted into upper arm <-> lift carriage self-collision at the last column of a
@@ -790,9 +801,15 @@ private:
     const auto start = std::chrono::steady_clock::now();
     const auto limit = start + std::chrono::duration<double>(tcp_settle_timeout_s_);
     std::deque<std::pair<std::chrono::steady_clock::time_point, std::array<double, 3>>> hist;
+    // Wall-clock (steady) time on purpose: with use_sim_time a stalled /clock would otherwise never end the wait.
     while (std::chrono::steady_clock::now() < limit) {
+      if (stop()) {
+        return;
+      }
       FrameTransform tcp;
       if (!lookup(frame_id_, "tcp_link", tcp)) {
+        RCLCPP_WARN(
+          this->get_logger(), "tool settling ended early: TF lookup of tcp_link in %s failed", frame_id_.c_str());
         return;
       }
       const auto now = std::chrono::steady_clock::now();
@@ -815,7 +832,9 @@ private:
           return;
         }
       }
-      waitFor(0.05, false);
+      if (!waitFor(0.05)) {
+        return;
+      }
     }
     RCLCPP_WARN(this->get_logger(), "tool still moving after %.1f s of settling", tcp_settle_timeout_s_);
   }
