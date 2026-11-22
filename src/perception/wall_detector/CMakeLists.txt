@@ -77,6 +77,9 @@ install(TARGETS ${WALL_DETECTOR_TARGETS}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
+# Host/offline tools: python mirror of the core, the detected-vs-truth comparison, a .pcd -> PointCloud2 publisher.
+install(PROGRAMS scripts/compare_wall_scene.py scripts/pcd_to_cloud.py scripts/wall_fit_ref.py
+  DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
