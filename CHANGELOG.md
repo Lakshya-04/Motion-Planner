@@ -241,3 +241,4 @@ The history up to 2026-11-20 was consolidated from 561 commits into 15 milestone
 - No live sensor ingest, no time parameterisation.
 - Both simulators hold a 10 N contact (MuJoCo 10.13 N; Gazebo 9.69 N with the compliant tip).
 - Nothing verified on hardware.
+- Lift catalog: `docs/lift_catalog.md` lists the published telescopic/prismatic lifts of TIAGo, Fetch, PR2, HSR, Stretch and two commercial columns with sources; five new profiles (`generic_6dof_pr2_spine_lift`, `generic_6dof_hsr_torso_lift`, `generic_6dof_stretch_mast_lift`, `fr3_column870_lift`, `xarm7_column500_lift`) and `test_lift_catalog.py`; data only, primitives, no lift xacro change.
