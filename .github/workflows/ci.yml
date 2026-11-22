@@ -32,7 +32,7 @@ jobs:
           python3 docker/tools/check_params.py
       - name: Tool tests
         run: |
-          python3 -m pip install --quiet pytest pyyaml numpy xacro
+          python3 -m pip install --quiet pytest pyyaml numpy matplotlib xacro
           python3 -m pytest docker/tools/tests -q
 
   host-core-tests:
