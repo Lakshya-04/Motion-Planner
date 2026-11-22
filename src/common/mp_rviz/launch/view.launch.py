@@ -3,7 +3,8 @@
 A profile is ``profiles/<name>.rviz``. ``profile:=list`` is not a launch feature: run
 ``ros2 launch mp_rviz view.launch.py --show-args`` for the arguments and see docs/rviz/README.md for the table.
 ``rviz_config:=/abs/path.rviz`` overrides the profile. ``markers:=true`` also starts mp_viz_markers.py
-(mission state text and the tool trace coloured by force).
+(mission state text and the tool trace coloured by force). ``scene:=true`` starts mp_viz_scene.py (planned wall
+columns, base stands).
 """
 import os
 
@@ -31,6 +32,10 @@ def _setup(context, *args, **kwargs):
         actions.append(Node(
             package='mp_rviz', executable='mp_viz_markers.py', name='mp_viz_markers', output='screen',
             parameters=[{'use_sim_time': sim_time}]))
+    if LaunchConfiguration('scene').perform(context).lower() in ('1', 'true', 'yes'):
+        actions.append(Node(
+            package='mp_rviz', executable='mp_viz_scene.py', name='mp_viz_scene', output='screen',
+            parameters=[{'use_sim_time': sim_time}]))
     return actions
 
 
@@ -40,5 +45,6 @@ def generate_launch_description():
         DeclareLaunchArgument('rviz_config', default_value='', description='absolute path; overrides profile'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('markers', default_value='false', description='also start mp_viz_markers.py'),
+        DeclareLaunchArgument('scene', default_value='false', description='also start mp_viz_scene.py'),
         OpaqueFunction(function=_setup),
     ])

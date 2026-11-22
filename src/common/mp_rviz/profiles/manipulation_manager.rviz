@@ -53,6 +53,36 @@ Visualization Manager:
       History Policy: Keep Last
       Reliability Policy: Reliable
       Value: /wall_coverage_demo/final_coverage_markers
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Plan columns
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/plan_columns
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Stands
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/stands
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Reach slice
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/reach_slice
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
