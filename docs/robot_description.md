@@ -221,13 +221,46 @@ Profile `lift:` keys: `type`, `stroke_m`, `stages`, `mount_height_m` (`lift_moun
 `lift_output_link` above `lift_base_link` when retracted; for a scissor this is the minimum height),
 `max_velocity_mps`, `max_acceleration_mps2` (URDF cannot carry an acceleration: it is not wired into MoveIt yet,
 so copy it into `mobile_manipulator_moveit_config/config/joint_limits.yaml` by hand), and `payload_kg` (a note about
-the real lift's rating, not used by the model). With `none` / `fixed` the lift joint is not actuated:
+the real lift's rating, not used by the model), and `geometry` (below). With `none` / `fixed` the lift joint is not actuated:
 the SRDF omits it from the home state, the ros2_control block does not command it, `lift_arm` has the
 same six joints as `arm`, and the profile sets `joints.lift: null`.
 
 The structural collision matrix has its own files for `none` and `scissor`
 (`srdf/acm_<family>_<lift>.xacro`, `scripts/generate_acm.py --lift`); `telescopic` and `fixed` share the
-column's. Profiles: `ur10e_telescopic`, `ur10e_scissor`, `ur10e_nolift`, `generic_6dof_telescopic`.
+column's. Profiles: `ur10e_telescopic`, `ur10e_scissor`, `ur10e_nolift`, `generic_6dof_telescopic`,
+`ur10e_lift_reference`.
+
+**Column geometry (telescopic and fixed).** Without a `geometry` section the stages are cylinders as tall
+as the column. With one, the column is described from primitives (boxes or cylinders, no meshes), so the
+model can follow a measured lift:
+
+```yaml
+lift:
+  type: telescopic
+  stroke_m: 0.8
+  stages: 2
+  mount_height_m: 0.738        # lift_output_link above lift_base_link, retracted
+  geometry:
+    shape: box                 # cylinder (default) | box, for the stage tubes
+    column: {size_m: [0.186, 0.186, 0.648]}                 # fixed outer tube: x, y, height
+    stages:                                                 # outermost first, one entry per stage
+      - {size_m: [0.164, 0.164, 0.690], rest_z_m: -0.014}   # outer x, y, height; bottom above the column's bottom, retracted
+      - {size_m: [0.146, 0.146, 0.490], rest_z_m: 0.213}
+    carriage: {size_m: [0.212, 0.22, 0.035]}                # plate on the last stage
+```
+
+`scripts/profile_xacro_args.py` turns it into `lift_shape`, `lift_column_size`, `lift_stage_sizes`,
+`lift_stage_rest_z` and `lift_carriage_size`. The stack must be continuous or the xacro refuses to render:
+the top of the last stage (`rest_z_m` + height) equals `mount_height_m` minus the arm mount height
+(`arm_mount_xyz` z, so set it to the plate's thickness here), every stage is narrower than the one below,
+and there is one entry per stage. Whether neighbouring tubes still overlap at full extension depends on the
+stroke and is checked by `test/test_lifts.py` (`_stack_violations`), not by the xacro: a stroke the tubes
+cannot cover leaves a gap. The first stage moves `stroke / stages` and the last one the whole stroke, so
+`ur10e_lift_reference` (0.8 m, two stages: the middle tube 0.4 m, the top tube 0.8 m) models a three-tube
+column. The reachability helper `armBaseHeightAtLiftZero` still assumes the default 0.8 m column and 0.02 m
+arm mount, so for such a profile its value is not the arm base height (unfixed).
+
+The commanded joint is driven on hardware by the `lift_hardware` package ([lift.md](lift.md)).
 
 **Recipe: chain / column lift.** A chain-driven or rigid-chain column lift behaves, to the planner,
 like any single-axis vertical lift: one prismatic joint, `lower 0`, `upper = stroke`. Use
