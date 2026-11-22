@@ -11,6 +11,7 @@ Output: primitives in the simulator world frame, plain JSON-able dicts::
     {'kind': 'polyline', 'key': 'ns/id', 'ns': str, 'points': [[x,y,z],...], 'color': [r,g,b,a], 'width': m}
     {'kind': 'arrow', ... 'start': [..], 'end': [..], 'color', 'width'}
     {'kind': 'box', ... 'center': [..], 'size': [..], 'quat': [x,y,z,w], 'color', 'width'}
+    {'kind': 'tiles', ... 'quads': [[p0, p1, p2, p3], ...], 'color'}   (filled planar quads, TRIANGLE_LIST markers)
     {'kind': 'label', ... 'position': [..], 'text': str, 'color', 'height': m}
 
 The marker frame -> sim world transform is a fixed ``FrameTransform`` (x, y, z, yaw), default identity.
@@ -126,6 +127,14 @@ def convert_marker(m, tf=None):
         return base
     if t == 'SPHERE':
         base.update(kind='sphere', center=list(pos), radius=float(scale[0]) / 2.0)
+        return base
+    if t == 'TRIANGLE_LIST':
+        # filled quads (two triangles c0 c1 c2 / c0 c2 c3 each, as coverage_paint emits them): sims draw them filled
+        pts = [tf.point(quat_apply_pose(pose, p)) for p in m.get('points', [])]
+        quads = [[pts[i], pts[i + 1], pts[i + 2], pts[i + 5]] for i in range(0, len(pts) - 5, 6)]
+        if not quads:
+            return None
+        base.update(kind='tiles', quads=quads)
         return base
     if t in ('TEXT', 'TEXT_VIEW_FACING'):
         base.update(kind='label', position=list(pos), text=m.get('text', ''), height=float(scale[2]))

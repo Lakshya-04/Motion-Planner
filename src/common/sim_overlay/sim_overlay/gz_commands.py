@@ -45,6 +45,13 @@ def marker_requests(prim):
         return [_strip(prim, arrow_polyline(prim['start'], prim['end']))]
     if k == 'box':
         return [_strip(prim, box_polyline(prim['center'], prim['size'], prim['quat']))]
+    if k == 'tiles':
+        # one TRIANGLE_LIST for all quads, both windings (gz draws single-sided triangles)
+        tri = []
+        for q in prim['quads']:
+            tri += [q[0], q[1], q[2], q[0], q[2], q[3], q[0], q[2], q[1], q[0], q[3], q[2]]
+        return ['%s, %s, %s' % (_head(prim['ns'] or 'default', prim['id'], 'TRIANGLE_LIST'), _material(prim['color']),
+                                ', '.join('point: %s' % _pt(p) for p in tri))]
     if k == 'sphere':
         return ['%s, %s, scale: {x: %.3f, y: %.3f, z: %.3f}, pose: {position: %s}' % (
             _head(prim['ns'] or 'default', prim['id'], 'SPHERE'), _material(prim['color']),

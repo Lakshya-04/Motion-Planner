@@ -83,6 +83,25 @@ def draw(user_scn, primitives, mujoco=None, min_width=0.004):
                 g = next_geom()
                 mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_CAPSULE, np.zeros(3), np.zeros(3), ident, rgba)
                 mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_CAPSULE, w, np.array(a, float), np.array(b, float))
+        elif k == 'tiles':
+            quads = prim['quads']
+            if not room(len(quads)):
+                dropped += 1
+                continue
+            for q in quads:
+                a, b, d = (np.array(q[i], float) for i in (0, 1, 3))
+                e1, e2 = b - a, d - a
+                l1, l2 = float(np.linalg.norm(e1)), float(np.linalg.norm(e2))
+                if l1 < 1e-9 or l2 < 1e-9:
+                    continue
+                x, y = e1 / l1, e2 / l2
+                z = np.cross(x, y)
+                z /= (np.linalg.norm(z) or 1.0)
+                g = next_geom()
+                # thin box: columns of the rotation matrix are the box axes
+                mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_BOX, np.array([l1 / 2, l2 / 2, 0.0015]),
+                                    a + e1 / 2 + e2 / 2,
+                                    np.column_stack([x, np.cross(z, x), z]).flatten(), rgba)
         elif k in ('sphere', 'label'):
             if not room():
                 dropped += 1
