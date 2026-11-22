@@ -63,6 +63,36 @@ python3 src/common/sim_overlay/scripts/coverage_replay.py run.csv [--wall run.cs
 
 Reads `t,x,y,z,force[,active]` and the wall json (default `run.csv.wall.json`), writes a matplotlib PNG (default `run.coverage.png`) and prints a JSON line with `percent_done`, areas and sample counts. `--overlay-json` writes the primitives for the MuJoCo feed / `gz_overlay.py --from-json`. `docs/media/coverage_paint_example.png` is made from SYNTHETIC strokes (not a simulator run).
 
+### Touch-up plan: finish what is left
+
+`coverage_replay.py` says how much was covered; `touch_up_plan.py` turns the rest into a plan the manager can run (same input: `run.csv` + `run.csv.wall.json`; core `sim_overlay/touch_up.py`, no ROS):
+
+```bash
+python3 src/common/sim_overlay/scripts/touch_up_plan.py run.csv --out touch_up_coverage.json \
+    --tool-profiles src/perception/coverage_planner/config/tool_profiles.yaml --tool contact_wiper \
+    [--plan coverage_output.json --failed 3 7 --partial 5] [--min-length 0.10] [--max-gap 0.05]
+```
+
+The undone cells (never swept in contact, plus the failed / partial columns of `--plan`) are grouped into vertical strips: `swath_m` wide (touching strips keep the planner's pitch `swath * (1 - overlap_pct / 100)`), each undone run along a strip is one stroke, strokes shorter than `--min-length` (default 0.10 m) are dropped and their area is printed as `ignored_m2` ("ignored area"). Strips go left to right and alternate direction (single pass, no connector segments). `--plan` copies tool attitude, stand-off and frame from the original plan; without it the attitude is derived from the wall (tool z into the wall). Only `sweep_direction: vertical` is supported (the manager strokes along z); the wall's v axis must be up. The file has `final_lifted_and_expanded.path.poses` and `.segments`, the keys `CoverageOutputJsonSource` reads (`check_manager_schema` repeats its parsing in the tests). Fully covered wall: no file, message `wall fully covered ... nothing to touch up`.
+
+Worked example (synthetic run: 1 m x 0.98 m wall, strokes of swath 0.14 m at u = 0.07 0.21 0.49 0.63 0.77 0.91, the strip at u 0.35 missing):
+
+```
+$ touch_up_plan.py run.csv --swath 0.14 --out touch_up_coverage.json
+{"undone_m2": 0.14, "planned_strips": 1, "planned_strokes": 1, "stroke_length_m": 1.0, "ignored_m2": 0.0, "percent_done_before": 85.71, ...}
+1 strokes in 1 strips, 0.0000 m2 ignored (strokes under 0.10 m)
+```
+
+One stroke of 21 poses at u = 0.35 from v 0 to 1 m. Run only that on the manager (same stack, goal field `coverage_json_path`; `z_offset_m` and `wall_direction` as for the original plan):
+
+```bash
+ros2 action send_goal /execute_coverage coverage_task_msgs/action/ExecuteCoverage \
+  "{coverage_json_path: '/abs/path/touch_up_coverage.json', multi_stand: false, tool_mode: 0}" --feedback
+# or as a parameter: ros2 run manipulation_manager manipulation_manager_node --ros-args -p coverage_json_path:=/abs/path/touch_up_coverage.json
+```
+
+Record that run too and repeat `touch_up_plan.py` on it until the message says nothing is left. Host pytest (`test/test_touch_up.py`) covers one missing strip, fully covered, speckle below the minimum, obstacle split, serpentine, the CLI and the manager schema; the manager run itself was not done.
+
 Not run: the node under ROS, RViz, Gazebo or MuJoCo; host pytest covers the core, replay CLI, marker to primitive path, gz command text and the MuJoCo box adapter (fake `mujoco`). The Gazebo `/marker` service limits above apply (GUI only, one `gz service` per marker; this adds about 8 calls per refresh).
 
 ## Limits
