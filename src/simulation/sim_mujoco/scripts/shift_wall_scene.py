@@ -19,6 +19,7 @@ import os
 import sys
 
 PATCH_WIDTH = 0.3   # the stock patch's width (y 0..0.3)
+CURTAIN_TOP_M = 2.6  # top of the planning-scene curtain behind the wall
 
 
 def shift_scene(path, out, dx, dy, width=PATCH_WIDTH, dz=0.0):
@@ -64,7 +65,7 @@ def shift_pcd(path, out, dx, dy, width=PATCH_WIDTH, dz=0.0):
         f.writelines(' '.join(v) + '\n' for v in points)
 
 
-def sim_wall_pcd(scene_path, pcd_in, pcd_out, curtain=True):
+def sim_wall_pcd(scene_path, pcd_in, pcd_out, curtain=True, curtain_top=CURTAIN_TOP_M):
     """walls.pcd stretched to the sim wall's whole extent (smoke_wall_scene.json, with its 0.25 m margin around the
     contact patch), and with `curtain` on to the whole plane behind which the arm has no business (y 0.5 m beyond
     the wall on each side, z 0 to 2.6 m): the cloud MoveIt's octomap is made of. walls.pcd covers the patch only, so
@@ -93,7 +94,7 @@ def sim_wall_pcd(scene_path, pcd_in, pcd_out, curtain=True):
     v0, v1 = w['v_range_m']
     y_lo, y_hi, z_lo, z_hi = oy + u0, oy + u1, oz - v1, oz - v0   # basis_v is -z
     if curtain:
-        y_lo, y_hi, z_lo, z_hi = y_lo - 0.5, y_hi + 0.5, 0.0, 2.6
+        y_lo, y_hi, z_lo, z_hi = y_lo - 0.5, y_hi + 0.5, 0.0, curtain_top
     ny, nz = round((y_hi - y_lo) / step), round((z_hi - z_lo) / step)
     cloud = [[x, f'{y_lo + i * step:.4f}', f'{z_lo + j * step:.4f}', '0'] for i in range(ny + 1) for j in range(nz + 1)]
     header = [f'WIDTH {len(cloud)}\n' if h.startswith('WIDTH') else

@@ -233,6 +233,7 @@ The history up to 2026-11-20 was consolidated from 561 commits into 15 milestone
 
 - `mobile_manipulator_description`: four more primitive bases (`jackal` diff, `dingo_o` omni, `tiago_style` and `fetch_style` round diff bases whose torso lift is the profile's one-carriage telescopic lift, 0.35 / 0.386 m) with four profiles, and `test/test_home_pose.py`, a host-run joint-limit and capsule self-collision check of every profile's home pose (UR profiles skip without `ur_description`). Rendered and tested with host xacro only; not built in colcon or Docker.
 - `sim_gazebo`: the Gazebo contact-force discrepancy (1240 to 1820 N scored vs 40 to 70 N feedback vs 22 N in MuJoCo) is analysed from the code only (ranked hypotheses and the runs that test them in docs/sim_gazebo.md, cause not found); adds a ROS-free contact summary with `contact_ground_truth` info topic and tool-wall filter parameters, a `run.csv.contacts.csv` sidecar from `record_run.py`, explicit contact surface parameters in the ground and wall SDF and pytests for them (not built or run in Gazebo).
+- `sim_mujoco`: scenario `two_panels_tall` (wall z 0.3..2.3 m, patch z 0.6..2.0 m so the lift telescopes; `--patch-z` / `MULTI_STAND_PATCH_Z` override) and `run_metrics.py`, a ROS-free report of the lift range used, chassis-to-wall clearance and tool reach fraction per stand from `manager.log`, printed at the end of `run_multi_stand_pass.sh`. Host pytest only; not run in a simulator.
 
 ### Changed (first block)
 - TRAC-IK with `Distance` is the default MoveIt IK solver.

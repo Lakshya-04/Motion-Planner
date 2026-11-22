@@ -857,6 +857,7 @@ sim (`wall_world.py`), a blocked region for the coverage planner and a surface i
 | `protrusion` | 0.5 m | 0.07 x 0.07 m box, 35 mm proud, socket-like | one stand |
 | `two_panels` | 0.9 m | full-height 40 mm rib, 30 mm proud, between the panels | multi-stand (two stands) |
 | `two_panels_plain` | 0.9 m | none (control) | multi-stand |
+| `two_panels_tall` | 0.9 m, wall z 0.3..2.3 m | none; patch z 0.6..2.0 m, so the lift has to telescope | multi-stand |
 
 Scoring: each recording is scored twice with `score_run` (`docs/coverage_patterns.md`): `cov_wall` is the covered fraction of the wall
 minus the obstacle's own footprint, `cov_reach` the fraction of the wall minus the obstacle grown by the planner's 0.07 m
@@ -1142,3 +1143,23 @@ Without the base pose the arm was drawn at the origin with yaw 0 (90 degrees off
 0.4 m too short at 0.4 m of lift. `render_run.py record` now stores the base pose, the replay and `viewer.py` apply it and the stage polynomials, and the
 viewer shows the ground-truth contact force and redraws at 15 Hz by default (`SIM_MUJOCO_VIEWER_HZ`; software GL at 33 Hz used 4 to 5 cores and starved the
 pass). Media: `docs/media/two_stand_moveit.mp4` and `.gif`.
+
+## Tall wall and run metrics (lift used, chassis clearance, reach)
+
+Feedback on the two-stand pass was that the lift is not complete and the base looks too close to the wall. Measured from the run: the dock
+poses used 0.05 to 0.17 m of the lift's 1.5 m stroke (the stock contact patch is z 1.0..1.3 m and the arm base sits at 1.17 m retracted, so the
+column never telescopes), the arm base was 0.80 m from the wall face, the tool about 1.1 m from the arm base of a 1.3 m reach.
+
+- Scenario `two_panels_tall` (`make_scenario_scene.py`): wall z 0.3..2.3 m, patch z 0.6..2.0 m. The sim wall, the planned wall, `walls.pcd` and
+  the planning-scene curtain (`walls_sim.pcd`, top at the wall's top + 0.3 m, at least 2.6 m) follow. `MULTI_STAND_SCENARIO=two_panels_tall
+  run_multi_stand_pass.sh` also sets the manager's `coverage_z_min_m/max_m` and the recorder's band from the scenario (`MP_Z_LO`, `MP_Z_HI`).
+  `MULTI_STAND_PATCH_Z="lo,hi"` (with a scenario) overrides the patch, the wall then reaches 0.3 m beyond it. Stock scenarios are unchanged.
+- `scripts/run_metrics.py RUN_DIR` (parsing in `sim_mujoco/run_metrics.py`, ROS-free, `test/test_run_metrics.py`) reads `manager.log` and
+  prints: the lift range (min, max, span, path travel, from the `ARMSTATE` lines; `q[0]` is the lift), per stand the chassis-to-wall
+  clearance (rotated base footprint of the profile against the wall plane in `data/wall_pass_coverage_scene.json`; stand poses from the `stand N: arm base ... yaw`
+  lines) and the tool reach fraction (arm base to `tcp_in_odom` over the 1.3 m reach, arm base height 1.17 m + lift). `FLAG:` lines mark a lift
+  span under 25 % of the stroke, a chassis under 0.30 m from the wall, a tool beyond 85 % of the reach. `run_multi_stand_pass.sh` prints it
+  at the end of a run. It is a report, not a gate. The lift comes from `ARMSTATE` samples only (stow and dock moments), not from the
+  continuous joint states, so its path travel is a lower bound.
+- Not run: the tall-wall scenario in the simulator (whether the planner finds stands, docks and strokes at z 0.6 and 2.0 is not known), the
+  shell script end to end. Tested on the host: parsing, the metrics, the scenario files.
