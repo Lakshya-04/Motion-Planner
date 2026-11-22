@@ -1854,6 +1854,10 @@ private:
           RCLCPP_WARN(this->get_logger(), "DOCKGOAL reach preference skipped: no TF %s <- %s", frame_id_.c_str(), arm_base_frame_.c_str());
         }
       }
+      if (jog_params_.lower.size() == live.size() && jog_params_.upper.size() == live.size()) {
+        dock_ik_sel_.joint_lower = jog_params_.lower;
+        dock_ik_sel_.joint_upper = jog_params_.upper;
+      }
       const auto choice = selectDockIk(
         [&](const std::vector<double> & sd) -> std::optional<std::vector<double>> {
           auto r = req;
@@ -1896,7 +1900,8 @@ private:
       txt += buf;
     }
     RCLCPP_INFO(this->get_logger(), "DOCKGOAL seeded IK q=[%s]", txt.c_str());
-    return res.joint_solution;
+    // same pose, representative nearest the seed (the IK may return a joint 2*pi away)
+    return rebaseDockIk(res.joint_solution, seed, dock_ik_sel_);
   }
 
   /// recovery_keeps_branch: the joint goal for `pose` chosen on the arm's live branch (selectRecoveryGoal, IK seeded

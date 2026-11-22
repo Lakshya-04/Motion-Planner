@@ -48,6 +48,10 @@ struct DockIkSelectorParams
   size_t lift_joint{0};                     ///< index of the lift joint in a solution
   double lift_min_m{0.0};                   ///< lift stroke limits the proposed lift is clamped into
   double lift_max_m{1.5};
+  // Joint limits used by rebaseDockIk (same order as a solution); used only when their size equals the solution's,
+  // otherwise a non-linear joint is kept inside [-2*pi, 2*pi].
+  std::vector<double> joint_lower;
+  std::vector<double> joint_upper;
 };
 
 /// Where the tool goal lies relative to the arm base, for the reach preference.
@@ -100,6 +104,37 @@ inline double dockIkCost(
     worst = std::max(worst, std::fabs(d));
   }
   return worst;
+}
+
+/// Moves every joint of `q` that is not linear to the representative q_i + 2*pi*k nearest `ref` (the same pose: the
+/// IK may return the value 2*pi away), kept inside the joint limits when `p` has them for every joint, else inside
+/// [-2*pi, 2*pi]. A joint with no representative inside the limits keeps its value. Linear joints are untouched.
+inline std::vector<double> rebaseDockIk(
+  std::vector<double> q, const std::vector<double> & ref, const DockIkSelectorParams & p)
+{
+  if (q.size() != ref.size()) {
+    return q;
+  }
+  const double two_pi = 2.0 * M_PI;
+  const bool have_limits = p.joint_lower.size() == q.size() && p.joint_upper.size() == q.size();
+  for (size_t i = 0; i < q.size(); ++i) {
+    if (std::find(p.linear_joints.begin(), p.linear_joints.end(), i) != p.linear_joints.end()) {
+      continue;
+    }
+    const double lo = have_limits ? p.joint_lower[i] : -two_pi;
+    const double hi = have_limits ? p.joint_upper[i] : two_pi;
+    double v = q[i] + two_pi * std::round((ref[i] - q[i]) / two_pi);
+    while (v > hi + 1e-9) {
+      v -= two_pi;
+    }
+    while (v < lo - 1e-9) {
+      v += two_pi;
+    }
+    if (v >= lo - 1e-9 && v <= hi + 1e-9) {
+      q[i] = v;
+    }
+  }
+  return q;
 }
 
 /// True when some branch joint is clearly on opposite sides of zero in `a` and `b`.
@@ -216,6 +251,9 @@ inline DockIkChoice selectDockIk(
       best.reach_fraction = prefer ? frac : -1.0;
       best_under = under;
     }
+  }
+  if (best.ok) {
+    best.q = rebaseDockIk(best.q, reference, p);
   }
   best.reach_over_target = prefer && best.ok && !best_under;
   if (prefer && !best.ok) {
