@@ -998,6 +998,10 @@ and per stand stows the arm, drives there (`navigate_to_stand`), re-injects the 
 MoveIt keeps obstacles in the robot's root frame, so the wall must be put in again after the base moved) and runs the columns
 in odom. `record_run.py --frame odom` records, `score_run` scores the whole wall. Details: `docs/stand_navigation.md`.
 
+`MULTI_STAND_DOUBLE_PASS` (default `false`) is passed to the coverage planner as `double_pass`. The default plans one pass per strip, which
+gives up the second, reversed force-contact wipe of the mop profile; `true` plans both passes (each strip then starts at the same end, so
+joints are only the strip pitch).
+
 Result (first of two full runs, UR10e generic omni base, 9 columns at swath 0.14, speed 0.01 m/s; the repeat is below): stand 0 at arm base (0.18, 0.01) yaw 1.571
 with columns 3-8, stand 1 at (0.18, 0.51) with columns 0-2 (arrival errors 4.1 and 19.4 mm); all 9 columns done, goal
 `success`, feedback and result peak force 23.8 N (conditioned wrench magnitude, includes the press transient); scorer passes:
