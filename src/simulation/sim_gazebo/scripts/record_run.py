@@ -8,6 +8,11 @@ PATH and PATH.wall.json on SIGINT/SIGTERM or after --timeout seconds. The wall i
 unless overridden. Same CSV as sim_mujoco/scripts/record_run.py, including the `active` column (the last
 /tool/valve std_msgs/Bool, 0 when none was published: the spray pass) and `--frame odom` (the world frame after a base
 move, with --wall-x and --wall-y in that frame).
+
+Also writes PATH.contacts.csv (not read by score_run): per ground-truth sample the tool-axis force, the norm of
+the whole force, and from /ft_sensor/ground_truth_info the number of contact pairs and points, the sum and the
+maximum of the per-point force norms and the count of duplicate points, so a peak in run.csv can be traced to
+one point, several points, or a contact with something other than the wall (docs/sim_gazebo.md, contact model).
 """
 import argparse
 import json
@@ -19,7 +24,7 @@ import rclpy
 from geometry_msgs.msg import WrenchStamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float64MultiArray
 from tf2_ros import Buffer, TransformListener
 
 
@@ -29,11 +34,18 @@ class Recorder(Node):
         self.frame = frame
         self.valve = 0     # last /tool/valve state, the `active` column
         self.rows = []     # (sim t_s, x, y, z, |Fz|, valve), tool point in `frame`
+        self.info = [0.0] * 6   # last /ft_sensor/ground_truth_info
+        self.detail = []        # (sim t_s, |F|, pairs, points, sum_point_norm, max_point_norm, dup_points)
         self.lock = threading.Lock()
         self.tf = Buffer()
         self.tf_listener = TransformListener(self.tf, self)
         self.create_subscription(WrenchStamped, '/ft_sensor/ground_truth_wrench', self._truth, qos_profile_sensor_data)
         self.create_subscription(Bool, '/tool/valve', self._valve, 10)
+        self.create_subscription(Float64MultiArray, '/ft_sensor/ground_truth_info', self._info, qos_profile_sensor_data)
+
+    def _info(self, m):
+        if len(m.data) >= 6:
+            self.info = list(m.data[:6])   # published just before the wrench of the same Contacts message
 
     def _valve(self, m):
         self.valve = 1 if m.data else 0
@@ -43,18 +55,26 @@ class Recorder(Node):
             t = self.tf.lookup_transform(self.frame, 'tcp_link', rclpy.time.Time()).transform.translation
         except Exception:  # noqa: BLE001  (no transform yet: skip the row)
             return
+        stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        f = m.wrench.force
+        i = self.info
         with self.lock:
-            self.rows.append((m.header.stamp.sec + m.header.stamp.nanosec * 1e-9, t.x, t.y, t.z,
-                              abs(m.wrench.force.z), self.valve))
+            self.rows.append((stamp, t.x, t.y, t.z, abs(f.z), self.valve))
+            self.detail.append((stamp, (f.x * f.x + f.y * f.y + f.z * f.z) ** 0.5, i[0], i[1], i[3], i[4], i[5]))
 
     def write(self, path, wall_x, wall_y, wall_z):
         with self.lock:
             rows = list(self.rows)
+            detail = list(self.detail)
         t0 = rows[0][0] if rows else 0.0
         with open(path, 'w') as f:
             f.write('t,x,y,z,force,active\n')
             for t, x, y, z, fz, valve in rows:
                 f.write(f'{t - t0:.4f},{x:.5f},{y:.5f},{z:.5f},{fz:.4f},{valve}\n')
+        with open(path + '.contacts.csv', 'w') as f:
+            f.write('t,force_norm,pairs,points,sum_point_norm,max_point_norm,dup_points\n')
+            for t, fn, pairs, pts, sn, mx, dup in detail:
+                f.write(f'{t - t0:.4f},{fn:.4f},{pairs:.0f},{pts:.0f},{sn:.4f},{mx:.4f},{dup:.0f}\n')
         with open(path + '.wall.json', 'w') as f:
             json.dump({'origin': [wall_x, 0.0, 0.0], 'u': [0, 1, 0], 'v': [0, 0, 1],
                        'u_range': list(wall_y), 'v_range': list(wall_z)}, f)

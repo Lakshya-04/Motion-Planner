@@ -282,6 +282,11 @@ if(BUILD_TESTING)
     target_include_directories(dock_ik_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   endif()
 
+  ament_add_gtest(recovery_branch_test test/recovery_branch_test.cpp)
+  if(TARGET recovery_branch_test)
+    target_include_directories(recovery_branch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
   ament_add_gtest(column_ordering_test test/column_ordering_test.cpp)
   if(TARGET column_ordering_test)
     target_include_directories(column_ordering_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
