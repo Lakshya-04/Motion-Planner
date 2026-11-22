@@ -34,7 +34,8 @@ def test_gazebo_branch(profile_name):
     profile, robot = _render(profile_name, 'gazebo')
     rc = robot.find("ros2_control[@type='system']")
     assert rc.find('hardware/plugin').text == 'gz_ros2_control/GazeboSimSystem'
-    joints = {j.get('name'): j for j in rc.findall('joint')}
+    # commanded joints; the mimic lift stages are state-only and checked in test_gazebo_lift_stage_mimic
+    joints = {j.get('name'): j for j in rc.findall('joint') if j.find('command_interface') is not None}
     assert list(joints) == prof.controlled_joints(profile)
     for j in joints.values():
         assert {c.get('name') for c in j.findall('command_interface')} == JOINT_CMD
@@ -90,9 +91,13 @@ def test_other_backends_unchanged(hardware):
 
 
 def _render_with(extra):
-    profile = prof.load_profile('ur10e_telescopic')
+    return _render_with_hw(extra, 'gazebo')
+
+
+def _render_with_hw(extra, hardware, profile_name='ur10e_telescopic'):
+    profile = prof.load_profile(profile_name)
     doc = xacro.process_file(os.path.join(DESC, 'urdf', 'mobile_manipulator.urdf.xacro'),
-                             mappings={**prof.xacro_mappings(profile, 'gazebo'), **extra})
+                             mappings={**prof.xacro_mappings(profile, hardware), **extra})
     return ET.fromstring(doc.toxml())
 
 
@@ -132,3 +137,36 @@ def test_rgb_camera_off_by_default_and_a_gz_camera_on_rgb_camera_link():
     s = robot.find("gazebo[@reference='rgb_camera_link']/sensor[@type='camera']")
     assert s.find('topic').text == '/rgb_camera' and s.find('gz_frame_id').text == 'rgb_camera_link'
     assert s.find('camera/image/width').text == '640' and s.find('camera/image/height').text == '480'
+
+
+def _urdf_mimics(robot):
+    return {j.get('name'): j.find('mimic') for j in robot.findall('joint') if j.find('mimic') is not None}
+
+
+@pytest.mark.parametrize('stages', [0, 1, 2, 3])
+def test_gazebo_lift_stage_mimic(stages):
+    """gz-sim ignores the URDF <mimic>: every stage joint needs the mimic params in ros2_control."""
+    robot = _render_with_hw({'lift': 'telescopic', 'lift_stages': str(stages), 'lift_stroke': '1.2'}, 'gazebo', 'generic_6dof_telescopic')
+    rc = robot.find("ros2_control[@name='mobile_manipulator_system']")
+    declared = {j.get('name'): j for j in rc.findall('joint') if j.find("param[@name='mimic']") is not None}
+    urdf = {n: m for n, m in _urdf_mimics(robot).items() if n.startswith('lift_stage_')}
+    assert sorted(declared) == sorted(urdf) == [f'lift_stage_{i}_joint' for i in range(1, stages + 1)]
+    for name, joint in declared.items():
+        params = {p.get('name'): p.text for p in joint.findall('param')}
+        assert params['mimic'] == urdf[name].get('joint') == 'lift_joint'
+        assert float(params['multiplier']) == pytest.approx(float(urdf[name].get('multiplier')))
+        assert float(params['multiplier']) == pytest.approx(1.0 / stages)
+        assert float(params['offset']) == pytest.approx(float(urdf[name].get('offset')))
+        assert joint.find('command_interface') is None  # never commanded
+        assert {s.get('name') for s in joint.findall('state_interface')} >= {'position', 'velocity'}
+
+
+@pytest.mark.parametrize('hardware', ['mock', 'jtac_mock'])
+def test_stage_mimic_params_only_in_gazebo(hardware):
+    robot = _render_with_hw({'lift_stages': '2'}, hardware, 'generic_6dof_telescopic')
+    assert robot.find(".//ros2_control//param[@name='mimic']") is None
+
+
+def test_gazebo_pinned_lift_declares_no_stage_joints():
+    robot = _render_with_hw({'lift_fixed_height': '0.3'}, 'gazebo', 'generic_6dof_telescopic')
+    assert robot.find(".//ros2_control//param[@name='mimic']") is None

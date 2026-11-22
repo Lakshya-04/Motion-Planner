@@ -241,3 +241,5 @@ The history up to 2026-11-20 was consolidated from 561 commits into 15 milestone
 - No live sensor ingest, no time parameterisation.
 - Both simulators hold a 10 N contact (MuJoCo 10.13 N; Gazebo 9.69 N with the compliant tip).
 - Nothing verified on hardware.
+
+- Gazebo: telescopic lift stage joints are declared with ros2_control mimic params (gz-sim ignores the URDF `<mimic>`, so the column stayed retracted under the raised arm); xacro tests for the params and the telescopic geometry. Not run in Gazebo.

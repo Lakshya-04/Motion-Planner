@@ -238,3 +238,23 @@ def test_lift_specific_acm_is_up_to_date(lift):
     committed = {tuple(sorted(m)) for m in re.findall(r'link1="([^"]+)" link2="([^"]+)"', text)}
     assert generated == committed, (
         f'stale: run scripts/generate_acm.py --arm generic_6dof --lift {lift} --out srdf/acm_generic_6dof_{lift}.xacro')
+
+
+@pytest.mark.parametrize('stages', [0, 1, 2, 3])
+@pytest.mark.parametrize('lift', [0.0, 0.4, 1.5])
+def test_telescopic_stages_are_continuous_with_the_lift(stages, lift):
+    """With lift_joint = L the stage joints sum to L: the top of the last stage is the carriage height."""
+    robot = _robot(arm='generic_6dof', lift='telescopic', lift_stroke=1.5, lift_stages=stages)
+    master = robot.joint_map['lift_joint']
+    column = master.origin.xyz[2]
+    mimics = [robot.joint_map[f'lift_stage_{i}_joint'] for i in range(1, stages + 1)]
+    for j in mimics:
+        assert j.mimic.joint == 'lift_joint' and j.mimic.offset == 0.0
+        assert j.mimic.multiplier == pytest.approx(1.0 / stages)
+    travel = sum(j.mimic.multiplier * lift + j.mimic.offset for j in mimics)
+    if stages:
+        assert travel == pytest.approx(lift)
+        tube = robot.link_map[f'lift_stage_{stages}_link'].visual.geometry.length
+        assert tube == pytest.approx(column)
+        top = travel + tube  # stage 1 starts at the column base, each tube is `column` tall
+        assert top == pytest.approx(column + lift)  # = lift_carriage_link height
