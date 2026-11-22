@@ -54,6 +54,9 @@ struct MissionVerifyInput
   GeometricCoverageResult geometric;
   double min_geometric_percent{0.0}; ///< 0 = not checked; otherwise the run fails below it (or when it is unavailable)
   double swath_m{0.0};               ///< recorded in the report
+  /// Stand index -> the ids of the columns assigned to it (multi-stand runs; empty = single stand). Makes the result
+  /// carry a `stands` block: per stand the columns done/partial/failed and, when computed, its geometric coverage.
+  std::map<size_t, std::vector<size_t>> stand_columns;
   PathQualitySummary path_quality;   ///< report only (`available` false = not computed)
   bool path_quality_requested{false};
 };
@@ -162,6 +165,35 @@ inline nlohmann::json missionVerifyToJson(const MissionVerifyResult & r, const M
   } else {
     j["geometric_coverage_percent"] = nullptr;
     j["geometric"] = {{"available", false}, {"note", in.geometric.note}};
+  }
+  if (!in.stand_columns.empty()) {
+    nlohmann::json stands = nlohmann::json::array();
+    const auto has = [](const std::vector<size_t> & v, size_t c) {return std::find(v.begin(), v.end(), c) != v.end();};
+    for (const auto & [stand, cols] : in.stand_columns) {
+      nlohmann::json e = {{"stand", stand}, {"columns", cols}};
+      std::vector<size_t> d, p, f, none;
+      for (const size_t c : cols) {
+        if (has(in.done, c)) {d.push_back(c);}
+        else if (has(in.partial, c)) {p.push_back(c);}
+        else if (has(in.failed, c)) {f.push_back(c);}
+        else {none.push_back(c);}
+      }
+      e["done"] = d;
+      e["partial"] = p;
+      e["failed"] = f;
+      e["not_run"] = none;
+      e["column_percent"] = cols.empty() ? 0.0 : 100.0 * static_cast<double>(d.size()) / static_cast<double>(cols.size());
+      const auto g = in.geometric.group.find(stand);
+      if (in.geometric.available && g != in.geometric.group.end()) {
+        e["geometric_coverage_percent"] = g->second.percent;
+        e["planned_cells"] = g->second.planned_cells;
+        e["covered_cells"] = g->second.covered_cells;
+      } else {
+        e["geometric_coverage_percent"] = nullptr;
+      }
+      stands.push_back(e);
+    }
+    j["stands"] = stands;
   }
   if (in.path_quality_requested) {
     nlohmann::json cols = nlohmann::json::array();
