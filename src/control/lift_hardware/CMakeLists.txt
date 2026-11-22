@@ -64,6 +64,11 @@ if(BUILD_TESTING)
     ament_add_gtest(test_${name} test/core/test_${name}.cpp)
     target_link_libraries(test_${name} lift_hardware_core)
   endforeach()
+
+  # Property / fuzz test of the supervisor against a faulty simulated device (seeded, random faults and commands).
+  ament_add_gtest(test_supervisor_fuzz test/core/test_supervisor_fuzz.cpp)
+  target_link_libraries(test_supervisor_fuzz lift_hardware_core)
+  target_include_directories(test_supervisor_fuzz PRIVATE test/core)
 endif()
 
 ament_package()

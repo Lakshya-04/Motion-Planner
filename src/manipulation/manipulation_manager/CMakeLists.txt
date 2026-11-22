@@ -298,6 +298,13 @@ if(BUILD_TESTING)
     target_include_directories(dock_ik_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   endif()
 
+  # Property / fuzz tests of the ROS-free decision cores (seeded, 20000 cases, NaN / inf / size-mismatch inputs).
+  ament_add_gtest(core_fuzz_test test/core_fuzz_test.cpp)
+  if(TARGET core_fuzz_test)
+    target_link_libraries(core_fuzz_test ${PROJECT_NAME}_core core_types::core_types)
+    target_include_directories(core_fuzz_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
   ament_add_gtest(column_retry_test test/column_retry_test.cpp)
   if(TARGET column_retry_test)
     target_include_directories(column_retry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
