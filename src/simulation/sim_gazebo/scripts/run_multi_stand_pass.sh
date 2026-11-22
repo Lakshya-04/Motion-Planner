@@ -106,6 +106,7 @@ manipulation_manager:
     stand_arrival_command: 'python3 -u $PKG/lib/sim_gazebo/wait_arm_settled.py --timeout ${MULTI_STAND_SETTLE_TIMEOUT:-90} >> $OUT/settle.log 2>&1; ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1${CUROBO_ARRIVAL}'
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
+    tcp_settle_timeout_s: ${MULTI_STAND_TCP_SETTLE:-4.0}
     dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]}
     dock_ik_seeded: ${MULTI_STAND_DOCK_IK_SEEDED:-false}
     dock_ik_continuity: ${MULTI_STAND_DOCK_IK_CONTINUITY:-false}

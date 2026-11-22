@@ -679,3 +679,35 @@ Runs on `fix/gazebo-two-stand` (main plus the recovery option, the dock-continui
 What the contact sidecar (`run.csv.contacts.csv`, 1.33 million samples over 1700 s) showed in the first run: no contact until sim time 76.6 s, then a 1400 N impact at 2 points, afterwards a constant 3 to 6 N for the remaining 1600 s (the tool stuck against something), 1.5 % of the samples above 100 N, per-sample point counts of 1 to 3 and a sum of per-point norms equal to the reported force within 1 % (so the points are not double counted). The Gazebo script kept the stock wall's obstacle in the simulated world (moved along the wall) while the planner's scene never contains it, and the MuJoCo pass uses the plain scenario: the arm drove into an obstacle the planner did not know about. The script now builds a plain wall (`MULTI_STAND_OBSTACLES=1` keeps the obstacle). This confirms hypothesis 6 of the contact analysis above (a collision other than the tool-wall pair) and rejects hypothesis 5 (counting); the 1400 N spike is a hard impact.
 
 Still failing in the plain-wall run (8 of 10 columns): `MoveGroupInterface::plan() failed or timeout` 23 times with 62 `Failed to fetch current robot state` and 107 `No state update received within 100ms` from the current state monitor (the joint states reach MoveIt late or not as a full set; a possible link to the new state-only stage joints is not checked); 16 times `docked N m off the standoff pose, not pressing from there` (the Cartesian dock path ends short); collision truncation at `arm_forearm_link <-> arm_wrist_{2,3}_link`. The dock continuity selector rejected the first dock of each stand (its reference is the stow pose, a different branch by construction) and fell back to the seeded IK; the recovery option refused its jog ("too far") in some cases. Not run yet: the same pass with PR #184 (tool pad in the planner model, a contact exclusion that works).
+
+### Two-stand plain wall: what the run log showed, and the fixes (2026-11-22)
+
+Read from the plain-wall run's `manager.log` and `sim_launch.log` (10 columns, 2 of 10 done, peak 18 N):
+
+- **The current-state-monitor timeouts and the plan failures behind them.** Every `Didn't receive robot state ... latest received state has time 0.000000`
+  (62 of them, never any other value) is the `MoveGroupInterface`'s own state monitor on the backend node `motion_planner_backend`, which nothing spins:
+  it never receives a `/joint_states` message. `move_group` then planned from its own state, and 20 of the 62 plan requests were refused by the
+  `CheckStartStateBounds` adapter (`Joint 'lift_joint' ... outside bounds by -2.2e-14`, the lift read at its lower stop). The planner clamps the start
+  into the joint bounds, but only on the path that got a state from that monitor. `OmplPlanner` now reads the live state from the planning scene monitor
+  first (the one `CartesianPlanner` already uses, which has its own spinner), clamps it, and falls back to the `MoveGroupInterface` state only without
+  it. The joint states themselves were never starved (`/joint_states` reaches `wait_arm_settled.py` and the manager's own subscription).
+- **Docks ending off the standoff.** All 16 `docked N m off the standoff pose` warnings read 0.027 to 0.108 m with 0.0 to 0.7 deg, after a dock segment
+  of 7 trajectory points over 0.52 s. The tool track in `run.csv` still moves 6 cm in the second after the check (x 0.87 to 0.94 m between 167.0 and
+  168.0 s, check at about 167 s), so the arm trails its trajectory by more than the fixed 0.5 s the check waits. New manager parameter
+  `tcp_settle_timeout_s` (default 0 = the old fixed wait; the Gazebo pass sets 4 s, `MULTI_STAND_TCP_SETTLE`): the approach and dock checks then wait
+  until the tool position changes by less than `tcp_settle_tolerance_m` (2 mm) over 0.4 s, at most that long, before comparing.
+- **Forearm and wrist collision.** In the first rerun (the two fixes above only) every plan failed at the first dock: its joint goal (wrist 1 at -4.25 rad)
+  had `arm_forearm_link` against `arm_wrist_2_link` in contact ("Unable to sample any valid states for goal tree"), and after a drive to another branch
+  79 of 140 plan requests were refused by `CheckStartStateCollision` with the same pair (51 more with `arm_upper_arm_link` against `lift_carriage_link`),
+  64 Cartesian truncations at that pair. The UR matrix (`srdf/acm_ur*.xacro`, from `scripts/generate_acm.py`, `arm_never_pairs`) now lists the forearm
+  against wrist 2 and wrist 3 as `Never`: the wrist 1 link separates them on the real arm, and the description's cylinders overlap at angles the arm reaches.
+  Not changed: `arm_upper_arm_link` against `lift_carriage_link` (a pair that can touch for real).
+
+| run (plain wall, two stands, 10 columns, same script and options) | columns done / failed | coverage | scored peak | feedback peak | in band | result |
+|---|---|---|---|---|---|---|
+| before (`fix/gazebo-two-stand` tree) | 2 / 8 | 0.24 | 18.1 N | 23.5 N | n/a | fails |
+| start state from the scene monitor + tool settle (no matrix change) | 0 / 10 | 0.0 | none | none | n/a | fails (start and goal states in forearm/wrist contact) |
+| + forearm/wrist `Never` pairs | 10 / 0 (columns 3 and 4 retried once after docking 0.07 and 0.04 m off) | 1.000 (2790 of 2790 cells) | 872.5 N | 33.5 N | 0.876 | scorer passes (RMS error 9.7 N, wall gap max 18.9 mm) |
+
+One run each. The 872.5 N is a single episode at sim time 399.9 to 401.2 s (32 samples above 350 N, 774 above 100 N of 282663), on stand 1 (y 0.48 to 0.59 m,
+z 1.18 to 1.27 m); the feedback peak of the pass was 33.5 N. Not investigated, and one run does not show the pass is stable.

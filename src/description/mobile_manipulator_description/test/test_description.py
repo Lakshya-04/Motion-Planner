@@ -172,7 +172,7 @@ def _generated_acm(arm):
     robot = URDF.from_xml_string(_render(arm=arm))
     adjacent = module.adjacent_pairs(robot)
     lift = module.lift_pairs(robot) - adjacent
-    return adjacent | lift
+    return adjacent | lift | module.arm_never_pairs(robot, arm)
 
 
 def _committed_acm(name):
