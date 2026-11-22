@@ -24,7 +24,9 @@ declare -a NAMES RESULTS
 fail=0
 run_suite() {  # name dir
   local name="$1" dir="$2"
-  if python3 -m pytest "$dir" -q -p no:cacheprovider; then RESULTS+=("PASS"); else RESULTS+=("FAIL"); fail=1; fi
+  python3 -m pytest "$dir" -q -p no:cacheprovider; rc=$?
+  # pytest exit 5 = no tests collected (a package whose tests are C++ only): not a failure
+  if [ $rc -eq 0 ]; then RESULTS+=("PASS"); elif [ $rc -eq 5 ]; then RESULTS+=("NO-TESTS"); else RESULTS+=("FAIL"); fail=1; fi
   NAMES+=("$name")
 }
 for s in "${SUITES[@]}"; do
