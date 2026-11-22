@@ -39,7 +39,7 @@ With the lift free the IK tends to dock with the lift near its start and the too
 | `dock_ik_lift_joint` | 0 | Index of the lift joint in the planning group. |
 | `dock_ik_lift_min_m`, `dock_ik_lift_max_m` | 0.0, 1.5 | Stroke the proposed lift is clamped into. |
 
-The reachability node has a matching opt-in for stand planning, `stand_min_clearance_m` (default 0 = off), described in [reachability.md](reachability.md): a floor for the chassis-to-wall clearance of every `~/plan_stands` request.
+The reachability node has a matching opt-in for stand planning, `stand_min_clearance_m` (default 0 = off), described in [reachability.md](reachability.md): a floor for the chassis-to-wall clearance of every `~/plan_stands` request; and `stand_balance_reach` / `stand_max_reach_fraction` / `arm_reach_m` (default off, recommended cap 0.85) that centre each stand's columns in the arm reach and cap the tool distance ("Reach margin of stands" in the same document).
 
 ## Recovery jog
 

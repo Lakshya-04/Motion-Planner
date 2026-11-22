@@ -121,7 +121,7 @@ VerifiedStandPlan planStandsVerified(
       }
       std::vector<std::vector<double>> hs;
       const auto reach = reachableByHeight(
-        map, request.targets_world, a.stand.arm_xy.x(), a.stand.arm_xy.y(), heights, request.arm_mount_offset_z);
+        map, request.targets_world, a.stand.arm_xy.x(), a.stand.arm_xy.y(), heights, request.arm_mount_offset_z, request.reach);
       for (const size_t t : todo) {
         std::vector<double> ok;
         for (size_t h = 0; h < heights.size(); ++h) {if (reach[t][h]) {ok.push_back(heights[h]);}}

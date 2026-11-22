@@ -12,6 +12,9 @@
 #   MULTI_STAND_COVERAGE_EXTRA     more ros arguments of the coverage demo (-p obstacle_inflation_radius_m:=0.07)
 #   MULTI_STAND_REACH_FRACTION=0.7       keep the tool within this fraction of MULTI_STAND_ARM_REACH (default 1.3 m, UR10e) by moving the lift (needs DOCK_IK_CONTINUITY=true; default 0 = off)
 #   MULTI_STAND_MIN_CLEARANCE=0.5        stand planner floor on the chassis-to-wall clearance in m (default 0 = off)
+#   MULTI_STAND_BALANCE_REACH=true       stand planner centres each stand's columns in the reach (reachability `stand_balance_reach`, default false = off)
+#   MULTI_STAND_MAX_REACH_FRACTION=0.85  stand planner rejects poses beyond this fraction of the arm reach (`stand_max_reach_fraction`, default 0 = off);
+#                                        the reach is MULTI_STAND_ARM_REACH here (0 = the largest tool distance in the map)
 #   MULTI_STAND_DOCK_IK_CONTINUITY=true  choose the dock joint goal among IK solutions by continuity (manager `dock_ik_continuity`, default false)
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
 #                                  configuration docked at the wall, [] chains the seeds from the previous dock
@@ -117,7 +120,9 @@ start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$STAND_PRO
 # the demo rasterizes the obstacle clearance into the grid itself; the service node would add its own 0.3 m default
 start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0
 start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
-  -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0}
+  -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0} \
+  -p stand_max_reach_fraction:=${MULTI_STAND_MAX_REACH_FRACTION:-0.0} -p stand_balance_reach:=${MULTI_STAND_BALANCE_REACH:-false} \
+  -p arm_reach_m:=${MULTI_STAND_ARM_REACH:-0.0}
 NAV_ARGS=()
 if [ "${MULTI_STAND_PATH_PLANNER:-0}" = 1 ]; then
   NAV_ARGS=(-p wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json -p use_path_planner:=true)

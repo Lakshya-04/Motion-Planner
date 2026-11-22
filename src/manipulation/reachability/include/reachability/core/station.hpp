@@ -53,7 +53,15 @@ struct StationRequest
   /// model the arm-base point alone is tested. Empty / unset = no change.
   std::optional<FreeSpace> free_space;
   double free_space_margin{0.05};
+  /// Reach margin (see ReachLimit). With a cap, a pose farther than `max_fraction` of the arm reach does not count
+  /// as reachable from a station. With `balance`, chooseStation ranks equally covering stations by the worst
+  /// tool-distance / reach fraction (rounded to kReachQuantum) before the drive tie-break, so a stand sits where its
+  /// group is comfortably within reach instead of where the base already is. Default = off, no change.
+  ReachLimit reach;
 };
+
+/// Reach fractions closer than this count as equal when ranking stations (the start-pose / drive tie-break decides).
+constexpr double kReachQuantum = 0.02;
 
 /// Minimum chassis-to-wall clearance of a request: the requested value, raised to `floor_m` when that is positive
 /// (the node parameter `stand_min_clearance_m`; 0 or negative = off, the request is used as is). A non-finite floor
