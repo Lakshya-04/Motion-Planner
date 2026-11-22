@@ -2,6 +2,7 @@
 // scene. All of them share one MoveItPlanningBackend through the PluginContext ("moveit_backend"),
 // created by whichever plugin is initialized first.
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include <pluginlib/class_list_macros.hpp>
@@ -34,6 +35,28 @@ void configure(OmplPlanner & planner, const PluginParams & params)
   planner.setDirectFirst(
     paramOr(params, "free_space_direct_first", false), config,
     paramOr(params, "direct_default_acceleration", 2.0));
+
+  FreeSpaceOptimizeConfig optimize;
+  optimize.enabled = paramOr(params, "free_space_optimize", false);
+  optimize.time_budget_s = paramOr(params, "free_space_time_budget_s", optimize.time_budget_s);
+  optimize.num_candidates =
+    static_cast<int>(paramOr(params, "free_space_num_candidates", static_cast<double>(optimize.num_candidates)));
+  optimize.objective = parseObjective(paramOr(params, "free_space_objective", std::string("length")));
+  const std::string planners = paramOr(params, "free_space_planners", std::string());
+  if (!planners.empty()) {
+    optimize.planners.clear();
+    std::stringstream stream(planners);
+    for (std::string item; std::getline(stream, item, ',');) {
+      if (!item.empty()) {
+        optimize.planners.push_back(item);
+      }
+    }
+  }
+  optimize.shortcut.shortcut_iterations =
+    static_cast<std::size_t>(paramOr(params, "free_space_shortcut_iterations", 300.0));
+  optimize.shortcut.smoothing_rounds =
+    static_cast<std::size_t>(paramOr(params, "free_space_smoothing_rounds", 4.0));
+  planner.setFreeSpaceOptimize(optimize, paramOr(params, "direct_default_acceleration", 2.0));
 }
 
 /// Wraps a MoveIt planner (built on the shared backend in initialize()) as a PlannerPlugin.

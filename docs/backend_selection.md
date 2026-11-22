@@ -59,7 +59,7 @@ planning:
 | Name | Base class | Package | Notes |
 |---|---|---|---|
 | `moveit_cartesian` | Planner | motion_planner_moveit | jump detection, reachability-tilt retry, wall-contact ACM |
-| `moveit_ompl` | Planner | motion_planner_moveit | pose and joint goals; params `free_space_direct_first` (default false), `direct_revolute_step` (0.05 rad), `direct_prismatic_step` (0.01 m), `direct_default_acceleration` (2.0, used only by the direct path retiming) |
+| `moveit_ompl` | Planner | motion_planner_moveit | pose and joint goals; params `free_space_direct_first` (default false), `direct_revolute_step` (0.05 rad), `direct_prismatic_step` (0.01 m), `direct_default_acceleration` (2.0, used only by the direct path retiming); optimal mode: `free_space_optimize` (false), `free_space_time_budget_s` (20), `free_space_num_candidates` (5), `free_space_objective` (`length`\|`duration`), `free_space_planners`, `free_space_shortcut_iterations` (300), `free_space_smoothing_rounds` (4) |
 | `moveit_ik` | Ik | motion_planner_moveit | params `ik_extra_seeds`, `ik_seed_perturbation` |
 | `moveit_collision` | Collision | motion_planner_moveit | |
 | `moveit_scene` | Scene | motion_planner_moveit | param `octomap_resolution` |
@@ -79,7 +79,38 @@ IK or a retiming failure falls back to the normal OMPL plan unchanged. Log lines
 `direct path invalid at sample K, falling back to OMPL`. Pure logic: `motion_planner/core/direct_joint_path.hpp`.
 Why: the OMPL joint path was measured up to 16x longer than the straight-line joint distance (a stow took 37 s).
 
-Path shortcutting after OMPL: the MoveIt OMPL interface already simplifies each solution (`simplify_solutions`, default true, bounded
+### Optimal free-space mode (`moveit_ompl`, opt-in)
+
+Why: a free-space plan from the default OMPL planner (RRTConnect) was measured with a joint path 1.7x to 16x the straight-line joint
+distance for simple transitions (stow: 375 points, 37 s; "approach" between adjacent columns: 70 to 108 points, 7 to 11 s). Executing a
+long path costs wall time that no planning time can win back, so the planning time is spent on finding the shortest path.
+
+`plugin_params: {moveit_ompl: {free_space_optimize: true}}` replaces the single OMPL call of a free-space segment by:
+
+1. the direct joint-space line (same code as the fast path above, whether or not `free_space_direct_first` is set) as candidate 1;
+2. `free_space_num_candidates - 1` runs (at least 1) of asymptotically optimal planners, round robin over `free_space_planners`
+   (default `BITstarkConfigDefault,RRTstarkConfigDefault,AITstarkConfigDefault,InformedRRTstarkConfigDefault`, defined in
+   `mobile_manipulator_moveit_config/config/ompl_planning.yaml` with `optimization_objective: PathLengthOptimizationObjective`).
+   `free_space_time_budget_s` (default 20) is the total OMPL time, split equally; an asymptotically optimal planner keeps improving
+   until its slice is over. MoveIt's OMPL interface here (2.12) accepts the objectives PathLength, Minimax, StateCostIntegral,
+   MechanicalWork and MaximizeMinClearance; path length is used;
+3. per OMPL result: randomised shortcutting (`free_space_shortcut_iterations`, 300) and corner-cutting smoothing
+   (`free_space_smoothing_rounds`, 4, a repeated quadratic B-spline corner cut), every replacement segment densified and checked with
+   `PlanningScene::isStateValid`, so the result is valid and never longer; then the MoveIt TOTG time parameterisation;
+4. `selectBestCandidate`: `free_space_objective: length` picks the smallest joint path length weighted by 1/(joint range) (the lift's
+   metres and the arm's radians become comparable), `duration` the smallest TOTG duration. Ties keep the earlier candidate, so a clear
+   straight line (the direct path) always wins.
+
+One line per plan: `free-space plan: candidates N, best length=X (baseline straight Y, efficiency Z), <planner> used` (for `duration`
+the values are seconds). Baseline = straight joint line between the ends of the chosen path in the same unit (for `duration`, the
+slowest-joint rest-to-rest time); efficiency = baseline / value, 1 = straight. A pose goal gets a different IK solution per OMPL run;
+the direct candidate exists only when IK from the start succeeds. When no candidate is found the plan fails as before. Default off.
+The planning time of one free-space segment becomes about `free_space_time_budget_s` seconds (plus the direct path and the post-processing).
+Pure logic: `motion_planner/core/path_quality.hpp` (weighted length, duration estimate, baseline, efficiency, selection) and
+`motion_planner/core/path_shortcut.hpp` (shortcut and smoothing), both with host gtests (`path_quality_test`, `path_shortcut_test`).
+Status: host gtests pass; the MoveIt part is syntax-checked only, not yet run in a simulator.
+
+Path shortcutting after OMPL in the default mode: the MoveIt OMPL interface already simplifies each solution (`simplify_solutions`, default true, bounded
 by the planning time) and `ompl_planning.yaml` does not switch it off, so no extra shortcut stage was added.
 
 ### cuRobo: joint limits

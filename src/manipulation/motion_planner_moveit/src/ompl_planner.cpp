@@ -1,6 +1,7 @@
 #include "motion_planner_moveit/ompl_planner.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <exception>
 #include <limits>
 
@@ -30,6 +31,144 @@ void OmplPlanner::setDirectFirst(
   direct_first_ = enabled;
   direct_config_ = config;
   direct_default_acceleration_ = default_acceleration;
+}
+
+void OmplPlanner::setFreeSpaceOptimize(const FreeSpaceOptimizeConfig & config, double default_acceleration)
+{
+  optimize_ = config;
+  direct_default_acceleration_ = default_acceleration;
+}
+
+bool OmplPlanner::planOptimized(
+  const std::vector<double> & start, const std::vector<double> & goal,
+  moveit_msgs::msg::RobotTrajectory & out)
+{
+  const auto robot_model = move_group_->getRobotModel();
+  const auto * jmg = robot_model ? robot_model->getJointModelGroup(move_group_name_) : nullptr;
+  const auto log = node_ ? node_->get_logger() : rclcpp::get_logger("ompl_planner");
+  if (!jmg || start.empty()) {
+    return false;
+  }
+  MoveItTimeParameterizer retimer(robot_model, move_group_name_);
+  const auto limits = retimer.modelLimits(direct_default_acceleration_, 0.0);
+
+  // Weighted by 1/range so the lift's metres and the arm's radians are comparable.
+  PathQualityConfig quality;
+  std::vector<double> ranges;
+  for (const auto * joint : jmg->getActiveJointModels()) {
+    const auto & b = joint->getVariableBounds(joint->getName());
+    ranges.push_back(b.position_bounded_ ? b.max_position_ - b.min_position_ : 0.0);
+  }
+  quality.weights = weightsFromRanges(ranges);
+  for (const auto & l : limits) {
+    quality.velocity_limits.push_back(l.velocity);
+    quality.acceleration_limits.push_back(l.acceleration);
+  }
+
+  DirectJointPathConfig sampling = direct_config_;
+  if (sampling.prismatic.empty()) {
+    for (const auto * joint : jmg->getActiveJointModels()) {
+      sampling.prismatic.push_back(joint->getType() == moveit::core::JointModel::PRISMATIC);
+    }
+  }
+
+  std::vector<PathCandidate> candidates;
+  std::vector<moveit_msgs::msg::RobotTrajectory> trajectories;
+  auto addCandidate = [&](const std::string & source, const moveit_msgs::msg::RobotTrajectory & traj) {
+      PathCandidate c;
+      c.source = source;
+      for (const auto & p : traj.joint_trajectory.points) {
+        c.points.push_back(p.positions);
+      }
+      if (!traj.joint_trajectory.points.empty()) {
+        const auto & t = traj.joint_trajectory.points.back().time_from_start;
+        c.duration_s = static_cast<double>(t.sec) + 1e-9 * static_cast<double>(t.nanosec);
+      }
+      candidates.push_back(std::move(c));
+      trajectories.push_back(traj);
+    };
+
+  // The direct joint path first: a clear straight line always wins, and wins ties.
+  if (goal.size() == start.size()) {
+    moveit_msgs::msg::RobotTrajectory direct;
+    if (tryDirectJointPath(start, goal, direct)) {
+      addCandidate("direct", direct);
+    }
+  }
+  const int n_ompl = std::max(1, optimize_.num_candidates - static_cast<int>(candidates.size()));
+  const double slice = std::max(0.1, optimize_.time_budget_s / n_ompl);
+
+  const std::string saved_planner = move_group_->getPlannerId();
+  const double saved_time = move_group_->getPlanningTime();
+  for (int k = 0; k < n_ompl && !optimize_.planners.empty(); ++k) {
+    const std::string & planner = optimize_.planners[static_cast<size_t>(k) % optimize_.planners.size()];
+    move_group_->setPlannerId(planner);
+    move_group_->setPlanningTime(slice);
+    moveit::planning_interface::MoveGroupInterface::Plan plan;
+    if (!static_cast<bool>(move_group_->plan(plan)) || plan.trajectory.joint_trajectory.points.size() < 2) {
+      RCLCPP_INFO(log, "free-space candidate %s: no plan in %.1f s", planner.c_str(), slice);
+      continue;
+    }
+    // Post-process: randomised shortcut + corner cutting, every new segment checked through the planning scene.
+    std::vector<std::vector<double>> raw;
+    for (const auto & p : plan.trajectory.joint_trajectory.points) {
+      if (raw.empty() || maxJointDelta(raw.back(), p.positions) > 1e-9) {
+        raw.push_back(p.positions);
+      }
+    }
+    std::vector<std::vector<double>> improved = raw;
+    std::string scene_error;
+    if (backend_->ensurePlanningSceneMonitor(move_group_name_, scene_error) && backend_->planningSceneMonitor()) {
+      planning_scene_monitor::LockedPlanningSceneRO scene(backend_->planningSceneMonitor());
+      if (scene && raw.size() >= 2) {
+        moveit::core::RobotState state(scene->getCurrentState());
+        PathShortcutConfig cfg = optimize_.shortcut;
+        cfg.sampling = sampling;
+        improved = improvePath(
+          raw, cfg, quality, [&](const std::vector<double> & q) {
+            state.setJointGroupPositions(jmg, q);
+            state.update();
+            return scene->isStateValid(state, move_group_name_);
+          });
+      }
+    }
+    // Densify the polyline so the time parameterisation's blends stay inside the checked corridor.
+    core_types::Trajectory piece;
+    piece.joint_names = jmg->getActiveJointModelNames();
+    for (size_t i = 0; i + 1 < improved.size(); ++i) {
+      const auto seg = densify(improved[i], improved[i + 1], sampling);
+      for (size_t s = (i == 0 ? 0 : 1); s < seg.size(); ++s) {
+        core_types::TrajectoryPoint point;
+        point.positions = seg[s];
+        piece.points.push_back(std::move(point));
+      }
+    }
+    std::string message;
+    if (piece.points.size() >= 2 &&
+      retimer.retime(piece, SegmentRole::kTransition, limits, 0.0, message))
+    {
+      moveit_msgs::msg::RobotTrajectory traj;
+      traj.joint_trajectory = ros_adapters::toRos(piece);
+      addCandidate(planner, traj);
+    } else {
+      RCLCPP_WARN(
+        log, "free-space candidate %s: retiming failed (%s), keeping the raw plan", planner.c_str(), message.c_str());
+      addCandidate(planner, plan.trajectory);
+    }
+  }
+  move_group_->setPlannerId(saved_planner);
+  move_group_->setPlanningTime(saved_time);
+
+  const auto selection = selectBestCandidate(candidates, optimize_.objective, quality);
+  if (selection.best_index < 0) {
+    return false;
+  }
+  const auto best = static_cast<size_t>(selection.best_index);
+  RCLCPP_INFO(
+    log, "%s",
+    formatFreeSpaceLog(candidates.size(), optimize_.objective, selection, candidates[best].source).c_str());
+  out = trajectories[best];
+  return true;
 }
 
 bool OmplPlanner::tryDirectJointPath(
@@ -240,7 +379,7 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
       move_group_->setStartState(start_state);
       used_explicit_start_state = true;
       start_state.copyJointGroupPositions(joint_model_group, direct_start);
-      if (direct_goal.empty() && direct_first_) {
+      if (direct_goal.empty() && (direct_first_ || optimize_.enabled)) {
         if (start_state.setFromIK(joint_model_group, direct_goal_pose, 0.1)) {
           start_state.copyJointGroupPositions(joint_model_group, direct_goal);
         }
@@ -284,7 +423,7 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
       start_state.update();
       move_group_->setStartState(start_state);
       start_state.copyJointGroupPositions(joint_model_group, direct_start);
-      if (direct_goal.empty() && direct_first_) {
+      if (direct_goal.empty() && (direct_first_ || optimize_.enabled)) {
         if (start_state.setFromIK(joint_model_group, direct_goal_pose, 0.1)) {
           start_state.copyJointGroupPositions(joint_model_group, direct_goal);
         }
@@ -296,7 +435,9 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
 
   moveit::planning_interface::MoveGroupInterface::Plan moveit_plan;
   bool direct_ok = false;
-  if (direct_first_ && !direct_start.empty() && direct_goal.size() == direct_start.size()) {
+  if (optimize_.enabled && !direct_start.empty()) {
+    direct_ok = planOptimized(direct_start, direct_goal, moveit_plan.trajectory);
+  } else if (direct_first_ && !direct_start.empty() && direct_goal.size() == direct_start.size()) {
     direct_ok = tryDirectJointPath(direct_start, direct_goal, moveit_plan.trajectory);
   }
   const bool plan_result = direct_ok ? true : static_cast<bool>(move_group_->plan(moveit_plan));

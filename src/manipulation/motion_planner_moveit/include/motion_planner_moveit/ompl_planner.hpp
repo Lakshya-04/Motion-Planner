@@ -1,12 +1,15 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "geometry_msgs/msg/pose.hpp"
 #include "moveit_msgs/msg/robot_trajectory.hpp"
 
 #include "motion_planner/core/direct_joint_path.hpp"
+#include "motion_planner/core/path_quality.hpp"
+#include "motion_planner/core/path_shortcut.hpp"
 #include "motion_planner/core/planners/planner.hpp"
 
 namespace rclcpp
@@ -29,6 +32,20 @@ namespace motion_planner
 
 class MoveItPlanningBackend;
 
+/// Optimal free-space mode (plugin params `free_space_optimize`, `free_space_time_budget_s`,
+/// `free_space_num_candidates`, `free_space_objective`, `free_space_planners`).
+struct FreeSpaceOptimizeConfig
+{
+  bool enabled{false};
+  double time_budget_s{20.0};   ///< Total OMPL planning time, shared by the OMPL candidates.
+  int num_candidates{5};        ///< Candidates in all, the direct joint path included.
+  FreeSpaceObjective objective{FreeSpaceObjective::kLength};
+  /// planner_configs of ompl_planning.yaml, used round robin for the OMPL candidates.
+  std::vector<std::string> planners{
+    "BITstarkConfigDefault", "RRTstarkConfigDefault", "AITstarkConfigDefault", "InformedRRTstarkConfigDefault"};
+  PathShortcutConfig shortcut;
+};
+
 class OmplPlanner : public Planner
 {
 public:
@@ -47,7 +64,17 @@ public:
   /// the planning scene; one invalid sample falls back to OMPL unchanged.
   void setDirectFirst(bool enabled, const DirectJointPathConfig & config, double default_acceleration);
 
+  /// Optimal mode: asymptotically optimal OMPL runs plus the direct joint path, post-processed and the best chosen.
+  void setFreeSpaceOptimize(const FreeSpaceOptimizeConfig & config, double default_acceleration);
+
 private:
+  /// Fills `out` with the best of the candidates; false when none was found (the caller then plans as before).
+  bool planOptimized(
+    const std::vector<double> & start, const std::vector<double> & goal,
+    moveit_msgs::msg::RobotTrajectory & out);
+
+  FreeSpaceOptimizeConfig optimize_;
+
   /// Straight-line attempt; true when moveit_plan was filled with a timed, valid trajectory.
   bool tryDirectJointPath(
     const std::vector<double> & start, const std::vector<double> & goal,
