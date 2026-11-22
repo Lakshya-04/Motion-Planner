@@ -12,6 +12,7 @@
 # Run, record in odom and score like run_manager_pass.sh.
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
 #   MULTI_STAND_DOCK_IK_CONTINUITY=true  choose the dock joint goal among IK solutions by continuity (manager `dock_ik_continuity`, default false)
+#   MULTI_STAND_RECOVERY_KEEPS_BRANCH=true  recover from a short approach on the live IK branch (manager `recovery_keeps_branch`, default false)
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented)
 #   STAND_MAP                      a built reachability map (skips the build, which takes a few minutes)
@@ -37,12 +38,17 @@ gz_init "${MULTI_STAND_OUT:-/tmp/multi_stand_pass}"
 trap gz_stop_all EXIT
 
 python3 "$PKG/lib/sim_gazebo/shift_wall_scene.py" "$DATA" "$OUT/data" 0.0 "$DY" "$WIDTH" || exit 2
-# the sim wall: the stock scene with its obstacle out of the patch (the shifted copy would be re-centred by the generator)
+# the sim wall: the stock scene without its obstacle (MULTI_STAND_OBSTACLES=1 keeps it, moved out of the patch; the planner's scene never has it,
+# so with it the arm drives into an obstacle the planner does not know about)
 python3 - "$DATA/smoke_wall_scene.json" "$OUT/data/smoke_wall_scene.json" <<'PY' || exit 2
 import json, sys
+import os
 scene = json.load(open(sys.argv[1]))
-for ob in scene['obstacles']:
-    ob['uv_on_wall']['u'] = [-0.9, -0.6]
+if os.environ.get('MULTI_STAND_OBSTACLES', '0') == '1':
+    for ob in scene['obstacles']:
+        ob['uv_on_wall']['u'] = [-0.9, -0.6]
+else:
+    scene['obstacles'] = []   # a plain wall like the MuJoCo pass (two_panels_plain); the planner's scene has no obstacle either
 json.dump(scene, open(sys.argv[2], 'w'), indent=2)
 PY
 WALL_X=0.98
@@ -103,6 +109,7 @@ manipulation_manager:
     dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]}
     dock_ik_seeded: ${MULTI_STAND_DOCK_IK_SEEDED:-false}
     dock_ik_continuity: ${MULTI_STAND_DOCK_IK_CONTINUITY:-false}
+    recovery_keeps_branch: ${MULTI_STAND_RECOVERY_KEEPS_BRANCH:-false}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MULTI_STAND_PRESS:-0.005}

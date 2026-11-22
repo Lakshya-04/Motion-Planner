@@ -71,6 +71,7 @@
 #include "manipulation_manager/core/mission_fsm.hpp"
 #include "manipulation_manager/core/mission_ledger.hpp"
 #include "manipulation_manager/core/dock_ik_selector.hpp"
+#include "manipulation_manager/core/recovery_branch.hpp"
 #include "manipulation_manager/core/recovery_jog.hpp"
 #include "manipulation_manager/core/stand_check.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
@@ -268,6 +269,12 @@ public:
       dock_ik_sel_.wrist_max_rad = this->declare_parameter<double>("dock_ik_wrist_max_rad", 3.2);
       dock_ik_sel_.max_dq_rad = this->declare_parameter<double>("dock_ik_max_dq_rad", 3.2);
     }
+    // recovery_keeps_branch: a recovery (jog after a short approach or a failed dock) stays on the IK branch the arm
+    // is on. The jog goes toward the last good configuration only when that is on the live branch (else the last
+    // docked one, else the arm stays), and the attempts after a short approach keep the joint goal chosen from the live
+    // state (selectRecoveryGoal) instead of falling back to a pose goal the planner solves from its own samples.
+    // Uses the dock_ik_* branch / wrist limits. Off by default (behaviour as before).
+    recovery_keeps_branch_ = this->declare_parameter<bool>("recovery_keeps_branch", false);
     verify_approach_ = this->declare_parameter<bool>("verify_approach", true);
     approach_tolerance_m_ = this->declare_parameter<double>("approach_tolerance_m", 0.05);
     // true: after the dock the tool must be on the standoff pose (position and orientation) before the press;
@@ -1665,7 +1672,9 @@ private:
     const auto ik = pipeline_.ik();
     const auto & seed = !dock_seed_.empty() ? dock_seed_ :
       (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
-    if (!ik || seed.empty()) {
+    // with the continuity choice the live state is a seed of its own, so an empty remembered seed (the first dock of a
+    // run) must not stop it
+    if (!ik || (seed.empty() && !dock_ik_continuity_)) {
       return {};
     }
     motion_planner::IkRequest req;
@@ -1713,6 +1722,44 @@ private:
     }
     RCLCPP_INFO(this->get_logger(), "DOCKGOAL seeded IK q=[%s]", txt.c_str());
     return res.joint_solution;
+  }
+
+  /// recovery_keeps_branch: the joint goal for `pose` chosen on the arm's live branch (selectRecoveryGoal, IK seeded
+  /// from the live state and the last docked one). Empty when there is no IK or no acceptable solution: the caller
+  /// keeps its previous goal.
+  std::vector<double> recoveryGoalIk(const core_types::Pose & pose)
+  {
+    const auto ik = pipeline_.ik();
+    const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_);
+    if (!ik || live.empty()) {
+      return {};
+    }
+    motion_planner::IkRequest req;
+    req.frame_id = frame_id_;
+    req.planning_group = planning_group_;
+    req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
+    const auto choice = selectRecoveryGoal(
+      [&](const std::vector<double> & sd) -> std::optional<std::vector<double>> {
+        auto r = req;
+        r.joint_seed = sd;
+        const auto res = ik->ik(r);
+        if (!res.success) {
+          return std::nullopt;
+        }
+        return res.joint_solution;
+      },
+      live, dock_branch_seed_, dock_ik_sel_);
+    if (!choice.ok) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "recovery goal: no solution on the live branch (%zu candidates; branch %zu, wrist %zu, jump %zu), unchanged",
+        choice.candidates, choice.rejected_branch, choice.rejected_wrist, choice.rejected_cost);
+      return {};
+    }
+    RCLCPP_INFO(
+      this->get_logger(), "recovery goal on the live branch: seed %zu of %zu, max dq %.3f rad", choice.seed_index,
+      choice.candidates, choice.cost);
+    return choice.q;
   }
 
   /// True when the tool frame is within `tol` of `pose` (both in frame_id_); `err` is the distance. An unknown tool
@@ -2086,7 +2133,9 @@ private:
   /// true when the jog ran and succeeded.
   bool recoverArm(const char * what)
   {
-    if (!recovery_jog_ || last_good_state_.empty() || stop()) {
+    if (!recovery_jog_ || (last_good_state_.empty() && !(recovery_keeps_branch_ && !dock_branch_seed_.empty())) ||
+      stop())
+    {
       return false;
     }
     std::vector<std::string> names;
@@ -2095,7 +2144,22 @@ private:
       RCLCPP_WARN(this->get_logger(), "%s: recovery jog skipped, no live joint state", what);
       return false;
     }
-    const auto jog = planRecoveryJog(live, last_good_state_, jog_params_);
+    std::vector<double> jog_target = last_good_state_;
+    if (recovery_keeps_branch_) {
+      const auto t = selectRecoveryJogTarget(live, last_good_state_, dock_branch_seed_, dock_ik_sel_);
+      if (!t.ok) {
+        RCLCPP_WARN(
+          this->get_logger(), "%s: recovery jog skipped, no known configuration on the arm's current branch", what);
+        return false;
+      }
+      if (t.from_branch_seed || t.last_good_rejected) {
+        RCLCPP_WARN(
+          this->get_logger(), "%s: last good configuration is on another branch, jogging toward %s", what,
+          t.from_branch_seed ? "the last docked one" : "it anyway");
+      }
+      jog_target = t.q;
+    }
+    const auto jog = planRecoveryJog(live, jog_target, jog_params_);
     if (!jog.ok) {
       RCLCPP_WARN(this->get_logger(), "%s: recovery jog refused: %s", what, jog.reason.c_str());
       return false;
@@ -2192,8 +2256,9 @@ private:
     if (dock_ik_seeded_ || dock_ik_continuity_) {
       goal_q = seededDockIk(first_goal);
     }
+    bool pin_q = false;   // recovery_keeps_branch: after a short approach every attempt uses the joint goal
     for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
-      const bool use_q = !goal_q.empty() && attempt % 2 == 0;
+      const bool use_q = !goal_q.empty() && (attempt % 2 == 0 || pin_q);
       if (dock_approach_extra_m_ > 0.0) {
         MotionSegmentSpec approach_seg = dock_seg;
         approach_seg.label = intent.label + "_approach";
@@ -2223,6 +2288,13 @@ private:
             logArmState("approach_short_" + intent.label);
             if (!recoverArm("approach")) {
               primeContinuityFromLiveState();
+            }
+            if (recovery_keeps_branch_) {
+              const auto g = recoveryGoalIk(first_goal);
+              if (!g.empty()) {
+                goal_q = g;
+                pin_q = true;
+              }
             }
             continue;
           }
@@ -2652,6 +2724,7 @@ private:
   bool dock_ik_seeded_{true};
   bool dock_ik_continuity_{false};
   DockIkSelectorParams dock_ik_sel_;
+  bool recovery_keeps_branch_{false};
   bool verify_approach_{true};
   bool verify_dock_{true};
   double dock_tolerance_m_{0.02};

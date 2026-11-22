@@ -111,3 +111,31 @@ def test_quaternion_matrix_roundtrip():
         q /= np.linalg.norm(q)
         q2 = np.array(ww._quat_from_matrix(ww._matrix_from_quat(q)))
         assert abs(abs(np.dot(q, q2)) - 1.0) < 1e-9
+
+
+def _check_contact_surfaces(root):
+    """Every collision of a world has friction, zero restitution and positive, explicit contact parameters."""
+    cols = list(root.iter('collision'))
+    assert cols
+    for col in cols:
+        surf = col.find('surface')
+        assert surf is not None, col.get('name')
+        assert float(surf.find('friction/ode/mu').text) > 0.0
+        assert float(surf.find('friction/ode/mu2').text) > 0.0
+        assert float(surf.find('bounce/restitution_coefficient').text) == 0.0
+        ode = surf.find('contact/ode')
+        assert float(ode.find('kp').text) > 0.0 and float(ode.find('kd').text) > 0.0
+        assert float(ode.find('max_vel').text) >= 0.0 and float(ode.find('min_depth').text) >= 0.0
+    phys = root.find('.//physics')
+    assert 0.0 < float(phys.find('max_step_size').text) <= 0.001   # the contact force peaks scale with the step
+    assert 'gz-sim-contact-system' in {p.get('filename') for p in root.iter('plugin')}
+
+
+def test_generated_world_has_explicit_contact_surfaces(tmp_path):
+    out = tmp_path / 'w.sdf'
+    ww.generate_world(SMOKE, str(out), standoff=0.9)
+    _check_contact_surfaces(ET.parse(out).getroot())
+
+
+def test_empty_world_has_explicit_contact_surfaces():
+    _check_contact_surfaces(ET.parse(os.path.join(HERE, '..', 'worlds', 'empty.sdf')).getroot())

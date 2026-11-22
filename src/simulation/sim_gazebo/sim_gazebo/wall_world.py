@@ -238,10 +238,22 @@ def build_world_sdf(shapes, world_name='wall_world', friction=0.8, step_size=0.0
     return '<?xml version="1.0"?>\n' + ET.tostring(sdf, encoding='unicode') + '\n'
 
 
+# SDF defaults of surface/contact/ode, written out so the contact model is explicit in the world. gz-sim 8 runs
+# the dartsim physics engine unless told otherwise; to our knowledge (unverified, docs/sim_gazebo.md) it solves
+# contacts as hard constraints and ignores kp, kd, max_vel and min_depth, so these values document the
+# assumption and change nothing. They only act if the world is run with an engine that reads them.
+CONTACT_ODE = {'kp': 1e12, 'kd': 1.0, 'max_vel': 0.01, 'min_depth': 0.0}
+
+
 def _mu(collision, mu):
-    ode = _sub(_sub(_sub(collision, 'surface'), 'friction'), 'ode')
+    surface = _sub(collision, 'surface')
+    ode = _sub(_sub(surface, 'friction'), 'ode')
     _sub(ode, 'mu', f'{mu:g}')
     _sub(ode, 'mu2', f'{mu:g}')
+    _sub(_sub(surface, 'bounce'), 'restitution_coefficient', '0')
+    code = _sub(_sub(surface, 'contact'), 'ode')
+    for k, v in CONTACT_ODE.items():
+        _sub(code, k, f'{v:g}')
 
 
 # ---------------------------------------------------------------- entry points
