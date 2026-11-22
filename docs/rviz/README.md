@@ -127,10 +127,22 @@ PB_OUT=/path/to/run_dir PB_SRC=$PWD/src PB_RVIZ_WS=/path/to/ws_with_mp_rviz_buil
 ```
 
 `PB_OUT` holds `coverage_output.json`, `data/walls.pcd` and `ur10e.rm4d` of an earlier run (reused, so the plan is
-reproducible); missing ones are built like `run_multi_stand_pass.sh` does. `data/smoke_wall_scene.json` there also draws the wall.
-`PB_BUILD_VOL` / `PB_INSTALL_VOL` (default `gzcols_b` / `gzcols_i`) are the colcon build and install of `PB_SRC`;
-`PB_DOMAIN` (92), `PB_IMAGE`, `PB_SPEED` (stroke speed, 0.01 m/s), `PB_EXTRA_STANDOFF` (0.02 m) tune the run. The script
-refuses to start without a free node slot (`docker/tools/hostwatch/slots.sh`).
+reproducible); missing ones are built. By default the plan covers the WHOLE 3.0 x 2.0 m wall (`make_full_wall_fixture.py`
+in the odom frame, wall plane at `PB_PLANE_X`, strokes 0.2 m wide, 20 % overlap, two passes); `PB_FULL_WALL=0` plans the
+0.9 m x 0.3 m patch of `run_multi_stand_pass.sh` instead. `data/smoke_wall_scene.json` there draws the wall in RViz.
+`PB_BUILD_VOL` / `PB_INSTALL_VOL` (default `gzcols_b` / `gzcols_i`) are the colcon build and install of `PB_SRC`.
+Every `PB_*` variable reaches the container. Settings: `PB_DOMAIN` (92), `PB_IMAGE`, `PB_SPEED` (tool speed along the
+stroke, default 0.2 m/s), `PB_EXTRA_STANDOFF` (0.02 m), `PB_PLANE_X` (0.98 m), `PB_Z_MIN` / `PB_Z_MAX` (the manager's
+`coverage_z_min_m` / `coverage_z_max_m`; 0.5 / 1.9 m by default), `PB_MAX_SPAN` (`stand_max_span_m`, 0.5 m),
+`PB_SWATH`, `PB_OVERLAP`. The manager writes `verify.json` (column and geometric coverage). The script refuses to start
+without a free node slot (`docker/tools/hostwatch/slots.sh`).
+
+Reach limits found with the UR10e on the telescopic lift (see the run numbers below): the stand planner always puts the
+arm base 0.60 m from the plane (the footprint clearance limit; `plan_stands` has no preferred distance and the manager
+sets none), so `PB_PLANE_X` fixes only where the base ends up (arm base x = plane - 0.60), the 0.70 m of the standoff
+advisor is not selectable through the manager. Strokes below about 0.5 m cannot be docked (no IK at that height with the
+tool horizontal), hence the default `PB_Z_MIN=0.5` (the lowest 0.5 m of the wall is not planned); columns at the lateral edge of a stand's span often fail to dock (OMPL approach
+or Cartesian dock `planning_failed`).
 
 What runs: `demo.launch.py` (robot_state_publisher, mock ros2_control, plain joint_trajectory_controller, move_group), the
 real `reachability_node` and `stand_navigator`, `manipulation_manager` (`contact: false`, controller `lift_arm_controller`)
@@ -140,6 +152,9 @@ is drawn from TF `tcp_link` in `odom`.
 
 Differences from the simulator pass, on purpose:
 
+- Whole wall, not all of it: with the defaults a run docked 15 of 19 columns (4 failed at stand edges) and the sampled tool path
+  covered 4.05 m2 of the 6.0 m2 wall (the planned area is 4.85 m2: z 0.5 to 1.9). Run time about 19.5 min at 0.2 m/s, of which
+  the OMPL approaches and failed-column retries take most.
 - Perfect tracking: no controller lag, no settling, no recovery jogs caused by it. Execution time is the planned time.
 - No contact: the mock has no force sensor, so the run uses the manager's non-contact mode (`contact: false`, the spray
   tool's flow): approach, dock at the stand-off, strokes 2 cm in front of the plan's plane, retract, per column. No press,
