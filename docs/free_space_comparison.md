@@ -81,7 +81,7 @@ FSC_LOG=/path/to/run/manager.log FSC_OUT=/tmp/fsc \
 ```
 
 It starts the sim with move_group and the wall in the planning scene (as `run_manager_pass.sh`), turns the ARMSTATE
-lines of the log into transitions, runs `free_space_compare_node`, and writes `$FSC_OUT/results.csv`, `results.md`
+lines of the log into transitions, runs `free_space_compare_node`, and writes `$FSC_OUT/results.csv`, `results_table.markdown`
 and `results.png`. A hand list instead of a log: `python3 docker/tools/free_space_compare.py template --out t.json`,
 edit the joint states (retract to next-column approach, stow to dock, dock to stow, stand change), then
 `FSC_TRANSITIONS=t.json`. Optional: `FSC_MODES`, `FSC_BUDGET` (optimal time budget, 10 s), `FSC_REPEATS`.

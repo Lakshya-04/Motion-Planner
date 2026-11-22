@@ -8,7 +8,7 @@ sim image) and `free_space_compare_curobo.py` (cuRobo, on the GPU lane) write JS
                              transitions file (start joint state = one ARMSTATE, goal joint state = the next one that
                              follows a free-space move), classified stow / stand_change / column_change
   template [--out F]         a hand list to edit: retract -> next-column approach, stow <-> dock, stand change
-  analyze RES... --out-dir D read result files, write results.csv, results.md and results.png
+  analyze RES... --out-dir D read result files, write results.csv, results_table.markdown and results.png
 
 Metrics per (transition, mode): success, planning time, duration (after TOTG), joint path length weighted by
 1/range of every joint (the lift's metres and the arm's radians become fractions of travel), TCP path length, and the
@@ -299,10 +299,10 @@ def cmd_analyze(a):
         with open(a.transitions) as f:
             logged = json.load(f).get('logged_segments')
     write_csv(rows, os.path.join(a.out_dir, 'results.csv'))
-    with open(os.path.join(a.out_dir, 'results.md'), 'w') as f:
+    with open(os.path.join(a.out_dir, 'results_table.markdown'), 'w') as f:
         f.write(markdown(rows, logged))
     png = write_chart(rows, os.path.join(a.out_dir, 'results.png'))
-    print(f"{len(rows)} runs -> {a.out_dir}/results.csv results.md" + (' results.png' if png else ''))
+    print(f"{len(rows)} runs -> {a.out_dir}/results.csv results_table.markdown" + (' results.png' if png else ''))
     return 0
 
 

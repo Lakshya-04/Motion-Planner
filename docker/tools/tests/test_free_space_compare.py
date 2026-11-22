@@ -116,7 +116,7 @@ def test_cli_analyze_writes_files(tmp_path):
     out = tmp_path / 'out'
     assert fsc.main(['analyze', str(m), '--out-dir', str(out)]) == 0
     assert (out / 'results.csv').read_text().startswith('transition,class,mode')
-    md = (out / 'results.md').read_text()
+    md = (out / 'results_table.markdown').read_text()
     assert '| cartesian |' in md and 'joint_goal_branch_mismatch' in md and 'Best mode per transition' in md
 
 

@@ -2,7 +2,7 @@
 # Free-space transition comparison in the MuJoCo sim image (docs/free_space_comparison.md): starts the sim with
 # move_group and the wall in the planning scene (like run_manager_pass.sh, but no manager and no motion), plans every
 # transition with each MoveIt mode through free_space_compare_node, optionally with cuRobo, and writes
-# $FSC_OUT/results.csv, results.md and results.png.
+# $FSC_OUT/results.csv, results_table.markdown and results.png.
 #
 #   FSC_LOG=/path/manager.log   transitions from the ARMSTATE lines of an earlier run, or
 #   FSC_TRANSITIONS=/path/t.json   a hand list (free_space_compare.py template writes one to edit)
@@ -62,4 +62,4 @@ if [ -n "${FSC_CUROBO_ROBOT:-}" ]; then
 fi
 
 python3 "$TOOLS/free_space_compare.py" analyze "${RESULTS[@]}" --out-dir "$OUTDIR" --transitions "$OUTDIR/transitions.json"
-echo "results: $OUTDIR/results.csv $OUTDIR/results.md $OUTDIR/results.png"
+echo "results: $OUTDIR/results.csv $OUTDIR/results_table.markdown $OUTDIR/results.png"
