@@ -21,6 +21,7 @@
 | [robot_description.md](robot_description.md) | Generic base + lift + N-DOF arm + tool description, swap contracts, profile YAML (group/joint names, DOF), UR10e / generic 6-DOF / Panda-like 7-DOF arms |
 | [moveit_config.md](moveit_config.md) | MoveIt config: groups, controller, collision matrix, demo, smoke test, findings |
 | [reachability.md](reachability.md) | RM4D reachability / inverse reachability module: base stationing, lift bands, feasibility pre-filter |
+| [standoff.md](standoff.md) | Standoff advisor: reachable fraction and pose quality versus base-to-wall distance on an RM4D map, the robust recommended distance (plateau shrunk by the navigation tolerance), how to feed it into the stand search, `WallDock` and the sims, results on the UR10e and the smoke wall, limits |
 | [robot_self_filter.md](robot_self_filter.md) | Generic module that removes the robot's own body from sensor data: port, implementations, contact-mode and time-alignment rules, evaluation |
 | [learned_recovery.md](learned_recovery.md) | Research on recovery to a known state: RL, imitation learning, MPC, safety filters; recommended staged architecture |
 | [behavior_tree_evaluation.md](behavior_tree_evaluation.md) | BehaviorTree.CPP for the manager: availability in Jazzy, state map, target tree, prototype results, recommendation (adopt later) |
