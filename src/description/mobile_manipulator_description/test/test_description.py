@@ -7,6 +7,7 @@ planning chain runs from base_link to tcp_link. Runs from the source tree: it bu
 ament prefix so `$(find mobile_manipulator_description)` resolves without installing anything.
 """
 import os
+import re
 import pathlib
 import tempfile
 
@@ -186,6 +187,15 @@ def _committed_acm(name):
 def test_committed_acm_is_up_to_date(arm, file):
     assert _generated_acm(arm) == _committed_acm(file), (
         f'srdf/{file} is stale: run scripts/generate_acm.py --arm {arm} --out srdf/{file}')
+
+
+@pytest.mark.parametrize('file', [f for f in ('acm_ur.xacro', 'acm_ur_none.xacro', 'acm_ur_scissor.xacro')
+                                  if (PKG / 'srdf' / f).exists()])
+def test_ur_matrices_disable_forearm_against_wrist_2_and_3(file):
+    never = {tuple(sorted(m)) for m in re.findall(
+        r'link1="([^"]+)" link2="([^"]+)" reason="Never"', (PKG / 'srdf' / file).read_text())}
+    assert ('arm_forearm_link', 'arm_wrist_2_link') in never
+    assert ('arm_forearm_link', 'arm_wrist_3_link') in never
 
 
 def test_srdf_includes_the_generated_matrix():

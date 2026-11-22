@@ -91,7 +91,9 @@ def arm_never_pairs(robot, arm):
     cylinders of the description overlap at wrist-1 angles the real arm reaches without touching. In the Gazebo
     two-stand run that pair made the dock joint goal 'invalid' (OMPL: 'Unable to sample any valid states for goal
     tree'), refused 79 of 140 plans from a start state with the pair overlapping, and truncated the Cartesian
-    segments. Only pairs between links that exist and carry geometry are returned."""
+    segments. Only pairs between links that exist and carry geometry are returned.
+
+    These Never pairs match the upstream Universal Robots MoveIt config convention."""
     if not arm.startswith('ur'):
         return set()
     have = collision_links(robot)
