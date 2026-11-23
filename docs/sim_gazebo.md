@@ -728,3 +728,10 @@ Read from the plain-wall run's `manager.log` and `sim_launch.log` (10 columns, 2
 
 One run each. The 872.5 N is a single episode at sim time 399.9 to 401.2 s (32 samples above 350 N, 774 above 100 N of 282663), on stand 1 (y 0.48 to 0.59 m,
 z 1.18 to 1.27 m); the feedback peak of the pass was 33.5 N. Not investigated, and one run does not show the pass is stable.
+
+### Queued visible runs (maintainer tooling)
+
+`docker/tools/gazebo-infra/` holds the wrappers used to run the two-stand pass visibly through a one-at-a-time job queue:
+`gz_queue.sh <prio> <name> <worktree> [VAR=val ...]` writes a job, `gz_run.sh` builds in the `sim-gazebo` image (shared ccache, per-lane
+build volumes), waits for the host's memory slots, runs `run_multi_stand_pass.sh` with `gui:=true` and the `MULTI_STAND_*` knobs from the
+environment, and writes `<name>_out`. The paths in them are the maintainer's host layout; copy and adapt.
