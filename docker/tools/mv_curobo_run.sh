@@ -9,7 +9,7 @@
 #     free_space_fallback moveit_ompl) and MANAGER_PASS_CUROBO_WORLD=1; (e) always stop the node and keep its log.
 # Output: $INFRA/cp/<name>_out, run log cp/<name>.out, node log cp/<name>_curobo_node.log (also copied into <name>_out).
 # The sim container runs as uid 1000 like the node (a root sim container cannot reach the node: docs/sim_mujoco.md).
-# Env: INFRA (/home/hmm/mp-infra), SIM_LANE (a|b), CUROBO_ROBOT (lift_arm.yml), CUROBO_NODE_SH (run_curobo_node.sh to use).
+# Env: CUROBO_WARMUP_SEC (900: how long the node may take to print "cuRobo ready"; a shared/cold GPU needed >300 s), INFRA (/home/hmm/mp-infra), SIM_LANE (a|b), CUROBO_ROBOT (lift_arm.yml), CUROBO_NODE_SH (run_curobo_node.sh to use).
 NAME=$1; W=$2
 I=${INFRA:-/home/hmm/mp-infra}; L=${SIM_LANE:-a}; HERE=$(cd "$(dirname "$0")" && pwd)
 H=${HOSTWATCH:-$HERE/hostwatch}; [ -d "$H" ] || H=/home/hmm/Motion-Planner/docker/tools/hostwatch
@@ -98,7 +98,7 @@ echo BUILT_NODE_WS
 wait_slot node
 export ROS_DOMAIN_ID=$DOM CUROBO_DOCKER_ARGS="--ipc host"
 OPT=(); [ -n "${CUROBO_OPTIMIZE:-}" ] && OPT=(--optimize ${CUROBO_TIME_BUDGET:+--time-budget $CUROBO_TIME_BUDGET} ${CUROBO_CANDIDATES:+--candidates $CUROBO_CANDIDATES} ${CUROBO_OBJECTIVE:+--objective $CUROBO_OBJECTIVE})
-bash "$NODE_SH" start --name "$NODE" --ws $I/curobo_ws --robot "$ROBOT" --max-boxes 3000 "${OPT[@]}" || { echo "node failed to start" >&2; exit 4; }
+bash "$NODE_SH" start --name "$NODE" --ws $I/curobo_ws --robot "$ROBOT" --max-boxes 3000 --wait-sec "${CUROBO_WARMUP_SEC:-900}" "${OPT[@]}" || { echo "node failed to start" >&2; exit 4; }
 
 # --- (d) the visible pass
 wait_slot sim
