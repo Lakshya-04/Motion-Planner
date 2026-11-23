@@ -55,6 +55,7 @@ fi
 
 start demo ros2 launch mobile_manipulator_moveit_config demo.launch.py profile:=$PROFILE_NAME rviz:=false
 start fake_base python3 "$MPR/scripts/mp_fake_base.py"
+start jointlog python3 "$MPR/scripts/mp_joint_logger.py" "$OUT/joints.csv" 4.0
 start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$OUT/ur10e.rm4d -p base_profile:=$PROFILE ${PB_REACH_EXTRA:-}
 start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE ${PB_REACH_EXTRA:-}
 
