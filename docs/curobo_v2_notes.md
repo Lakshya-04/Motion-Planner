@@ -533,9 +533,9 @@ graph calls succeeded.
   (one request also interpolated the line `joint_values -> trajectory[0]`). GPU tests now check that `clear_world()` and a smaller `set_world()` really
   remove cuboids from cuRobo (they do: the stale-layer behaviour noted for voxels does not apply to cuboids).
 
-### Low-lift docked-to-stow `no_path`: what the code shows and what a GPU run must confirm (2026-11-21)
+### Low-lift docked-to-stow `no_path`: what the code shows and what a GPU run measured (2026-11-22)
 
-Source: the two-stand runs in [sim_mujoco.md](sim_mujoco.md) ("Running a pass with cuRobo as the planner"). Read from code and config only; nothing here was run on a GPU.
+Source: the two-stand runs in [sim_mujoco.md](sim_mujoco.md) ("Running a pass with cuRobo as the planner"). The code findings were read from code and config; the measured outcomes follow them.
 
 Found in the code (not hypotheses):
 
@@ -544,12 +544,31 @@ Found in the code (not hypotheses):
 - Extra ignore pairs for a pair the sampled matrix keeps although the parts never touch: `generate_curobo_robot.py --ignore-pair A:B` and `--ignore-group A,B,C` (merged on top of the hop rule; names are checked against the links that have spheres). Not used by default, because a wrongly ignored pair hides a real self-collision.
 - Latency knobs that exist: node parameters `max_attempts` (20), `fallback_attempts` (6), `seed_fallback` (true), `run_curobo_node.sh start --max-attempts N`; plugin `timeout_sec` / `wait_for_service_sec` in `planning_curobo.yaml`. The node is single threaded and a plan call holds it, so a `set_world` or a second plan issued meanwhile waits behind it (that is the `unavailable` / timed-out world load seen while busy). `timeout_sec` must exceed the longest plan the node may run (`max_attempts` times one attempt plus the fallback); with 11 to 16 s per successful plan on the shared 4 GB card, 60 s is tight for a failing one. Lowering `max_attempts` to about 6 trades some success on hard problems for a shorter failure; not measured.
 
-Hypotheses that need a GPU run to confirm:
+Measured on a GPU (2026-11-22, RTX 3050 4 GB, motion-planner:gpu, EMPTY world, GPU not shared with a sim, warm kernel cache). Command (queued, one GPU job):
 
-1. The `no_path` is an invalid start (arm links against the lift or base spheres, or self-collision pairs outside the hop rule, at lift 0 to 0.01 with the arm swung out). Check: call `~/check_motion` with the docked state, or `plan_joint` and read the new code. If it is `start_in_collision`, list the pair (cuRobo's debug info or `sphere_self_collision.py` on the spherized URDF with the lift prismatic joint set low) and decide between `--ignore-pair` for that pair and refitting those links with a lower `--sphere-density`. If it is `no_path` instead, the start is valid and the cause is elsewhere (trajectory optimisation, joint range of the lift, the world).
-2. `--ignore-hops 2` alone fixes it. Not known: whether the lift stage links fall inside the hop rule (a mimic joint is a joint, not a rigid one).
-3. A retract-to-safe-lift step before the stow (lift to 0.4 with the arm folded, as `home` in the profile) is the conservative workaround if the low-lift start stays invalid; it is a manager sequence change and is not implemented here.
-4. The 11 to 16 s plan time is dominated by trajectory optimisation attempts on a GPU shared with the simulator; it is not isolated from the sim's load.
+```bash
+SIMQ_BY=<name> ~/.claude/coordination/motion-planner/simq_add.sh 30 curobo-lowlift "$PWD/docker/tools/curobo_lowlift_run.sh"
+# VARIANTS="hops2 sampled hops2_pair" selects configs: --ignore-hops 2 (the default), CUROBO_SPHERE_ARGS= (sampled matrix only),
+# --ignore-hops 2 --ignore-pair base_link:lift_stage_2_link. Output: build/lowlift/<variant>/probe.{json,log}
+```
+
+`docker/tools/curobo_lowlift_probe.py` takes 19 docked arm poses logged in two-stand MuJoCo passes (`docker/tools/curobo_lowlift_poses.json`; q = lift, then the six arm joints), sets the lift to as-logged / 0 / 0.01 / 0.05 / 0.2 / 0.4, and asks `check_states` (joint limits + self-collision). An independent numpy sphere-pair check (URDF FK, the yml's spheres and ignore table) names the pairs; it agreed with cuRobo on every state of every variant (0 disagreements), so the pairs below are the cause, not a guess. Valid states of 19 by lift:
+
+| config | as logged | 0.0 | 0.01 | 0.05 to 0.4 |
+|---|---|---|---|---|
+| sampled matrix only (old 7-joint default) | 10 | 0 | 0 | 18 |
+| `--ignore-hops 2` (default now) | 12 | 0 | 18 | 18 |
+| `--ignore-hops 2 --ignore-pair base_link:lift_stage_2_link` | 18 | 18 | 18 | 18 |
+
+The stow pose is valid in all three.
+
+1. **Confirmed: the old `no_path` was an invalid start (`start_in_collision`), a sphere-model artefact.** With the sampled matrix alone every docked pose at lift 0 to 0.01 is rejected. Pairs: `base_link`/`lift_stage_1_link`, `base_link`/`lift_stage_2_link`, `lift_carriage_link`/`lift_stage_1_link` (overlaps 2.5 to 6.2 mm at lift 0.01, 16 mm at 0), plus `arm_base_link_inertia`/`lift_base_link` (3 mm) at lift 0, and `arm_forearm_link`/`arm_wrist_2_link` (0.7 mm, pose `docked_wall_column_3` only, at every lift). `plan_joint` now answers `start_in_collision` at `precheck` in 0.01 s; with the precheck off the same start is a `no_path` after 3 to 25 s here (`max_attempts` 6; the sim run's 37 to 40 s was 20 attempts plus the graph fallback). MuJoCo does not collide in these poses, so the model, not the robot, is at fault.
+2. **True at lift 0.01, false at lift exactly 0.0.** `--ignore-hops 2` makes 18 of 19 poses valid at 0.01 (the lift-stage links fall inside the hop rule); docked to stow then plans in 0.09 to 0.15 s, `route=trajopt` (poses 4 to 8, empty world). It does not help at lift 0.0: `base_link`/`lift_stage_2_link` overlaps 5 mm, all 19 poses invalid. The manager's logged docks are often at lift 0.0000, so with `--ignore-hops 2` alone those starts stay `start_in_collision`. Adding `--ignore-pair base_link:lift_stage_2_link` makes lift 0.0 valid for 18 of 19 (same planning times at 0.01 for poses 4 to 8). What that pair ignore hides: any real contact between the base body spheres and the second lift stage. Those parts are a rigidly mounted column over the base, they do not move relative to each other except along the lift axis, and the overlap is 5 mm at the retracted end only, so it is an artefact of the sphere fit, not a measured clearance; this was not checked against the mesh. Not made the default.
+   - Caveat, any config: `docked_wall_column_3` is invalid at every lift (`arm_forearm_link`/`arm_wrist_3_link` 0.3 mm with hops, `arm_forearm_link`/`arm_wrist_2_link` 0.7 mm without). It is a wrist pose, not a lift problem; an ignore for it could hide a real wrist self-collision and was not tested.
+3. **A retract-to-0.4 step does not rescue an invalid start and is not needed when the start is valid.** Sampled matrix: lift-only motion docked to 0.4 fails `check_motion` (the start is invalid), folding the arm at lift 0.01 is invalid, and only mid (lift 0.4, arm swung) to stow plans (0.33 s). With `--ignore-hops 2` (0.01) or the pair ignore (0.0) the direct docked-to-stow plan already succeeds, and the retract (`check_motion` true, mid to stow 0.1 to 0.25 s) and fold-first variants succeed too. Not implemented in the manager.
+4. Still not measured: the 11 to 16 s plan time under sim load (these runs were unshared and fast).
+
+Not verified: planning with the wall in the world (empty world only); a full docked to stow from lift exactly 0.0 under the manager; the physical clearance of the retracted lift stages against the base (mesh check); the `--ignore-pair` variant on poses other than the 19 logged (columns 0 to 18 of one wall); behaviour on a second robot. Generator side effect found by the run: `--ignore-pair` together with `--ignore-hops` was rejected ("links without collision spheres": the check saw the hop table's frame names); fixed (`generate_curobo_robot.py`, test added). Recommendation only: keep `--ignore-hops 2` as the default; if docks at lift 0.0 are needed, add the base_link:lift_stage_2_link ignore to `CUROBO_SPHERE_ARGS` after a mesh clearance check, or keep the dock lift at 0.01 or above.
 
 Tests (no GPU): `docker/tools/tests/test_curobo_robot_config.py` (ignore-table helpers, the script default), `src/manipulation/curobo_bridge/test/test_endpoint_precheck.py` (precheck logic with a stub state check).
 
