@@ -93,6 +93,10 @@ public:
   std::vector<BaseCandidate> inverseQuery(
     const Pose & tool_in_world, double arm_base_z, int ring_samples = 24) const;
 
+  /// Largest tool distance from the arm base over the occupied cells (cell centres, m); 0 for an empty map. An
+  /// estimate of the arm's reach for the reach-margin options of stand planning.
+  double estimateReach() const;
+
   /// Adds the counts of other maps built with the same parameters (parallel build shards).
   void mergeFrom(const Map4D & other);
 

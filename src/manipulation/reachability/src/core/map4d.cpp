@@ -28,6 +28,26 @@ size_t Map4D::index(int iz, int itheta, int ix, int iy) const
   return ((static_cast<size_t>(iz) * ntheta_ + itheta) * nxy_ + ix) * nxy_ + iy;
 }
 
+double Map4D::estimateReach() const
+{
+  double best2 = 0.0;
+  for (int iz = 0; iz < nz_; ++iz) {
+    const double z = params_.z_min + (iz + 0.5) * params_.resolution;
+    for (int ix = 0; ix < nxy_; ++ix) {
+      const double x = -params_.xy_extent + (ix + 0.5) * params_.resolution;
+      for (int iy = 0; iy < nxy_; ++iy) {
+        const double y = -params_.xy_extent + (iy + 0.5) * params_.resolution;
+        const double r2 = x * x + y * y + z * z;
+        if (r2 <= best2) {continue;}
+        for (int it = 0; it < ntheta_; ++it) {
+          if (cells_[index(iz, it, ix, iy)] != 0) {best2 = r2; break;}
+        }
+      }
+    }
+  }
+  return std::sqrt(best2);
+}
+
 size_t Map4D::nonzeroCells() const
 {
   return static_cast<size_t>(std::count_if(cells_.begin(), cells_.end(), [](uint8_t c) {return c != 0;}));

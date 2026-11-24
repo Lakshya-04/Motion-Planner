@@ -67,6 +67,18 @@ ReachabilityNode::ReachabilityNode(const rclcpp::NodeOptions & options)
   // Opt-in floor for the chassis-to-wall clearance of every plan_stands request (m); 0 = off, requests as sent.
   stand_min_clearance_m_ = declare_parameter<double>("stand_min_clearance_m", 0.0);
 
+  // Opt-in reach margin for stand planning: a cap on the tool distance as a fraction of the arm reach (0 = off,
+  // 0.85 recommended) and a balance switch that centres each stand's columns in the reach. `arm_reach_m` 0 = the
+  // largest tool distance in the map.
+  stand_max_reach_fraction_ = declare_parameter<double>("stand_max_reach_fraction", 0.0);
+  stand_balance_reach_ = declare_parameter<bool>("stand_balance_reach", false);
+  arm_reach_m_ = declare_parameter<double>("arm_reach_m", 0.0);
+  if (map_ && (stand_max_reach_fraction_ > 0.0 || stand_balance_reach_)) {
+    if (!(arm_reach_m_ > 0.0)) {arm_reach_m_ = map_->estimateReach();}
+    RCLCPP_INFO(get_logger(), "stand reach margin: cap %.2f of the reach, balance %s, reach %.3f m",
+      stand_max_reach_fraction_, stand_balance_reach_ ? "on" : "off", arm_reach_m_);
+  }
+
   using namespace reachability_msgs::srv;
   is_reachable_ = create_service<IsReachable>(
     "~/is_reachable",
@@ -245,6 +257,9 @@ void ReachabilityNode::handlePlanStands(
       return;
     }
     r.arm_mount_offset_z = req->arm_mount_offset_z;
+    r.reach.reach_m = arm_reach_m_;
+    r.reach.max_fraction = stand_max_reach_fraction_ > 0.0 ? stand_max_reach_fraction_ : 0.0;
+    r.reach.balance = stand_balance_reach_;
     r.base = base_;
     std::optional<Stand> start;
     if (req->has_start) {

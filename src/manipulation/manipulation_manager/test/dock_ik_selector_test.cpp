@@ -234,7 +234,37 @@ TEST(DockIkRebaseTest, SelectDockIkReturnsTheRebasedSolution)
   const auto c = selectDockIk(tableIk(seeds, {V{1.5, 5.35, -5.90, 1.13}}), seeds, ref, p);
   ASSERT_TRUE(c.ok);
   EXPECT_NEAR(c.q[1], -0.933, 1e-3);
+}
+
   EXPECT_NEAR(c.q[2], 0.383, 1e-3);
+TEST(DockIkSelectorTest, FirstDockIsMeasuredAgainstTheDockSeedNotTheStow)
+{
+  DockIkSelectorParams p;
+  p.branch_joints = {1, 3};
+  const V stow{0.4, 0.0, -1.57, 1.57, -1.57, -1.57, 0.0};
+  const V seed{0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708};
+  const V good{0.05, 2.80, -2.82, -1.27, -2.20, -0.36, -1.5708};   // the seed's branch
+  const V bad{0.04, -0.94, 0.60, 0.92, 1.70, -2.16, 1.57};         // the stow's branch (elbow up, pan flipped)
+  const auto ik = [&](const V & sd) -> std::optional<V> {return sd == seed ? good : bad;};
+  const auto & ref = dockBranchReference({}, seed, stow);
+  EXPECT_EQ(ref, seed);
+  const auto ch = selectDockIk(ik, {V{}, stow, seed}, ref, p);
+  ASSERT_TRUE(ch.ok);
+  EXPECT_NEAR(ch.q[1], 2.80, 1e-12);
+  EXPECT_EQ(ch.rejected_branch, 1u);
+  // against the stow the seed's branch is the one dropped (the failure this guards)
+  const auto old = selectDockIk(ik, {V{}, stow, seed}, stow, p);
+  ASSERT_TRUE(old.ok);
+  EXPECT_NEAR(old.q[1], -0.94, 1e-12);
+}
+
+TEST(DockIkSelectorTest, BranchReferencePrefersPreviousDockThenSeedThenLive)
+{
+  const V prev{1, 1, 1}, seed{2, 2, 2}, live{3, 3, 3}, short_seed{2, 2};
+  EXPECT_EQ(dockBranchReference(prev, seed, live), prev);
+  EXPECT_EQ(dockBranchReference({}, seed, live), seed);
+  EXPECT_EQ(dockBranchReference({}, {}, live), live);
+  EXPECT_EQ(dockBranchReference({}, short_seed, live), live);
 }
 
 }  // namespace manipulation_manager

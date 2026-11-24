@@ -47,6 +47,7 @@ With `stand_max_span_m` > 0 the manager asks `plan_stands` for the columns group
 - `stand_min_clearance_m` (default 0 = the planner's own default): written into the `min_clearance` field of every request the manager sends. The reachability node's `stand_min_clearance_m` is only a floor on that field, and applies on the node that answers `base_check_service`; `stand_strategy` is ignored by `~/plan_verified_stands` (selectStands, a weighted greedy cover), so `set_cover` has no effect when the manager points at the verified service.
 
 The reachability node has a matching opt-in for stand planning, `stand_min_clearance_m` (default 0 = off), described in [reachability.md](reachability.md): a floor for the chassis-to-wall clearance of every `~/plan_stands` request.
+The reachability node has a matching opt-in for stand planning, `stand_min_clearance_m` (default 0 = off), described in [reachability.md](reachability.md): a floor for the chassis-to-wall clearance of every `~/plan_stands` request; and `stand_balance_reach` / `stand_max_reach_fraction` / `arm_reach_m` (default off, recommended cap 0.85) that centre each stand's columns in the arm reach and cap the tool distance ("Reach margin of stands" in the same document).
 
 ## Column retry pass (`retry_failed_columns:=true`)
 

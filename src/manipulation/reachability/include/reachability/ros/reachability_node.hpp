@@ -47,6 +47,9 @@ private:
     reachability_msgs::srv::PlanStands::Response & response);
   std::shared_ptr<StandVerifier> verifier_;
   bool verify_by_default_{false};
+  double stand_max_reach_fraction_{0.0};   ///< Parameter `stand_max_reach_fraction`: reach cap for stand poses, 0 = off.
+  bool stand_balance_reach_{false};        ///< Parameter `stand_balance_reach`: centre each stand's group in the reach.
+  double arm_reach_m_{0.0};                ///< Reach used by the two above: parameter `arm_reach_m`, else the map's estimate.
   double stand_min_clearance_m_{0.0};   ///< Parameter `stand_min_clearance_m`: floor for the request clearance, 0 = off.
   VerifyOptions verify_options_;
   std::shared_ptr<Map4D> map_;

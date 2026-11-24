@@ -822,7 +822,36 @@ built with `rm4d_tool` and serves it:
 | `~/plan_lift_bands` | wall targets, base station, lift range and step | bands + unreachable targets |
 | `~/plan_stands` | wall targets and plane, lift range, optional start stand | stands in visiting order (arm base x, y, base yaw, targets, lift bands, travel time) + unreachable targets |
 
-Parameters: `map_file` (required), `stand_strategy` (`greedy` default, or `set_cover`, see the section above), `stand_min_clearance_m` (default 0 = off; when positive, every `~/plan_stands` request's `min_clearance` is raised to at least this, so the chassis keeps this distance from the wall; the tall-wall MuJoCo run docked at the 0.30 m default, with the tool at up to 87% of reach), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored; a set `base_profile` that cannot be loaded leaves the node not ready, like a missing `map_file`).
+Parameters: `map_file` (required), `stand_strategy` (`greedy` default, or `set_cover`, see the section above), `stand_min_clearance_m` (default 0 = off; when positive, every `~/plan_stands` request's `min_clearance` is raised to at least this, so the chassis keeps this distance from the wall; the tall-wall MuJoCo run docked at the 0.30 m default, with the tool at up to 87% of reach), `stand_max_reach_fraction` (default 0 = off; recommended 0.85: a pose farther from the arm base than this fraction of the arm reach does not count as reachable from a stand, at any lift height, see "Reach margin of stands" below), `stand_balance_reach` (default false = off), `arm_reach_m` (default 0 = the largest tool distance in the map; the reach the two options above use), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored; a set `base_profile` that cannot be loaded leaves the node not ready, like a missing `map_file`).
+
+### Reach margin of stands
+
+The stand planner maximises the number of reachable poses and, among stands that reach the same poses and need the same
+lift bands, prefers the one the base reaches soonest (the start pose). That keeps the first stand near where the robot
+already is, but not the tool away from the edge of the reach: in the tall-wall two-stand MuJoCo run (UR10e on the lift,
+wall patch z 0.6 to 2.0 m, columns at y 0.31 to 1.19 m, clearance floor 0.42 m) stand 0 stayed at the start pose, 0.3 to
+0.8 m along the wall from its columns and 0.92 m from the wall, so the tool was at 94 to 101 % of the 1.3 m reach on the
+far columns, the dock IK took contorted branches (shoulder -3.6 rad, elbow -3.5 rad), and the run saw force spikes of up
+to 241 N and one column that failed after 300 s of retries. The well centred stand 1 (tool at 71 to 78 % of the reach)
+had none of that.
+
+Two opt-in node parameters (both off by default, so plans are unchanged), reach = `arm_reach_m` or the map's estimate:
+
+- `stand_balance_reach` (bool): `chooseStation` (greedy) and the set-cover candidates rank stations by the worst reach
+  fraction (tool distance from the arm base over the reach, the lift placed to minimise it) of the group, rounded to
+  0.02, before the drive tie-break; the along-wall position and the standoff (from the clearance floor up) are both
+  searched. The start pose is only the tie-breaker among stations with the same margin: the planner does not trade
+  margin for a shorter drive.
+- `stand_max_reach_fraction` (0 to 1, recommended 0.85): a hard cap. A pose beyond the fraction is unreachable at that
+  lift height (the verified plan's height table too), so a stand must cover it within the cap or it is left to another
+  stand, and the unreachable list tells you when no stand can.
+
+`planStands` takes both through `StationRequest::reach` (`ReachLimit`); `LiftBandPlan::max_reach_fraction` reports the
+result. `global_stands` (the cover with a tour) is not changed. Host test:
+`test/core/stand_reach_margin_test.cpp` (analytic sphere-shell reach model, the tall-wall first column group: without the
+options the stand is 0.2 m from the start pose and 0.35 m along the wall from the middle of its columns, with
+`stand_balance_reach` it sits on the middle). The sim script exposes them as `MULTI_STAND_BALANCE_REACH`,
+`MULTI_STAND_MAX_REACH_FRACTION` and `MULTI_STAND_ARM_REACH`.
 
 `~/plan_stands` rejects `grid_step` below 0.02 m, `lift_step` below 0.01 m, `lift_max` (when set) below `lift_min`, and searches whose work (stations x lift heights x targets) exceeds 5e7 per stand, so one request cannot keep the node's callbacks busy for minutes. All positions (targets, wall point, returned stands) are in the same world frame the caller chose; the service does not transform.
 The map does not know which side of a wall is free, so base candidates come back on both sides of

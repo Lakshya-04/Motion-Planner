@@ -1978,7 +1978,7 @@ private:
     req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
     if (dock_ik_continuity_ || exclude) {
       const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_);
-      const std::vector<double> & ref = !dock_branch_seed_.empty() ? dock_branch_seed_ : live;
+      const std::vector<double> & ref = dockBranchReference(dock_branch_seed_, dock_seed_, live);
       // reach preference: where the tool goal lies relative to the arm base (TF frame_id <- arm_base_frame, the live lift
       // taken out of the arm base height)
       DockReachContext reach_ctx;
