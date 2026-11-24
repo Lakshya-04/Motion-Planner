@@ -94,14 +94,18 @@ echo BUILT_SIM
 echo BUILT_NODE_WS
 [ -f $I/curobo_ws/install/setup.bash ] || { echo "curobo_ws install missing" >&2; exit 3; }
 
-# --- (c) the cuRobo node, only when slots says node YES
-wait_slot node
+# --- (c) the cuRobo node: node (2.4 GB) + sim (3.7 GB) must fit together, so wait for BOTH slots and avail >= NEED_MB BEFORE
+# starting the node (a node started first starves the sim slot and the whole queue); give up after GRANT_WAIT_SEC (600).
+NEED_MB=${CUROBO_NEED_MB:-6200}; t0=$(date +%s)
+while true; do o=$(bash "$H/slots.sh"); av=$(echo "$o" | sed -n 's/.*avail_mb=\([0-9]*\).*/\1/p' | head -1)
+  if echo "$o" | grep -q '^sim  *YES' && echo "$o" | grep -q '^node  *YES' && [ "${av:-0}" -ge "$NEED_MB" ]; then break; fi
+  [ $(( $(date +%s) - t0 )) -gt "${GRANT_WAIT_SEC:-600}" ] && { echo "no sim+node slot within ${GRANT_WAIT_SEC:-600} s (avail ${av:-?} MB, need $NEED_MB): giving up, node not started" >&2; exit 5; }
+  sleep 20; done
 export ROS_DOMAIN_ID=$DOM CUROBO_DOCKER_ARGS="--ipc host"
 OPT=(); [ -n "${CUROBO_OPTIMIZE:-}" ] && OPT=(--optimize ${CUROBO_TIME_BUDGET:+--time-budget $CUROBO_TIME_BUDGET} ${CUROBO_CANDIDATES:+--candidates $CUROBO_CANDIDATES} ${CUROBO_OBJECTIVE:+--objective $CUROBO_OBJECTIVE})
 bash "$NODE_SH" start --name "$NODE" --ws $I/curobo_ws --robot "$ROBOT" --max-boxes 3000 --wait-sec "${CUROBO_WARMUP_SEC:-900}" "${OPT[@]}" || { echo "node failed to start" >&2; exit 4; }
 
-# --- (d) the visible pass
-wait_slot sim
+# --- (d) the visible pass (sim slot was checked together with the node above; the node's own memory now makes slots.sh say NO)
 export MANAGER_PASS_PLANNING_CONFIG=/cp/${NAME}_planning_curobo_pass.yaml MANAGER_PASS_CUROBO_WORLD=1
 ENVS=$(env | grep -E '^(MULTI_STAND_|MANAGER_PASS_|SC=)' | sed 's/^/-e /' | tr '\n' ' ')
 docker rm -f mv_sim_$L >/dev/null 2>&1
