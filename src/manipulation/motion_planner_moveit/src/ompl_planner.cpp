@@ -1,6 +1,7 @@
 #include "motion_planner_moveit/ompl_planner.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <exception>
 #include <limits>
 
@@ -8,10 +9,12 @@
 
 #include "moveit/move_group_interface/move_group_interface.h"
 #include "moveit/planning_scene_monitor/planning_scene_monitor.h"
+#include "moveit/robot_state/cartesian_interpolator.h"
 #include "moveit/robot_trajectory/robot_trajectory.h"
 #include "rclcpp/rclcpp.hpp"
 
 #include "motion_planner_moveit/moveit_planning_backend.hpp"
+#include "motion_planner_moveit/moveit_time_parameterizer.hpp"
 #include "motion_planner/core/planners/wall_penetration_check.hpp"
 #include "ros_adapters/ros_conversions.hpp"
 
@@ -21,6 +24,301 @@ namespace motion_planner
 OmplPlanner::OmplPlanner(std::shared_ptr<MoveItPlanningBackend> backend)
 : backend_(std::move(backend))
 {
+}
+
+void OmplPlanner::setDirectFirst(
+  bool enabled, const DirectJointPathConfig & config, double default_acceleration)
+{
+  direct_first_ = enabled;
+  direct_config_ = config;
+  direct_default_acceleration_ = default_acceleration;
+}
+
+void OmplPlanner::setFreeSpaceOptimize(const FreeSpaceOptimizeConfig & config, double default_acceleration)
+{
+  optimize_ = config;
+  direct_default_acceleration_ = default_acceleration;
+}
+
+bool OmplPlanner::planOptimized(
+  const std::vector<double> & start, const std::vector<double> & goal,
+  moveit_msgs::msg::RobotTrajectory & out)
+{
+  const auto robot_model = move_group_->getRobotModel();
+  const auto * jmg = robot_model ? robot_model->getJointModelGroup(move_group_name_) : nullptr;
+  const auto log = node_ ? node_->get_logger() : rclcpp::get_logger("ompl_planner");
+  if (!jmg || start.empty()) {
+    return false;
+  }
+  MoveItTimeParameterizer retimer(robot_model, move_group_name_);
+  const auto limits = retimer.modelLimits(direct_default_acceleration_, 0.0);
+
+  // Weighted by 1/range so the lift's metres and the arm's radians are comparable.
+  PathQualityConfig quality;
+  std::vector<double> ranges;
+  for (const auto * joint : jmg->getActiveJointModels()) {
+    const auto & b = joint->getVariableBounds(joint->getName());
+    ranges.push_back(b.position_bounded_ ? b.max_position_ - b.min_position_ : 0.0);
+  }
+  quality.weights = weightsFromRanges(ranges);
+  for (const auto & l : limits) {
+    quality.velocity_limits.push_back(l.velocity);
+    quality.acceleration_limits.push_back(l.acceleration);
+  }
+
+  DirectJointPathConfig sampling = direct_config_;
+  if (sampling.prismatic.empty()) {
+    for (const auto * joint : jmg->getActiveJointModels()) {
+      sampling.prismatic.push_back(joint->getType() == moveit::core::JointModel::PRISMATIC);
+    }
+  }
+
+  std::vector<PathCandidate> candidates;
+  std::vector<moveit_msgs::msg::RobotTrajectory> trajectories;
+  auto addCandidate = [&](const std::string & source, const moveit_msgs::msg::RobotTrajectory & traj) {
+      PathCandidate c;
+      c.source = source;
+      for (const auto & p : traj.joint_trajectory.points) {
+        c.points.push_back(p.positions);
+      }
+      if (!traj.joint_trajectory.points.empty()) {
+        const auto & t = traj.joint_trajectory.points.back().time_from_start;
+        c.duration_s = static_cast<double>(t.sec) + 1e-9 * static_cast<double>(t.nanosec);
+      }
+      candidates.push_back(std::move(c));
+      trajectories.push_back(traj);
+    };
+
+  // The direct joint path first: a clear straight line always wins, and wins ties.
+  if (goal.size() == start.size()) {
+    moveit_msgs::msg::RobotTrajectory direct;
+    if (tryDirectJointPath(start, goal, direct)) {
+      addCandidate("direct", direct);
+    }
+  }
+  // The tool's straight line next: when it is clear and on the goal's branch it is usually far shorter in TCP space
+  // than any joint-space path, and the selection below decides by the objective (a joint-space straight line that
+  // is valid still beats it on weighted joint length).
+  if (optimize_.cartesian_candidate && goal.size() == start.size()) {
+    moveit_msgs::msg::RobotTrajectory line;
+    if (tryCartesianLine(start, goal, line)) {
+      addCandidate("cartesian", line);
+    }
+  }
+  const int n_ompl = std::max(1, optimize_.num_candidates - static_cast<int>(candidates.size()));
+  const double slice = std::max(0.1, optimize_.time_budget_s / n_ompl);
+
+  const std::string saved_planner = move_group_->getPlannerId();
+  const double saved_time = move_group_->getPlanningTime();
+  for (int k = 0; k < n_ompl && !optimize_.planners.empty(); ++k) {
+    const std::string & planner = optimize_.planners[static_cast<size_t>(k) % optimize_.planners.size()];
+    move_group_->setPlannerId(planner);
+    move_group_->setPlanningTime(slice);
+    moveit::planning_interface::MoveGroupInterface::Plan plan;
+    if (!static_cast<bool>(move_group_->plan(plan)) || plan.trajectory.joint_trajectory.points.size() < 2) {
+      RCLCPP_INFO(log, "free-space candidate %s: no plan in %.1f s", planner.c_str(), slice);
+      continue;
+    }
+    // Post-process: randomised shortcut + corner cutting, every new segment checked through the planning scene.
+    std::vector<std::vector<double>> raw;
+    for (const auto & p : plan.trajectory.joint_trajectory.points) {
+      if (raw.empty() || maxJointDelta(raw.back(), p.positions) > 1e-9) {
+        raw.push_back(p.positions);
+      }
+    }
+    std::vector<std::vector<double>> improved = raw;
+    std::string scene_error;
+    if (backend_->ensurePlanningSceneMonitor(move_group_name_, scene_error) && backend_->planningSceneMonitor()) {
+      planning_scene_monitor::LockedPlanningSceneRO scene(backend_->planningSceneMonitor());
+      if (scene && raw.size() >= 2) {
+        moveit::core::RobotState state(scene->getCurrentState());
+        PathShortcutConfig cfg = optimize_.shortcut;
+        cfg.sampling = sampling;
+        improved = improvePath(
+          raw, cfg, quality, [&](const std::vector<double> & q) {
+            state.setJointGroupPositions(jmg, q);
+            state.update();
+            return scene->isStateValid(state, move_group_name_);
+          });
+      }
+    }
+    // Densify the polyline so the time parameterisation's blends stay inside the checked corridor.
+    core_types::Trajectory piece;
+    piece.joint_names = jmg->getActiveJointModelNames();
+    for (size_t i = 0; i + 1 < improved.size(); ++i) {
+      const auto seg = densify(improved[i], improved[i + 1], sampling);
+      for (size_t s = (i == 0 ? 0 : 1); s < seg.size(); ++s) {
+        core_types::TrajectoryPoint point;
+        point.positions = seg[s];
+        piece.points.push_back(std::move(point));
+      }
+    }
+    std::string message;
+    if (piece.points.size() >= 2 &&
+      retimer.retime(piece, SegmentRole::kTransition, limits, 0.0, message))
+    {
+      moveit_msgs::msg::RobotTrajectory traj;
+      traj.joint_trajectory = ros_adapters::toRos(piece);
+      addCandidate(planner, traj);
+    } else {
+      RCLCPP_WARN(
+        log, "free-space candidate %s: retiming failed (%s), keeping the raw plan", planner.c_str(), message.c_str());
+      addCandidate(planner, plan.trajectory);
+    }
+  }
+  move_group_->setPlannerId(saved_planner);
+  move_group_->setPlanningTime(saved_time);
+
+  const auto selection = selectBestCandidate(candidates, optimize_.objective, quality);
+  if (selection.best_index < 0) {
+    return false;
+  }
+  const auto best = static_cast<size_t>(selection.best_index);
+  RCLCPP_INFO(
+    log, "%s",
+    formatFreeSpaceLog(candidates.size(), optimize_.objective, selection, candidates[best].source).c_str());
+  out = trajectories[best];
+  last_route_ = "optimal:" + candidates[best].source;
+  return true;
+}
+
+bool OmplPlanner::tryCartesianLine(
+  const std::vector<double> & start, const std::vector<double> & goal,
+  moveit_msgs::msg::RobotTrajectory & out)
+{
+  const auto robot_model = move_group_->getRobotModel();
+  const auto * jmg = robot_model ? robot_model->getJointModelGroup(move_group_name_) : nullptr;
+  const auto log = node_ ? node_->get_logger() : rclcpp::get_logger("ompl_planner");
+  const auto * tip = robot_model ? robot_model->getLinkModel(move_group_->getEndEffectorLink()) : nullptr;
+  if (!jmg || !tip) {
+    return false;
+  }
+  std::string scene_error;
+  if (!backend_->ensurePlanningSceneMonitor(move_group_name_, scene_error) || !backend_->planningSceneMonitor()) {
+    return false;
+  }
+  std::vector<std::shared_ptr<moveit::core::RobotState>> states;
+  double fraction = 0.0;
+  {
+    planning_scene_monitor::LockedPlanningSceneRO scene(backend_->planningSceneMonitor());
+    if (!scene) {
+      return false;
+    }
+    moveit::core::RobotState goal_state(scene->getCurrentState());
+    goal_state.setJointGroupPositions(jmg, goal);
+    goal_state.update();
+    const Eigen::Isometry3d goal_pose = goal_state.getGlobalLinkTransform(tip);
+    moveit::core::RobotState seed(scene->getCurrentState());
+    seed.setJointGroupPositions(jmg, start);
+    seed.update();
+    const moveit::core::GroupStateValidityCallbackFn valid =
+      [&](moveit::core::RobotState * rs, const moveit::core::JointModelGroup * g, const double * q) {
+        rs->setJointGroupPositions(g, q);
+        rs->update();
+        return scene->isStateValid(*rs, move_group_name_);
+      };
+    fraction = moveit::core::CartesianInterpolator::computeCartesianPath(
+      &seed, jmg, states, tip, goal_pose, true, moveit::core::MaxEEFStep(optimize_.cartesian_eef_step),
+      moveit::core::JumpThreshold::absolute(optimize_.cartesian_revolute_jump, optimize_.cartesian_prismatic_jump),
+      valid);
+  }
+  if (fraction < 0.999 || states.size() < 2) {
+    RCLCPP_INFO(log, "cartesian candidate: line reached %.0f%% only, dropped", 100.0 * fraction);
+    return false;
+  }
+  core_types::Trajectory piece;
+  piece.joint_names = jmg->getActiveJointModelNames();
+  for (const auto & st : states) {
+    core_types::TrajectoryPoint point;
+    st->copyJointGroupPositions(jmg, point.positions);
+    piece.points.push_back(std::move(point));
+  }
+  if (!reachesJointGoal(piece.points.back().positions, goal, optimize_.cartesian_goal_tolerance)) {
+    RCLCPP_INFO(log, "cartesian candidate: the line ends on another joint branch than the goal, dropped");
+    return false;
+  }
+  MoveItTimeParameterizer retimer(robot_model, move_group_name_);
+  std::string message;
+  if (!retimer.retime(
+      piece, SegmentRole::kTransition, retimer.modelLimits(direct_default_acceleration_, 0.0), 0.0, message))
+  {
+    RCLCPP_WARN(log, "cartesian candidate: retiming failed (%s), dropped", message.c_str());
+    return false;
+  }
+  out.joint_trajectory = ros_adapters::toRos(piece);
+  RCLCPP_INFO(
+    log, "cartesian candidate: %zu points, %.2f s", piece.points.size(),
+    piece.points.empty() ? 0.0 : piece.points.back().time_from_start_sec);
+  return true;
+}
+
+bool OmplPlanner::tryDirectJointPath(
+  const std::vector<double> & start, const std::vector<double> & goal,
+  moveit_msgs::msg::RobotTrajectory & out)
+{
+  const auto robot_model = move_group_->getRobotModel();
+  const auto * jmg = robot_model ? robot_model->getJointModelGroup(move_group_name_) : nullptr;
+  const auto log = node_ ? node_->get_logger() : rclcpp::get_logger("ompl_planner");
+  if (!jmg) {
+    return false;
+  }
+  DirectJointPathConfig config = direct_config_;
+  if (config.prismatic.empty()) {
+    for (const auto * joint : jmg->getActiveJointModels()) {
+      config.prismatic.push_back(joint->getType() == moveit::core::JointModel::PRISMATIC);
+    }
+  }
+
+  std::string scene_error;
+  if (!backend_->ensurePlanningSceneMonitor(move_group_name_, scene_error) ||
+    !backend_->planningSceneMonitor())
+  {
+    RCLCPP_WARN(log, "direct path unavailable (no planning scene: %s), falling back to OMPL", scene_error.c_str());
+    return false;
+  }
+  DirectJointPathResult path;
+  {
+    planning_scene_monitor::LockedPlanningSceneRO scene(backend_->planningSceneMonitor());
+    if (!scene) {
+      return false;
+    }
+    moveit::core::RobotState state(scene->getCurrentState());
+    path = buildDirectJointPath(
+      start, goal, config, [&](const std::vector<double> & q) {
+        state.setJointGroupPositions(jmg, q);
+        state.update();
+        return scene->isStateValid(state, move_group_name_);
+      });
+  }
+  if (path.status == DirectJointPathResult::Status::kInvalidSample) {
+    RCLCPP_INFO(log, "direct path invalid at sample %zu, falling back to OMPL", path.invalid_index);
+    return false;
+  }
+  if (path.status != DirectJointPathResult::Status::kOk) {
+    return false;  // no motion or bad input: let OMPL answer as before
+  }
+
+  core_types::Trajectory piece;
+  piece.joint_names = jmg->getActiveJointModelNames();
+  for (const auto & q : path.samples) {
+    core_types::TrajectoryPoint point;
+    point.positions = q;
+    piece.points.push_back(std::move(point));
+  }
+  MoveItTimeParameterizer retimer(robot_model, move_group_name_);
+  std::string message;
+  if (!retimer.retime(
+      piece, SegmentRole::kTransition, retimer.modelLimits(direct_default_acceleration_, 0.0), 0.0,
+      message))
+  {
+    RCLCPP_WARN(log, "direct path retiming failed (%s), falling back to OMPL", message.c_str());
+    return false;
+  }
+  out.joint_trajectory = ros_adapters::toRos(piece);
+  RCLCPP_INFO(
+    log, "direct joint path: %zu points, %.2f s", piece.points.size(),
+    piece.points.empty() ? 0.0 : piece.points.back().time_from_start_sec);
+  return true;
 }
 
 std::string OmplPlanner::name() const
@@ -82,6 +380,8 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
   // Joint-space goal takes priority when given -- it isn't a Cartesian-path
   // concept, so there's no pose to fall back to reading here anyway.
   bool used_joint_target = false;
+  std::vector<double> direct_goal;
+  geometry_msgs::msg::Pose direct_goal_pose;
   if (!request.target_joint_state.empty()) {
     const auto robot_model = move_group_->getRobotModel();
     const auto * joint_model_group =
@@ -91,6 +391,7 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
     {
       move_group_->setJointValueTarget(request.target_joint_state);
       used_joint_target = true;
+      direct_goal = request.target_joint_state;
     } else {
       PlanningResult invalid_target;
       invalid_target.success = false;
@@ -135,8 +436,10 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
       goal_pose = resolved_pose;
     }
     move_group_->setPoseTarget(goal_pose);
+    direct_goal_pose = goal_pose;
   }
 
+  std::vector<double> direct_start;
   bool used_explicit_start_state = false;
   if (!request.start_joint_state.empty()) {
     const auto robot_model = move_group_->getRobotModel();
@@ -156,6 +459,12 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
       start_state.update();
       move_group_->setStartState(start_state);
       used_explicit_start_state = true;
+      start_state.copyJointGroupPositions(joint_model_group, direct_start);
+      if (direct_goal.empty() && (direct_first_ || optimize_.enabled)) {
+        if (start_state.setFromIK(joint_model_group, direct_goal_pose, 0.1)) {
+          start_state.copyJointGroupPositions(joint_model_group, direct_goal);
+        }
+      }
     } else if (node_) {
       RCLCPP_WARN(
         node_->get_logger(),
@@ -194,13 +503,30 @@ PlanningResult OmplPlanner::plan(const PlanningRequest & request)
       start_state.enforceBounds(joint_model_group);
       start_state.update();
       move_group_->setStartState(start_state);
+      start_state.copyJointGroupPositions(joint_model_group, direct_start);
+      if (direct_goal.empty() && (direct_first_ || optimize_.enabled)) {
+        if (start_state.setFromIK(joint_model_group, direct_goal_pose, 0.1)) {
+          start_state.copyJointGroupPositions(joint_model_group, direct_goal);
+        }
+      }
     } else {
       move_group_->setStartStateToCurrentState();
     }
   }
 
   moveit::planning_interface::MoveGroupInterface::Plan moveit_plan;
-  const auto plan_result = move_group_->plan(moveit_plan);
+  bool direct_ok = false;
+  if (optimize_.enabled && !direct_start.empty()) {
+    direct_ok = planOptimized(direct_start, direct_goal, moveit_plan.trajectory);
+  } else if (direct_first_ && !direct_start.empty() && direct_goal.size() == direct_start.size()) {
+    direct_ok = tryDirectJointPath(direct_start, direct_goal, moveit_plan.trajectory);
+  }
+  const bool plan_result = direct_ok ? true : static_cast<bool>(move_group_->plan(moveit_plan));
+  if (!direct_ok) {
+    last_route_ = "ompl";
+  } else if (!optimize_.enabled) {
+    last_route_ = "direct";
+  }  // optimal: planOptimized set it
 
   result.success = static_cast<bool>(plan_result);
   result.status = result.success ? "planned" : "failed";
