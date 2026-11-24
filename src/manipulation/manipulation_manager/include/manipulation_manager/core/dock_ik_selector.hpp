@@ -26,6 +26,14 @@
 // attempt docked with) are dropped when they lie within tol_rad (max wrapped |dq|) of a candidate, so the winner is
 // the cheapest candidate that differs from them; with allow_branch_change the branch test is skipped too, which lets
 // the other IK branch through (the wrist and cost limits still apply). No exclusion: nothing changes.
+//
+// Joint-limit margin (opt-in, min_limit_margin_rad > 0 with lower/upper of the solution's size): a solution with a
+// limited non-linear joint (finite range under limit_range_cutoff_rad, so the +-2 pi joints never count) closer than the margin
+// to a limit is rejected (rejected_limit). A seed that already sits inside the margin (the arm's ready pose can) is
+// also tried with those joints moved toward the middle of their range (relief seeds, appended after the others), so
+// the IK can leave the stop through the null space of a redundant arm. Reason: the xArm 7 docked with joint 2 on
+// its lower stop (0.4 mrad inside it) and pressed 25-67 N during the contact stroke, while docks with 0.1 rad or more
+// of margin stayed at 25 N or less. The linear_joints (the lift, which the dock may park on its stop) are not checked.
 #pragma once
 
 #include <algorithm>
@@ -53,6 +61,11 @@ struct DockIkSelectorParams
   size_t lift_joint{0};                     ///< index of the lift joint in a solution
   double lift_min_m{0.0};                   ///< lift stroke limits the proposed lift is clamped into
   double lift_max_m{1.5};
+  // Joint-limit margin (see the header comment); min_limit_margin_rad <= 0 or limits of another size = off.
+  double min_limit_margin_rad{0.0};         ///< rejected: a limited joint closer than this to a limit
+  std::vector<double> lower;                ///< joint limits, same order as a solution
+  std::vector<double> upper;
+  double limit_range_cutoff_rad{6.0};       ///< joints with a range above this (continuous-like) are not checked
 };
 
 /// Where the tool goal lies relative to the arm base, for the reach preference.
@@ -81,6 +94,8 @@ struct DockIkChoice
   size_t rejected_wrist{0};
   size_t rejected_cost{0};
   size_t rejected_excluded{0};   ///< candidates equal (within tol) to an already used solution
+  size_t rejected_limit{0};
+  double limit_margin{-1.0};     ///< smallest margin of the choice when the check is on, else -1
   double reach_fraction{-1.0};   ///< tool distance / reach_m of the choice; -1 when the preference is off
   bool reach_over_target{false}; ///< preference on, but no acceptable candidate was at or under the target
 };
@@ -139,6 +154,53 @@ inline bool dockBranchChanged(
     }
   }
   return false;
+}
+
+/// A joint the margin does not apply to: linear, without a range, or with a continuous-like range.
+inline bool dockLimitSkipped(size_t i, const DockIkSelectorParams & p)
+{
+  return std::find(p.linear_joints.begin(), p.linear_joints.end(), i) != p.linear_joints.end() ||
+         !(p.upper[i] > p.lower[i]) || p.upper[i] - p.lower[i] > p.limit_range_cutoff_rad;
+}
+
+inline bool dockLimitCheckOn(const DockIkSelectorParams & p, size_t n)
+{
+  return p.min_limit_margin_rad > 0.0 && p.lower.size() == n && p.upper.size() == n;
+}
+
+/// Smallest distance of a limited joint of `q` to one of its limits (negative when outside). Infinity when no joint
+/// is limited or the check is off for this size.
+inline double dockLimitMargin(const std::vector<double> & q, const DockIkSelectorParams & p)
+{
+  double m = INFINITY;
+  if (p.lower.size() != q.size() || p.upper.size() != q.size()) {
+    return m;
+  }
+  for (size_t i = 0; i < q.size(); ++i) {
+    if (dockLimitSkipped(i, p)) {
+      continue;
+    }
+    m = std::min(m, std::min(q[i] - p.lower[i], p.upper[i] - q[i]));
+  }
+  return m;
+}
+
+/// `seed` with every limited joint inside the margin moved to the middle of its range; same vector when none is.
+inline std::vector<double> dockReliefSeed(const std::vector<double> & seed, const DockIkSelectorParams & p)
+{
+  auto out = seed;
+  if (p.lower.size() != seed.size() || p.upper.size() != seed.size()) {
+    return out;
+  }
+  for (size_t i = 0; i < seed.size(); ++i) {
+    if (dockLimitSkipped(i, p)) {
+      continue;
+    }
+    if (std::min(seed[i] - p.lower[i], p.upper[i] - seed[i]) < p.min_limit_margin_rad) {
+      out[i] = 0.5 * (p.lower[i] + p.upper[i]);
+    }
+  }
+  return out;
 }
 
 inline bool dockReachPreferenceOn(const DockIkSelectorParams & p)
@@ -216,6 +278,18 @@ inline DockIkChoice selectDockIk(
     }
     best.reach_fraction = INFINITY;
   }
+  const bool limits = dockLimitCheckOn(p, reference.size());
+  if (limits) {
+    const size_t n_in = seeds.size();
+    for (size_t s = 0; s < n_in; ++s) {
+      if (seeds[s].size() == reference.size()) {
+        auto rel = dockReliefSeed(seeds[s], p);
+        if (rel != seeds[s]) {
+          seeds.push_back(std::move(rel));
+        }
+      }
+    }
+  }
   bool best_under = false;
   for (size_t s = 0; s < seeds.size(); ++s) {
     if (seeds[s].empty() || !allFiniteJoints(seeds[s])) {
@@ -250,6 +324,14 @@ inline DockIkChoice selectDockIk(
       ++best.rejected_branch;
       continue;
     }
+    double margin = -1.0;
+    if (limits) {
+      margin = dockLimitMargin(*sol, p);
+      if (margin < p.min_limit_margin_rad) {
+        ++best.rejected_limit;
+        continue;
+      }
+    }
     const double cost = dockIkCost(*sol, reference, p);
     if (!(cost <= p.max_dq_rad)) {   // also rejects a NaN cost or limit
       ++best.rejected_cost;
@@ -268,6 +350,7 @@ inline DockIkChoice selectDockIk(
       best.q = *sol;
       best.seed_index = s;
       best.cost = cost;
+      best.limit_margin = limits ? margin : -1.0;
       best.reach_fraction = prefer ? frac : -1.0;
       best_under = under;
     }

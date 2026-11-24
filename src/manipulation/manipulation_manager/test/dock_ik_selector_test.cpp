@@ -219,3 +219,79 @@ TEST(DockIkSelectorTest, BranchReferencePrefersPreviousDockThenSeedThenLive)
 }
 
 }  // namespace manipulation_manager
+
+namespace manipulation_manager
+{
+namespace
+{
+// xArm 7 group order: lift, joints 1..7; joint 2 range [-2.059, 2.0944], the +-2 pi joints are not limited.
+DockIkSelectorParams xarmLimits()
+{
+  DockIkSelectorParams p;
+  p.linear_joints = {0};
+  p.branch_joints = {};
+  p.lower = {0.0, -6.283, -2.059, -6.283, -0.192, -6.283, -1.693, -6.283};
+  p.upper = {1.5, 6.283, 2.0944, 6.283, 3.927, 6.283, 3.1416, 6.283};
+  p.min_limit_margin_rad = 0.1;
+  return p;
+}
+}  // namespace
+
+TEST(DockIkSelectorLimitTest, RejectsASolutionOnTheLowerStop)
+{
+  // the dock of the xArm run that pressed 25-67 N: joint 2 at -2.0578 (0.0012 rad from -2.059)
+  const V ref{0.0, -1.2, -2.0575, 2.16, 1.45, -1.04, 0.45, 0.08};
+  const std::vector<V> seeds{ref};
+  const auto ik = tableIk(seeds, {V{0.0005, -1.1988, -2.0578, 2.1595, 1.4548, -1.0442, 0.4499, 0.0818}});
+  const auto c = selectDockIk(ik, seeds, ref, xarmLimits());
+  EXPECT_FALSE(c.ok);
+  EXPECT_EQ(c.rejected_limit, 1u);
+}
+
+TEST(DockIkSelectorLimitTest, OffByDefaultKeepsTheStopSolution)
+{
+  const V ref{0.0, -1.2, -2.0575, 2.16, 1.45, -1.04, 0.45, 0.08};
+  const std::vector<V> seeds{ref};
+  const auto ik = tableIk(seeds, {V{0.0005, -1.1988, -2.0578, 2.1595, 1.4548, -1.0442, 0.4499, 0.0818}});
+  auto p = xarmLimits();
+  p.min_limit_margin_rad = 0.0;
+  const auto c = selectDockIk(ik, seeds, ref, p);
+  EXPECT_TRUE(c.ok);
+  EXPECT_DOUBLE_EQ(c.limit_margin, -1.0);
+}
+
+TEST(DockIkSelectorLimitTest, ReliefSeedFindsTheSolutionOffTheStop)
+{
+  const V ref{0.0, -1.2, -2.0575, 2.16, 1.45, -1.04, 0.45, 0.08};
+  const auto p = xarmLimits();
+  const V relief = dockReliefSeed(ref, p);
+  EXPECT_NE(relief, ref);
+  EXPECT_NEAR(relief[2], 0.5 * (-2.059 + 2.0944), 1e-12);   // only joint 2 was inside the margin
+  EXPECT_DOUBLE_EQ(relief[1], ref[1]);
+  EXPECT_DOUBLE_EQ(relief[0], ref[0]);                      // the lift is linear: untouched
+  const V on_stop{0.0, -1.2, -2.0578, 2.16, 1.45, -1.04, 0.45, 0.08};
+  const V off_stop{0.0, -1.0, -1.2, 2.0, 1.6, -1.1, 0.5, 0.1};
+  const std::vector<V> seeds{ref, relief};
+  const auto ik = tableIk(seeds, {on_stop, off_stop});
+  const auto c = selectDockIk(ik, {ref}, ref, p);
+  ASSERT_TRUE(c.ok);
+  EXPECT_EQ(c.seed_index, 1u);                              // the appended relief seed
+  EXPECT_EQ(c.rejected_limit, 1u);
+  EXPECT_NEAR(c.limit_margin, 0.859, 1e-9);
+}
+
+TEST(DockIkSelectorLimitTest, LiftOnItsStopAndContinuousJointsAreIgnored)
+{
+  const V ref{0.0005, 1.0, 0.5, 5.9, 1.0, 0.0, 0.5, 6.2};
+  EXPECT_GT(dockLimitMargin(ref, xarmLimits()), 0.4);
+  const V near{0.5, 1.0, 2.0, 0.0, 1.0, 0.0, 0.5, 0.0};   // joint 2 is 0.094 from its upper limit
+  EXPECT_NEAR(dockLimitMargin(near, xarmLimits()), 0.0944, 1e-9);
+}
+
+TEST(DockIkSelectorLimitTest, WrongSizeLimitsDisableTheCheck)
+{
+  auto p = xarmLimits();
+  p.lower.pop_back();
+  EXPECT_FALSE(dockLimitCheckOn(p, 8));
+}
+}  // namespace manipulation_manager
