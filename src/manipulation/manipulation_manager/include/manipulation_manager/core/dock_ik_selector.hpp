@@ -145,12 +145,16 @@ inline std::vector<double> rebaseDockIk(
     }
     const double lo = have_limits ? p.joint_lower[i] : -two_pi;
     const double hi = have_limits ? p.joint_upper[i] : two_pi;
-    double v = q[i] + two_pi * std::round((ref[i] - q[i]) / two_pi);
-    while (v > hi + 1e-9) {
-      v -= two_pi;
+    // NaN / inf / absurd magnitudes (a wrap of such a value is float noise): nothing sensible to rebase
+    if (!std::isfinite(q[i]) || !std::isfinite(ref[i]) || !std::isfinite(lo) || !std::isfinite(hi) ||
+      std::fabs(q[i]) > 1e3 || std::fabs(ref[i]) > 1e3) {
+      continue;
     }
-    while (v < lo - 1e-9) {
-      v += two_pi;
+    double v = q[i] + two_pi * std::round((ref[i] - q[i]) / two_pi);
+    if (v > hi + 1e-9) {
+      v -= two_pi * std::ceil((v - hi - 1e-9) / two_pi);
+    } else if (v < lo - 1e-9) {
+      v += two_pi * std::ceil((lo - 1e-9 - v) / two_pi);
     }
     if (v >= lo - 1e-9 && v <= hi + 1e-9) {
       q[i] = v;
@@ -308,7 +312,21 @@ inline DockIkChoice selectDockIk(
     }
   }
   if (best.ok) {
-    best.q = rebaseDockIk(best.q, reference, p);
+    {
+      // The branch and wrist checks ran on the raw solution: a representative that would fail either keeps the raw
+      // value of that joint (the same pose, a turn away).
+      const std::vector<double> raw = best.q;
+      best.q = rebaseDockIk(raw, reference, p);
+      if (p.wrist_joint >= 0 && static_cast<size_t>(p.wrist_joint) < best.q.size()) {
+        const size_t w = static_cast<size_t>(p.wrist_joint);
+        if (best.q[w] < p.wrist_min_rad || best.q[w] > p.wrist_max_rad) {best.q[w] = raw[w];}
+      }
+      if (dockBranchChanged(best.q, reference, p)) {
+        for (const size_t j : p.branch_joints) {
+          if (j < best.q.size()) {best.q[j] = raw[j];}
+        }
+      }
+    }
   }
   best.reach_over_target = prefer && best.ok && !best_under;
   if (prefer && !best.ok) {

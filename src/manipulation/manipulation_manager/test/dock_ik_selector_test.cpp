@@ -3,6 +3,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <limits>
 
 #include "manipulation_manager/core/dock_ik_selector.hpp"
 
@@ -224,6 +225,20 @@ TEST(DockIkRebaseTest, RespectsLimits)
   DockIkSelectorParams n;
   const V r = rebaseDockIk({0.0, 7.0}, {0.0, 6.5}, n);
   EXPECT_LE(std::fabs(r[1]), 2.0 * M_PI + 1e-9);
+}
+
+TEST(DockIkRebaseTest, NonFiniteAndHugeValuesTerminate)
+{
+  DockIkSelectorParams p;
+  p.joint_lower = {-6.3, -6.3};
+  p.joint_upper = {6.3, 6.3};
+  const double inf = std::numeric_limits<double>::infinity();
+  const V a = rebaseDockIk({1e300, 0.5}, {0.0, inf}, p);
+  EXPECT_EQ(a.size(), 2u);
+  const V b = rebaseDockIk({0.0, 0.5}, {1e300, 0.0}, p);
+  EXPECT_EQ(b.size(), 2u);
+  const V c = rebaseDockIk({std::nan(""), 7.0}, {0.0, 0.0}, p);
+  EXPECT_NEAR(c[1], 7.0 - 2.0 * M_PI, 1e-12);
 }
 
 TEST(DockIkRebaseTest, SelectDockIkReturnsTheRebasedSolution)
