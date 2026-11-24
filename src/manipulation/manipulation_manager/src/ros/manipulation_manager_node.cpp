@@ -280,6 +280,13 @@ public:
       dock_ik_sel_.lift_joint = static_cast<size_t>(std::max<int64_t>(0, this->declare_parameter<int>("dock_ik_lift_joint", 0)));
       dock_ik_sel_.lift_min_m = this->declare_parameter<double>("dock_ik_lift_min_m", 0.0);
       dock_ik_sel_.lift_max_m = this->declare_parameter<double>("dock_ik_lift_max_m", 1.5);
+      // Joint-limit margin of the continuity choice (xArm 7: joint 2 docked 0.4 mrad inside its stop and pressed 25-67 N
+      // in the contact stroke): a solution with a limited joint closer than dock_ik_min_limit_margin_rad to
+      // dock_ik_joint_lower/upper (group order, lift first) is dropped, and a seed inside the margin is also tried
+      // with those joints moved toward mid-range. 0 or limits of another size = off (default).
+      dock_ik_sel_.min_limit_margin_rad = this->declare_parameter<double>("dock_ik_min_limit_margin_rad", 0.0);
+      dock_ik_sel_.lower = this->declare_parameter<std::vector<double>>("dock_ik_joint_lower", std::vector<double>{});
+      dock_ik_sel_.upper = this->declare_parameter<std::vector<double>>("dock_ik_joint_upper", std::vector<double>{});
     }
     // recovery_keeps_branch: a recovery (jog after a short approach or a failed dock) stays on the IK branch the arm
     // is on. The jog goes toward the last good configuration only when that is on the live branch (else the last
@@ -1777,9 +1784,9 @@ private:
       if (choice.ok) {
         RCLCPP_INFO(
           this->get_logger(),
-          "DOCKGOAL continuity: seed %zu of %zu candidates, max dq %.3f rad (dropped: branch %zu, wrist %zu, jump %zu)",
+          "DOCKGOAL continuity: seed %zu of %zu candidates, max dq %.3f rad (dropped: branch %zu, wrist %zu, jump %zu, limit %zu), limit margin %.3f rad",
           choice.seed_index, choice.candidates, choice.cost, choice.rejected_branch, choice.rejected_wrist,
-          choice.rejected_cost);
+          choice.rejected_cost, choice.rejected_limit, choice.limit_margin);
         if (reach_ptr) {
           RCLCPP_INFO(
             this->get_logger(), "DOCKGOAL reach fraction %.2f (target %.2f)%s", choice.reach_fraction,
@@ -1789,8 +1796,8 @@ private:
       }
       RCLCPP_WARN(
         this->get_logger(),
-        "DOCKGOAL continuity: no acceptable solution (%zu candidates; branch %zu, wrist %zu, jump %zu), seeded IK as before",
-        choice.candidates, choice.rejected_branch, choice.rejected_wrist, choice.rejected_cost);
+        "DOCKGOAL continuity: no acceptable solution (%zu candidates; branch %zu, wrist %zu, jump %zu, limit %zu), seeded IK as before",
+        choice.candidates, choice.rejected_branch, choice.rejected_wrist, choice.rejected_cost, choice.rejected_limit);
     }
     req.joint_seed = seed;
     const auto res = ik->ik(req);
