@@ -234,9 +234,9 @@ TEST(DockIkRebaseTest, SelectDockIkReturnsTheRebasedSolution)
   const auto c = selectDockIk(tableIk(seeds, {V{1.5, 5.35, -5.90, 1.13}}), seeds, ref, p);
   ASSERT_TRUE(c.ok);
   EXPECT_NEAR(c.q[1], -0.933, 1e-3);
+  EXPECT_NEAR(c.q[2], 0.383, 1e-3);
 }
 
-  EXPECT_NEAR(c.q[2], 0.383, 1e-3);
 TEST(DockIkSelectorTest, FirstDockIsMeasuredAgainstTheDockSeedNotTheStow)
 {
   DockIkSelectorParams p;
