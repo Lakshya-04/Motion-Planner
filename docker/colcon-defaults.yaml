@@ -1,0 +1,12 @@
+# Installed as /etc/colcon/defaults.yaml (COLCON_DEFAULTS_FILE) so a plain `colcon build` in any image
+# uses ccache and mold. CMAKE_BUILD_TYPE is left to the caller. Note: a --cmake-args on the command line
+# replaces this list (docker/build.sh repeats these arguments for that reason). The CUDA launcher is set
+# through CMAKE_CUDA_COMPILER_LAUNCHER in the environment (it is only read when CUDA is enabled).
+build:
+  cmake-args:
+    - -DCMAKE_C_COMPILER_LAUNCHER=ccache
+    - -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    - -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache
+    - -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold
+    - -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=mold
+    - -DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=mold

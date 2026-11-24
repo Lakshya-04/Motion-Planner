@@ -42,6 +42,9 @@ inline bool nearJointLimits(
   double margin)
 {
   for (size_t i = 0; i < q.size(); ++i) {
+    if (!std::isfinite(q[i])) {
+      return true;   // an unknown joint value is not safely away from a limit
+    }
     if (i < lower.size() && q[i] < lower[i] + margin) {
       return true;
     }
@@ -67,24 +70,33 @@ inline RecoveryJog planRecoveryJog(
     jog.reason = "current and good state differ in size or are empty";
     return jog;
   }
-  if (p.max_step_rad <= 0.0 || p.max_speed <= 0.0) {
-    jog.reason = "max_step_rad and max_speed must be positive";
+  if (!(p.max_step_rad > 0.0) || !(p.max_speed > 0.0) || !std::isfinite(p.max_step_rad) ||
+    !std::isfinite(p.max_speed) || !std::isfinite(p.max_total_rad) || !std::isfinite(p.min_duration_s))
+  {
+    jog.reason = "max_step_rad, max_speed and max_total_rad must be positive and finite";
     return jog;
   }
+  for (size_t i = 0; i < current.size(); ++i) {
+    if (!std::isfinite(current[i]) || !std::isfinite(good[i])) {
+      jog.reason = "current or good state has a non-finite joint value";
+      return jog;
+    }
+  }
+  const double margin = std::isfinite(p.limit_margin) ? std::max(0.0, p.limit_margin) : 0.0;
   jog.target = good;
   for (size_t i = 0; i < jog.target.size(); ++i) {
     const bool lo = i < p.lower.size();
     const bool hi = i < p.upper.size();
     // a range too narrow for the margin keeps its middle
-    if (lo && hi && p.upper[i] - p.lower[i] <= 2.0 * p.limit_margin) {
+    if (lo && hi && p.upper[i] - p.lower[i] <= 2.0 * margin) {
       jog.target[i] = 0.5 * (p.lower[i] + p.upper[i]);
       continue;
     }
     if (hi) {
-      jog.target[i] = std::min(jog.target[i], p.upper[i] - p.limit_margin);
+      jog.target[i] = std::min(jog.target[i], p.upper[i] - margin);
     }
     if (lo) {
-      jog.target[i] = std::max(jog.target[i], p.lower[i] + p.limit_margin);
+      jog.target[i] = std::max(jog.target[i], p.lower[i] + margin);
     }
   }
   double dmax = 0.0;
@@ -100,9 +112,18 @@ inline RecoveryJog planRecoveryJog(
     jog.reason = "the good state is too far away for a jog";
     return jog;
   }
+  constexpr double kMaxSteps = 100000.0;   // bounds the waypoint count whatever max_step_rad is
+  if (dmax / p.max_step_rad > kMaxSteps) {
+    jog.reason = "max_step_rad is too small for this jog";
+    return jog;
+  }
   const size_t steps = std::max<size_t>(1, static_cast<size_t>(std::ceil(dmax / p.max_step_rad)));
   // A smoothstep ramp s(u) = 3u^2 - 2u^3 has a peak slope of 1.5, so the duration is 1.5 * dmax / max_speed.
   const double duration = std::max(p.min_duration_s, 1.5 * dmax / p.max_speed);
+  if (!std::isfinite(duration)) {
+    jog.reason = "max_speed is too small for this jog";
+    return jog;
+  }
   for (size_t k = 1; k <= steps; ++k) {
     const double u = static_cast<double>(k) / static_cast<double>(steps);
     const double s = u * u * (3.0 - 2.0 * u);

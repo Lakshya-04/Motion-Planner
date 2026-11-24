@@ -16,7 +16,10 @@ Kinematics advance_toward(
   const double step = max_acceleration * dt;
 
   // Already (almost) at rest on the target: land exactly.
-  if (std::abs(error) <= 0.5 * step * dt && std::abs(state.velocity) <= step) {
+  // (never farther than max_velocity * dt: with a long step, 0.5 * a * dt^2 alone can exceed the speed limit)
+  if (std::abs(error) <= 0.5 * step * dt && std::abs(error) <= max_velocity * dt &&
+    std::abs(state.velocity) <= step)
+  {
     return {target, 0.0};
   }
 

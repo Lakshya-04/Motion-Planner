@@ -49,7 +49,7 @@ Under `src/`, by area (layout rules: [docs/package_layout.md](docs/package_layou
 
 | Area | Packages | What they do |
 |---|---|---|
-| Common | `core_types`, `ros_adapters`, `force_core`, `tool_calibration` | ROS-free types and ports, conversions to ROS messages, the force-control core (contact state machine, wrench conditioning), the tool calibration record |
+| Common | `core_types`, `ros_adapters`, `force_core`, `tool_calibration`, `standoff_advisor` | ROS-free types and ports, conversions to ROS messages, the force-control core (contact state machine, wrench conditioning), the tool calibration record, the base-to-wall standoff advisor |
 | Description | `mobile_manipulator_description`, `mobile_manipulator_moveit_config`, `mobile_manipulator_profile` | Generic robot model (base + lift + N-DOF arm + tool, all swappable) with 13 profiles, MoveIt 2 config generated from a profile, header-only profile loader |
 | Perception | `scene_model`, `scene_adapters`, `robot_self_filter`, `wall_detector`, `coverage_planner`, `coverage_planner_msgs` | Scene model (clouds, meshes, voxels, ESDF, loaders), scene to planner geometry, robot self filter (library and node), wall detection from a live point cloud, wall coverage planning (boustrophedon, sweepline, wall patterns, scan to plan) |
 | Manipulation | `motion_planner`, `motion_planner_moveit`, `vamp_planner`, `curobo_bridge`, `curobo_bridge_msgs`, `curobo_planner`, `reachability`, `reachability_moveit`, `reachability_msgs`, `manipulation_manager`, `coverage_task_msgs`, `stand_navigator`, `stand_navigator_msgs`, `manipulation_bt_prototype` | Planner, IK, collision and scene ports; MoveIt/OMPL, VAMP and cuRobo v2 backends; RM4D reachability map and multi-stand planning; base navigation and wall docking to a stand; the manager that runs coverage, planning and execution |
@@ -217,7 +217,7 @@ Sources: `src/simulation/sim_mujoco/scripts/`, `src/simulation/sim_gazebo/script
 ## Documentation
 
 [docs/README.md](docs/README.md) is the index: [architecture](docs/architecture.md), [robot description](docs/robot_description.md),
-[design principles](docs/design_principles.md), [decision records](docs/adr/), [how to read a run](docs/how_to_read_a_run.md) (the files a pass writes and what each field means). Third-party software and licences:
+[design principles](docs/design_principles.md), [decision records](docs/adr/), [how to read a run](docs/how_to_read_a_run.md) (the files a pass writes and what each field means), [RViz profiles per module](docs/rviz/README.md). Third-party software and licences:
 [THIRD_PARTY.md](THIRD_PARTY.md). Changes: [CHANGELOG.md](CHANGELOG.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

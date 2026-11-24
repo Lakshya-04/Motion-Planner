@@ -34,6 +34,24 @@ ros2 launch wall_detector wall_detector.launch.py cloud_topic:=/depth_sensor/poi
 colcon test --packages-select wall_detector
 ```
 
+## Perception in the loop (MuJoCo two-stand pass)
+
+`MULTI_STAND_PERCEPTION=1 run_multi_stand_pass.sh` plans on a detected wall: `scripts/pcd_to_cloud.py` publishes the sim wall's
+cloud (`walls_sim.pcd`) as `PointCloud2` on `/perception/points` in `odom`, this node runs on it (`target_frame:=odom`), the
+scene is cropped to the contact patch and handed to the coverage planner ([sim_mujoco.md](../../../docs/sim_mujoco.md)).
+`scripts/compare_wall_scene.py DETECTED.json TRUTH.json` (numpy only, exit 1 out of tolerance) reports the normal angle error (deg), the
+plane offset error (mm), the rectangle's edge errors in the truth wall's u / v axes (mm) and IoU, and the recall of true obstacles.
+`scripts/wall_fit_ref.py` is a python mirror of `detectWall` (same RANSAC + PCA steps and node defaults, different random draws) so
+the comparison is tested on the host without ROS: `python3 -m pytest src/perception/wall_detector/test/python` (13 tests: clean and
+1 / 3 / 5 mm noisy clouds, a tilted wall, outliers plus a floor, obstacle recall, a too-short wall, the CLI, and the pass's
+`walls_sim.pcd` -> detect -> crop -> compare chain on `two_panels_plain`).
+
+What is detected, honestly: from the sim's clean cloud (exact grid, no noise) the plane comes out exact (angle 0.000 deg, offset
+0.00 mm, cropped extent equal to the baked planner scene). With 3 mm Gaussian noise on the same cloud: 0.001 deg, 0.01 mm. That is a
+check of the plumbing, not of perception quality: the sim cloud has no sensor noise, no occlusion, no holes and one plane. The
+detector writes no obstacles, so true obstacle recall is 0 (the pass warns, and plans without them), and the C++ node itself was
+not run in this mode when it was written (host python only; the pass needs a sim run).
+
 ## Status and limits
 
 - Fits one dominant plane; no obstacles, openings or non-planar surfaces in the output (the scene JSON has one wall and no obstacles).

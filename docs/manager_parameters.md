@@ -48,6 +48,18 @@ With `stand_max_span_m` > 0 the manager asks `plan_stands` for the columns group
 
 The reachability node has a matching opt-in for stand planning, `stand_min_clearance_m` (default 0 = off), described in [reachability.md](reachability.md): a floor for the chassis-to-wall clearance of every `~/plan_stands` request.
 
+## Column retry pass (`retry_failed_columns:=true`)
+
+Off by default. After the main pass, every column that ended failed or partial gets up to `max_column_retries` more attempts. The policy (what, in which order, which variant, when to stop, what is recorded) is `core/column_retry.hpp`, gtested on the host with a fake attempt function; the node function `retryFailedColumns` only moves the robot. Each attempt: stow the arm and prime the continuity from the live state with the dock reference cleared (a clean pose); dock with the next-best dock IK solution that differs from the ones the earlier attempts docked with (`DockIkExclusion` in `core/dock_ik_selector.hpp`; when none is left the planner samples its own goal); for a navigation failure, or a dock failure on the second attempt, optionally a stand re-planned with the `plan_stands` service from that column's cells (`retry_replan_stand`). Columns are retried by stand (fewest drives), then by id. A contact overload is never retried. The pass stops on cancel, an unrecoverable stow, or `retry_stop_after_failed` columns in a row that did not recover. The verify result gets a `column_retries` block: per attempt the column, stand, attempt number, variant (for example `fresh_stow+next_ik+restand`), the failure before and after, the outcome and a note; per column the attempts and the final outcome; the columns not retried and why. Not run in a simulation yet.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `retry_failed_columns` | false | Enable the second pass. |
+| `max_column_retries` | 1 | Extra attempts per failed or partial column (0 = none). |
+| `retry_replan_stand` | false | Allow a re-planned nearby stand (multi-stand runs): at once after a navigation failure, from the second attempt after a dock failure. |
+| `retry_allow_branch_change` | false | From the second attempt on, the different dock solution may be on the other IK branch (the wrist and jump limits still apply). |
+| `retry_stop_after_failed` | 3 | Stop the pass after this many columns in a row used all attempts without recovering (0 = never stop). |
+
 ## Recovery jog
 
 The jog moves the arm a few centimetres of joint space back toward the last good configuration before a retract or stow is retried.
@@ -87,6 +99,28 @@ All need `verify_result_path` (the file written when a task ends); without it th
 | `verify_path_skip_joints` | 1 | Leading joints of the planning group that are not in the chain file (1 for a lift plus arm group, 0 for a bare arm). |
 | `verify_path_min_sigma` | 0.02 | Smallest Jacobian singular value along the path below which a column is warned about. |
 | `verify_path_min_limit_margin` | 0.02 | Smallest joint-limit margin along the path (a share of the joint's range, 0 to 0.5) below which a column is warned about. |
+
+## Wall dock after navigate (`wall_dock_after_navigate:=true`)
+
+Off by default. After a successful `navigate_to_stand` (and the `stand_check` gate when on) and before priming or docking, the manager sends the
+stand navigator's `WallDock` goal (servo to a standoff from, and square to, the fitted wall plane). The measured standoff error (measured minus
+goal) and yaw error go through the stand-check logic (`core/wall_dock_gate.hpp`, built on `StandCheck`): within tolerance goes on, outside sends
+the goal again until `wall_dock_max_attempts` goals are used, then the stand is given up (columns not run, as for `stand_check`). A goal that
+fails (no fresh plane, timeout) is retried inside the same budget and then counts as a failed navigation attempt (the normal `stand_nav_attempts`
+retry applies). The log line is "wall dock: standoff error .. mm, yaw error .. rad", and with `verify_result_path` the result carries a
+`wall_dock` list (per stand: `ok`, `abort`, `attempts`, `wall_gap_error_m`, `wall_yaw_error_rad`, `message`). The action has no tolerance
+fields of its own (the dock node's `tolerance_standoff_m` and `tolerance_yaw_rad` decide when it reports success); the two tolerances below are the manager's.
+Host gtest: `wall_dock_gate_test`; not built in the ROS image and not run in a sim.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `wall_dock_after_navigate` | false | Enables the step. |
+| `wall_dock_action` | "wall_dock" | Name of the WallDock action. |
+| `wall_dock_standoff_m` | 0.30 | Goal standoff from the reference point to the plane. |
+| `wall_dock_timeout_s` | 0.0 | Goal timeout; 0 uses the dock node's default. |
+| `wall_dock_max_attempts` | 2 | WallDock goals sent per stand arrival at most (minimum 1). |
+| `wall_dock_standoff_tol_m` | 0.02 | Largest accepted absolute standoff error. |
+| `wall_dock_yaw_tol_rad` | 0.05 | Largest accepted absolute yaw error. |
 
 ## Column IK check (`column_ik_check:=true`)
 

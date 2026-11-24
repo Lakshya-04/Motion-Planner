@@ -179,6 +179,23 @@ TEST(Tracker, RecordsPerStandAndTotals)
   EXPECT_NE(t.summary().find("stand 1 not reached (navigation failed)"), std::string::npos);
 }
 
+TEST(Tracker, RetriedColumnReplacesItsEarlierOutcome)
+{
+  TaskTracker t;
+  t.beginMulti(2);
+  t.standReached(0, true, "");
+  t.columnFinished(0, 0, ColumnOutcome::kDone);
+  t.columnFinished(0, 1, ColumnOutcome::kFailed);
+  t.columnFinished(0, 2, ColumnOutcome::kPartial);
+  t.columnRetried(0, 1, ColumnOutcome::kDone);
+  t.columnRetried(0, 2, ColumnOutcome::kFailed);
+  EXPECT_EQ(t.done(), (std::vector<size_t>{0, 1}));
+  EXPECT_TRUE(t.partial().empty());
+  EXPECT_EQ(t.failed(), (std::vector<size_t>{2}));
+  EXPECT_EQ(t.stands()[0].done, (std::vector<size_t>{0, 1}));
+  EXPECT_EQ(t.stands()[0].failed, (std::vector<size_t>{2}));
+}
+
 TEST(Tracker, SuccessNeedsEveryColumnDoneAndEveryStandReached)
 {
   TaskTracker t;

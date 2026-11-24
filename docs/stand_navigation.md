@@ -39,11 +39,13 @@ agrees, wall gap 0.803 m, arm deviation 0.0016, F/T change 0.49 N, no drift at t
 
 Overview of what is real versus stubbed across navigation and perception: [navigation_and_perception.md](navigation_and_perception.md).
 
-- Obstacle avoidance. The controller drives a straight line; there is no costmap and no planning. The wall is
-  avoided only because the stand keeps the footprint clear and the approach is parallel to it.
+- Obstacle avoidance from live sensing. The controller drives a straight line unless a wall scene is given, then a base
+  path planner can go around the scene's walls and obstacles ("Path planning" below); there is no costmap from a sensor
+  and no dynamic obstacle handling.
 - Diff drive in the sim (the controller is unit-tested for it; the sim run used the omni profile).
-- Several stands in a loop is done in the manager's `execute_coverage` action (see "Several stands in a loop" below); not
-  done there: replanning a failed column, choosing another stand when navigation fails.
+- Several stands in a loop is done in the manager's `execute_coverage` action (see "Several stands in a loop" below); an opt-in
+  second pass (`retry_failed_columns`, see `docs/manager_parameters.md`) retries failed columns with another dock IK solution, a
+  fresh stow and optionally a re-planned stand (policy host-tested, not run in a simulation yet).
 - `NavigateThroughPoses`, a wall-plane servo for the last centimetres, localisation (odom only; the odom frame is the
   world frame, the base starts at the origin).
 - Found on the way and fixed: `manipulation_manager`'s default `base_check_service` was `/reachability_node/plan_stands`, but the
@@ -67,6 +69,38 @@ default. Not verified in a sim; RM4D estimates only.
 checking confirmed (`reachability_verified_node`, `docs/reachability.md`) instead of RM4D's promise alone. That service takes
 minutes on a wall, so raise `stand_service_timeout_s` (default 60 s, the wait for the stand planner's reply) to match. Only
 the parameter is new and the manager build passes; a mission has not been run this way.
+
+## Path planning (opt-in, scene based)
+
+`stand_navigator/path_planner.py` is a ROS-free planner for the base footprint (the `base.footprint` rectangle of the profile).
+It builds a 2D grid from a wall scene (the wall_detector JSON: `walls`, `obstacles`; vertical planes become 2 cm thick floor
+segments, obstacles become boxes protruding from their wall; heights are ignored, so anything blocks), inflates it by the
+footprint's circumscribed radius plus `planner_margin_m`, runs 8-connected A*, shortcuts the path by line of sight and
+follows it with `StandController` aimed at a carrot point `planner_lookahead_m` ahead (waypoint following, no stop at corners;
+`PathFollower`). It is plain grid A* plus shortcutting, not hybrid-A*: the diff base turns in place. `time_parametrize`
+turns a path into a speed- and acceleration-limited pose sequence (trapezoidal speed profile, yaw rate capped).
+The cells near the start and the goal, which the inflation would close (a stand is near the wall by design), are opened
+only where the exact footprint at that endpoint's yaw is collision-free; away from them the guarantee holds for every heading.
+
+Behaviour of `navigate_to_stand` (action definition unchanged):
+
+- No scene (`wall_scene_json` and `wall_scene_topic` empty): exactly the old straight-line drive.
+- With a scene, the straight drive is checked with the exact footprint (yaw interpolated for omni, along the line for diff).
+  If it is free the old controller runs unchanged; if it is blocked the planned path is followed, and if there is no path the goal
+  is rejected (`INVALID_GOAL`, reason in `error_msg`). `use_path_planner:=true` plans even when the straight line is free
+  (and falls back to the straight line if no path is found).
+- The result's `error_msg` carries the length, e.g. `arrived (planned path 3.10 m vs straight 2.40 m)` or
+  `arrived (straight line 2.40 m)`.
+
+Parameters: `use_path_planner` (false), `wall_scene_json` (file), `wall_scene_topic` (String JSON, transient local, e.g.
+`/wall_detector/wall_scene`), `planner_resolution_m` (0.05), `planner_margin_m` (0.02), `planner_lookahead_m` (0 = from the
+profile). The scene must be in the odom frame (nothing is transformed). Limits: host-tested on a kinematic base only
+(`test/test_path_planner.py`), not run in a simulator; no dynamic obstacles; one scene snapshot per goal.
+
+MuJoCo multi-stand pass switches (`run_multi_stand_pass.sh`): `MULTI_STAND_PATH_PLANNER=1` gives the navigator the pass's wall scene
+and `use_path_planner:=true`; `MULTI_STAND_WALL_DOCK=1` also starts `wall_docking_node` and latches the pass's scene
+(frame set to odom) on `/wall_detector/wall_scene` (the pass runs no wall_detector). Both default off. The manager does not send
+`WallDock` goals yet, so with the flag only the server is up (send a goal by hand, see the script header).
 
 ## Wall docking: standoff and yaw from the fitted plane
 
@@ -270,6 +304,33 @@ around the navigation, and the `TaskTracker` is the blackboard.
 Not done: replanning a failed column from another stand, a different stand chosen on the fly when navigation fails, pause and
 resume, a durable ledger (a restart reruns everything), `columns` given as a wall region instead of indices.
 
+## Base safety layer and the Nav2 backend
+
+`stand_navigator/nav_safety.py` (ROS-free, `test/test_nav_safety.py`) guards every `navigate_to_stand` run of the builtin
+backend; the reason of a stop is the result `error_msg`.
+
+| Check | Parameter(s) | Default | Result error code |
+|---|---|---|---|
+| Stale odometry: no odom for `odom_timeout_s`, stop | `odom_timeout_s` | 1.0 s (on) | `NO_ODOM` |
+| Velocity command gate: NaN/inf or over the profile limit refused, a hair over (5 %) clamped, acceleration re-clamped | `safety_check_commands` | true | `BAD_COMMAND` |
+| Stuck: progress metric (distance + 0.25 x yaw error) improved by less than `stuck_min_progress_m` for `stuck_window_s` | `stuck_window_s`, `stuck_min_progress_m` | 20 s, 0.02 m (on; 0 s = off) | `NAVIGATION_STUCK` |
+| Obstacle stop from a LaserScan or PointCloud2 (base frame): nearest point in a corridor along the commanded direction closer than `obstacle_stop_m` + v^2/(2 a) holds the base, abort after `obstacle_hold_s`; missing or stale sensor data aborts | `obstacle_scan_topic` or `obstacle_cloud_topic`, `obstacle_stop_m`, `obstacle_hold_s`, `obstacle_corridor_half_width_m` (0 = footprint), `obstacle_data_timeout_s`, `obstacle_z_min_m`, `obstacle_z_max_m` | off (no topic) | `OBSTACLE` |
+
+The default-on checks cannot change a healthy run: the controller output is already inside the limits (a host test runs
+`StandController` and `PathFollower` for omni and diff through the gate and monitor and requires identical commands and no
+verdict), and the stuck window is long and reset by any progress; it does not count inside the goal tolerance. The obstacle stop
+looks only along the direction of travel (not during pure rotation), assumes the scan or cloud is in the base frame (no TF), and
+is not a certified safety function: it is a software stop on top of the velocity limits, not a replacement for a safety lidar or e-stop.
+New error codes: `NAVIGATION_STUCK=6`, `OBSTACLE=7`, `BAD_COMMAND=8`, `NO_NAV2=9`.
+
+`backend:=nav2` (default `builtin`): `stand_navigator/nav2_adapter.py` converts the arm-base stand pose to a `base_footprint` goal
+with `core.arm_to_footprint`, sends it to the Nav2 `navigate_to_pose` action (`nav2_action_name`) and maps the outcome to the
+`NavigateToStand` codes (accepted/succeeded -> `NONE`, canceled, timeout after `timeout_s`, aborted -> `UNKNOWN` with Nav2's code and
+text, no server -> `NO_NAV2`). The action client sits behind the `Nav2Client` interface (tests use a fake); `nav2_msgs` is imported
+only when the node starts with `backend:=nav2`, so the package runs without Nav2. In this mode the path planner and the safety layer
+above are not used (Nav2 has its own costmaps, controller and recoveries). Not exercised against a real Nav2: no image has it (see
+"Nav2 swap path" for the setup); host-tested with a fake client only.
+
 ## Nav2 swap path
 
 Nav2 (`nav2_bringup`, `nav2_msgs`, `opennav_docking`) is not installed in the `build`, `full` or `sim` images, and adding it
@@ -280,7 +341,7 @@ is a large dependency set, so it was not added. To switch:
    obstacle layer from the sim lidar once one exists (none yet), `odom` as the global frame until localisation is added.
    Controller: MPPI with the `Omni` motion model for omni profiles, `DiffDrive` for diff; velocity and acceleration
    limits from the profile.
-3. Replace the node with a small bridge that keeps the `NavigateToStand` interface: convert the arm-base pose to a
+3. Set `backend:=nav2` (implemented, see above; or replace the node with a small bridge) that keeps the `NavigateToStand` interface: convert the arm-base pose to a
    `base_footprint` pose with `core.arm_to_footprint`, send it as `NavigateToPose` (`nav2_msgs`, same fields), and map the result.
    Callers do not change.
 4. For the last metres to the wall use `opennav_docking` with a custom `NonChargingDock` plugin (see the reuse map in `ROADMAP.md`).

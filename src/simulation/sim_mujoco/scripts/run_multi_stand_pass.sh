@@ -6,16 +6,34 @@
 # The wall is MULTI_STAND_WALL_WIDTH wide (default 0.9 m, the stock patch is 0.3) starting at y = MULTI_STAND_WALL_DY,
 # at x = 0.98 + MULTI_STAND_WALL_DX (shift_wall_scene.py). Run, record in odom and score like run_stand_pass.sh.
 #   MULTI_STAND_SCENARIO=name      a wall from make_scenario_scene.py (size, position and obstacles) instead of the DX/DY/WIDTH ones
-#   MULTI_STAND_PATCH_Z="lo,hi"    contact patch height in m (needs MULTI_STAND_SCENARIO; the wall grows 0.3 m above and below it);
-#                                  the scenario's own patch is used otherwise (two_panels_tall: 0.6,2.0); sets MP_Z_LO / MP_Z_HI,
+#   MULTI_STAND_PATCH_Z="lo,hi"    contact patch height in m (default 1.0,1.3; the tall wall is 0.6,2.0); needs
+#                                  MULTI_STAND_SCENARIO (the wall grows 0.3 m above and below it); the scenario's own patch is used otherwise (two_panels_tall: 0.6,2.0); sets MP_Z_LO / MP_Z_HI,
 #                                  the manager's coverage z range and the recorder's wall band
-#   MULTI_STAND_COVERAGE_EXTRA     more ros arguments of the coverage demo (-p obstacle_inflation_radius_m:=0.07)
+#   MULTI_STAND_DOUBLE_PASS=false  coverage_planner `double_pass` (default false = every strip once, the next one starts at the end the last one
+#                                  ended; true = up and back down every strip, the wiper profile's own default)
 #   MULTI_STAND_REACH_FRACTION=0.7       keep the tool within this fraction of MULTI_STAND_ARM_REACH (default 1.3 m, UR10e) by moving the lift (needs DOCK_IK_CONTINUITY=true; default 0 = off)
+#   MULTI_STAND_ARM_REACH=1.3      the arm's reach in m for that fraction (manager `dock_ik_reach_m`)
+#   MULTI_STAND_LIFT_STROKE=1.5    the lift's stroke in m (manager `dock_ik_lift_max_m`)
 #   MULTI_STAND_MIN_CLEARANCE=0.5        stand planner floor on the chassis-to-wall clearance in m (default 0 = off)
 #   MULTI_STAND_DOCK_IK_CONTINUITY=true  choose the dock joint goal among IK solutions by continuity (manager `dock_ik_continuity`, default false)
+#   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
+#   MULTI_STAND_SPEED / _SWATH / _OVERLAP / _TOOL_YAW / _TARGET / _PRESS / _STANDOFF / _APPROACH_EXTRA / _DOCK_ATTEMPTS / _MIN_COVERAGE
+#                                  the stroke speed, swath and overlap of the plan, tool yaw, target force, press depth, dock standoff and
+#                                  approach distance, dock tries and the score's minimum coverage (defaults in the script)
+#   MULTI_STAND_COVERAGE_EXTRA     more ros arguments of the coverage demo (-p obstacle_inflation_radius_m:=0.07)
+#   MULTI_STAND_LAUNCH_ARGS        more arguments of the sim launch; MULTI_STAND_OUT the output directory (default /tmp/multi_stand_pass)
+#   MULTI_STAND_SCORE_ARGS         extra score_run arguments
+#   MULTI_STAND_WALL_DX / _WALL_DY / _WALL_WIDTH  the wall's shift in x (0), the patch's start y (0.3) and width (0.9) in m
+#   MULTI_STAND_FILM=1             also store the joint states for render_run.py (launch with out_dir:=... in MULTI_STAND_LAUNCH_ARGS)
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
 #                                  configuration docked at the wall, [] chains the seeds from the previous dock
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
+#   MULTI_STAND_WALL_DOCK=1        also start wall_docking_node (action `wall_dock`) and latch the pass's wall scene, with its frame set to
+#                                  odom, on /wall_detector/wall_scene (no wall_detector runs in this pass). Default 0 = off. Only the
+#                                  server is added: the manager does not send WallDock goals yet, so send one by hand
+#                                  (`ros2 action send_goal /wall_dock stand_navigator_msgs/action/WallDock "{standoff_m: 0.55}"`)
+#   MULTI_STAND_PATH_PLANNER=1     give stand_navigator the pass's wall scene (wall_scene_json) and use_path_planner:=true; default 0 = the
+#                                  straight line unless it is blocked (docs/stand_navigation.md "Path planning")
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented), e.g. `stand_nav_timeout_s: 2.0` to make
 #                                  the navigation fail and watch the skip
@@ -23,6 +41,14 @@
 #                                  and z band, the tool roll, the reachability map's arm, the dock seed (UR10e only: [] elsewhere,
 #                                  MULTI_STAND_DOCK_SEED overrides) and the arm mount height follow the profile
 #                                  (profile_reach.py, docs/sim_mujoco.md "Running another robot profile"; unconfirmed in a sim)
+#   MULTI_STAND_PERCEPTION=1       perception in the loop (default off): the wall scene the coverage planner plans comes from
+#                                  wall_detector run on the sim wall's point cloud (walls_sim.pcd, published as PointCloud2
+#                                  /perception/points in odom), cropped to the contact patch, instead of the baked
+#                                  wall_pass_coverage_scene.json; compare_wall_scene.py then prints the detected-vs-baked
+#                                  errors (normal angle, plane offset, extent, obstacle recall; MULTI_STAND_PERCEPTION_STRICT=1
+#                                  aborts when they are out of tolerance). The planning-scene octomap and the scorer's wall
+#                                  still use the files. wall_detector reports no obstacles: a scenario with obstacles is planned
+#                                  without them (warned). Needs wall_detector installed. The cloud is noise-free.
 #   MANAGER_PASS_SCORE_ARGS / MULTI_STAND_SCORE_ARGS  extra score_run arguments
 # Needs a sourced ROS environment with sim_mujoco, reachability, stand_navigator, ft_conditioner,
 # compliant_trajectory_controller, coverage_planner, manipulation_manager, coverage_task_msgs and
@@ -84,6 +110,15 @@ if [ -z "$MAP" ]; then
     --extent 2.0 --zmin -1.8 --zmax 2.0 > "$OUT/map_build.log" 2>&1 || { cat "$OUT/map_build.log"; exit 2; }
 fi
 
+# one line with the knobs this run used, so its output is self-describing (the same line in the Gazebo script)
+summary_line() {
+  echo "multi_stand knobs: sim=mujoco profile=$STAND_PROFILE scenario=${MULTI_STAND_SCENARIO:-none} patch_z=${MP_Z_LO}..${MP_Z_HI}" \
+    "double_pass=${MULTI_STAND_DOUBLE_PASS:-false} reach_fraction=${MULTI_STAND_REACH_FRACTION:-0.0} arm_reach=${MULTI_STAND_ARM_REACH:-1.3}" \
+    "lift_stroke=${MULTI_STAND_LIFT_STROKE:-1.5} min_clearance=${MULTI_STAND_MIN_CLEARANCE:-0.0} dock_ik_continuity=${MULTI_STAND_DOCK_IK_CONTINUITY:-false}" \
+    "max_span=${MULTI_STAND_MAX_SPAN:-0.5} speed=${MULTI_STAND_SPEED:-0.01} swath=${MULTI_STAND_SWATH:-0.14} overlap=${MULTI_STAND_OVERLAP:-15.0}" \
+    "wall=${DX}/${DY}/${WIDTH} out=$OUT"
+}
+
 PIDS=()
 start() { local name=$1; shift; setsid "$@" > "$OUT/$name.log" 2>&1 & PIDS+=($!); }
 stop_all() {
@@ -104,13 +139,57 @@ start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$STAND_PRO
 start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0
 start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
   -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0}
-start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE
+NAV_ARGS=()
+if [ "${MULTI_STAND_PATH_PLANNER:-0}" = 1 ]; then
+  NAV_ARGS=(-p wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json -p use_path_planner:=true)
+fi
+start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE ${NAV_ARGS[@]+"${NAV_ARGS[@]}"}
+if [ "${MULTI_STAND_WALL_DOCK:-0}" = 1 ]; then
+  start wall_docking ros2 run stand_navigator wall_docking_node --ros-args -p base_profile:=$PROFILE
+  python3 - "$OUT/data/wall_pass_coverage_scene.json" "$OUT/wall_scene_odom.yaml" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d['frame_id'] = 'odom'
+open(sys.argv[2], 'w').write(json.dumps({'data': json.dumps(d)}))
+PYEOF
+  start wall_scene_pub ros2 topic pub -r 1 --qos-durability transient_local --qos-reliability reliable \
+    /wall_detector/wall_scene std_msgs/msg/String "$(cat "$OUT/wall_scene_odom.yaml")"
+fi
+
+# 0. MULTI_STAND_PERCEPTION=1: the planner's wall scene is detected, not read from the baked file
+PLAN_SCENE=$OUT/data/wall_pass_coverage_scene.json
+if [ "${MULTI_STAND_PERCEPTION:-0}" = 1 ]; then
+  WD=$(ros2 pkg prefix wall_detector)/lib/wall_detector
+  PERC=$OUT/perception
+  mkdir -p "$PERC"; rm -f "$PERC/wall_scene.json" "$PERC/walls.pcd" "$PERC/wall_scene_crop.json"
+  if python3 -c "import json,sys; sys.exit(0 if json.load(open('$PLAN_SCENE')).get('obstacles') else 1)"; then
+    echo "WARNING: MULTI_STAND_PERCEPTION: the scenario has obstacles, wall_detector reports none: they are not planned around" >&2
+  fi
+  start perception_cloud python3 "$WD/pcd_to_cloud.py" "$OUT/data/walls_sim.pcd" --topic /perception/points --frame odom --rate 5
+  CLOUD_PID=${PIDS[-1]}
+  start wall_detector ros2 launch wall_detector wall_detector.launch.py cloud_topic:=/perception/points \
+    target_frame:=odom output_dir:=$PERC accumulate_frames:=5
+  DET_PID=${PIDS[-1]}
+  for _ in $(seq 240); do [ -s "$PERC/wall_scene.json" ] && [ -s "$PERC/walls.pcd" ] && break; sleep 0.5; done
+  if [ ! -s "$PERC/wall_scene.json" ]; then echo "no wall detected from the sim cloud (see $OUT/wall_detector.log)"; exit 4; fi
+  sleep 1
+  kill -INT -- "-$CLOUD_PID" "-$DET_PID" 2>/dev/null   # frozen: the plan must not change mid-run
+  grep -E "wall: n" "$OUT/wall_detector.log" | tail -1 | cut -c1-220
+  python3 "$PKG/lib/sim_mujoco/crop_wall_scene.py" "$PERC/wall_scene.json" "$PERC/wall_scene_crop.json" \
+    --y $WALL_Y0 $WALL_Y1 --z $MP_Z_LO $MP_Z_HI || exit 5
+  python3 "$WD/compare_wall_scene.py" "$PERC/wall_scene_crop.json" "$OUT/data/wall_pass_coverage_scene.json" \
+    --json "$PERC/compare.json" | tee "$PERC/compare.txt"
+  if [ "${MULTI_STAND_PERCEPTION_STRICT:-0}" = 1 ] && ! grep -q "perception check: OK" "$PERC/compare.txt"; then
+    echo "detected wall out of tolerance (MULTI_STAND_PERCEPTION_STRICT=1)"; exit 6
+  fi
+  PLAN_SCENE=$PERC/wall_scene_crop.json
+fi
 
 # 1. coverage plan for the wall's contact region, in the world frame
 rm -f "$COV"
 sleep 3
 timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args \
-  -p wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json -p output_json:=$COV \
+  -p wall_scene_json:=$PLAN_SCENE -p output_json:=$COV \
   -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${MULTI_STAND_TOOL_YAW:-$MP_TOOL_YAW} \
   -p swath_m:=${MULTI_STAND_SWATH:-0.14} -p overlap_pct:=${MULTI_STAND_OVERLAP:-15.0} -p double_pass:=${MULTI_STAND_DOUBLE_PASS:-false} ${MULTI_STAND_COVERAGE_EXTRA:-} > "$OUT/coverage_demo.log" 2>&1 &
 DEMO=$!
@@ -191,6 +270,7 @@ echo "client exit code $RC (logs in $OUT)"
 grep -E "stand [0-9]+:|arrived|not reached|contact success|dock failed|retract failed|stow|canceled|no stand" "$OUT/manager.log" | cut -c1-200
 if [ "$CANCEL_AFTER" != 0 ]; then
   echo "admittance axes after the cancel: $(ros2 param get --spin-time 5 /combined_arm_lift_controller admittance.selected_axes 2>&1 | tr '\n' ' ')"
+  summary_line
   exit $RC
 fi
 kill -INT "$REC_PID" 2>/dev/null; wait "$REC_PID" 2>/dev/null; REC_PID=
@@ -206,5 +286,6 @@ if [ -f "$REC" ]; then
   SC=$?
   echo "score exit code $SC"
 fi
+summary_line
 [ $RC -ne 0 ] && exit $RC
 exit $SC

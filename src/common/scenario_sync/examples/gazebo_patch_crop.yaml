@@ -1,0 +1,30 @@
+# The multi-stand contact-patch test: the same 3 m x 2 m wall, but only the patch y 0.3..1.2, z 1.0..1.3 (0.9 m x 0.3 m,
+# MULTI_STAND_WALL_DY 0.3, MULTI_STAND_WALL_WIDTH 0.9 and the manager's coverage_z 1.0..1.3) is planned and executed.
+# check_sync reports it as "covers 4.5 % of the wall", which is what it is.
+schema_version: 1
+name: gazebo_patch_crop
+description: Gazebo multi-stand contact-patch test, a 0.9 x 0.3 m crop of the 3 x 2 m smoke wall.
+world_frame: odom
+wall:
+  point: [0.98, 0.0, 2.0]
+  normal: [-1.0, 0.0, 0.0]
+  u_range: [-1.5, 1.5]
+  v_range: [0.0, 2.0]
+patch:
+  mode: crop
+  u_range: [0.3, 1.2]      # y 0.3 .. 1.2
+  v_range: [0.7, 1.0]      # z 1.3 .. 1.0 (v = 2.0 - z)
+base:
+  x: 0.0
+  y: 0.0
+  yaw: 0.0
+  standoff_m: 0.98
+robot_profile: ur10e_telescopic
+tool_profile: spray_gun
+lift_range_m: [0.0, 1.5]
+consumers:
+  gazebo:
+    sim_wall_offset_m: 0.065
+  mujoco: {}
+  rviz:
+    fixed_frame: odom

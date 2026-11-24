@@ -8,6 +8,7 @@
 | [modules.md](modules.md) | Module map: every package with its tier and what it needs (ROS, GPU, simulator), the dependency layers, and recipes for lifting parts out |
 | [package_layout.md](package_layout.md) | `core/` + `ros/` split per module, how modules connect (pluginlib in-process, ROS interfaces across processes) |
 | [backend_selection.md](backend_selection.md) | Choosing planning backends (MoveIt, cuRobo, VAMP) by YAML through pluginlib: config schema, plugin names, writing and registering a plugin, what each backend supports |
+| [rviz/README.md](rviz/README.md) | One RViz profile per module (`mp_rviz`), the launcher, what each shows, what no module publishes yet |
 | [design_principles.md](design_principles.md) | Rules and lessons learned (frames, the slow lift axis, timing, safety) |
 | [curobo_v2_notes.md](curobo_v2_notes.md) | cuRobo v2 API, scene/perception inputs, how it maps onto our ports |
 | [vamp_notes.md](vamp_notes.md) | VAMP: what it does, upstream state, robot generation, our wrapper layout |
@@ -21,6 +22,7 @@
 | [robot_description.md](robot_description.md) | Generic base + lift + N-DOF arm + tool description, swap contracts, profile YAML (group/joint names, DOF), UR10e / generic 6-DOF / Panda-like 7-DOF arms |
 | [moveit_config.md](moveit_config.md) | MoveIt config: groups, controller, collision matrix, demo, smoke test, findings |
 | [reachability.md](reachability.md) | RM4D reachability / inverse reachability module: base stationing, lift bands, feasibility pre-filter |
+| [standoff.md](standoff.md) | Standoff advisor: reachable fraction and pose quality versus base-to-wall distance on an RM4D map, the robust recommended distance (plateau shrunk by the navigation tolerance), how to feed it into the stand search, `WallDock` and the sims, results on the UR10e and the smoke wall, limits |
 | [robot_self_filter.md](robot_self_filter.md) | Generic module that removes the robot's own body from sensor data: port, implementations, contact-mode and time-alignment rules, evaluation |
 | [learned_recovery.md](learned_recovery.md) | Research on recovery to a known state: RL, imitation learning, MPC, safety filters; recommended staged architecture |
 | [behavior_tree_evaluation.md](behavior_tree_evaluation.md) | BehaviorTree.CPP for the manager: availability in Jazzy, state map, target tree, prototype results, recommendation (adopt later) |
@@ -31,7 +33,9 @@
 | [perception_live.md](perception_live.md) | Live perception slice: simulated ray-cast depth sensor in MuJoCo, `wall_detector` (point cloud to `wall_scene.json` and a MoveIt box), the check script and its limits |
 | [how_to_read_a_run.md](how_to_read_a_run.md) | The files a MuJoCo manager pass writes (`manager.log` segment lines, `run.csv`, the score card, the film npz), what each field means and where the code writes it, with the two-stand pass as the worked example |
 | [sim_mujoco.md](sim_mujoco.md) | MuJoCo 4 simulation backend: ros2_control plugin (hardware:=mujoco), MJCF and wall world generators, raw wrist F/T and ground truth, smoke test, limits |
+| [scenario_sync.md](scenario_sync.md) | One `scenario.yaml` for Gazebo, MuJoCo, RViz and the coverage plan: generator, sync checker, and what disagrees today (plane, extents, frames, base start) |
 | [sim_gazebo.md](sim_gazebo.md) | Gazebo Harmonic backend (`hardware:=gazebo`): headless launch, wall worlds from wall_scene.json, raw F/T sensor and ground-truth contact wrench, smoke test, limits |
+| [sim_overlay.md](sim_overlay.md) | Coverage plan columns and stand poses drawn inside Gazebo (gz-sim /marker) and MuJoCo (viewer user_scn); host-tested only, never run in a simulator |
 | [hardware_bringup.md](hardware_bringup.md) | Commissioning procedure for the force path on a real arm and sensor (sign and frame checks, payload identification, limits, slow first contact), abort thresholds, what the simulations do not model; nothing verified on hardware. Parameter template: [`hardware_template.yaml`](../src/control/compliant_trajectory_controller/config/hardware_template.yaml) |
 | [lift.md](lift.md) | Driving the one lift joint: `lift_hardware` (home on connect, stroke clamp, velocity and acceleration limits, fault hold, reconnect backoff), the `LiftTransport` interface, the simulated and scripted transports, how a device transport plugs in (the device protocol is not public); the reference lift profile |
 | [calibration.md](calibration.md) | Calibration procedures in one place: F/T sign and bias, tool TCP (pivot calibration), payload services, wall plane, base-to-wall; nothing verified on hardware |

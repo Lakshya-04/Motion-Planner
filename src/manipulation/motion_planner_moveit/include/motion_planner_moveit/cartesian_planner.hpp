@@ -65,6 +65,18 @@ public:
   IkResult ik(const IkRequest & request) override;
   CollisionResult collision(const CollisionRequest & request) override;
 
+  /// Opt-in (plugin param `cartesian_joint_goal`, default off): a request that has only a JOINT goal (stow, a
+  /// seeded-IK approach) is no longer refused with "missing_target_poses". The goal's tool pose (forward
+  /// kinematics) is walked in a straight line from the start; the result counts only when the whole line was found
+  /// (fraction 1, the segment's own min_path_fraction is ignored) and its last state is within `tolerance`
+  /// (rad or m, per joint) of the goal state, i.e. on the goal's own IK branch. Otherwise it fails and the caller
+  /// falls back to the free-space planner exactly as before. Not used when the request has a wall reference.
+  void setJointGoalMode(bool enabled, double tolerance)
+  {
+    joint_goal_mode_ = enabled;
+    joint_goal_tolerance_ = tolerance;
+  }
+
   /// Public so the RAII restore guard in cartesian_planner.cpp (an
   /// anonymous-namespace helper, not a member) can call it from its
   /// destructor -- see setWallContactAcmEntry's doc comment below for the
@@ -131,6 +143,8 @@ private:
   bool applyFallbackTimeParameterization(moveit_msgs::msg::RobotTrajectory & trajectory_msg) const;
 
   std::shared_ptr<MoveItPlanningBackend> backend_;
+  bool joint_goal_mode_{false};
+  double joint_goal_tolerance_{0.05};
 
   /// Cached views, refreshed from backend_ by ensureMoveGroup()/
   /// ensurePlanningSceneMonitor()/ensurePlanningSceneInterface() -- kept so
