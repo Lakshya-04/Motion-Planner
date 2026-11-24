@@ -173,6 +173,23 @@ inline double idealLift(double current, const DockReachContext & c, const DockIk
   return std::min(std::max(v, lo), hi);
 }
 
+/// The configuration the branch check and the cost of a dock are measured against: the previous dock when there is
+/// one; for the first dock of a stand the configured dock seed (the arm branch known to dock at the wall) when it
+/// has the joint count of the live state, else the live state. Measuring the first dock against the live state (the
+/// arm stowed, elbow folded one way) rejects the configured branch as a "branch change" and keeps the stow branch,
+/// which for a low target (tall wall, tool well below the arm base) puts the upper arm into the lift carriage.
+inline const std::vector<double> & dockBranchReference(
+  const std::vector<double> & previous_dock, const std::vector<double> & dock_seed, const std::vector<double> & live)
+{
+  if (!previous_dock.empty()) {
+    return previous_dock;
+  }
+  if (!dock_seed.empty() && dock_seed.size() == live.size()) {
+    return dock_seed;
+  }
+  return live;
+}
+
 /// Runs `ik` from every seed (empty seeds are skipped) and returns the cheapest acceptable solution relative to
 /// `reference`. Ties go to the earlier seed. With `reach` set and the preference on (see the header comment) the
 /// seeds are followed by one lift-adjusted copy of each, and candidates at or under the target reach fraction win.
