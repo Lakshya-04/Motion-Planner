@@ -334,6 +334,19 @@ A spray pass is filmed the same way (`MANAGER_PASS_FILM=1 SPRAY_PASS_LAUNCH_ARGS
 the wall (`--standoff`, `--half-angle` set their size; the sim has no spray, this is the scorer's model). The result is in
 [Spray pass](#spray-pass-non-contact-tool).
 
+## One command: cuRobo pass
+
+`docker/tools/mv_curobo_run.sh <name> <worktree>` (queued with `docker/tools/mv_curobo_queue.sh <prio> <name> <worktree> [VAR=val ...]`)
+does the steps of the next section as one simulator-queue job: builds the manager with `curobo_planner` and `curobo_bridge_msgs` in
+the sim image, builds `curobo_bridge` + `curobo_bridge_msgs` with the fast image into `$INFRA/curobo_ws/install` (same lock as the
+build queue), starts the node (`--max-boxes 3000`, same `ROS_DOMAIN_ID` and `--ipc host` as the sim, only when the slots script says
+`node YES`), runs the visible multi-stand pass as uid 1000 with a copy of `planning_curobo.yaml` (per-call timeout 300 s,
+`free_space_fallback: moveit_ompl`) and `MANAGER_PASS_CUROBO_WORLD=1`, and always stops the node, keeping its log
+(`<name>_curobo_node.log`). `MULTI_STAND_*` variables pass through; `CUROBO_OPTIMIZE=1 CUROBO_TIME_BUDGET=S CUROBO_CANDIDATES=N
+CUROBO_OBJECTIVE=length|duration` select the optimal mode ([curobo_free_space_optimal.md](curobo_free_space_optimal.md)).
+Compare with the MoveIt run of the same scenario using `docker/tools/run_report.py <run dir>` on each. Host check only
+(`bash -n`, `docker/tools/tests/test_mv_curobo_scripts.py`); the job itself is unrun until it is queued and has a slot.
+
 ## Running a pass with cuRobo as the planner
 
 First run 2026-11-20 (single-stand pass, `run_manager_pass.sh`, MuJoCo, one run): the node came up, the wall cloud loaded, the manager logged `free_space=curobo`, and the pass passed (4 of 4 columns, coverage 1.0, peak 19.9 N). The only free-space segment of a single-stand pass is `prime_continuity` (a move to the current state); it reached cuRobo (`fsp_backend=curobo`) and was refused `invalid_request` at precheck (no start joint state in the request, most likely: MoveIt fills in the current state, cuRobo needs one), after which every segment was Cartesian on MoveIt. So that pass barely exercises cuRobo; a multi-stand pass (approach, stow, between-stand moves) is the real test and needs the cloud posed per stand (`source_frame`, not wired into those scripts yet). It makes cuRobo v0.9.0 the free-space planner of the manager in a
