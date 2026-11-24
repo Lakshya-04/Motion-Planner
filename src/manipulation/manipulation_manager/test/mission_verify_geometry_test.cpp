@@ -157,3 +157,21 @@ TEST(MissionVerifyStands, GeometryNullWhenNotComputed)
   EXPECT_TRUE(j["stands"][0]["geometric_coverage_percent"].is_null());
   EXPECT_DOUBLE_EQ(j["stands"][0]["column_percent"].get<double>(), 100.0);
 }
+
+TEST(MissionVerifyStands, WallDockBlockCarriesTheMeasuredGapAndYaw)
+{
+  auto in = clean();
+  EXPECT_FALSE(missionVerifyToJson(buildMissionVerify(in), in).contains("wall_dock"));
+  WallDockOutcome o;
+  o.ok = true;
+  o.attempts = 2;
+  o.measured = true;
+  o.standoff_error_m = -0.012;
+  o.yaw_error_rad = 0.03;
+  in.wall_dock[1] = o;
+  const auto j = missionVerifyToJson(buildMissionVerify(in), in);
+  ASSERT_EQ(j["wall_dock"].size(), 1u);
+  EXPECT_EQ(j["wall_dock"][0]["stand"], 1);
+  EXPECT_DOUBLE_EQ(j["wall_dock"][0]["wall_gap_error_m"].get<double>(), -0.012);
+  EXPECT_DOUBLE_EQ(j["wall_dock"][0]["wall_yaw_error_rad"].get<double>(), 0.03);
+}

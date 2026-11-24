@@ -6,6 +6,7 @@
 #   deps  : every package dependency, resolved by rosdep from the package.xml files
 #           (cached layer: only re-runs when a package.xml or apt-extra.txt changes)
 #   dev   : deps + developer tools + non-root user matching the host UID
+#   (every stage inherits ccache + mold + the CCACHE_*/launcher ENV from base; see docs/docker.md)
 #   build : deps + the workspace built and tested with colcon (CI-style, no GPU needed)
 #   gpu   : dev + CUDA-enabled PyTorch + cuRobo v2 pinned (needs the NVIDIA container runtime)
 #   sim-gazebo : deps + Gazebo Harmonic (ros_gz, gz_ros2_control) for the headless simulation backend
@@ -29,8 +30,24 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake ninja-build git curl ca-certificates \
       python3-colcon-common-extensions python3-rosdep python3-vcstool \
-      python3-pip python3-venv \
+      python3-pip python3-venv ccache mold \
     && rm -rf /var/lib/apt/lists/*
+
+# Compiler cache and fast linker, the default for every build in every stage below.
+# /ccache is world-writable (1777) so any UID can use it; callers mount a host dir or volume there
+# (docker/compose.yaml, docs/docker.md "Compiler cache (default)"). CMake >= 3.17 reads the
+# CMAKE_<LANG>_COMPILER_LAUNCHER environment variables; the colcon defaults file repeats the launchers and
+# adds mold, so a plain `colcon build` is cached. COMPILERCHECK=content makes identical toolchains share hits.
+ENV CCACHE_DIR=/ccache \
+    CCACHE_MAXSIZE=6G \
+    CCACHE_COMPILERCHECK=content \
+    CCACHE_BASEDIR=/ws \
+    CMAKE_C_COMPILER_LAUNCHER=ccache \
+    CMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    CMAKE_CUDA_COMPILER_LAUNCHER=ccache \
+    COLCON_DEFAULTS_FILE=/etc/colcon/defaults.yaml
+COPY docker/colcon-defaults.yaml /etc/colcon/defaults.yaml
+RUN mkdir -p /ccache && chmod 1777 /ccache
 
 WORKDIR /ws
 
@@ -70,7 +87,7 @@ ARG GID=1000
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-      gdb valgrind clang-format clang-tidy ccache sudo nano less \
+      gdb valgrind clang-format clang-tidy sudo nano less \
       ros-${ROS_DISTRO}-rviz2 ros-${ROS_DISTRO}-rqt-graph \
     && rm -rf /var/lib/apt/lists/* \
     && (getent passwd ${UID} && userdel -r $(getent passwd ${UID} | cut -d: -f1) || true) \
@@ -91,7 +108,8 @@ CMD ["bash"]
 FROM deps AS build
 COPY docker/build.sh /usr/local/bin/mp-build
 COPY src/ /ws/src/
-RUN chmod +x /usr/local/bin/mp-build && mp-build test
+RUN --mount=type=cache,target=/ccache,sharing=locked,mode=1777 \
+    chmod +x /usr/local/bin/mp-build && mp-build test
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
@@ -106,8 +124,12 @@ ARG UID=1000
 ARG GID=1000
 USER root
 COPY docker/requirements-gpu.txt /tmp/requirements-gpu.txt
+# PATH=/usr/lib/ccache puts ccache in front of gcc/g++ for extension builds (torch cpp_extension / ninja, pip
+# sdists); CUDA_HOME-based nvcc steps are cached through CMAKE_CUDA_COMPILER_LAUNCHER where CMake drives them.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m venv --system-site-packages /opt/venv \
+    --mount=type=cache,target=/ccache,sharing=locked,mode=1777 \
+    export PATH=/usr/lib/ccache:$PATH \
+    && python3 -m venv --system-site-packages /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
     && /opt/venv/bin/pip install -r /tmp/requirements-gpu.txt \
     && chown -R ${UID}:${GID} /opt/venv
@@ -124,7 +146,8 @@ ARG USERNAME=dev
 USER root
 COPY docker/requirements-sim.txt /tmp/requirements-sim.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    /opt/venv/bin/pip install -r /tmp/requirements-sim.txt \
+    --mount=type=cache,target=/ccache,sharing=locked,mode=1777 \
+    PATH=/usr/lib/ccache:$PATH /opt/venv/bin/pip install -r /tmp/requirements-sim.txt \
     && chown -R ${USERNAME}: /opt/venv
 USER ${USERNAME}
 
@@ -149,12 +172,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 FROM deps AS vamp-build
 ARG VAMP_REF=27cb9b66ebd8d101ce88d330f3b028398afc1cfa
 ARG VAMP_ARCH="-march=x86-64-v3 -mavx2"
-RUN git clone https://github.com/KavrakiLab/vamp.git /tmp/vamp \
+RUN --mount=type=cache,target=/ccache,sharing=locked,mode=1777 \
+    git clone https://github.com/KavrakiLab/vamp.git /tmp/vamp \
     && git -C /tmp/vamp checkout ${VAMP_REF} \
     && cmake -S /tmp/vamp -B /tmp/vamp/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
          -DVAMP_ARCH="${VAMP_ARCH}" -DVAMP_BUILD_PYTHON_BINDINGS=OFF \
          -DVAMP_BUILD_CPP_DEMO=OFF -DVAMP_BUILD_TESTS=OFF \
          -DCMAKE_INSTALL_PREFIX=/opt/vamp \
+         -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=mold \
     && cmake --build /tmp/vamp/build \
     && cmake --install /tmp/vamp/build \
     # Upstream's install step ships only its own headers, but they include the headers of the

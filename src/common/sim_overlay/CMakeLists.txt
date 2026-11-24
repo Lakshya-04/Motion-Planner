@@ -11,6 +11,7 @@ install(PROGRAMS
   scripts/overlay_dump.py
   scripts/coverage_paint.py
   scripts/coverage_replay.py
+  scripts/touch_up_plan.py
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
@@ -21,6 +22,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_overlay test/test_overlay.py)
   ament_add_pytest_test(test_gz_commands test/test_gz_commands.py)
   ament_add_pytest_test(test_coverage_paint test/test_coverage_paint.py)
+  ament_add_pytest_test(test_touch_up test/test_touch_up.py)
   ament_add_pytest_test(test_mujoco_overlay test/test_mujoco_overlay.py)
 endif()
 

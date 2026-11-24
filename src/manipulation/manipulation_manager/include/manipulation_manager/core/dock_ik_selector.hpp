@@ -21,6 +21,11 @@
 // the fraction at or under the target (idealLift), and a candidate at or under the target beats any above it whatever
 // its cost; the cost orders candidates on the same side of the target. No candidate under the target: the cheapest
 // one as without the preference (reach_over_target is set). Off by default; nothing here changes then.
+//
+// Next-best distinct candidate (column retry): with a DockIkExclusion the solutions already used (the ones a failed
+// attempt docked with) are dropped when they lie within tol_rad (max wrapped |dq|) of a candidate, so the winner is
+// the cheapest candidate that differs from them; with allow_branch_change the branch test is skipped too, which lets
+// the other IK branch through (the wrist and cost limits still apply). No exclusion: nothing changes.
 #pragma once
 
 #include <algorithm>
@@ -57,6 +62,14 @@ struct DockReachContext
   double z_rel_m{0.0};        ///< tool goal height minus the arm base height at zero lift
 };
 
+/// Solutions to stay away from (column retry): see the header comment.
+struct DockIkExclusion
+{
+  std::vector<std::vector<double>> used;   ///< earlier solutions; a candidate within tol_rad of one is dropped
+  double tol_rad{0.05};
+  bool allow_branch_change{false};
+};
+
 struct DockIkChoice
 {
   bool ok{false};
@@ -67,6 +80,7 @@ struct DockIkChoice
   size_t rejected_branch{0};
   size_t rejected_wrist{0};
   size_t rejected_cost{0};
+  size_t rejected_excluded{0};   ///< candidates equal (within tol) to an already used solution
   double reach_fraction{-1.0};   ///< tool distance / reach_m of the choice; -1 when the preference is off
   bool reach_over_target{false}; ///< preference on, but no acceptable candidate was at or under the target
 };
@@ -84,7 +98,12 @@ inline double wrapToPi(double a)
   return a - M_PI;
 }
 
-/// max_i |dq_i| between `q` and `ref`, wrapping every joint that is not linear. Infinity on a size mismatch.
+inline bool allFiniteJoints(const std::vector<double> & q)
+{
+  return std::all_of(q.begin(), q.end(), [](double x) {return std::isfinite(x);});
+}
+
+/// max_i |dq_i| between `q` and `ref`, wrapping every joint that is not linear. Infinity on a size mismatch or a non-finite joint.
 inline double dockIkCost(
   const std::vector<double> & q, const std::vector<double> & ref, const DockIkSelectorParams & p)
 {
@@ -96,6 +115,9 @@ inline double dockIkCost(
     double d = q[i] - ref[i];
     if (std::find(p.linear_joints.begin(), p.linear_joints.end(), i) == p.linear_joints.end()) {
       d = wrapToPi(d);
+    }
+    if (std::isnan(d)) {
+      return INFINITY;   // std::max(worst, NaN) keeps `worst`, so a NaN joint would look free
     }
     worst = std::max(worst, std::fabs(d));
   }
@@ -173,10 +195,11 @@ inline const std::vector<double> & dockBranchReference(
 /// seeds are followed by one lift-adjusted copy of each, and candidates at or under the target reach fraction win.
 inline DockIkChoice selectDockIk(
   const DockIkFn & ik, const std::vector<std::vector<double>> & seeds_in, const std::vector<double> & reference,
-  const DockIkSelectorParams & p, const DockReachContext * reach = nullptr)
+  const DockIkSelectorParams & p, const DockReachContext * reach = nullptr,
+  const DockIkExclusion * exclusion = nullptr)
 {
   DockIkChoice best;
-  if (!ik || reference.empty()) {
+  if (!ik || reference.empty() || !allFiniteJoints(reference)) {
     return best;
   }
   const bool prefer = reach != nullptr && dockReachPreferenceOn(p) && p.lift_joint < reference.size();
@@ -186,15 +209,17 @@ inline DockIkChoice selectDockIk(
       if (sd.size() == reference.size()) {
         auto adj = sd;
         adj[p.lift_joint] = idealLift(sd[p.lift_joint], *reach, p);
-        seeds.push_back(std::move(adj));
+        if (std::isfinite(adj[p.lift_joint])) {
+          seeds.push_back(std::move(adj));
+        }
       }
     }
     best.reach_fraction = INFINITY;
   }
   bool best_under = false;
   for (size_t s = 0; s < seeds.size(); ++s) {
-    if (seeds[s].empty()) {
-      continue;
+    if (seeds[s].empty() || !allFiniteJoints(seeds[s])) {
+      continue;   // a NaN seed would send the IK nowhere
     }
     const auto sol = ik(seeds[s]);
     if (!sol || sol->size() != reference.size()) {
@@ -208,12 +233,25 @@ inline DockIkChoice selectDockIk(
         continue;
       }
     }
-    if (dockBranchChanged(*sol, reference, p)) {
+    if (exclusion != nullptr) {
+      bool seen = false;
+      for (const auto & u : exclusion->used) {
+        if (dockIkCost(*sol, u, p) <= exclusion->tol_rad) {
+          seen = true;
+          break;
+        }
+      }
+      if (seen) {
+        ++best.rejected_excluded;
+        continue;
+      }
+    }
+    if (!(exclusion != nullptr && exclusion->allow_branch_change) && dockBranchChanged(*sol, reference, p)) {
       ++best.rejected_branch;
       continue;
     }
     const double cost = dockIkCost(*sol, reference, p);
-    if (cost > p.max_dq_rad) {
+    if (!(cost <= p.max_dq_rad)) {   // also rejects a NaN cost or limit
       ++best.rejected_cost;
       continue;
     }

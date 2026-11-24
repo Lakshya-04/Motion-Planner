@@ -119,6 +119,28 @@ TEST(MissionVerify, WritesAFileAndRefusesAnEmptyOrBadPath)
   EXPECT_FALSE(writeMissionVerify("/nonexistent_dir_xyz/r.json", {}));
 }
 
+TEST(MissionVerifyRetry, ResultCarriesThePerColumnAttempts)
+{
+  MissionVerifyInput in;
+  in.loaded = true;
+  in.done = {0, 1};
+  in.column_retry.enabled = true;
+  in.column_retry.max_retries = 1;
+  ColumnAttemptRecord a;
+  a.column = 1;
+  a.attempt = 1;
+  a.variant = "fresh_stow+next_ik";
+  a.outcome = ColumnOutcome::kDone;
+  in.column_retry.attempts.push_back(a);
+  in.column_retry.final_outcome[1] = ColumnOutcome::kDone;
+  const auto j = missionVerifyToJson(buildMissionVerify(in), in);
+  ASSERT_TRUE(j.contains("column_retries"));
+  EXPECT_EQ(j["column_retries"]["attempts"][0]["variant"], "fresh_stow+next_ik");
+  EXPECT_EQ(j["column_retries"]["columns"][0]["final_outcome"], "done");
+  MissionVerifyInput off;
+  EXPECT_FALSE(missionVerifyToJson(buildMissionVerify(off), off).contains("column_retries"));
+}
+
 TEST(ExecuteCoverageFeedback, CarriesTheMissionFsmState)
 {
   coverage_task_msgs::action::ExecuteCoverage::Feedback fb;

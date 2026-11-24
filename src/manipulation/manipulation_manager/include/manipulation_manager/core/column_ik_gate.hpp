@@ -20,6 +20,7 @@
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <utility>
@@ -121,6 +122,9 @@ public:
     for (const double lift : config_.lift_candidates) {
       if (config_.lift_joint >= seed.size()) {
         break;
+      }
+      if (!std::isfinite(lift)) {
+        continue;   // never hand a NaN / inf lift height to the IK or back as the dock seed
       }
       std::vector<double> s = seed;
       s[config_.lift_joint] = lift;

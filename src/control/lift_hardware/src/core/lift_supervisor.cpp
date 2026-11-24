@@ -13,6 +13,7 @@ namespace
 constexpr double kLandedEps = 1e-9;
 constexpr double kMaxShapeStepS = 0.25;
 constexpr double kReadingMarginM = 0.01;
+constexpr double kMaxStrokeM = 100.0;  // a device claiming more travel than this is lying (1e300 m overflowed the velocity estimate)
 }  // namespace
 
 const char * to_string(Phase phase)
@@ -68,7 +69,7 @@ void LiftSupervisor::try_connect(double now_s)
   if (fault == Fault::kNone) {
     fault = transport_->read_stroke(stroke);
   }
-  if (fault == Fault::kNone && !(std::isfinite(stroke) && stroke > 0.0)) {
+  if (fault == Fault::kNone && !(std::isfinite(stroke) && stroke > 0.0 && stroke <= kMaxStrokeM)) {
     fault = Fault::kOutOfRange;
   }
   if (fault != Fault::kNone) {
@@ -210,15 +211,16 @@ void LiftSupervisor::poll_homing(double now_s)
     snapshot_.phase = Phase::kReady;
     snapshot_.homed = true;
     snapshot_.velocity_mps = 0.0;
-    reference_ = {reading.height_m, 0.0};
-    target_m_ = reading.height_m;
+    const double inside = std::clamp(reading.height_m, 0.0, snapshot_.stroke_m);   // a reading may be a hair outside
+    reference_ = {inside, 0.0};
+    target_m_ = inside;
     last_sent_m_ = home;
     sent_any_ = true;
     last_send_s_ = now_s;
     shaping_started_ = false;
     at_target_ = true;
     out_of_tolerance_ = false;
-    snapshot_.reference_m = reading.height_m;
+    snapshot_.reference_m = inside;
   }
 }
 
@@ -273,11 +275,18 @@ void LiftSupervisor::command(double now_s, double target_m)
     shaping_started_ ? std::clamp(now_s - last_shape_s_, 0.0, kMaxShapeStepS) : 0.0;
   if (!shaping_started_) {
     shaping_started_ = true;
-    reference_ = {snapshot_.height_m, 0.0};
+    // a reading may sit a little outside [0, stroke] (the sanity margin): the reference starts inside the travel
+    reference_ = {std::clamp(snapshot_.height_m, 0.0, snapshot_.stroke_m), 0.0};
   }
   last_shape_s_ = now_s;
   reference_ = advance_toward(
     reference_, target_m_, config_.max_velocity_mps, config_.max_acceleration_mps2, dt);
+  // A target that reverses while the reference runs toward a travel end brakes past it (v^2 / 2a): the shaped
+  // reference, and so every height sent to the device, stays inside [0, stroke]; at the end it stops.
+  if (reference_.position < 0.0 || reference_.position > snapshot_.stroke_m) {
+    reference_.position = std::clamp(reference_.position, 0.0, snapshot_.stroke_m);
+    reference_.velocity = 0.0;
+  }
   snapshot_.reference_m = reference_.position;
   at_target_ = std::abs(reference_.position - target_m_) < kLandedEps;
 
