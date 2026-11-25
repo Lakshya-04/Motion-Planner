@@ -24,7 +24,7 @@ std::shared_ptr<ExecutionPort> wrapWithRetiming(
   // 0 jerk = unlimited (TOTG bang-bang accel, jolts). With transition_jerk 0 the limit per joint is
   // ratio * its acceleration limit (full accel reached in 1/ratio s); ratio 0 restores pure TOTG.
   const double transition_jerk_ratio =
-    std::max(0.0, node->declare_parameter<double>("retime_transition_jerk_ratio", 4.0));
+    std::max(0.0, node->declare_parameter<double>("retime_transition_jerk_ratio", 0.0));
   const double vel_scale = std::clamp(node->declare_parameter<double>("retime_vel_scale", 1.0), 0.01, 1.0);
 
   robot_model_loader::RobotModelLoader loader(node, "robot_description");

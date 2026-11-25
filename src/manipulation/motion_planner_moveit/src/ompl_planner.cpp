@@ -26,11 +26,11 @@ namespace motion_planner
 namespace
 {
 // Peak jerk of a free-space transition = ratio x the joint's acceleration limit (full accel in 1/ratio s).
-// MP_TRANSITION_JERK_RATIO=0 restores bang-bang TOTG.
+// Default 0 = bang-bang TOTG (smoothing is opt-in: MP_TRANSITION_JERK_RATIO=4 turns it on; the sim run showed Ruckig failures).
 double transitionJerkRatioFromEnv()
 {
   const char * v = std::getenv("MP_TRANSITION_JERK_RATIO");
-  return v ? std::atof(v) : 4.0;
+  return v ? std::atof(v) : 0.0;  // opt-in: default off, Ruckig failed on short moves in the sim
 }
 const double kTransitionJerkRatio = transitionJerkRatioFromEnv();
 }  // namespace

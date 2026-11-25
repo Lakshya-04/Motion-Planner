@@ -411,7 +411,7 @@ bool CartesianPlanner::applyFallbackTimeParameterization(
     // TOTG is bang-bang in acceleration; round it with Ruckig (jerk = ratio x accel limit per joint).
     // A failure keeps the TOTG timing.
     const char * env = std::getenv("MP_TRANSITION_JERK_RATIO");
-    const double ratio = env ? std::atof(env) : 4.0;
+    const double ratio = env ? std::atof(env) : 0.0;  // opt-in
     const auto * jmg = rt.getGroup();
     if (ratio > 0.0 && jmg) {
       std::unordered_map<std::string, double> vel, acc, jerk;

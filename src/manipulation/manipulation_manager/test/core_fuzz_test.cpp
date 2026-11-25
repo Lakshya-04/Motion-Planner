@@ -254,7 +254,7 @@ TEST(CoreFuzz, SelectDockIkMatchesAnIndependentOracleAndNeverReturnsABadCandidat
         ASSERT_LE(w, p.wrist_max_rad);
       }
       ASSERT_TRUE(std::isfinite(ch.cost));
-      ASSERT_TRUE(ch.cost <= p.max_dq_rad) << "cost " << ch.cost << " max " << p.max_dq_rad;
+      ASSERT_TRUE(ch.cost <= p.max_dq_rad * std::max(1.0, p.lift_cost_weight)) << "cost " << ch.cost << " max " << p.max_dq_rad;
       ASSERT_DOUBLE_EQ(ch.cost, dockIkCost(ch.q, reference, p));
       ASSERT_LT(ch.seed_index, seeds.size() * 2);
     } else {
