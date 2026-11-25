@@ -35,6 +35,7 @@ The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/
   [CHANGELOG.md](CHANGELOG.md) and [docs/ROADMAP.md](docs/ROADMAP.md#19-since-143-what-merged-and-what-it-is-worth).
 - **Navigation and perception are the weakest links.** The base drives a straight line to each stand on ground-truth simulator odometry (no map, no obstacle avoidance, no localisation, no Nav2), wall docking and `wall_detector` are not started in the two-stand passes (the wall is pre-baked), and the self filter is not in any pass. [docs/navigation_and_perception.md](docs/navigation_and_perception.md) has the component table and the ordered gap list.
 - **Nothing has run on hardware.**
+- What is untested on real hardware, in commissioning order: [docs/hardware_readiness.md](docs/hardware_readiness.md).
 - Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md); the handoff: [docs/dev_handoff.md](docs/dev_handoff.md); the order of
   the next themes: [docs/development_plan.md](docs/development_plan.md).
 
