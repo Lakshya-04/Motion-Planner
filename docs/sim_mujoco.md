@@ -777,7 +777,20 @@ the likely reason it rests closer: the tool rest depends on the arm configuratio
 data: why the tool rests 5 to 11 mm above the unload reference (0.5385 m) and not on it. The force at the release
 line is 0.0 N and the tool speed 1.5 to 10 mm/s in every run, so the speed criterion does not separate the runs.
 Change: `unload_m` default 0.01 to 0.02 m, so the rest position is about 10 mm further from the wall and the same bump
-leaves 6 mm of air. This is a fix derived from the numbers above and has NOT been run in the simulator.
+leaves 6 mm of air.
+
+Verified in MuJoCo (single stand, scored with `--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0`): xArm 7 x3 all 4/4 columns,
+coverage 1.0, tilt at most 1.04 deg, wall gap at most 0.8 mm. The retract handover spike is gone in 12/12 xArm columns (0.0 N from
+the end of the unload through the retract). UR10e x2: 4/4 columns, peaks 19.8 / 20.0 N, unchanged. Scored peaks of the xArm runs
+were 27.2 / 66.9 / 39.6 N, so xArm is NOT clean by a 40 N rule: run x2 (the other arm branch) has 25 to 67 N inside the contact
+stroke of columns 0 and 1 from the first contact sample, a different mechanism from the retract spike, and x3 has one 39.6 N
+spike at the end of a stroke.
+
+Tried and rejected: an opt-in joint-limit margin for the dock IK (`dock_ik_min_limit_margin_rad`, branches
+`fix/xarm-dock-limit-margin`, `feat/dock-ik-limit-margin`). Hypothesis: x2 docks with joint 2 on its lower stop. With
+`dock_ik_continuity` on and a 0.1 rad margin (3 xArm 7 runs) all columns still succeed but the stroke spikes stay (40 to 200 N
+mid-stroke); continuity alone (margin off, 3 runs) gave peaks of 24.5 / 20.1 N and more. The margin did not remove the spikes and
+made the worst run worse, so it was not merged. The cause of the mid-stroke xArm spikes is still unexplained.
 
 - The tool pad in the planner (`generic_tool.xacro`): the planner's tool used to be a 0.1 m mount cylinder with a bare TCP frame
   at 0.165 m and no pad, while the simulator adds a 3 cm radius, 1 cm thick pad disc at the TCP, so MoveIt believed the tool
