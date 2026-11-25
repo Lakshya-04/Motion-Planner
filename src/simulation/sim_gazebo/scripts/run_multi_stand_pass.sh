@@ -30,7 +30,9 @@
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift configuration
 #   MULTI_STAND_DOCK_IK_SEEDED=true  seed the dock IK with MULTI_STAND_DOCK_SEED (manager `dock_ik_seeded`, default false here)
 #   MULTI_STAND_SETTLE_TIMEOUT=90  wait_arm_settled.py timeout in s at every stand arrival; MULTI_STAND_TCP_SETTLE=4.0 the manager's
-#                                  `tcp_settle_timeout_s` (s)
+#                                  `tcp_settle_timeout_s` (s); MULTI_STAND_TCP_SETTLE_TOL=0.002 its `tcp_settle_tolerance_m` (m moved in 0.4 s).
+#                                  Under jtac_position_only the joint loop has a 10 s time constant, so a tool 5 cm off its goal moves only 2 mm
+#                                  in 0.4 s and counts as settled at the default tolerance: use TOL=0.0005 with SETTLE=60 to wait for it to arrive
 #   MULTI_STAND_OBSTACLES=1        keep the stock wall's obstacle in the sim (moved out of the patch; the planner never knows it)
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
 #   MULTI_STAND_DOCK_IK_CONTINUITY=true  choose the dock joint goal among IK solutions by continuity (manager `dock_ik_continuity`, default false)
@@ -73,7 +75,7 @@ summary_line() {
     "double_pass=${MULTI_STAND_DOUBLE_PASS:-false} reach_fraction=${MULTI_STAND_REACH_FRACTION:-0.0} arm_reach=${MULTI_STAND_ARM_REACH:-1.3}" \
     "lift_stroke=${MULTI_STAND_LIFT_STROKE:-1.5} min_clearance=${MULTI_STAND_MIN_CLEARANCE:-0.0} dock_ik_continuity=${MULTI_STAND_DOCK_IK_CONTINUITY:-false}" \
     "max_span=${MULTI_STAND_MAX_SPAN:-0.5} speed=${MULTI_STAND_SPEED:-0.01} swath=${MULTI_STAND_SWATH:-0.14} overlap=${MULTI_STAND_OVERLAP:-15.0}" \
-    "tcp_settle=${MULTI_STAND_TCP_SETTLE:-4.0} wall=0.0/${DY}/${WIDTH} out=$OUT"
+    "tcp_settle=${MULTI_STAND_TCP_SETTLE:-4.0}/${MULTI_STAND_TCP_SETTLE_TOL:-0.002} wall=0.0/${DY}/${WIDTH} out=$OUT"
 }
 # the sim wall: the stock scene without its obstacle (MULTI_STAND_OBSTACLES=1 keeps it, moved out of the patch; the planner's scene never has it,
 # so with it the arm drives into an obstacle the planner does not know about)
@@ -145,6 +147,7 @@ manipulation_manager:
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
     tcp_settle_timeout_s: ${MULTI_STAND_TCP_SETTLE:-4.0}
+    tcp_settle_tolerance_m: ${MULTI_STAND_TCP_SETTLE_TOL:-0.002}
     dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-[0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708]}
     dock_ik_seeded: ${MULTI_STAND_DOCK_IK_SEEDED:-false}
     dock_ik_continuity: ${MULTI_STAND_DOCK_IK_CONTINUITY:-false}
