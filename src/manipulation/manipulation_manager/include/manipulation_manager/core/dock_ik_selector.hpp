@@ -59,6 +59,10 @@ struct DockIkSelectorParams
   size_t lift_joint{0};                     ///< index of the lift joint in a solution
   double lift_min_m{0.0};                   ///< lift stroke limits the proposed lift is clamped into
   double lift_max_m{1.5};
+  // Joint limits used by rebaseDockIk (same order as a solution); used only when their size equals the solution's,
+  // otherwise a non-linear joint is kept inside [-2*pi, 2*pi].
+  std::vector<double> joint_lower;
+  std::vector<double> joint_upper;
 };
 
 /// Where the tool goal lies relative to the arm base, for the reach preference.
@@ -134,6 +138,41 @@ inline double dockIkCost(
   return worst;
 }
 
+/// Moves every joint of `q` that is not linear to the representative q_i + 2*pi*k nearest `ref` (the same pose: the
+/// IK may return the value 2*pi away), kept inside the joint limits when `p` has them for every joint, else inside
+/// [-2*pi, 2*pi]. A joint with no representative inside the limits keeps its value. Linear joints are untouched.
+inline std::vector<double> rebaseDockIk(
+  std::vector<double> q, const std::vector<double> & ref, const DockIkSelectorParams & p)
+{
+  if (q.size() != ref.size()) {
+    return q;
+  }
+  const double two_pi = 2.0 * M_PI;
+  const bool have_limits = p.joint_lower.size() == q.size() && p.joint_upper.size() == q.size();
+  for (size_t i = 0; i < q.size(); ++i) {
+    if (std::find(p.linear_joints.begin(), p.linear_joints.end(), i) != p.linear_joints.end()) {
+      continue;
+    }
+    const double lo = have_limits ? p.joint_lower[i] : -two_pi;
+    const double hi = have_limits ? p.joint_upper[i] : two_pi;
+    // NaN / inf / absurd magnitudes (a wrap of such a value is float noise): nothing sensible to rebase
+    if (!std::isfinite(q[i]) || !std::isfinite(ref[i]) || !std::isfinite(lo) || !std::isfinite(hi) ||
+      std::fabs(q[i]) > 1e3 || std::fabs(ref[i]) > 1e3) {
+      continue;
+    }
+    double v = q[i] + two_pi * std::round((ref[i] - q[i]) / two_pi);
+    if (v > hi + 1e-9) {
+      v -= two_pi * std::ceil((v - hi - 1e-9) / two_pi);
+    } else if (v < lo - 1e-9) {
+      v += two_pi * std::ceil((lo - 1e-9 - v) / two_pi);
+    }
+    if (v >= lo - 1e-9 && v <= hi + 1e-9) {
+      q[i] = v;
+    }
+  }
+  return q;
+}
+
 /// True when some branch joint is clearly on opposite sides of zero in `a` and `b`.
 inline bool dockBranchChanged(
   const std::vector<double> & a, const std::vector<double> & b, const DockIkSelectorParams & p)
@@ -149,6 +188,34 @@ inline bool dockBranchChanged(
     }
   }
   return false;
+}
+
+/// True when `p` carries real joint limits for a solution of `n` joints (rebasing without them could leave the limits).
+inline bool dockRebaseHasLimits(const DockIkSelectorParams & p, size_t n)
+{
+  return p.joint_lower.size() == n && p.joint_upper.size() == n;
+}
+
+/// rebaseDockIk for a solution already accepted on its raw values: only with real joint limits (otherwise `raw` is
+/// returned unchanged), and a representative that would fail the wrist window or flip a branch joint keeps the raw
+/// value of that joint (the same pose, a turn away).
+inline std::vector<double> rebaseDockIkChecked(
+  const std::vector<double> & raw, const std::vector<double> & ref, const DockIkSelectorParams & p)
+{
+  if (!dockRebaseHasLimits(p, raw.size()) || raw.size() != ref.size()) {
+    return raw;
+  }
+  std::vector<double> q = rebaseDockIk(raw, ref, p);
+  if (p.wrist_joint >= 0 && static_cast<size_t>(p.wrist_joint) < q.size()) {
+    const size_t w = static_cast<size_t>(p.wrist_joint);
+    if (q[w] < p.wrist_min_rad || q[w] > p.wrist_max_rad) {q[w] = raw[w];}
+  }
+  if (dockBranchChanged(q, ref, p)) {
+    for (const size_t j : p.branch_joints) {
+      if (j < q.size()) {q[j] = raw[j];}
+    }
+  }
+  return q;
 }
 
 inline bool dockReachPreferenceOn(const DockIkSelectorParams & p)
@@ -281,6 +348,9 @@ inline DockIkChoice selectDockIk(
       best.reach_fraction = prefer ? frac : -1.0;
       best_under = under;
     }
+  }
+  if (best.ok) {
+    best.q = rebaseDockIkChecked(best.q, reference, p);
   }
   best.reach_over_target = prefer && best.ok && !best_under;
   if (prefer && !best.ok) {

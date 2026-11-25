@@ -80,6 +80,7 @@
 #include "manipulation_manager/core/recovery_jog.hpp"
 #include "manipulation_manager/core/stand_check.hpp"
 #include "manipulation_manager/core/column_chain.hpp"
+#include "manipulation_manager/core/serpentine.hpp"
 #include "manipulation_manager/core/stand_gate.hpp"
 #include "manipulation_manager/core/wall_dock_gate.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
@@ -323,6 +324,16 @@ public:
     // short chain move falls back to the normal approach, planned from where the tool really is.
     chain_columns_ = this->declare_parameter<bool>("chain_columns", false);
     chain_max_shift_m_ = this->declare_parameter<double>("chain_max_shift_m", 0.4);
+    // Serpentine columns (default off): each column keeps the direction the coverage plan gave it (up, then down, ...)
+    // and the retract backs the tool off the wall at the END of the stroke, not at its start, so the next column starts
+    // where this one finished. Off: every column runs bottom to top and the retract returns to the column's start
+    // (a full-length trip back down the wall after every stroke).
+    serpentine_columns_ = this->declare_parameter<bool>("serpentine_columns", false);
+    if (serpentine_columns_ && !dock_at_stroke_start_) {
+      RCLCPP_WARN(
+        this->get_logger(), "serpentine_columns without dock_at_stroke_start: every column docks at its middle "
+        "height, so the stroke end the retract backs off at is not where the next column docks");
+    }
     contact_y_overshoot_ = this->declare_parameter<double>("contact_y_overshoot_m", 0.045);
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
@@ -397,6 +408,12 @@ public:
     // self-collision or how badly it is conditioned at the edge of its reach, so plan_stands is asked for stands
     // group by group. 0 = the whole plan at once.
     stand_max_span_ = this->declare_parameter<double>("stand_max_span_m", 0.0);
+    // Consecutive stands closer than this (m, plan view) are merged when plan_stands finds one stand for both of
+    // their target sets (grouped requests can return stands a few cm apart). 0 = off.
+    stand_merge_tol_ = this->declare_parameter<double>("stand_merge_tol_m", 0.0);
+    // Minimum chassis-to-wall clearance (m) asked of plan_stands in every request (its min_clearance field); 0 = the
+    // planner's own default (and its stand_min_clearance_m floor).
+    stand_min_clearance_ = this->declare_parameter<double>("stand_min_clearance_m", 0.0);
     // A shell command run after each arrival at a stand, before its columns (empty = none).
     arrival_command_ = this->declare_parameter<std::string>("stand_arrival_command", "");
     // A shell command that takes the wall out of the planning scene. With it (and the arrival command, which
@@ -962,6 +979,7 @@ private:
       CoverageOutputJsonSource source(
         path, world_frame_.empty() ? frame_id_ : world_frame_, z_offset_, coverage_z_step_,
         coverage_z_min_, coverage_z_max_, coverage_eef_speed_, wall_dir_);
+      source.setFollowPlanDirection(serpentine_columns_);
       intents = source.getCoveragePlan();
     } catch (const std::exception & e) {
       out.message = std::string("cannot load the coverage plan ") + path + ": " + e.what();
@@ -1224,6 +1242,12 @@ private:
         last_good_state_ = travel_state_;   // the stowed arm: where a jog goes back to
         arm_stuck_ = false;
         chain_valid_ = false;
+        if (serpentine_columns_) {
+          // the arm was stowed for the drive and the base stands elsewhere: the docked branch of the last stand is no
+          // reference for the first dock here (it made every candidate 'wrong branch' and fell back to a raw IK solution a
+          // turn away from the stow pose)
+          dock_branch_seed_.clear();
+        }
         for (const size_t c : orderColumns(visit_columns[s], sel)) {
           if (stop()) {
             break;
@@ -1333,6 +1357,52 @@ private:
     if (stands.empty()) {
       why = "plan_stands returned no stand";
       return false;
+    }
+    if (stand_merge_tol_ > 0.0 && stands.size() > 1) {
+      std::vector<core_types::Pose> all_poses;
+      for (const auto & c : sel) {
+        all_poses.insert(all_poses.end(), c.poses.begin(), c.poses.end());
+      }
+      std::vector<MergeableStand> ms;
+      for (size_t i = 0; i < stands.size(); ++i) {
+        ms.push_back({stands[i].x, stands[i].y, stands[i].yaw, targets_per_stand[i]});
+      }
+      const auto merger = [&](const std::vector<size_t> & idx) -> std::optional<MergeableStand> {
+          std::vector<CoverageSegmentIntent> one(1);
+          for (const size_t k : idx) {
+            if (k >= all_poses.size()) {
+              return std::nullopt;
+            }
+            one[0].poses.push_back(all_poses[k]);
+          }
+          auto req = makeStandRequest(stanceWall(one));
+          auto future = client->async_send_request(req);
+          if (rclcpp::spin_until_future_complete(
+              shared_from_this(), future, std::chrono::duration<double>(stand_service_timeout_s_)) !=
+            rclcpp::FutureReturnCode::SUCCESS)
+          {
+            return std::nullopt;
+          }
+          const auto res = future.get();
+          if (!res->success || res->stands.size() != 1 || !res->unreachable.empty() || !res->not_planned.empty() ||
+            res->stands[0].target_indices.size() != idx.size())
+          {
+            return std::nullopt;
+          }
+          return MergeableStand{res->stands[0].x, res->stands[0].y, res->stands[0].yaw, {}};
+        };
+      const size_t n = mergeNearDuplicateStands(ms, stand_merge_tol_, merger);
+      if (n > 0) {
+        stands.clear();
+        targets_per_stand.clear();
+        for (const auto & m : ms) {
+          stands.push_back({m.x, m.y, m.yaw});
+          targets_per_stand.push_back(m.targets);
+        }
+        RCLCPP_INFO(
+          this->get_logger(), "merged %zu near-duplicate stand(s) (within %.2f m): %zu stand(s) left", n,
+          stand_merge_tol_, stands.size());
+      }
     }
     return true;
   }
@@ -1603,6 +1673,25 @@ private:
     if (stop()) {
       return false;
     }
+    // A serpentine stand ends with the tool backed off at the top of the wall, where the planning model has the arm
+    // touching the lift (the start state is refused). Come back down the standoff plane in one straight move, to
+    // the height a column starts from in the bottom-up order, and stow from there.
+    const auto lowering = decideStowLower(
+      serpentine_columns_, chain_valid_, chain_last_standoff_, coverage_z_min_);
+    if (lowering.lower) {
+      MotionSegmentSpec down;
+      down.label = "stow_lower";
+      down.mode_hint = "cartesian";
+      down.waypoint_indices = {0};
+      down.min_path_fraction = 0.99;
+      down.target_eef_speed = coverage_eef_speed_;
+      if (manager_.executeMotionSegments(frame_id_, {down}, {lowering.target}, planning_group_).success) {
+        chain_valid_ = false;
+        if (stowAttempts()) {
+          return true;
+        }
+      }
+    }
     if (recoverArm("stow") && stowAttempts()) {
       return true;
     }
@@ -1635,6 +1724,9 @@ private:
     req->wall_normal.x = -wall_dir_.d[0];
     req->wall_normal.y = -wall_dir_.d[1];
     req->wall_normal.z = -wall_dir_.d[2];
+    if (stand_min_clearance_ > 0.0) {
+      req->min_clearance = stand_min_clearance_;
+    }
     req->lift_min = base_check_lift_min_;
     req->lift_max = base_check_lift_max_;
     req->arm_mount_offset_z = base_check_arm_mount_z_;
@@ -1906,6 +1998,10 @@ private:
           RCLCPP_WARN(this->get_logger(), "DOCKGOAL reach preference skipped: no TF %s <- %s", frame_id_.c_str(), arm_base_frame_.c_str());
         }
       }
+      if (jog_params_.lower.size() == live.size() && jog_params_.upper.size() == live.size()) {
+        dock_ik_sel_.joint_lower = jog_params_.lower;
+        dock_ik_sel_.joint_upper = jog_params_.upper;
+      }
       const auto choice = selectDockIk(
         [&](const std::vector<double> & sd) -> std::optional<std::vector<double>> {
           auto r = req;
@@ -1930,7 +2026,9 @@ private:
             this->get_logger(), "DOCKGOAL reach fraction %.2f (target %.2f)%s", choice.reach_fraction,
             dock_ik_sel_.reach_target_fraction, choice.reach_over_target ? ", over the target" : "");
         }
-        return choice.q;
+        // the approach starts at the live state: of the 2*pi-equivalent representatives take the one nearest to IT, not
+        // to the remembered branch seed (which can be a turn away after a stow or a failed column)
+        return live.size() == choice.q.size() ? rebaseDockIkChecked(choice.q, live, dock_ik_sel_) : choice.q;
       }
       RCLCPP_WARN(
         this->get_logger(),
@@ -1953,8 +2051,14 @@ private:
       txt += buf;
     }
     RCLCPP_INFO(this->get_logger(), "DOCKGOAL seeded IK q=[%s]", txt.c_str());
-    column_dock_q_[static_cast<size_t>(std::max(0, column_))].push_back(res.joint_solution);
-    return res.joint_solution;
+    // same pose, representative nearest the live state (the IK may return a joint 2*pi away)
+    {
+      const auto live_now = readCurrentJointState(shared_from_this(), joint_name_candidates_);
+      const auto q = rebaseDockIkChecked(
+        res.joint_solution, live_now.size() == res.joint_solution.size() ? live_now : seed, dock_ik_sel_);
+      column_dock_q_[static_cast<size_t>(std::max(0, column_))].push_back(q);
+      return q;
+    }
   }
 
   /// recovery_keeps_branch: the joint goal for `pose` chosen on the arm's live branch (selectRecoveryGoal, IK seeded
@@ -2899,28 +3003,41 @@ private:
     // it off while the pad is pressed on the wall lets the arm jump to its reference (88 to 233 N spikes on the xArm 7
     // in about half the runs, even after the force had decayed and the reference had been backed off).
     setState("retracting");
+    // Back off at the end of the stroke for a serpentine plan (the next column starts there), else at its start.
+    core_types::Pose retract_pose = chooseRetractPose(serpentine_columns_, standoff_pose, intent.poses);
+    if (serpentine_columns_ && contact_exec.waypoints_completed < intent.poses.size()) {
+      // a stroke that stopped early: back off from where the tool really is, not from the planned end of the stroke
+      FrameTransform here;
+      if (lookup(frame_id_, "tcp_link", here)) {retract_pose.z = here.t[2];}
+    }
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
-    retract_seg.mode_hint = "fsp";
+    // a serpentine retract leaves the wall from the stroke's end (often the top of the reach): the straight move away
+    // from the wall is deterministic, where a randomized joint-space plan from there failed; fsp stays the fallback
+    retract_seg.mode_hint = retractModeHint(serpentine_columns_);
     retract_seg.waypoint_indices = {0};
     retract_seg.min_path_fraction = 0.99;  // see dock_seg's own comment above for why
     const auto retract_exec = manager_.executeMotionSegments(
-      frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
+      frame_id_, {retract_seg}, {retract_pose}, planning_group_);
     setAdmittanceEngaged(false);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
+      retract_seg.mode_hint = retractFallbackHint();
       const auto retract_again = [&]() {
           for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
             if (manager_.executeMotionSegments(
-                frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
+                frame_id_, {retract_seg}, {retract_pose}, planning_group_).success)
             {
               return true;
             }
           }
           return false;
         };
-      bool freed = false;
-      if (!stop() && recoverArm("retract")) {
+      // a failed straight retract is first tried as one plain free-space plan from where the arm is; the jog is the
+      // next resort
+      bool freed = serpentine_columns_ && !stop() && manager_.executeMotionSegments(
+        frame_id_, {retract_seg}, {retract_pose}, planning_group_).success;
+      if (!freed && !stop() && recoverArm("retract")) {
         freed = retract_again();
       }
       if (!freed && !stop() && canRecoverWithoutWall()) {
@@ -2937,7 +3054,7 @@ private:
     }
 
     chain_valid_ = contact_exec.success && contact_exec.waypoints_completed > 0 && !arm_stuck_;
-    chain_last_standoff_ = standoff_pose;
+    chain_last_standoff_ = retract_pose;
     if (!contact_exec.success || contact_exec.waypoints_completed == 0) {
       return ColumnOutcome::kFailed;
     }
@@ -2991,19 +3108,31 @@ private:
     }
     setState("retracting");
 
+    // Back off at the end of the stroke for a serpentine plan (the next column starts there), else at its start.
+    core_types::Pose retract_pose = chooseRetractPose(serpentine_columns_, standoff_pose, intent.poses);
+    if (serpentine_columns_ && stroke_exec.waypoints_completed < intent.poses.size()) {
+      // a stroke that stopped early: back off from where the tool really is, not from the planned end of the stroke
+      FrameTransform here;
+      if (lookup(frame_id_, "tcp_link", here)) {retract_pose.z = here.t[2];}
+    }
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
-    retract_seg.mode_hint = "fsp";
+    // a serpentine retract leaves the wall from the stroke's end (often the top of the reach): the straight move away
+    // from the wall is deterministic, where a randomized joint-space plan from there failed; fsp stays the fallback
+    retract_seg.mode_hint = retractModeHint(serpentine_columns_);
     retract_seg.waypoint_indices = {0};
     retract_seg.min_path_fraction = 0.99;
     const auto retract_exec = manager_.executeMotionSegments(
-      frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
+      frame_id_, {retract_seg}, {retract_pose}, planning_group_);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
+      retract_seg.mode_hint = retractFallbackHint();
       // a start state the planners refuse: jog it free, then try the retract again
-      if (!stop() && recoverArm("retract") &&
+      const bool plain_fsp_ok = serpentine_columns_ && !stop() && manager_.executeMotionSegments(
+        frame_id_, {retract_seg}, {retract_pose}, planning_group_).success;
+      if (plain_fsp_ok || (!stop() && recoverArm("retract") &&
         manager_.executeMotionSegments(
-          frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
+          frame_id_, {retract_seg}, {retract_pose}, planning_group_).success))
       {
         arm_stuck_ = false;
       } else {
@@ -3014,7 +3143,7 @@ private:
     }
 
     chain_valid_ = stroke_exec.success && stroke_exec.waypoints_completed > 0 && !arm_stuck_;
-    chain_last_standoff_ = standoff_pose;
+    chain_last_standoff_ = retract_pose;
     if (!stroke_exec.success || stroke_exec.waypoints_completed == 0) {
       return ColumnOutcome::kFailed;
     }
@@ -3033,6 +3162,8 @@ private:
   double last_arrival_pos_err_m_{0.0};
   double last_arrival_yaw_err_rad_{0.0};
   double stand_max_span_{0.0};
+  double stand_merge_tol_{0.15};
+  double stand_min_clearance_{0.0};
   std::string arrival_command_;
   std::string wall_clear_command_;
   double nav_timeout_s_{240.0};
@@ -3163,6 +3294,7 @@ private:
   double dock_approach_extra_m_{0.0};
   bool chain_columns_{false};
   double chain_max_shift_m_{0.4};
+  bool serpentine_columns_{false};
   bool chain_valid_{false};                 ///< the tool is at chain_last_standoff_ after a finished column of this stand
   core_types::Pose chain_last_standoff_;
   std::string base_check_mode_{"off"};

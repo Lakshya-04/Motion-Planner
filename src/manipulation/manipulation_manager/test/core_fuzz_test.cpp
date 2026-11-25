@@ -256,7 +256,7 @@ TEST(CoreFuzz, SelectDockIkMatchesAnIndependentOracleAndNeverReturnsABadCandidat
       }
       ASSERT_TRUE(std::isfinite(ch.cost));
       ASSERT_TRUE(ch.cost <= p.max_dq_rad * std::max(1.0, p.lift_cost_weight)) << "cost " << ch.cost << " max " << p.max_dq_rad;
-      ASSERT_DOUBLE_EQ(ch.cost, dockIkCost(ch.q, reference, p));
+      ASSERT_NEAR(ch.cost, dockIkCost(ch.q, reference, p), 1e-9);   // a rebase moves joints by whole turns
       ASSERT_LT(ch.seed_index, seeds.size() * 2);
     } else {
       ASSERT_TRUE(ch.q.empty());
@@ -299,7 +299,18 @@ TEST(CoreFuzz, SelectDockIkMatchesAnIndependentOracleAndNeverReturnsABadCandidat
     ASSERT_EQ(ch.rejected_cost, rc);
     ASSERT_EQ(ch.ok, best != nullptr);
     if (ch.ok) {
-      ASSERT_TRUE(sameBits(ch.q, *best)) << "not the best acceptable candidate";
+      // selectDockIk returns the chosen candidate rebased to the representative nearest the reference
+      ASSERT_EQ(ch.q.size(), best->size());
+      for (size_t j = 0; j < ch.q.size(); ++j) {
+        const bool linear = std::find(p.linear_joints.begin(), p.linear_joints.end(), j) != p.linear_joints.end();
+        const double d = ch.q[j] - (*best)[j];
+        if (linear) {
+          ASSERT_EQ(ch.q[j], (*best)[j]);
+        } else {
+          // the same pose: a whole number of turns apart
+          ASSERT_NEAR(d - 2.0 * M_PI * std::round(d / (2.0 * M_PI)), 0.0, 1e-6) << "joint " << j;
+        }
+      }
       // the reach preference: under the target unless the fallback is flagged
       if (prefer) {
         ASSERT_EQ(ch.reach_over_target, !best_under);

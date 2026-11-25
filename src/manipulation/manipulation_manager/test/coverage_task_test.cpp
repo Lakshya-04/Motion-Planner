@@ -219,3 +219,42 @@ TEST(Tracker, SuccessNeedsEveryColumnDoneAndEveryStandReached)
   s.columnFinished(0, 1, ColumnOutcome::kPartial);
   EXPECT_FALSE(s.success());
 }
+
+TEST(MergeNearDuplicateStands, MergesCloseNeighboursWhenOneStandServesBoth)
+{
+  std::vector<MergeableStand> stands = {{0.38, -0.61, 0.0, {0, 1}}, {0.38, -0.57, 0.0, {2, 3}},
+    {0.38, -0.53, 0.0, {4}}, {0.38, 0.59, 0.0, {5, 6}}};
+  std::vector<std::vector<size_t>> asked;
+  const auto n = mergeNearDuplicateStands(stands, 0.15, [&](const std::vector<size_t> & t) {
+      asked.push_back(t);
+      return std::optional<MergeableStand>(MergeableStand{0.38, -0.57, 0.0, {}});
+    });
+  EXPECT_EQ(n, 2u);
+  ASSERT_EQ(stands.size(), 2u);
+  EXPECT_EQ(stands[0].targets, (std::vector<size_t>{0, 1, 2, 3, 4}));   // coverage identical
+  EXPECT_EQ(stands[1].targets, (std::vector<size_t>{5, 6}));
+  ASSERT_EQ(asked.size(), 2u);
+  EXPECT_EQ(asked[1], (std::vector<size_t>{0, 1, 2, 3, 4}));
+}
+
+TEST(MergeNearDuplicateStands, RefusedPairAndFarStandsAreKept)
+{
+  std::vector<MergeableStand> stands = {{0.0, 0.0, 0.0, {0}}, {0.0, 0.04, 0.0, {1}}, {0.0, 1.0, 0.0, {2}}};
+  EXPECT_EQ(mergeNearDuplicateStands(stands, 0.15, [](const std::vector<size_t> &) {return std::nullopt;}), 0u);
+  EXPECT_EQ(stands.size(), 3u);
+  size_t calls = 0;
+  EXPECT_EQ(mergeNearDuplicateStands(stands, 0.15, [&](const std::vector<size_t> &) {
+        ++calls;
+        return std::optional<MergeableStand>(MergeableStand{});
+      }), 1u);
+  EXPECT_EQ(calls, 1u);   // the 1 m neighbour is never offered
+}
+
+TEST(MergeNearDuplicateStands, ZeroToleranceIsOff)
+{
+  std::vector<MergeableStand> stands = {{0.0, 0.0, 0.0, {0}}, {0.0, 0.01, 0.0, {1}}};
+  EXPECT_EQ(mergeNearDuplicateStands(stands, 0.0, [](const std::vector<size_t> &) {
+        return std::optional<MergeableStand>(MergeableStand{});
+      }), 0u);
+  EXPECT_EQ(stands.size(), 2u);
+}
