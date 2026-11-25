@@ -127,3 +127,56 @@ TEST(PathQuality, JointGoalBranchCheck)
   EXPECT_FALSE(reachesJointGoal({}, {}, 0.05));
   EXPECT_NEAR(maxJointStep({{0, 0}, {0.1, 0.3}, {0.1, 3.5}}), 3.2, 1e-12);
 }
+
+// ---- lift cost weight: lift travel is `w` times as costly as arm travel ----
+
+TEST(PathQualityLiftWeight, WeightOneReproducesThePlainWeighting)
+{
+  const std::vector<double> base = weightsFromRanges({2.0, 4.0, 6.0});
+  EXPECT_EQ(applyLiftCostWeight(base, {true, false, false}, 1.0), base);
+  const auto w2 = applyLiftCostWeight(base, {true, false, false}, 2.0);
+  EXPECT_DOUBLE_EQ(w2[0], 2.0 * base[0]);
+  EXPECT_DOUBLE_EQ(w2[1], base[1]);
+  EXPECT_DOUBLE_EQ(w2[2], base[2]);
+  EXPECT_EQ(applyLiftCostWeight(base, {true, false, false}, -3.0), base);  // invalid weight = off
+}
+
+TEST(PathQualityLiftWeight, LiftMoveCostsTwiceTheEqualArmMove)
+{
+  PathQualityConfig c;
+  c.weights = applyLiftCostWeight({1.0, 1.0}, {true, false}, 2.0);
+  EXPECT_NEAR(weightedDistance({0, 0}, {0.5, 0}, c), 2.0 * weightedDistance({0, 0}, {0, 0.5}, c), 1e-12);
+}
+
+TEST(PathQualityLiftWeight, LessLiftBeatsLessTotalTravelWhenWeightedCostSaysSo)
+{
+  // A: lift 0.9, arm 0.1 (total raw travel 1.0, but 0.9 on the lift).
+  // B: lift 0.1, arm 1.1 (more raw travel, mostly arm).
+  const std::vector<std::vector<double>> a{{0.0, 0.0}, {0.9, 0.1}};
+  const std::vector<std::vector<double>> b{{0.0, 0.0}, {0.1, 1.1}};
+  PathCandidate ca{"A", a, -1.0};
+  PathCandidate cb{"B", b, -1.0};
+  PathQualityConfig plain;   // weight 1: A (0.906) beats B (1.105)
+  EXPECT_EQ(selectBestCandidate({ca, cb}, FreeSpaceObjective::kLength, plain).best_index, 0);
+  PathQualityConfig w2;
+  w2.weights = applyLiftCostWeight({1.0, 1.0}, {true, false}, 2.0);  // A 1.81, B 1.11: B wins
+  const auto sel = selectBestCandidate({ca, cb}, FreeSpaceObjective::kLength, w2);
+  EXPECT_EQ(sel.best_index, 1);
+  EXPECT_NEAR(sel.length, std::sqrt(0.2 * 0.2 + 1.1 * 1.1), 1e-12);
+  // list order does not matter
+  EXPECT_EQ(selectBestCandidate({cb, ca}, FreeSpaceObjective::kLength, w2).best_index, 0);
+}
+
+TEST(PathQualityLiftWeight, WeightOneSelectionMatchesDefaultConfigExactly)
+{
+  const std::vector<std::vector<double>> a{{0.0, 0.0}, {0.9, 0.1}};
+  const std::vector<std::vector<double>> b{{0.0, 0.0}, {0.1, 1.1}};
+  PathQualityConfig base;
+  base.weights = weightsFromRanges({1.5, 6.28});
+  PathQualityConfig one;
+  one.weights = applyLiftCostWeight(base.weights, {true, false}, 1.0);
+  const auto s0 = selectBestCandidate({{"A", a, -1.0}, {"B", b, -1.0}}, FreeSpaceObjective::kLength, base);
+  const auto s1 = selectBestCandidate({{"A", a, -1.0}, {"B", b, -1.0}}, FreeSpaceObjective::kLength, one);
+  EXPECT_EQ(s0.best_index, s1.best_index);
+  EXPECT_DOUBLE_EQ(s0.length, s1.length);
+}

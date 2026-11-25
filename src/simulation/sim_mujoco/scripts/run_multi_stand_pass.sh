@@ -14,6 +14,7 @@
 #   MULTI_STAND_REACH_FRACTION=0.7       keep the tool within this fraction of MULTI_STAND_ARM_REACH (default 1.3 m, UR10e) by moving the lift (needs DOCK_IK_CONTINUITY=true; default 0 = off)
 #   MULTI_STAND_ARM_REACH=1.3      the arm's reach in m for that fraction (manager `dock_ik_reach_m`)
 #   MULTI_STAND_LIFT_STROKE=1.5    the lift's stroke in m (manager `dock_ik_lift_max_m`)
+#   MULTI_STAND_LIFT_COST_WEIGHT=2.0     lift delta counts this many times an arm joint delta in the dock IK continuity cost (manager `dock_ik_lift_cost_weight`; 1.0 = off)
 #   MULTI_STAND_MIN_CLEARANCE=0.5        stand planner floor on the chassis-to-wall clearance in m (default 0 = off)
 #   MULTI_STAND_BALANCE_REACH=true       stand planner centres each stand's columns in the reach (reachability `stand_balance_reach`, default false = off)
 #   MULTI_STAND_MAX_REACH_FRACTION=0.85  stand planner rejects poses beyond this fraction of the arm reach (`stand_max_reach_fraction`, default 0 = off);
@@ -235,6 +236,7 @@ manipulation_manager:
     dock_ik_lift_joint: 0
     dock_ik_lift_min_m: 0.0
     dock_ik_lift_max_m: ${MULTI_STAND_LIFT_STROKE:-1.5}
+    dock_ik_lift_cost_weight: ${MULTI_STAND_LIFT_COST_WEIGHT:-2.0}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MULTI_STAND_PRESS:-0.0015}

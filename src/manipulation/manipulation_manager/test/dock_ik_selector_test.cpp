@@ -69,7 +69,43 @@ TEST(DockIkSelectorTest, ContinuousJointsAreWrappedLinearOnesAreNot)
 {
   DockIkSelectorParams p;   // joint 0 linear
   EXPECT_NEAR(dockIkCost({0.0, 3.0}, {0.0, -3.0}, p), 2.0 * M_PI - 6.0, 1e-12);
-  EXPECT_NEAR(dockIkCost({2.0, 0.0}, {-1.0, 0.0}, p), 3.0, 1e-12);
+  EXPECT_NEAR(dockIkCost({2.0, 0.0}, {-1.0, 0.0}, p, false), 3.0, 1e-12);   // raw: the lift is not wrapped
+}
+
+TEST(DockIkSelectorTest, LiftDeltaIsWeightedInTheCost)
+{
+  DockIkSelectorParams p;   // joint 0 linear, default lift_cost_weight 2
+  EXPECT_NEAR(dockIkCost({1.0, 0.0}, {0.0, 0.0}, p), 2.0, 1e-12);
+  EXPECT_NEAR(dockIkCost({1.0, 0.0}, {0.0, 0.0}, p, false), 1.0, 1e-12);
+  p.lift_cost_weight = 1.0;   // old behaviour exactly
+  EXPECT_NEAR(dockIkCost({1.0, 0.5}, {0.0, 0.0}, p), 1.0, 1e-12);
+}
+
+TEST(DockIkSelectorTest, PrefersArmMotionOverLiftMotionAndWeightOneRestoresTheOldChoice)
+{
+  // seed 0: lift moves 0.8 m, arm 0.3 rad. seed 1: lift stays, arm moves 1.2 rad.
+  // weight 1: max |dq| 0.8 vs 1.2 -> seed 0. weight 2: 1.6 vs 1.2 -> seed 1 (arm motion preferred).
+  const V ref{0.0, 0.0};
+  const std::vector<V> seeds{V{0.8, 0.3}, V{0.0, 1.2}};
+  const DockIkFn ik = [](const V & sd) -> std::optional<V> {return sd;};
+  DockIkSelectorParams p;
+  p.branch_joints = {};
+  p.lift_cost_weight = 1.0;
+  EXPECT_EQ(selectDockIk(ik, seeds, ref, p).seed_index, 0u);
+  p.lift_cost_weight = 2.0;
+  const auto c = selectDockIk(ik, seeds, ref, p);
+  ASSERT_TRUE(c.ok);
+  EXPECT_EQ(c.seed_index, 1u);
+  EXPECT_NEAR(c.cost, 1.2, 1e-12);
+}
+
+TEST(DockIkSelectorTest, MaxDqLimitStaysRawForTheLift)
+{
+  DockIkSelectorParams p;
+  p.branch_joints = {};
+  p.max_dq_rad = 1.5;   // lift 1.0 m weighted 2.0 > 1.5, but the raw limit is what rejects
+  const DockIkFn ik = [](const V & sd) -> std::optional<V> {return sd;};
+  EXPECT_TRUE(selectDockIk(ik, {V{1.0, 0.0}}, V{0.0, 0.0}, p).ok);
 }
 
 TEST(DockIkSelectorTest, RejectsALargeJumpAndFallsBackWhenNothingIsLeft)

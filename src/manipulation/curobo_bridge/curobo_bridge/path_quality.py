@@ -26,6 +26,20 @@ def joint_weights(lower: Sequence[float], upper: Sequence[float], floor: float =
     return out
 
 
+DEFAULT_LIFT_COST_WEIGHT = 2.0
+
+
+def apply_lift_cost_weight(weights: Sequence[float], joint_names: Sequence[str],
+                           lift_joints: Sequence[str], lift_cost_weight: float = DEFAULT_LIFT_COST_WEIGHT) -> List[float]:
+    """`weights` with the entries of `lift_joints` multiplied by `lift_cost_weight` (lift motion that many times as
+    costly as arm motion). 1.0 (or a non-positive / non-finite value) returns the weights unchanged."""
+    out = [float(w) for w in weights]
+    if not (np.isfinite(lift_cost_weight) and lift_cost_weight > 0.0) or lift_cost_weight == 1.0:
+        return out
+    lift = set(lift_joints)
+    return [w * float(lift_cost_weight) if name in lift else w for w, name in zip(out, joint_names)]
+
+
 def path_length(positions: Sequence[Sequence[float]], weights: Optional[Sequence[float]] = None) -> float:
     """Weighted joint-space path length; 0 for fewer than two waypoints."""
     q = np.asarray(positions, dtype=float)

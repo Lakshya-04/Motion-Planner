@@ -279,7 +279,7 @@ TEST(CoreFuzz, SelectDockIkMatchesAnIndependentOracleAndNeverReturnsABadCandidat
       }
       if (dockBranchChanged(s, reference, p)) {++rb; continue;}
       const double cost = dockIkCost(s, reference, p);
-      if (!(cost <= p.max_dq_rad)) {++rc; continue;}
+      if (!(dockIkCost(s, reference, p, false) <= p.max_dq_rad)) {++rc; continue;}
       bool under = true;
       if (prefer) {under = dockReachFraction(s[p.lift_joint], ctx, p) <= p.reach_target_fraction + 1e-9;}
       if (best == nullptr || (under && !best_under) || (under == best_under && cost < best_cost)) {

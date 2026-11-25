@@ -47,7 +47,8 @@ inline FreeSpaceObjective parseObjective(const std::string & s)
 
 struct PathQualityConfig
 {
-  /// Per-joint weight (typically 1 / joint range). Empty or short = 1 for the missing joints.
+  /// Per-joint weight (typically 1 / joint range, times the lift cost weight on the lift joint, see
+  /// applyLiftCostWeight). Empty or short = 1 for the missing joints.
   std::vector<double> weights;
   std::vector<double> velocity_limits;      ///< Per joint; <= 0 = unknown (ignored).
   std::vector<double> acceleration_limits;  ///< Per joint; <= 0 = unknown (ignored).
@@ -62,6 +63,31 @@ inline std::vector<double> weightsFromRanges(const std::vector<double> & ranges)
     w.push_back((std::isfinite(r) && r > 1e-9) ? 1.0 / r : 1.0);
   }
   return w;
+}
+
+/// Default cost multiplier of the lift (prismatic) joint relative to an arm joint: moving the lift by a given
+/// normalised distance is this many times as costly as moving an arm joint, so plans prefer arm motion.
+/// 1.0 switches the preference off (the plain 1/range weighting).
+constexpr double kDefaultLiftCostWeight = 2.0;
+
+/// `weights` with every joint flagged in `is_lift` multiplied by `lift_cost_weight` (the per-joint cost weighting:
+/// lift 2.0, arm joints 1.0 by default). Missing flags count as arm joints; `weights` shorter than `is_lift` are
+/// padded with 1. A weight of 1.0 (or a non-finite / non-positive one) returns `weights` unchanged.
+inline std::vector<double> applyLiftCostWeight(
+  std::vector<double> weights, const std::vector<bool> & is_lift, double lift_cost_weight)
+{
+  if (!(std::isfinite(lift_cost_weight) && lift_cost_weight > 0.0) || lift_cost_weight == 1.0) {
+    return weights;
+  }
+  if (weights.size() < is_lift.size()) {
+    weights.resize(is_lift.size(), 1.0);
+  }
+  for (std::size_t j = 0; j < is_lift.size(); ++j) {
+    if (is_lift[j]) {
+      weights[j] *= lift_cost_weight;
+    }
+  }
+  return weights;
 }
 
 inline double jointWeight(const PathQualityConfig & cfg, std::size_t j)
