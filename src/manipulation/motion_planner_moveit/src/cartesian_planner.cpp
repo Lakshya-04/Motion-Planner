@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <string>
+#include <unordered_map>
 #include <exception>
 #include <vector>
 
@@ -16,6 +19,7 @@
 #include "moveit/robot_state/cartesian_interpolator.h"
 #include "moveit/robot_trajectory/robot_trajectory.h"
 #include "moveit/trajectory_processing/time_optimal_trajectory_generation.h"
+#include <moveit/trajectory_processing/ruckig_traj_smoothing.hpp>
 #include "rclcpp/rclcpp.hpp"
 
 #include "motion_planner_moveit/moveit_planning_backend.hpp"
@@ -404,6 +408,35 @@ bool CartesianPlanner::applyFallbackTimeParameterization(
   }
 
   if (success) {
+    // TOTG is bang-bang in acceleration; round it with Ruckig (jerk = ratio x accel limit per joint).
+    // A failure keeps the TOTG timing.
+    const char * env = std::getenv("MP_TRANSITION_JERK_RATIO");
+    const double ratio = env ? std::atof(env) : 4.0;
+    const auto * jmg = rt.getGroup();
+    if (ratio > 0.0 && jmg) {
+      std::unordered_map<std::string, double> vel, acc, jerk;
+      for (const auto * joint : jmg->getActiveJointModels()) {
+        const auto & b = joint->getVariableBounds(joint->getName());
+        if (!b.velocity_bounded_ || !b.acceleration_bounded_) {
+          vel.clear();
+          break;
+        }
+        vel[joint->getName()] = b.max_velocity_;
+        acc[joint->getName()] = b.max_acceleration_;
+        jerk[joint->getName()] = ratio * b.max_acceleration_;
+      }
+      if (!vel.empty()) {
+        robot_trajectory::RobotTrajectory smoothed(rt, true);
+        try {
+          if (trajectory_processing::RuckigSmoothing::applySmoothing(
+              smoothed, vel, acc, jerk, 1.0, 1.0, true, 0.01))
+          {
+            rt = smoothed;
+          }
+        } catch (const std::exception &) {
+        }
+      }
+    }
     rt.getRobotTrajectoryMsg(trajectory_msg);
   }
   return success;
