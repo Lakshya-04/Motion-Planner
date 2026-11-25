@@ -168,6 +168,16 @@ Visualization Manager:
       Reliability Policy: Reliable
       Value: /mp_viz/wall
   - Class: rviz_default_plugins/MarkerArray
+    Name: Coverage paint (done / not done)
+    Enabled: false
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/coverage_paint
+  - Class: rviz_default_plugins/MarkerArray
     Name: Reachable (green) / not (red)
     Enabled: false
     Namespaces: {}

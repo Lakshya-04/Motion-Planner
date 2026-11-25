@@ -14,6 +14,7 @@
 #   MULTI_STAND_REACH_FRACTION=0.7       keep the tool within this fraction of MULTI_STAND_ARM_REACH (default 1.3 m, UR10e) by moving the lift (needs DOCK_IK_CONTINUITY=true; default 0 = off)
 #   MULTI_STAND_ARM_REACH=1.3      the arm's reach in m for that fraction (manager `dock_ik_reach_m`)
 #   MULTI_STAND_LIFT_STROKE=1.5    the lift's stroke in m (manager `dock_ik_lift_max_m`)
+#   MULTI_STAND_LIFT_COST_WEIGHT=2.0     lift delta counts this many times an arm joint delta in the dock IK continuity cost (manager `dock_ik_lift_cost_weight`; 1.0 = off)
 #   MULTI_STAND_MIN_CLEARANCE=0.5        stand planner floor on the chassis-to-wall clearance in m (default 0 = off)
 #   MULTI_STAND_BALANCE_REACH=true       stand planner centres each stand's columns in the reach (reachability `stand_balance_reach`, default false = off)
 #   MULTI_STAND_MAX_REACH_FRACTION=0.85  stand planner rejects poses beyond this fraction of the arm reach (`stand_max_reach_fraction`, default 0 = off);
@@ -27,6 +28,10 @@
 #   MULTI_STAND_LAUNCH_ARGS        more arguments of the sim launch; MULTI_STAND_OUT the output directory (default /tmp/multi_stand_pass)
 #   MULTI_STAND_SCORE_ARGS         extra score_run arguments
 #   MULTI_STAND_WALL_DX / _WALL_DY / _WALL_WIDTH  the wall's shift in x (0), the patch's start y (0.3) and width (0.9) in m
+#   MULTI_STAND_PAINT=1            live done / not done wall paint (RViz topic /mp_viz/coverage_paint; _PAINT_FEED defaults to mujoco, none = RViz only; default off;
+#                                  the MuJoCo viewer draws it when the sim is launched with viewer:=true in MULTI_STAND_LAUNCH_ARGS)
+#   MULTI_STAND_RVIZ=0             opt out of RViz; the sim launch opens the same mp_rviz window as the Gazebo sim by default (rviz:=true; skipped
+#                                  without DISPLAY). MULTI_STAND_RVIZ_PROFILE (default mission_overview); wall time, use_sim_time false
 #   MULTI_STAND_FILM=1             also store the joint states for render_run.py (launch with out_dir:=... in MULTI_STAND_LAUNCH_ARGS)
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
 #                                  configuration docked at the wall, [] chains the seeds from the previous dock
@@ -119,8 +124,14 @@ summary_line() {
     "double_pass=${MULTI_STAND_DOUBLE_PASS:-false} reach_fraction=${MULTI_STAND_REACH_FRACTION:-0.0} arm_reach=${MULTI_STAND_ARM_REACH:-1.3}" \
     "lift_stroke=${MULTI_STAND_LIFT_STROKE:-1.5} min_clearance=${MULTI_STAND_MIN_CLEARANCE:-0.0} dock_ik_continuity=${MULTI_STAND_DOCK_IK_CONTINUITY:-false}" \
     "max_span=${MULTI_STAND_MAX_SPAN:-0.5} speed=${MULTI_STAND_SPEED:-0.01} swath=${MULTI_STAND_SWATH:-0.14} overlap=${MULTI_STAND_OVERLAP:-15.0}" \
-    "wall=${DX}/${DY}/${WIDTH} out=$OUT"
+    "wall=${DX}/${DY}/${WIDTH} paint=${MULTI_STAND_PAINT:-0} out=$OUT"
 }
+
+# MULTI_STAND_PAINT=1 defaults the paint feed to mujoco; the viewer (sim launch, viewer:=true) reads this file when the variable is set
+if [ "${MULTI_STAND_PAINT:-0}" = 1 ]; then
+  MULTI_STAND_PAINT_FEED=${MULTI_STAND_PAINT_FEED:-mujoco}
+  [ "$MULTI_STAND_PAINT_FEED" = mujoco ] && export SIM_MUJOCO_OVERLAY_JSON=$OUT/mp_sim_overlay.json
+fi
 
 PIDS=()
 start() { local name=$1; shift; setsid "$@" > "$OUT/$name.log" 2>&1 & PIDS+=($!); }
@@ -135,9 +146,12 @@ stop_all() {
 }
 trap stop_all EXIT
 
+RVIZ_ARGS=()
+[ "${MULTI_STAND_RVIZ:-1}" = 0 ] && RVIZ_ARGS=(rviz:=false)
+[ "${MULTI_STAND_RVIZ:-1}" != 0 ] && RVIZ_ARGS=(rviz_profile:=${MULTI_STAND_RVIZ_PROFILE:-mission_overview})
 start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$STAND_PROFILE controller:=jtac \
   conditioner:=true payload_mass_kg:=0.5 move_group:=true base_motion:=true scene:=$OUT/data/smoke_wall_scene.json \
-  ${MULTI_STAND_LAUNCH_ARGS:-}
+  ${RVIZ_ARGS[@]+"${RVIZ_ARGS[@]}"} ${MULTI_STAND_LAUNCH_ARGS:-}
 # the demo rasterizes the obstacle clearance into the grid itself; the service node would add its own 0.3 m default
 start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0
 start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
@@ -235,6 +249,7 @@ manipulation_manager:
     dock_ik_lift_joint: 0
     dock_ik_lift_min_m: 0.0
     dock_ik_lift_max_m: ${MULTI_STAND_LIFT_STROKE:-1.5}
+    dock_ik_lift_cost_weight: ${MULTI_STAND_LIFT_COST_WEIGHT:-2.0}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MULTI_STAND_PRESS:-0.0015}
@@ -263,6 +278,17 @@ sleep 25   # sim, controllers and move_group up
 timeout 120 ros2 run motion_planner_moveit world_model_loader_node --ros-args \
   -p point_cloud_path:=$OUT/data/walls_sim.pcd -p frame_id:=odom -p octomap_resolution:=0.01 \
   > "$OUT/world_model.log" 2>&1
+
+# MULTI_STAND_PAINT=1: live done / not done paint of the wall (docs/sim_overlay.md "Coverage paint"). Always on /mp_viz/coverage_paint
+# (RViz: add a MarkerArray display, the mp_rviz mission_overview and layers profiles have it, off) and /mp_viz/coverage_percent;
+# MULTI_STAND_PAINT_FEED=none|mujoco (default mujoco when MULTI_STAND_PAINT=1: writes $OUT/mp_sim_overlay.json, which sim_mujoco's viewer.py
+# draws via SIM_MUJOCO_OVERLAY_JSON, exported above the sim launch)
+# MULTI_STAND_PAINT_ARGS adds launch arguments (swath_m:=.. frame_id:=..). Default off; a failure to start it never fails the pass.
+if [ "${MULTI_STAND_PAINT:-0}" = 1 ]; then
+  start coverage_paint ros2 launch sim_overlay coverage_paint.launch.py wall_scene_json:=$PLAN_SCENE source:=mujoco \
+    frame_id:=odom plan_file:=$COV swath_m:=${MULTI_STAND_SWATH:-0.14} feed:=$MULTI_STAND_PAINT_FEED \
+    mujoco_json:=$OUT/mp_sim_overlay.json ${MULTI_STAND_PAINT_ARGS:-}
+fi
 
 # 4. the manager as an action server, one goal
 start manager ros2 launch manipulation_manager manipulation_manager.launch.py hardware:=jtac_mock use_sim_time:=false \

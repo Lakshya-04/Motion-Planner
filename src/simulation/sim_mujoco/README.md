@@ -9,7 +9,7 @@ Simulator (ROS 2 plugin, a ROS-free C++ core `MujocoSim`, pure-Python generators
 ## Inputs and outputs
 
 - Plugin `sim_mujoco/MujocoSystemInterface` (`sim_mujoco.xml`, library `sim_mujoco_hardware`): joint position and velocity commands in; position, velocity and effort state out; the tool force/torque as a sensor (raw wrist wrench, plus ground truth).
-- Launch `launch/sim_mujoco.launch.py`; arguments include `profile`, `scene` and `scene_offset`, `controller` (`jtc` default or `jtac`), `viewer`, `conditioner`, `depth_sensor` (+ `depth_sensor_pose`), `base_motion`. With `depth_sensor` it publishes `/depth_sensor/points`; with `base_motion` it takes `/cmd_vel` and publishes `/odom` and TF; the raw wrench is on `/sim_mujoco/ft_raw`.
+- Launch `launch/sim_mujoco.launch.py`; arguments include `profile`, `scene` and `scene_offset`, `controller` (`jtc` default or `jtac`), `viewer`, `rviz` (+ `rviz_profile`, default `mission_overview`: the same mp_rviz window as the Gazebo sim; on by default, `rviz:=false` or `MULTI_STAND_RVIZ=0` to opt out), `conditioner`, `depth_sensor` (+ `depth_sensor_pose`), `base_motion`. With `depth_sensor` it publishes `/depth_sensor/points`; with `base_motion` it takes `/cmd_vel` and publishes `/odom` and TF; the raw wrench is on `/sim_mujoco/ft_raw`.
 - Python modules `sim_mujoco.mjcf_generator` (URDF to MJCF, standard library only), `sim_mujoco.wall_world`, `sim_mujoco.sim_noise`; the `generate_mjcf` script.
 - Scripts under `scripts/`: `run_smoke.sh`, `run_contact.sh`, `run_wall_pass.sh`, `run_manager_pass.sh`, `run_spray_pass.sh`, `run_multi_stand_pass.sh`, `run_scenarios.sh` and others, each with its Python test client; `render_run.py` and `plot_run.py` for media.
 

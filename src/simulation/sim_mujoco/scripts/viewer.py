@@ -63,6 +63,9 @@ def main():
                 data.qpos[adr] = v
     node.create_subscription(PoseStamped, '/sim_mujoco/base_pose', on_base, qos_profile_sensor_data)
     threading.Thread(target=rclpy.spin, args=(node,), daemon=True).start()
+    # Optional overlay (coverage paint etc.): SIM_MUJOCO_OVERLAY_JSON = the sim_overlay feed written by overlay_dump.py; unset = off
+    from sim_mujoco.viewer_overlay import OverlayHook
+    overlay = OverlayHook.from_env(mujoco)
     with mujoco.viewer.launch_passive(model, data) as viewer:
         while viewer.is_running() and rclpy.ok():
             for a1, a2, c in mimics:
@@ -74,6 +77,8 @@ def main():
                                   f'{force[0]:6.1f}            {force[1]:6.1f}'))
             except Exception:
                 pass
+            if overlay is not None:
+                overlay.update(viewer.user_scn)
             viewer.sync()
             threading.Event().wait(1.0 / max(1.0, VIEW_HZ))
     rclpy.shutdown()

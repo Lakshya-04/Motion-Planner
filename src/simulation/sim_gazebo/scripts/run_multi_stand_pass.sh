@@ -20,6 +20,7 @@
 #   MULTI_STAND_REACH_FRACTION=0.7       keep the tool within this fraction of MULTI_STAND_ARM_REACH (default 1.3 m, UR10e) by moving the lift (needs DOCK_IK_CONTINUITY=true; default 0 = off)
 #   MULTI_STAND_ARM_REACH=1.3      the arm's reach in m for that fraction (manager `dock_ik_reach_m`)
 #   MULTI_STAND_LIFT_STROKE=1.5    the lift's stroke in m (manager `dock_ik_lift_max_m`)
+#   MULTI_STAND_LIFT_COST_WEIGHT=2.0     lift delta counts this many times an arm joint delta in the dock IK continuity cost (manager `dock_ik_lift_cost_weight`; 1.0 = off)
 #   MULTI_STAND_MIN_CLEARANCE=0.5        stand planner floor on the chassis-to-wall clearance in m (default 0 = off)
 #   MULTI_STAND_SPEED / _SWATH / _OVERLAP / _TOOL_YAW / _TARGET / _PRESS / _STANDOFF / _APPROACH_EXTRA / _DOCK_ATTEMPTS / _MIN_COVERAGE
 #                                  the stroke speed, swath and overlap of the plan, tool yaw, target force, press depth, dock standoff and
@@ -35,6 +36,7 @@
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
 #   MULTI_STAND_DOCK_IK_CONTINUITY=true  choose the dock joint goal among IK solutions by continuity (manager `dock_ik_continuity`, default false)
 #   MULTI_STAND_RECOVERY_KEEPS_BRANCH=true  recover from a short approach on the live IK branch (manager `recovery_keeps_branch`, default false)
+#   MULTI_STAND_PAINT=1            live done / not done wall paint (RViz topic /mp_viz/coverage_paint; _PAINT_FEED=gazebo; default off)
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented)
 #   STAND_MAP                      a built reachability map (skips the build, which takes a few minutes)
@@ -73,7 +75,7 @@ summary_line() {
     "double_pass=${MULTI_STAND_DOUBLE_PASS:-false} reach_fraction=${MULTI_STAND_REACH_FRACTION:-0.0} arm_reach=${MULTI_STAND_ARM_REACH:-1.3}" \
     "lift_stroke=${MULTI_STAND_LIFT_STROKE:-1.5} min_clearance=${MULTI_STAND_MIN_CLEARANCE:-0.0} dock_ik_continuity=${MULTI_STAND_DOCK_IK_CONTINUITY:-false}" \
     "max_span=${MULTI_STAND_MAX_SPAN:-0.5} speed=${MULTI_STAND_SPEED:-0.01} swath=${MULTI_STAND_SWATH:-0.14} overlap=${MULTI_STAND_OVERLAP:-15.0}" \
-    "tcp_settle=${MULTI_STAND_TCP_SETTLE:-4.0} wall=0.0/${DY}/${WIDTH} out=$OUT"
+    "tcp_settle=${MULTI_STAND_TCP_SETTLE:-4.0} wall=0.0/${DY}/${WIDTH} paint=${MULTI_STAND_PAINT:-0} out=$OUT"
 }
 # the sim wall: the stock scene without its obstacle (MULTI_STAND_OBSTACLES=1 keeps it, moved out of the patch; the planner's scene never has it,
 # so with it the arm drives into an obstacle the planner does not know about)
@@ -153,6 +155,7 @@ manipulation_manager:
     dock_ik_lift_joint: 0
     dock_ik_lift_min_m: 0.0
     dock_ik_lift_max_m: ${MULTI_STAND_LIFT_STROKE:-1.5}
+    dock_ik_lift_cost_weight: ${MULTI_STAND_LIFT_COST_WEIGHT:-2.0}
     recovery_keeps_branch: ${MULTI_STAND_RECOVERY_KEEPS_BRANCH:-false}
     dock_approach_extra_m: ${MULTI_STAND_APPROACH_EXTRA:-0.1}
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
@@ -176,6 +179,16 @@ gz_stills
 # 3. the wall into MoveIt's scene (world frame; TF places it relative to base_footprint)
 gz_world_model "$OUT/data/walls.pcd" odom
 wait $WM
+
+# MULTI_STAND_PAINT=1: live done / not done paint of the wall (docs/sim_overlay.md "Coverage paint"). Always on /mp_viz/coverage_paint
+# (RViz: add a MarkerArray display, the mp_rviz mission_overview and layers profiles have it, off) and /mp_viz/coverage_percent;
+# MULTI_STAND_PAINT_FEED=none|gazebo (draws in the gz GUI: needs the sim launched with gui:=true)
+# MULTI_STAND_PAINT_ARGS adds launch arguments (swath_m:=.. frame_id:=..). Default off; a failure to start it never fails the pass.
+if [ "${MULTI_STAND_PAINT:-0}" = 1 ]; then
+  gz_start coverage_paint ros2 launch sim_overlay coverage_paint.launch.py wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json source:=gazebo \
+    frame_id:=odom plan_file:=$COV swath_m:=${MULTI_STAND_SWATH:-0.14} feed:=${MULTI_STAND_PAINT_FEED:-none} \
+    mujoco_json:=$OUT/mp_sim_overlay.json ${MULTI_STAND_PAINT_ARGS:-}
+fi
 
 # 4. the manager as an action server, one goal
 gz_start manager ros2 launch manipulation_manager manipulation_manager.launch.py hardware:=jtac_mock profile:=ur10e_telescopic \

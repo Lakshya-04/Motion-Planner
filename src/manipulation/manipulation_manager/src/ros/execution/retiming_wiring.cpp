@@ -21,6 +21,10 @@ std::shared_ptr<ExecutionPort> wrapWithRetiming(
   const double accel = node->declare_parameter<double>("retime_accel", 2.0);
   const double seam_jerk = node->declare_parameter<double>("retime_seam_jerk", 20.0);
   const double transition_jerk = node->declare_parameter<double>("retime_transition_jerk", 0.0);
+  // 0 jerk = unlimited (TOTG bang-bang accel, jolts). With transition_jerk 0 the limit per joint is
+  // ratio * its acceleration limit (full accel reached in 1/ratio s); ratio 0 restores pure TOTG.
+  const double transition_jerk_ratio =
+    std::max(0.0, node->declare_parameter<double>("retime_transition_jerk_ratio", 0.0));
   const double vel_scale = std::clamp(node->declare_parameter<double>("retime_vel_scale", 1.0), 0.01, 1.0);
 
   robot_model_loader::RobotModelLoader loader(node, "robot_description");
@@ -35,6 +39,11 @@ std::shared_ptr<ExecutionPort> wrapWithRetiming(
     model, planning_group, tcp_link);
   auto seam = retimer->modelLimits(accel, seam_jerk);
   auto transition = retimer->modelLimits(accel, transition_jerk);
+  if (transition_jerk <= 0.0) {
+    for (auto & l : transition) {
+      l.jerk = transition_jerk_ratio * l.acceleration;
+    }
+  }
   for (auto * set : {&seam, &transition}) {
     for (auto & l : *set) {
       l.velocity *= vel_scale;

@@ -41,6 +41,11 @@ public:
   /// jerk as given (0 = unbounded).
   std::vector<JointLimit> modelLimits(double default_acc, double jerk) const;
 
+  /// modelLimits() with a per-joint jerk of jerk_ratio * that joint's acceleration limit (full
+  /// acceleration reached in 1/jerk_ratio s), so metres (lift) and radians (arm) scale alike.
+  /// jerk_ratio <= 0 gives unbounded jerk, i.e. bang-bang TOTG.
+  std::vector<JointLimit> smoothLimits(double default_acc, double jerk_ratio) const;
+
 private:
   std::shared_ptr<const moveit::core::RobotModel> model_;
   std::string group_;

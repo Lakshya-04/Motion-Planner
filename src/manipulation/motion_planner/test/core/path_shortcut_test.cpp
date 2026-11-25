@@ -57,3 +57,13 @@ TEST(PathShortcut, DeterministicForSameSeed)
   const std::vector<std::vector<double>> path{{0, 0}, {0.3, 0.8}, {0.5, 1.0}, {0.7, 0.8}, {1, 0}, {1.2, 0.5}};
   EXPECT_EQ(shortcutPath(path, config(), isFree), shortcutPath(path, config(), isFree));
 }
+
+TEST(PathShortcutLiftWeight, ImprovePathNeverIncreasesTheLiftWeightedLength)
+{
+  PathQualityConfig q;
+  q.weights = applyLiftCostWeight({1.0, 1.0}, {true, false}, 2.0);
+  const std::vector<std::vector<double>> path{{0.0, 0.0}, {0.5, 0.0}, {0.5, 0.5}, {0.0, 0.5}, {0.0, 1.0}};
+  const auto out = improvePath(path, config(), q, isFree);
+  EXPECT_LE(weightedPathLength(out, q), weightedPathLength(path, q) + 1e-12);
+  EXPECT_LT(weightedPathLength(out, q), weightedPathLength(path, q));
+}
