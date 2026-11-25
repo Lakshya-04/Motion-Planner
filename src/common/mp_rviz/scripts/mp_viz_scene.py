@@ -8,6 +8,7 @@ Reads:   coverage_topic (coverage_planner_msgs/CoveragePlan; default /wall_cover
          the top-level path/segments) read at start and on ~/refresh; with it no CoveragePlan topic is needed. Set
          frame_id to the frame the file's poses are meant in (the manager's world_frame, e.g. odom), the file's own
          frame_id (e.g. base_link) is only right while the base is at that frame's origin.
+         plan_file and wall_scene_json are re-read when their modification time changes (checked every 2 s).
 Writes:  /mp_viz/plan_columns (MarkerArray, one LINE_STRIP per segment; connectors grey),
          /mp_viz/stands (MarkerArray, per stand an ARROW, a footprint LINE_STRIP and a TEXT_VIEW_FACING),
          /mp_viz/reach_slice (MarkerArray; reserved: reachability_msgs has no map/slice service, nothing is published).
@@ -102,6 +103,21 @@ class MpVizScene(Node):
         self._publish_wall()
         if self.plan_file:
             self._load_file()
+        # the plan / wall files are often written after this node started (the coverage run): reload on change
+        self._mtimes = {}
+        self.create_timer(2.0, self._watch_files)
+
+    def _watch_files(self):
+        for path, fn in ((self.plan_file, self._load_file), (self.wall_scene_json, self._publish_wall)):
+            if not path:
+                continue
+            try:
+                m = os.stat(path).st_mtime
+            except OSError:
+                continue
+            if self._mtimes.get(path) != m:
+                self._mtimes[path] = m
+                fn()
 
     # wall
     def _publish_wall(self):

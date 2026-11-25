@@ -25,3 +25,43 @@ def test_profile_is_wellformed(path):
     for d in displays:
         assert d.get('Class'), d
         assert d.get('Name'), d
+
+
+def _sim_overview():
+    with open(os.path.join(HERE, '..', 'profiles', 'sim_overview.rviz')) as f:
+        return yaml.safe_load(f)
+
+
+def test_sim_overview_topics_frame_and_window():
+    cfg = _sim_overview()
+    vm = cfg['Visualization Manager']
+    assert vm['Global Options']['Fixed Frame'] == 'odom'
+    assert cfg['Window Geometry']['Width'] >= 1400 and cfg['Window Geometry']['Height'] >= 900
+    topics = {}
+    for d in vm['Displays']:
+        t = d.get('Topic')
+        topics[d['Name']] = (t.get('Value') if isinstance(t, dict) else t) or d.get('Trajectory Topic') \
+            or d.get('Planning Scene Topic')
+        if d.get('Enabled', True) and 'Topic' in d and isinstance(t, dict):
+            assert t['Durability Policy'] in ('Volatile', 'Transient Local')
+    enabled = {d['Name']: d for d in vm['Displays'] if d.get('Enabled', True)}
+    want = ['/mp_viz/wall', '/monitored_planning_scene', '/mp_viz/plan_columns', '/mp_viz/stands',
+            '/mp_viz/coverage_paint', '/display_planned_path', '/mp_viz/planned_trajectory', '/mp_viz/tool_trace']
+    on_topics = {topics[n] for n in enabled}
+    for w in want:
+        assert w in on_topics, w
+    assert any(d['Class'] == 'rviz_default_plugins/RobotModel' for d in enabled.values())
+    assert any(d['Class'] == 'rviz_default_plugins/TF' for d in enabled.values())
+    # latched publishers need a Transient Local subscription
+    latched = {'/mp_viz/wall', '/mp_viz/plan_columns', '/mp_viz/stands', '/mp_viz/coverage_paint'}
+    for d in vm['Displays']:
+        t = d.get('Topic')
+        if isinstance(t, dict) and t.get('Value') in latched:
+            assert t['Durability Policy'] == 'Transient Local', d['Name']
+
+
+def test_sim_launches_default_to_sim_overview():
+    root = os.path.join(HERE, '..', '..', '..', 'simulation')
+    for rel in ('sim_gazebo/launch/sim.launch.py', 'sim_mujoco/launch/sim_mujoco.launch.py'):
+        with open(os.path.join(root, rel)) as f:
+            assert "'rviz_profile', default_value='sim_overview'" in f.read(), rel

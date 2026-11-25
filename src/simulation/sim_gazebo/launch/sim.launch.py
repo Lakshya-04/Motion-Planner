@@ -218,8 +218,13 @@ def _launch(context):
         if rviz_launch:
             actions.append(IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(rviz_launch),
-                launch_arguments={'profile': lc('rviz_profile'), 'use_sim_time': 'false',
-                                  'markers': 'true', 'scene': 'false'}.items()))
+                # this sim runs on /clock (robot_state_publisher, bridge and odom use sim time), so RViz must too, or
+                # every TF lookup against wall time fails and nothing shows
+                launch_arguments={'profile': lc('rviz_profile'), 'use_sim_time': 'true',
+                                  'markers': 'true', 'scene': lc('rviz_scene'), 'fixed_frame': 'odom',
+                                  'scene_frame': 'odom', 'plan_file': lc('rviz_plan_file'),
+                                  'wall_scene_json': lc('rviz_wall_scene') or lc('wall_scene'),
+                                  'moveit_profile': lc('profile')}.items()))
     if lc('arm_meshes') == 'true':
         # gz resolves the description's model://ur_description/... URIs through GZ_SIM_RESOURCE_PATH; without it the UR links
         # have no visual and no collision geometry in gz (only the primitives of the lift, tool and sensor link exist)
@@ -278,7 +283,10 @@ def generate_launch_description():
         DeclareLaunchArgument('wall_id', default_value='0'),
         DeclareLaunchArgument('standoff', default_value='0.9', description='wall distance in front of the base (m)'),
         DeclareLaunchArgument('rviz', default_value='true', description='open the same RViz window as the MuJoCo sim (mp_rviz); skipped without a display, rviz:=false opts out'),
-        DeclareLaunchArgument('rviz_profile', default_value='mission_overview', description='mp_rviz profiles/<name>.rviz'),
+        DeclareLaunchArgument('rviz_profile', default_value='sim_overview', description='mp_rviz profiles/<name>.rviz'),
+        DeclareLaunchArgument('rviz_scene', default_value='true', description='also start mp_viz_scene.py (wall, plan columns, stands)'),
+        DeclareLaunchArgument('rviz_plan_file', default_value='', description='coverage_output.json the manager executes (plan columns)'),
+        DeclareLaunchArgument('rviz_wall_scene', default_value='', description='wall_scene.json for the wall display (default: wall_scene)'),
         DeclareLaunchArgument('gui', default_value='false', description='true opens the gz GUI (server only otherwise)'),
         DeclareLaunchArgument('controller', default_value='jtc', description='jtc | jtac | none'),
         DeclareLaunchArgument('ft_conditioner', default_value='false',
