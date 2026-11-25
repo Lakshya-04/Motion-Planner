@@ -30,6 +30,8 @@ jobs:
         run: |
           python3 -m pip install --quiet pyyaml
           python3 docker/tools/check_params.py
+      - name: Doc citation check (paths and parameter names in doc tables)
+        run: python3 docker/tools/check_doc_citations.py
       - name: Tool tests
         run: |
           python3 -m pip install --quiet pytest pyyaml numpy matplotlib xacro
