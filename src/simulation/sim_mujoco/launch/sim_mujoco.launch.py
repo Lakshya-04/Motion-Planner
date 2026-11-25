@@ -157,11 +157,13 @@ def _setup(context, *args, **kwargs):
     nodes = [control_node, rsp, jsb,
              RegisterEventHandler(OnProcessExit(target_action=jsb, on_exit=[controller])), viewer]
     # the same RViz window as the Gazebo sim (mp_rviz view.launch.py); this sim runs on wall time, so use_sim_time false
-    nodes.append(IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(get_package_share_directory('mp_rviz'), 'launch', 'view.launch.py')),
-        launch_arguments={'profile': arg('rviz_profile'), 'use_sim_time': 'false',
-                          'markers': arg('rviz_markers'), 'scene': arg('rviz_scene')}.items(),
-        condition=IfCondition(LaunchConfiguration('rviz'))))
+    # on by default; skipped (not failed) when no display is available, rviz:=false opts out
+    if arg('rviz').lower() in ('1', 'true', 'yes') and (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+        nodes.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(get_package_share_directory('mp_rviz'), 'launch', 'view.launch.py')),
+            launch_arguments={'profile': arg('rviz_profile'), 'use_sim_time': 'false',
+                              'markers': arg('rviz_markers'), 'scene': arg('rviz_scene')}.items()))
     if arg('base_motion') == 'true':
         # the plugin publishes the base pose as geometry_msgs only; this turns it into /odom and TF
         nodes.append(Node(package='sim_mujoco', executable='base_odom.py', name='base_odom', output='screen',
@@ -245,8 +247,8 @@ def generate_launch_description():
         DeclareLaunchArgument('out_dir', default_value='', description='where to write the MJCF'),
         DeclareLaunchArgument('viewer', default_value='false',
                               description='open the MuJoCo viewer (needs a display and python mujoco)'),
-        DeclareLaunchArgument('rviz', default_value='false',
-                              description='open the same RViz window as the Gazebo sim (mp_rviz view.launch.py; needs a display)'),
+        DeclareLaunchArgument('rviz', default_value='true',
+                              description='open the same RViz window as the Gazebo sim (mp_rviz view.launch.py); on by default, skipped without a display, rviz:=false opts out'),
         DeclareLaunchArgument('rviz_profile', default_value='mission_overview', description='mp_rviz profiles/<name>.rviz'),
         DeclareLaunchArgument('rviz_markers', default_value='true', description='also start mp_viz_markers.py'),
         DeclareLaunchArgument('rviz_scene', default_value='false', description='also start mp_viz_scene.py'),
