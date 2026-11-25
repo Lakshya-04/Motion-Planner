@@ -47,6 +47,7 @@ void configure(OmplPlanner & planner, const PluginParams & params)
   optimize.num_candidates =
     static_cast<int>(paramOr(params, "free_space_num_candidates", static_cast<double>(optimize.num_candidates)));
   optimize.objective = parseObjective(paramOr(params, "free_space_objective", std::string("length")));
+  optimize.lift_cost_weight = paramOr(params, "lift_cost_weight", optimize.lift_cost_weight);
   const std::string planners = paramOr(params, "free_space_planners", std::string());
   if (!planners.empty()) {
     optimize.planners.clear();

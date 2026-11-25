@@ -40,6 +40,11 @@ struct FreeSpaceOptimizeConfig
   double time_budget_s{20.0};   ///< Total OMPL planning time, shared by the OMPL candidates.
   int num_candidates{5};        ///< Candidates in all, the direct joint path included.
   FreeSpaceObjective objective{FreeSpaceObjective::kLength};
+  /// Plugin param `lift_cost_weight`: cost multiplier of the lift (prismatic) joint's weighted travel against an arm
+  /// joint's (1.0), in candidate scoring and shortcut/smoothing. 2.0 = lift motion is twice as costly, so plans prefer
+  /// arm motion. 1.0 = the plain 1/range weighting. The OMPL planners' own internal objective is MoveIt's unweighted
+  /// path length; the weighting decides among the candidates and the post-processing.
+  double lift_cost_weight{kDefaultLiftCostWeight};
   /// planner_configs of ompl_planning.yaml, used round robin for the OMPL candidates.
   std::vector<std::string> planners{
     "BITstarkConfigDefault", "RRTstarkConfigDefault", "AITstarkConfigDefault", "InformedRRTstarkConfigDefault"};

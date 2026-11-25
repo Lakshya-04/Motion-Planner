@@ -61,6 +61,13 @@ bool OmplPlanner::planOptimized(
     ranges.push_back(b.position_bounded_ ? b.max_position_ - b.min_position_ : 0.0);
   }
   quality.weights = weightsFromRanges(ranges);
+  // Lift (prismatic) travel costs optimize_.lift_cost_weight times an arm joint's (default 2): candidate scoring and
+  // shortcut/smoothing acceptance both use these weights. 1.0 = the plain 1/range weighting.
+  std::vector<bool> is_lift;
+  for (const auto * joint : jmg->getActiveJointModels()) {
+    is_lift.push_back(joint->getType() == moveit::core::JointModel::PRISMATIC);
+  }
+  quality.weights = applyLiftCostWeight(quality.weights, is_lift, optimize_.lift_cost_weight);
   for (const auto & l : limits) {
     quality.velocity_limits.push_back(l.velocity);
     quality.acceleration_limits.push_back(l.acceleration);

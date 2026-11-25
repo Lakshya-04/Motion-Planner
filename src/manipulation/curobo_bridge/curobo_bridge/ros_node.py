@@ -113,7 +113,8 @@ class CuroboPlannerNode(Node):
             free_space_optimize=bool(self.declare_parameter('free_space_optimize', False).value),
             free_space_time_budget_s=float(self.declare_parameter('free_space_time_budget_s', 20.0).value),
             free_space_num_candidates=int(self.declare_parameter('free_space_num_candidates', 6).value),
-            free_space_objective=str(self.declare_parameter('free_space_objective', 'length').value))
+            free_space_objective=str(self.declare_parameter('free_space_objective', 'length').value),
+            lift_cost_weight=float(self.declare_parameter('lift_cost_weight', 2.0).value))
         self._planner = planner
         if self._planner is None:
             try:

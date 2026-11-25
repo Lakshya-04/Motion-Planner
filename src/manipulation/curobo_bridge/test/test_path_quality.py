@@ -144,3 +144,15 @@ def test_optimal_stops_starting_candidates_after_budget():
     p._budget_s = 0.0
     p._plan_joint_optimal([0.0], [0.5], None, None)
     assert len(p._planner.calls) == 1        # the first candidate always runs
+
+
+def test_lift_cost_weight_prefers_arm_motion():
+    names = ['lift', 'a1']
+    base = [1.0, 1.0]
+    a = [[0, 0], [0.9, 0.1]]   # mostly lift
+    b = [[0, 0], [0.1, 1.1]]   # mostly arm
+    assert pq.apply_lift_cost_weight(base, names, ['lift'], 1.0) == base
+    w2 = pq.apply_lift_cost_weight(base, names, ['lift'], 2.0)
+    assert w2 == [2.0, 1.0]
+    assert pq.path_length(a, base) < pq.path_length(b, base)
+    assert pq.path_length(b, w2) < pq.path_length(a, w2)
