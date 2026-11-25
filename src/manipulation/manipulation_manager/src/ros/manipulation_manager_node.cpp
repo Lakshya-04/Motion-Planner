@@ -2018,7 +2018,7 @@ private:
         column_dock_q_[static_cast<size_t>(std::max(0, column_))].push_back(choice.q);
         RCLCPP_INFO(
           this->get_logger(),
-          "DOCKGOAL continuity: seed %zu of %zu candidates, max dq %.3f rad (dropped: branch %zu, wrist %zu, jump %zu)",
+          "DOCKGOAL continuity: seed %zu of %zu candidates, weighted cost %.3f (max dq, lift metres x lift_cost_weight; dropped: branch %zu, wrist %zu, jump %zu)",
           choice.seed_index, choice.candidates, choice.cost, choice.rejected_branch, choice.rejected_wrist,
           choice.rejected_cost);
         if (reach_ptr) {
@@ -2094,7 +2094,7 @@ private:
       return {};
     }
     RCLCPP_INFO(
-      this->get_logger(), "recovery goal on the live branch: seed %zu of %zu, max dq %.3f rad", choice.seed_index,
+      this->get_logger(), "recovery goal on the live branch: seed %zu of %zu, weighted cost %.3f (max dq, lift weighted)", choice.seed_index,
       choice.candidates, choice.cost);
     return choice.q;
   }
