@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Keep the parameters of the manager and reachability nodes and their documentation in step.
+"""Keep the parameters of the manager, reachability, stand_navigator, coverage_planner and wall_detector nodes and their documentation in step.
 
-Two checks, per package (manipulation_manager, reachability):
+Two checks, per package:
 
- 1. Every parameter the package's C++ declares (`declare_parameter<T>("name", ...)`) must show up as a
+ 1. Every parameter the package's C++ or Python declares (`declare_parameter<T>("name", ...)`, `self.declare_parameter('name', ...)`) must show up as a
     word in the package's config yaml, launch files or README, or in docs/ (any *.md). A parameter
     nobody can find a description of is a parameter nobody can use.
  2. Every key under `ros__parameters` in the package's config yaml must be declared by the package's C++.
@@ -34,14 +34,19 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PACKAGES = {
     "manipulation_manager": "src/manipulation/manipulation_manager",
     "reachability": "src/manipulation/reachability",
+    "stand_navigator": "src/manipulation/stand_navigator",
+    "coverage_planner": "src/perception/coverage_planner",
+    "wall_detector": "src/perception/wall_detector",
 }
 CODE_DIRS = ("src", "include", "apps")
 CODE_EXT = (".cpp", ".hpp", ".h", ".cc")
+PY_DIRS = ("scripts", "src")  # python nodes: scripts/, src/ and the package's own module dir (<pkg>/<pkg>/)
+PY_EXT = (".py",)
 ALLOWLIST = os.path.join(os.path.dirname(__file__), "check_params_allowlist.txt")
 
 # declare_parameter / declare_parameter<T> / declare_parameter<std::vector<double>>(  first-argument...
 DECL = re.compile(r"\bdeclare_parameters?\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\s*\(\s*([^,)]*)", re.S)
-LITERAL = re.compile(r'^\s*"([^"]+)"\s*$')
+LITERAL = re.compile(r'^\s*["\']([^"\']+)["\']\s*$')
 
 
 def read(path):
@@ -56,7 +61,9 @@ def walk(base, exts):
                 yield os.path.join(d, n)
 
 
-def strip_comments(text):
+def strip_comments(text, python=False):
+    if python:
+        return re.sub(r"#[^\n]*", "", text)
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
     return re.sub(r"//[^\n]*", "", text)
 
@@ -64,9 +71,10 @@ def strip_comments(text):
 def declared(pkg_dir):
     """-> (set of literal names, list of (file, expr) for names that are not plain literals)."""
     names, dynamic = {}, []
-    for sub in CODE_DIRS:
-        for path in walk(os.path.join(pkg_dir, sub), CODE_EXT):
-            text = strip_comments(read(path))
+    sources = [(sub, CODE_EXT) for sub in CODE_DIRS] + [(sub, PY_EXT) for sub in PY_DIRS + (os.path.basename(pkg_dir),)]
+    for sub, exts in sources:
+        for path in walk(os.path.join(pkg_dir, sub), exts):
+            text = strip_comments(read(path), path.endswith(PY_EXT))
             for m in DECL.finditer(text):
                 arg = m.group(1).strip()
                 lit = LITERAL.match(arg)

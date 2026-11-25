@@ -10,7 +10,7 @@ end to end in headless one-command passes (coverage planner, manager, MoveIt, co
 and scored), including multi-stand passes where the base drives between stands. Nothing here has run on hardware.
 The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
-**Where it stands (2026-11-22, main at #173):**
+**Where it stands (2026-11-22, main at #204):**
 - **Single-stand wall passes** in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
 - **Two-stand passes in MuJoCo pass**, with MoveIt/OMPL and with cuRobo. The latest run (MoveIt/OMPL, scored on the tool pose after #167 and
   #172, one run): 10 of 10 columns, coverage 100 %, tool tilt at most 0.15 deg, wall gap at most 0.9 mm, peak force 22.1 N against a 10 N
@@ -33,8 +33,28 @@ The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/
   base placement optimiser (ceilings, corners), a differential-IK core, a runtime safety monitor core (**not a certified safety function**),
   tool contact frame, tilt and plane-touch calibration, a teleoperation core and a lateral dock term. The list with evidence is
   [CHANGELOG.md](CHANGELOG.md) and [docs/ROADMAP.md](docs/ROADMAP.md#19-since-143-what-merged-and-what-it-is-worth).
-- **Navigation and perception are the weakest links.** The base drives a straight line to each stand on ground-truth simulator odometry (no map, no obstacle avoidance, no localisation, no Nav2), wall docking and `wall_detector` are not started in the two-stand passes (the wall is pre-baked), and the self filter is not in any pass. [docs/navigation_and_perception.md](docs/navigation_and_perception.md) has the component table and the ordered gap list.
+- **Newest additions (#198 and #203), each with an honest tag.** "Host-tested only" means unit tests or host builds and no simulator run; "unbuilt" means the ROS node wiring was not compiled in a workspace image.
+  | Addition | Tag | Where |
+  |---|---|---|
+  | Coverage paint (live done / not done wall map, `run.csv` replay to a PNG and a percent) | host-tested only (31 pytest); node, RViz, Gazebo and MuJoCo drawing never run | [docs/sim_overlay.md](docs/sim_overlay.md) |
+  | Plan and stand overlay inside Gazebo and MuJoCo | host-tested only (gz commands dry-run); never run in a simulator | [docs/sim_overlay.md](docs/sim_overlay.md) |
+  | Reach report (reach fractions per lift height, minimum lift positions, flags, heat strip from an RM4D map) | host-tested only (pytest on an analytic map); Python tool, no simulator involved | [docs/reachability.md](docs/reachability.md) |
+  | Stand navigation planner (grid A* over the wall scene, shortcut, waypoint follower; opt-in) | host-tested only; the MuJoCo switches `MULTI_STAND_PATH_PLANNER` and `MULTI_STAND_WALL_DOCK` exist but are not yet measured | [docs/stand_navigation.md](docs/stand_navigation.md) |
+  | Perception-in-the-loop mode (`MULTI_STAND_PERCEPTION=1`: simulated cloud to `wall_detector` to the coverage planner) | host-tested only (Python mirror of the fit); C++ node and simulator run unbuilt; `wall_detector` reports no obstacles | [docs/perception_live.md](docs/perception_live.md) |
+  | Plan redundancy report (`plan_redundancy_report`, `score_run --plan`: jumps, repeated strokes, strip and stand order) | host-tested only (host g++ gtests); not built in the ROS image | [docs/coverage_planner.md](docs/coverage_planner.md) |
+  | Chained columns (`chain_columns`, opt-in, one straight move between neighbouring columns) | host-tested only; manager node wiring unbuilt | [docs/manager_parameters.md](docs/manager_parameters.md) |
+  | Scenario sync, standoff advisor, per-module RViz profiles, plan-only playback | host-tested only | [docs/scenario_sync.md](docs/scenario_sync.md), [docs/standoff.md](docs/standoff.md), [docs/rviz/README.md](docs/rviz/README.md) |
+  | Navigation safety layer (stale odometry, command gate, stuck detection, scan/cloud obstacle stop; default-on checks, tested not to change healthy runs) | host-tested only (pytest); built and unit-tested in the ROS image with the batch, never run in a simulator | [docs/stand_navigation.md](docs/stand_navigation.md#base-safety-layer-and-the-nav2-backend) |
+  | Nav2 adapter (`backend:=nav2`, goal conversion and result mapping) | host-tested only (fake Nav2 client); no image has Nav2, so never run against a real Nav2 | [docs/stand_navigation.md](docs/stand_navigation.md#nav2-swap-path) |
+  | Wall dock step after `navigate_to_stand` (opt-in, feeds the stand check and the verify result) | host-tested only (gtests on the gate); built with the batch, never run in a simulator | [docs/manager_parameters.md](docs/manager_parameters.md) |
+  | Failed-column retry (`retry_failed_columns`, next dock IK solution, fresh stow, optional stand re-plan; opt-in) | host-tested only (gtests on the policy); built with the batch, no simulator run yet | [docs/manager_parameters.md](docs/manager_parameters.md) |
+  | Touch-up plan (undone cells of a recorded run to a serpentine `coverage_output.json`) | host-tested only (pytest); the plan has not been executed by the manager in a simulator | [docs/sim_overlay.md](docs/sim_overlay.md) |
+  | Gazebo multi-stand script parity with MuJoCo (double pass, reach, clearance, tall patch knobs) | host-tested only (script test); the Gazebo tall wall has never run, unverified in sim | [docs/sim_gazebo.md](docs/sim_gazebo.md) |
+
+  None of these is verified in a simulator yet (the batch-2 rows were built and unit-tested in the ROS image, no more); the verified-in-sim results are the MuJoCo passes above.
+- **Navigation and perception are the weakest links.** The base drives a straight line to each stand on ground-truth simulator odometry (no map, no localisation; an opt-in planner, safety layer and Nav2 adapter now exist but have not run in a simulator), wall docking and `wall_detector` are not started in the two-stand passes (the wall is pre-baked), and the self filter is not in any pass. [docs/navigation_and_perception.md](docs/navigation_and_perception.md) has the component table and the ordered gap list.
 - **Nothing has run on hardware.**
+- What is untested on real hardware, in commissioning order: [docs/hardware_readiness.md](docs/hardware_readiness.md).
 - Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md); the handoff: [docs/dev_handoff.md](docs/dev_handoff.md); the order of
   the next themes: [docs/development_plan.md](docs/development_plan.md).
 

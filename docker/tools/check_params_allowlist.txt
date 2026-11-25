@@ -9,3 +9,5 @@
 #
 # Currently empty: the first run of the check found 28 undocumented manager parameters, all fixed in
 # docs/manager_parameters.md, and no yaml key without a declaration (neither package has a ros__parameters yaml).
+# Later extension to stand_navigator, coverage_planner and wall_detector (C++ and Python nodes) found 10
+# undocumented coverage_planner test-script parameters, now in that package's README; still no exceptions.
