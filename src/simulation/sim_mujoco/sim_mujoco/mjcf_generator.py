@@ -23,6 +23,8 @@ What is generated
     `base_x_joint`, `base_y_joint` (slide) and `base_yaw_joint` (hinge) on the root body, each with a
     stiff position actuator the plugin drives from /cmd_vel, plus `<custom>` numerics carrying the drive
     type and the velocity limits. The wheels stay visual.
+  * optionally (`floor`, off by default) a visual-only checker floor: no contacts, so the kinematic base
+    and the wall contact scoring behave exactly as without it.
 """
 import math
 import pathlib
@@ -210,6 +212,8 @@ DEFAULTS = dict(
     tool_pad_radius=0.03,
     tool_pad_thickness=0.01,
     friction=(0.8, 0.005, 0.0001),
+    floor=False,                     # True: a visual-only checker floor at z = floor_z (no contacts, not scanned by the depth sensor)
+    floor_z=0.0,
     base_motion=None,                # None, or dict(drive='omni'|'diff', max_linear=, max_angular=)
     base_kp=(2.0e4, 2.0e4, 1.0e4),   # N/m, N/m, N m/rad: stiff hold, so wall contact barely moves it
     base_kv_over_kp=0.1,             # seconds
@@ -266,7 +270,18 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
     default = ET.SubElement(mj, 'default')
     ET.SubElement(default, 'geom', contype='1', conaffinity='1', friction=_fmt(opt['friction']))
     asset = ET.SubElement(mj, 'asset')
+    if opt['floor']:
+        ET.SubElement(asset, 'texture', name='floor_tex', type='2d', builtin='checker', width='256',
+                      height='256', rgb1='0.32 0.34 0.38', rgb2='0.42 0.44 0.48')
+        ET.SubElement(asset, 'material', name='floor_mat', texture='floor_tex', texrepeat='8 8',
+                      texuniform='true', reflectance='0.05')
     world = ET.SubElement(mj, 'worldbody')
+    if opt['floor']:
+        # the planar base is driven kinematically by its slide/hinge joints (no wheel contact), so the floor
+        # only has to be seen: contype = conaffinity = 0 means no contacts, and group 2 keeps it out of the
+        # depth sensor's group-1 rays. The wall, the obstacles and every contact force are unchanged.
+        ET.SubElement(world, 'geom', name='floor', type='plane', size='6 6 0.1', pos=f'0 0 {opt["floor_z"]:g}',
+                      material='floor_mat', contype='0', conaffinity='0', group='2')
     ET.SubElement(world, 'light', pos='0 0 4', dir='0 0 -1', diffuse='0.8 0.8 0.8')
 
     mesh_assets = {}
