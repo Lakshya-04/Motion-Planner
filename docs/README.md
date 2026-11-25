@@ -1,5 +1,7 @@
 # Documentation
 
+Status of the newest additions (coverage paint, reach report, stand navigation planner, perception-in-the-loop mode, plan redundancy report, chained columns, navigation safety and Nav2 adapter, wall dock after navigate, column retry, touch-up plan, Gazebo script parity), each tagged verified in sim, host-tested only or unbuilt: see the table in the [top-level README](../README.md). At present none is verified in a simulator (all are host-tested only); the per-area evidence is in [ROADMAP.md](ROADMAP.md).
+
 | Document | What it covers |
 |---|---|
 | [ROADMAP.md](ROADMAP.md) | Status checklist for the whole workflow (done / partial / not done), the reuse map of open source and recent papers, the milestone order and the open decisions |
