@@ -11,6 +11,7 @@ columns, base stands). For the wall and the executed plan pass ``plan_file:=<cov
 MoveIt parameters (robot description, SRDF, kinematics) that the Trajectory and PlanningScene displays need.
 """
 import os
+import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -28,6 +29,17 @@ def _setup(context, *args, **kwargs):
     if not os.path.isfile(cfg):
         avail = sorted(f[:-5] for f in os.listdir(os.path.join(share, 'profiles')) if f.endswith('.rviz'))
         raise RuntimeError('no RViz profile "%s"; available: %s' % (profile, ', '.join(avail)))
+    if LaunchConfiguration('moveit_displays').perform(context).lower() in ('1', 'true', 'yes'):
+        import yaml
+        with open(cfg) as f:
+            doc = yaml.safe_load(f)
+        for d in doc['Visualization Manager']['Displays']:
+            if str(d.get('Class', '')).startswith('moveit_rviz_plugin/'):
+                d['Enabled'] = True
+                d['Value'] = True
+        cfg = os.path.join(tempfile.mkdtemp(prefix='mp_rviz_'), profile + '_moveit.rviz')
+        with open(cfg, 'w') as f:
+            yaml.safe_dump(doc, f, sort_keys=False)
     sim_time = LaunchConfiguration('use_sim_time').perform(context).lower() in ('1', 'true', 'yes')
     rviz_params = [{'use_sim_time': sim_time}]
     moveit_profile = LaunchConfiguration('moveit_profile').perform(context)
@@ -69,5 +81,7 @@ def generate_launch_description():
         DeclareLaunchArgument('wall_scene_json', default_value='', description='wall_scene.json for mp_viz_scene'),
         DeclareLaunchArgument('moveit_profile', default_value='',
                               description='description profile: gives RViz the MoveIt parameters (Trajectory display)'),
+        DeclareLaunchArgument('moveit_displays', default_value='false',
+                              description='enable the moveit_rviz_plugin displays (can block RViz startup)'),
         OpaqueFunction(function=_setup),
     ])

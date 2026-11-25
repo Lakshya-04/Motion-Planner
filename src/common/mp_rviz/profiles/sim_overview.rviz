@@ -2,7 +2,11 @@
 # Wall, coverage plan columns, stands and the coverage paint come from mp_viz_scene.py (scene:=true, plan_file,
 # wall_scene_json, frame odom) and coverage_paint; the motion plan from move_group (/display_planned_path, free-space
 # segments) and from the manager (/mp_viz/planned_trajectory, every segment incl. Cartesian); the tool trace from
-# mp_viz_markers.py (markers:=true). Needs use_sim_time to match the sim clock (Gazebo: true).
+# mp_viz_markers.py (markers:=true). The thick GREEN line (/mp_viz/tcp_executed) is the TCP motion actually executed
+# (TF odom->tcp_link, whole pass). The moveit_rviz_plugin displays (PlanningScene, the two Trajectory) are OFF here:
+# they load the robot model synchronously and can keep RViz at its splash screen until robot_description and
+# robot_description_semantic exist; view.launch.py moveit_displays:=true switches them on (when RViz has MoveIt
+# parameters). Needs use_sim_time to match the sim clock (Gazebo: true).
 Panels:
 - Class: rviz_common/Displays
   Name: Displays
@@ -35,7 +39,7 @@ Visualization Manager:
     Alpha: 1
     Description Topic:
       Depth: 5
-      Durability Policy: Volatile
+      Durability Policy: Transient Local
       History Policy: Keep Last
       Reliability Policy: Reliable
       Value: /robot_description
@@ -67,8 +71,8 @@ Visualization Manager:
       Value: /mp_viz/wall
   - Class: moveit_rviz_plugin/PlanningScene
     Name: Planning scene (collision objects, octomap)
-    Enabled: true
-    Value: true
+    Enabled: false
+    Value: false
     Move Group Namespace: ''
     Planning Scene Topic: /monitored_planning_scene
     Robot Description: robot_description
@@ -124,8 +128,8 @@ Visualization Manager:
       Value: /mp_viz/coverage_paint
   - Class: moveit_rviz_plugin/Trajectory
     Name: Motion plan (move_group, /display_planned_path)
-    Enabled: true
-    Value: true
+    Enabled: false
+    Value: false
     Robot Description: robot_description
     Trajectory Topic: /display_planned_path
     Robot Alpha: 0.4
@@ -137,8 +141,8 @@ Visualization Manager:
     Interrupt Display: false
   - Class: moveit_rviz_plugin/Trajectory
     Name: Motion plan (manager, executed segment, /mp_viz/planned_trajectory)
-    Enabled: true
-    Value: true
+    Enabled: false
+    Value: false
     Robot Description: robot_description
     Trajectory Topic: /mp_viz/planned_trajectory
     Robot Alpha: 0.6
@@ -149,8 +153,38 @@ Visualization Manager:
     State Display Time: 0.05 s
     Interrupt Display: false
   - Class: rviz_default_plugins/MarkerArray
-    Name: Tool trace (coloured by force)
+    Name: Stand reachable columns (per stand)
     Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/stand_columns
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Reachable poses (green/red, refresh)
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/reachable
+  - Class: rviz_default_plugins/Marker
+    Name: TCP executed (GREEN line, odom)
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/tcp_executed
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Tool trace (coloured by force)
+    Enabled: false
     Namespaces: {}
     Topic:
       Depth: 5

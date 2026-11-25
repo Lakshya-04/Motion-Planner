@@ -45,18 +45,27 @@ def test_sim_overview_topics_frame_and_window():
         if d.get('Enabled', True) and 'Topic' in d and isinstance(t, dict):
             assert t['Durability Policy'] in ('Volatile', 'Transient Local')
     enabled = {d['Name']: d for d in vm['Displays'] if d.get('Enabled', True)}
-    want = ['/mp_viz/wall', '/monitored_planning_scene', '/mp_viz/plan_columns', '/mp_viz/stands',
-            '/mp_viz/coverage_paint', '/display_planned_path', '/mp_viz/planned_trajectory', '/mp_viz/tool_trace']
+    want = ['/mp_viz/wall', '/mp_viz/plan_columns', '/mp_viz/stands',
+            '/mp_viz/coverage_paint', '/mp_viz/transitions', '/mp_viz/stand_columns', '/mp_viz/tcp_executed',
+            '/mp_viz/mission_text']
     on_topics = {topics[n] for n in enabled}
     for w in want:
         assert w in on_topics, w
+    # displays that can block RViz at its splash screen are off by default; the tool trace is the secondary trail
+    off = {d['Name'] for d in vm['Displays'] if not d.get('Enabled', True)}
+    assert not any(d['Class'].startswith('moveit_rviz_plugin/') for d in enabled.values())
+    assert 'Tool trace (coloured by force)' in off
+    green = next(d for d in vm['Displays'] if d['Name'].startswith('TCP executed'))
+    assert green['Class'] == 'rviz_default_plugins/Marker'
     assert any(d['Class'] == 'rviz_default_plugins/RobotModel' for d in enabled.values())
     assert any(d['Class'] == 'rviz_default_plugins/TF' for d in enabled.values())
     # latched publishers need a Transient Local subscription
-    latched = {'/mp_viz/wall', '/mp_viz/plan_columns', '/mp_viz/stands', '/mp_viz/coverage_paint'}
+    latched = {'/mp_viz/wall', '/mp_viz/plan_columns', '/mp_viz/stands', '/mp_viz/coverage_paint',
+               '/mp_viz/stand_columns', '/robot_description'}
     for d in vm['Displays']:
         t = d.get('Topic')
-        if isinstance(t, dict) and t.get('Value') in latched:
+        if isinstance(t, dict) and t.get('Value') in latched or d.get('Description Topic', {}).get('Value') in latched:
+            t = t if isinstance(t, dict) else d['Description Topic']
             assert t['Durability Policy'] == 'Transient Local', d['Name']
 
 

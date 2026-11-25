@@ -18,6 +18,8 @@ Writes:  /mp_viz/plan_columns (MarkerArray, one LINE_STRIP per segment; connecto
          pose, plus a text with the count). Computed on ~/refresh with reachability_msgs/IsReachable, one async request
          per pose (at most max_reach_targets, evenly sampled), for a base at base_x/base_y/base_yaw (frame_id frame) and
          the arm base at height arm_base_z (+ arm_dx/arm_dy in the base frame). ONE lift height only.
+         /mp_viz/stand_columns (MarkerArray: per stand a POINTS marker in that stand's colour at the plan poses
+         PlanStands assigned to it = the columns reachable from that stand, plus a text 'stand i: n poses').
          /mp_viz/transitions (MarkerArray: grey arrows from the end of each stroke to the start of the next, in execution
          order, plus the visiting number at the start of each stroke group; drawn from start_index/end_index).
 All topics are transient_local so a late RViz gets the last state.
@@ -87,6 +89,7 @@ class MpVizScene(Node):
         self.reach_pub.publish(MarkerArray(markers=[Marker(action=Marker.DELETEALL)]))
         self.trans_pub = self.create_publisher(MarkerArray, '/mp_viz/transitions', qos)
         self.wall_pub = self.create_publisher(MarkerArray, '/mp_viz/wall', qos)
+        self.stand_cols_pub = self.create_publisher(MarkerArray, '/mp_viz/stand_columns', qos)
         self.reachable_pub = self.create_publisher(MarkerArray, '/mp_viz/reachable', qos)
         self.reach_client = self.create_client(IsReachable, is_reach_srv) if IsReachable is not None else None
         self._reach_gen = 0
@@ -279,7 +282,7 @@ class MpVizScene(Node):
             m = Marker(type=Marker.LINE_STRIP, action=Marker.ADD, ns='plan_columns', id=i)
             m.header.frame_id = frame
             m.pose.orientation.w = 1.0
-            m.scale.x = 0.01 if ln['connector'] else 0.025
+            m.scale.x = 0.01 if ln['connector'] else 0.03
             m.color = _color(ln['rgb'], 0.5 if ln['connector'] else 1.0)
             m.points = [Point(x=x, y=y, z=z) for x, y, z in ln['points']]
             arr.markers.append(m)
@@ -336,6 +339,7 @@ class MpVizScene(Node):
         wn = self.wall_normal if len(self.wall_normal) == 3 else list(logic.wall_normal_from_tool(q))
         req.wall_point = Point(x=float(wp[0]), y=float(wp[1]), z=float(wp[2]))
         req.wall_normal.x, req.wall_normal.y, req.wall_normal.z = (float(c) for c in wn)
+        self._stand_poses = poses
         fut = self.client.call_async(req)
         fut.add_done_callback(self._on_stands)
         res.success, res.message = True, 'PlanStands requested with %d targets; %s' % (len(poses), reach_msg)
@@ -376,7 +380,33 @@ class MpVizScene(Node):
             t.text = sp['label']
             arr.markers += [a, f, t]
         self.stands_pub.publish(arr)
+        self._publish_stand_columns(r.stands, frame)
         self.get_logger().info('stands: %d' % len(r.stands))
+
+    def _publish_stand_columns(self, stands, frame):
+        poses = getattr(self, '_stand_poses', None) or []
+        arr = MarkerArray(markers=[Marker(action=Marker.DELETEALL)])
+        for i, s in enumerate(stands):
+            idx = [k for k in s.target_indices if 0 <= k < len(poses)]
+            rgb = logic.palette(i)
+            m = Marker(type=Marker.POINTS, action=Marker.ADD, ns='stand_columns', id=i)
+            m.header.frame_id = frame
+            m.pose.orientation.w = 1.0
+            m.scale.x = m.scale.y = 0.04
+            m.color = _color(rgb, 1.0)
+            m.points = [Point(x=poses[k].position.x, y=poses[k].position.y, z=poses[k].position.z) for k in idx]
+            arr.markers.append(m)
+            if idx:
+                t = Marker(type=Marker.TEXT_VIEW_FACING, action=Marker.ADD, ns='stand_columns_text', id=i)
+                t.header.frame_id = frame
+                t.pose.position.x, t.pose.position.y = s.x, s.y
+                t.pose.position.z = 0.7
+                t.pose.orientation.w = 1.0
+                t.scale.z = 0.12
+                t.color = _color(rgb)
+                t.text = 'stand %d reaches %d poses' % (i, len(idx))
+                arr.markers.append(t)
+        self.stand_cols_pub.publish(arr)
 
 
 def main():
