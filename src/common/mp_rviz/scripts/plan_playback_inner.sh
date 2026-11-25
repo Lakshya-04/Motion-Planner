@@ -45,7 +45,7 @@ if [ ! -s "$COV" ] || [ ! -s "$OUT/ur10e.rm4d" ] || [ ! -s "$OUT/data/walls.pcd"
   start coverage_planner ros2 run coverage_planner coverage_planner_node
   sleep 3
   timeout 300 ros2 run coverage_planner wall_coverage_demo_node --ros-args -p wall_scene_json:=$SCENE \
-    -p output_json:=$COV -p orientation_format:=quaternion -p tool_frame_yaw_deg:=-90.0 -p swath_m:=$SWATH -p overlap_pct:=$OVERLAP \
+    -p output_json:=$COV -p orientation_format:=quaternion -p tool_frame_yaw_deg:=-90.0 -p swath_m:=$SWATH -p overlap_pct:=$OVERLAP -p double_pass:=${PB_DOUBLE_PASS:-false} \
     > "$OUT/coverage_demo.log" 2>&1 &
   D=$!; for _ in $(seq 600); do [ -s "$COV" ] && break; sleep 0.5; done; kill -INT $D 2>/dev/null
   [ -s "$COV" ] || { echo "no coverage plan"; exit 3; }
@@ -72,6 +72,9 @@ manipulation_manager:
     coverage_z_max_m: $Z_MAX
     coverage_eef_speed_mps: ${PB_SPEED:-0.2}
     dock_at_stroke_start: true
+    serpentine_columns: ${PB_SERPENTINE:-true}
+    chain_columns: ${PB_CHAIN:-true}
+    dock_ik_lift_cost_weight: 2.0
     stand_max_span_m: $SPAN
     stand_arrival_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1'
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'

@@ -11,6 +11,15 @@ ros2 launch mp_rviz view.launch.py rviz_config:=/abs/path.rviz     # any other f
 `markers:=true` also starts `mp_viz_markers.py`, which publishes `/mp_viz/mission_text` (state and force as text)
 and `/mp_viz/tool_trace` (the tool path coloured by force). A wrong profile name lists the available ones.
 
+`sim_overview` is the default profile of both `sim_gazebo` and `sim_mujoco` (fixed frame `odom`, window 1400x900): RobotModel,
+TF (odom, base_footprint, tcp_link), the wall (`/mp_viz/wall`), the MoveIt planning scene, the plan columns, stands, coverage
+paint, the motion plan (`/display_planned_path` from move_group for free-space segments, `/mp_viz/planned_trajectory` from
+`manipulation_manager` for every segment sent to the controller, Cartesian included; both with a trail) and the tool trace.
+The sims start `mp_viz_scene.py` for it (`rviz_scene`, `rviz_plan_file:=<coverage_output.json>`, `rviz_wall_scene`; the files
+are re-read when they change) and pass `moveit_profile` so RViz gets the MoveIt parameters. The Gazebo sim runs RViz with
+`use_sim_time:=true` (the TF is on `/clock`). The coverage_planner_node path is in frame `map` and the demo path in the wall
+scene's `base_link`, so neither is drawn in `odom`; the plan columns are.
+
 `scene:=true` also starts `mp_viz_scene.py` (all topics transient_local; shown in `mission_overview`,
 `manipulation_manager` and `reachability`):
 

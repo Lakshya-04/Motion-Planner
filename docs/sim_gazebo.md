@@ -713,6 +713,11 @@ Read from the plain-wall run's `manager.log` and `sim_launch.log` (10 columns, 2
   168.0 s, check at about 167 s), so the arm trails its trajectory by more than the fixed 0.5 s the check waits. New manager parameter
   `tcp_settle_timeout_s` (default 0 = the old fixed wait; the Gazebo pass sets 4 s, `MULTI_STAND_TCP_SETTLE`): the approach and dock checks then wait
   until the tool position changes by less than `tcp_settle_tolerance_m` (2 mm) over 0.4 s, at most that long, before comparing.
+  **Premature "settled" (gazebo-tall-fixed3, stand 0, 10 columns, 2 of 10 done).** Under `jtac_position_only` the joint loop is first order with a 10 s time
+  constant, so a tool 5 cm from its goal moves only about 2 mm in 0.4 s: the 2 mm check declared it settled ("tool settled after 4.4 s") while it was still
+  converging, and every dock was then judged 4 to 6 cm off the standoff (limit 2 cm) with the lift at 0 and shoulder/elbow 0.17 to 0.19 rad short of the MuJoCo
+  run's joints. `MULTI_STAND_TCP_SETTLE_TOL` (`tcp_settle_tolerance_m`, default 0.002 unchanged) with `MULTI_STAND_TCP_SETTLE=60` waits for the arrival
+  (0.5 mm per 0.4 s corresponds to about 1.2 cm left). Not run yet.
 - **Forearm and wrist collision.** In the first rerun (the two fixes above only) every plan failed at the first dock: its joint goal (wrist 1 at -4.25 rad)
   had `arm_forearm_link` against `arm_wrist_2_link` in contact ("Unable to sample any valid states for goal tree"), and after a drive to another branch
   79 of 140 plan requests were refused by `CheckStartStateCollision` with the same pair (51 more with `arm_upper_arm_link` against `lift_carriage_link`),
