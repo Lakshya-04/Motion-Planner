@@ -158,10 +158,11 @@ class MpVizScene(Node):
         t = Marker(type=Marker.TEXT_VIEW_FACING, action=Marker.ADD, ns='wall_text', id=0)
         t.header.frame_id = frame
         c = logic.wall_corners(wall)
+        # above the wall's top-left corner (smallest y), clear of the robot and the plan
         t.pose.position.x, t.pose.position.y, t.pose.position.z = (
-            sum(p[k] for p in c) / 4.0 for k in range(3))
+            min(p[0] for p in c), min(p[1] for p in c), max(p[2] for p in c) + 0.12)
         t.pose.orientation.w = 1.0
-        t.scale.z = 0.15
+        t.scale.z = 0.08
         t.color = _color((1.0, 1.0, 1.0))
         t.text = 'wall %.1f x %.1f m = %.1f m2, face %.3f m' % (
             abs(wall['u_range_m'][1] - wall['u_range_m'][0]), abs(wall['v_range_m'][1] - wall['v_range_m'][0]),
@@ -248,7 +249,7 @@ class MpVizScene(Node):
         t.pose.position.x, t.pose.position.y, t.pose.position.z = (
             self.base[0], self.base[1], self.arm_base_z + 1.2)
         t.pose.orientation.w = 1.0
-        t.scale.z = 0.15
+        t.scale.z = 0.09
         t.color = _color((1.0, 1.0, 1.0))
         t.text = 'base (%.2f, %.2f, yaw %.2f): %s' % (*self.base, logic.reach_summary(flags))
         arr.markers.append(t)
@@ -329,7 +330,7 @@ class MpVizScene(Node):
             t.pose.position.x, t.pose.position.y, t.pose.position.z = (
                 float(nn['at'][0]), float(nn['at'][1]), float(nn['at'][2]) + 0.06)
             t.pose.orientation.w = 1.0
-            t.scale.z = 0.07
+            t.scale.z = 0.06
             t.color = _color((1.0, 1.0, 0.4))
             t.text = str(nn['n'])
             arr.markers.append(t)
@@ -393,7 +394,7 @@ class MpVizScene(Node):
             t = hdr(Marker(type=Marker.TEXT_VIEW_FACING, ns='stand_text', **base))
             t.pose.position.x, t.pose.position.y, t.pose.position.z = s.x, s.y, 0.4
             t.pose.orientation.w = 1.0
-            t.scale.z = 0.15
+            t.scale.z = 0.09
             t.color = _color((1.0, 1.0, 1.0))
             t.text = sp['label']
             arr.markers += [a, f, t]
@@ -420,7 +421,7 @@ class MpVizScene(Node):
                 t.pose.position.x, t.pose.position.y = s.x, s.y
                 t.pose.position.z = 0.7
                 t.pose.orientation.w = 1.0
-                t.scale.z = 0.12
+                t.scale.z = 0.09
                 t.color = _color(rgb)
                 t.text = 'stand %d reaches %d poses' % (i, len(idx))
                 arr.markers.append(t)

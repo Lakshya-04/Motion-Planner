@@ -55,6 +55,7 @@ class MpVizMarkers(Node):
         self.path_max = int(p('path_max_points', 6000).value)
         self.path_min_step = float(p('path_min_step_m', 0.01).value)   # 1 cm: the line stays smooth, 5x fewer points than 2 mm
         self.path_width = float(p('path_line_width_m', 0.02).value)
+        self.text_xyz = [float(c) for c in p('text_xyz', [0.9, -1.5, 2.4]).value]   # fixed_frame position of the readout
         self.path_pts = []
         self._path_dirty = False
         self._trace_dirty = False
@@ -130,9 +131,9 @@ class MpVizMarkers(Node):
         text = Marker()
         text.header.frame_id, text.header.stamp = self.fixed_frame, now
         text.ns, text.id, text.type, text.action = 'mp_viz_text', 0, Marker.TEXT_VIEW_FACING, Marker.ADD
-        text.pose.position.x, text.pose.position.y, text.pose.position.z = pos.x, pos.y, pos.z + 0.25
+        text.pose.position.x, text.pose.position.y, text.pose.position.z = self.text_xyz   # fixed corner, not over the tool
         text.pose.orientation.w = 1.0
-        text.scale.z = 0.1
+        text.scale.z = 0.07
         text.color = ColorRGBA(r=1.0, g=1.0, b=1.0, a=1.0)
         text.text = logic.format_readout(
             fb.state if fb else '', fb.stand_index if fb else 0, fb.stand_count if fb else 0,
