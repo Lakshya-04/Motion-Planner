@@ -5,6 +5,7 @@
 // run with -fsanitize=address,undefined as well (see the package CMakeLists / report for the standalone command).
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
