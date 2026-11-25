@@ -9,16 +9,17 @@
 #     free_space_fallback moveit_ompl) and MANAGER_PASS_CUROBO_WORLD=1; (e) always stop the node and keep its log.
 # Output: $INFRA/cp/<name>_out, run log cp/<name>.out, node log cp/<name>_curobo_node.log (also copied into <name>_out).
 # The sim container runs as uid 1000 like the node (a root sim container cannot reach the node: docs/sim_mujoco.md).
-# Env: CUROBO_WARMUP_SEC (900: how long the node may take to print "cuRobo ready"; a shared/cold GPU needed >300 s), INFRA (/home/hmm/mp-infra), SIM_LANE (a|b), CUROBO_ROBOT (lift_arm.yml), CUROBO_NODE_SH (run_curobo_node.sh to use).
+# Env: CUROBO_WARMUP_SEC (900: how long the node may take to print "cuRobo ready"; a shared/cold GPU needed >300 s), INFRA ($HOME/mp-infra), SIM_LANE (a|b), CUROBO_ROBOT (lift_arm.yml), CUROBO_NODE_SH (run_curobo_node.sh to use).
 NAME=$1; W=$2
-I=${INFRA:-/home/hmm/mp-infra}; L=${SIM_LANE:-a}; HERE=$(cd "$(dirname "$0")" && pwd)
-H=${HOSTWATCH:-$HERE/hostwatch}; [ -d "$H" ] || H=/home/hmm/Motion-Planner/docker/tools/hostwatch
+I=${INFRA:-$HOME/mp-infra}; L=${SIM_LANE:-a}; HERE=$(cd "$(dirname "$0")" && pwd)
+H=${HOSTWATCH:-$HERE/hostwatch}; [ -d "$H" ] || H=${MP_REPO:-$HOME/Motion-Planner}/docker/tools/hostwatch
 NODE_SH=${CUROBO_NODE_SH:-$HERE/run_curobo_node.sh}
-ROBOT=${CUROBO_ROBOT:-/home/hmm/Motion-Planner/.claude/worktrees/w1-curobo-lowlift/build/lowlift/hops2/lift_arm.yml}
+ROBOT=${CUROBO_ROBOT:-}
 DOM=$((81 + $( [ "$L" = b ] && echo 1 || echo 0 )))
 NODE=curobo-node-$NAME
 OUT=$I/cp/${NAME}_out
 [ -n "$NAME" ] && [ -d "$W/src" ] || { echo "usage: mv_curobo_run.sh <name> <worktree>" >&2; exit 2; }
+[ -n "$ROBOT" ] || { echo "set CUROBO_ROBOT to a cuRobo robot yml made by docker/tools/generate_curobo_robot.py (e.g. with --ignore-hops 2)" >&2; exit 2; }
 [ -f "$ROBOT" ] || { echo "robot config missing: $ROBOT (regenerate with docker/tools/generate_curobo_7dof.sh, a GPU job)" >&2; exit 2; }
 mkdir -p "$I/cp" "$I/curobo_ws"
 
