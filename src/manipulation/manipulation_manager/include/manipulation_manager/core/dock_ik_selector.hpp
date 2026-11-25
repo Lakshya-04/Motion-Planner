@@ -180,6 +180,34 @@ inline bool dockBranchChanged(
   return false;
 }
 
+/// True when `p` carries real joint limits for a solution of `n` joints (rebasing without them could leave the limits).
+inline bool dockRebaseHasLimits(const DockIkSelectorParams & p, size_t n)
+{
+  return p.joint_lower.size() == n && p.joint_upper.size() == n;
+}
+
+/// rebaseDockIk for a solution already accepted on its raw values: only with real joint limits (otherwise `raw` is
+/// returned unchanged), and a representative that would fail the wrist window or flip a branch joint keeps the raw
+/// value of that joint (the same pose, a turn away).
+inline std::vector<double> rebaseDockIkChecked(
+  const std::vector<double> & raw, const std::vector<double> & ref, const DockIkSelectorParams & p)
+{
+  if (!dockRebaseHasLimits(p, raw.size()) || raw.size() != ref.size()) {
+    return raw;
+  }
+  std::vector<double> q = rebaseDockIk(raw, ref, p);
+  if (p.wrist_joint >= 0 && static_cast<size_t>(p.wrist_joint) < q.size()) {
+    const size_t w = static_cast<size_t>(p.wrist_joint);
+    if (q[w] < p.wrist_min_rad || q[w] > p.wrist_max_rad) {q[w] = raw[w];}
+  }
+  if (dockBranchChanged(q, ref, p)) {
+    for (const size_t j : p.branch_joints) {
+      if (j < q.size()) {q[j] = raw[j];}
+    }
+  }
+  return q;
+}
+
 inline bool dockReachPreferenceOn(const DockIkSelectorParams & p)
 {
   return p.reach_target_fraction > 0.0 && p.reach_m > 0.0;
@@ -312,21 +340,7 @@ inline DockIkChoice selectDockIk(
     }
   }
   if (best.ok) {
-    {
-      // The branch and wrist checks ran on the raw solution: a representative that would fail either keeps the raw
-      // value of that joint (the same pose, a turn away).
-      const std::vector<double> raw = best.q;
-      best.q = rebaseDockIk(raw, reference, p);
-      if (p.wrist_joint >= 0 && static_cast<size_t>(p.wrist_joint) < best.q.size()) {
-        const size_t w = static_cast<size_t>(p.wrist_joint);
-        if (best.q[w] < p.wrist_min_rad || best.q[w] > p.wrist_max_rad) {best.q[w] = raw[w];}
-      }
-      if (dockBranchChanged(best.q, reference, p)) {
-        for (const size_t j : p.branch_joints) {
-          if (j < best.q.size()) {best.q[j] = raw[j];}
-        }
-      }
-    }
+    best.q = rebaseDockIkChecked(best.q, reference, p);
   }
   best.reach_over_target = prefer && best.ok && !best_under;
   if (prefer && !best.ok) {

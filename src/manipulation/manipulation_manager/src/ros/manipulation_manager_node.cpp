@@ -407,7 +407,7 @@ public:
     stand_max_span_ = this->declare_parameter<double>("stand_max_span_m", 0.0);
     // Consecutive stands closer than this (m, plan view) are merged when plan_stands finds one stand for both of
     // their target sets (grouped requests can return stands a few cm apart). 0 = off.
-    stand_merge_tol_ = this->declare_parameter<double>("stand_merge_tol_m", 0.15);
+    stand_merge_tol_ = this->declare_parameter<double>("stand_merge_tol_m", 0.0);
     // Minimum chassis-to-wall clearance (m) asked of plan_stands in every request (its min_clearance field); 0 = the
     // planner's own default (and its stand_min_clearance_m floor).
     stand_min_clearance_ = this->declare_parameter<double>("stand_min_clearance_m", 0.0);
@@ -2025,7 +2025,7 @@ private:
         }
         // the approach starts at the live state: of the 2*pi-equivalent representatives take the one nearest to IT, not
         // to the remembered branch seed (which can be a turn away after a stow or a failed column)
-        return live.size() == choice.q.size() ? rebaseDockIk(choice.q, live, dock_ik_sel_) : choice.q;
+        return live.size() == choice.q.size() ? rebaseDockIkChecked(choice.q, live, dock_ik_sel_) : choice.q;
       }
       RCLCPP_WARN(
         this->get_logger(),
@@ -2051,7 +2051,7 @@ private:
     // same pose, representative nearest the live state (the IK may return a joint 2*pi away)
     {
       const auto live_now = readCurrentJointState(shared_from_this(), joint_name_candidates_);
-      const auto q = rebaseDockIk(
+      const auto q = rebaseDockIkChecked(
         res.joint_solution, live_now.size() == res.joint_solution.size() ? live_now : seed, dock_ik_sel_);
       column_dock_q_[static_cast<size_t>(std::max(0, column_))].push_back(q);
       return q;
