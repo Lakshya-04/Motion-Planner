@@ -30,6 +30,9 @@
 #   MULTI_STAND_WALL_DX / _WALL_DY / _WALL_WIDTH  the wall's shift in x (0), the patch's start y (0.3) and width (0.9) in m
 #   MULTI_STAND_PAINT=1            live done / not done wall paint (RViz topic /mp_viz/coverage_paint; _PAINT_FEED defaults to mujoco, none = RViz only; default off;
 #                                  the MuJoCo viewer draws it when the sim is launched with viewer:=true in MULTI_STAND_LAUNCH_ARGS)
+#   MULTI_STAND_RVIZ=1             open the same RViz window as the Gazebo sim (mp_rviz view.launch.py; needs DISPLAY; default off)
+#                                  MULTI_STAND_RVIZ_PROFILE (default mission_overview); the sim publishes /tf (odom, base_footprint), /joint_states,
+#                                  /robot_description, /mp_viz/*; wall time, so use_sim_time stays false
 #   MULTI_STAND_FILM=1             also store the joint states for render_run.py (launch with out_dir:=... in MULTI_STAND_LAUNCH_ARGS)
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
 #                                  configuration docked at the wall, [] chains the seeds from the previous dock
@@ -144,9 +147,14 @@ stop_all() {
 }
 trap stop_all EXIT
 
+RVIZ_ARGS=()
+if [ "${MULTI_STAND_RVIZ:-0}" = 1 ]; then
+  RVIZ_ARGS=(rviz:=true rviz_profile:=${MULTI_STAND_RVIZ_PROFILE:-mission_overview})
+  [ -z "${DISPLAY:-}" ] && echo "warning: MULTI_STAND_RVIZ=1 but DISPLAY is not set; RViz will not open"
+fi
 start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$STAND_PROFILE controller:=jtac \
   conditioner:=true payload_mass_kg:=0.5 move_group:=true base_motion:=true scene:=$OUT/data/smoke_wall_scene.json \
-  ${MULTI_STAND_LAUNCH_ARGS:-}
+  ${RVIZ_ARGS[@]+"${RVIZ_ARGS[@]}"} ${MULTI_STAND_LAUNCH_ARGS:-}
 # the demo rasterizes the obstacle clearance into the grid itself; the service node would add its own 0.3 m default
 start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0
 start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
