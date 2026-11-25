@@ -23,7 +23,7 @@ What is generated
     `base_x_joint`, `base_y_joint` (slide) and `base_yaw_joint` (hinge) on the root body, each with a
     stiff position actuator the plugin drives from /cmd_vel, plus `<custom>` numerics carrying the drive
     type and the velocity limits. The wheels stay visual.
-  * optionally (`floor`, off by default) a visual-only checker floor: no contacts, so the kinematic base
+  * optionally (`floor`, on in generate() and the launch, `--no-floor` on the CLI) a visual-only checker floor: no contacts, so the kinematic base
     and the wall contact scoring behave exactly as without it.
 """
 import math

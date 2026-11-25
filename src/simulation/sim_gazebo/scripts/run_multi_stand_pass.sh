@@ -185,7 +185,7 @@ wait $WM
 # MULTI_STAND_PAINT_FEED=none|gazebo (draws in the gz GUI: needs the sim launched with gui:=true)
 # MULTI_STAND_PAINT_ARGS adds launch arguments (swath_m:=.. frame_id:=..). Default off; a failure to start it never fails the pass.
 if [ "${MULTI_STAND_PAINT:-0}" = 1 ]; then
-  start coverage_paint ros2 launch sim_overlay coverage_paint.launch.py wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json source:=gazebo \
+  gz_start coverage_paint ros2 launch sim_overlay coverage_paint.launch.py wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json source:=gazebo \
     frame_id:=odom plan_file:=$COV swath_m:=${MULTI_STAND_SWATH:-0.14} feed:=${MULTI_STAND_PAINT_FEED:-none} \
     mujoco_json:=$OUT/mp_sim_overlay.json ${MULTI_STAND_PAINT_ARGS:-}
 fi

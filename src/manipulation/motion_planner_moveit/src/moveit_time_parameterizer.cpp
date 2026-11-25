@@ -145,8 +145,13 @@ bool MoveItTimeParameterizer::retime(
       const bool has_jerk = std::all_of(
         limits.begin(), limits.end(), [](const JointLimit & l) {return l.jerk > 0.0;});
       if (ok && has_jerk) {
-        ok = trajectory_processing::RuckigSmoothing::applySmoothing(
-          rt, vel, acc, jerk, 1.0, 1.0, true, 0.01);
+        // Smooth a copy: a Ruckig failure keeps the TOTG timing instead of failing the whole retime.
+        robot_trajectory::RobotTrajectory smoothed(rt, true);
+        if (trajectory_processing::RuckigSmoothing::applySmoothing(
+            smoothed, vel, acc, jerk, 1.0, 1.0, true, 0.01))
+        {
+          rt = smoothed;
+        }
       }
     } else {
       ok = trajectory_processing::RuckigSmoothing::applySmoothing(

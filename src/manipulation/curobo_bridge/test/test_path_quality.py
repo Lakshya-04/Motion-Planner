@@ -107,6 +107,7 @@ def _make(paths, straight_valid, objective='length', candidates=3):
     p._torch, p._planner = _Torch(), _Planner(paths)
     p._optimize, p._budget_s, p._num_candidates, p._objective = True, 100.0, candidates, objective
     p._finetune_attempts, p._seed0, p._interpolation_dt, p._max_attempts = 4, 7, 0.1, 10
+    p._lift_joints, p._lift_cost_weight = [], 1.0
     p._joint_limits = lambda: ([-1.0], [1.0])
     p._va_limits = lambda: ([1.0], [2.0])
     p.check_motion = lambda rows, step: straight_valid
