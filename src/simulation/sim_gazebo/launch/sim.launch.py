@@ -207,6 +207,19 @@ def _launch(context):
                               'world_frame': 'odom' if base_motion else 'world'}])
 
     actions = [gz, rsp, bridge, truth, spawn]
+    # the same RViz window as the MuJoCo sim (mp_rviz view.launch.py); on by default, skipped without a display or when
+    # mp_rviz is not installed, rviz:=false opts out
+    if lc('rviz').lower() in ('1', 'true', 'yes') and (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+        try:
+            rviz_launch = os.path.join(get_package_share_directory('mp_rviz'), 'launch', 'view.launch.py')
+        except Exception as e:
+            print(f'sim_gazebo: RViz skipped, mp_rviz not found ({e})')
+            rviz_launch = None
+        if rviz_launch:
+            actions.append(IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(rviz_launch),
+                launch_arguments={'profile': lc('rviz_profile'), 'use_sim_time': 'false',
+                                  'markers': 'true', 'scene': 'false'}.items()))
     if lc('arm_meshes') == 'true':
         # gz resolves the description's model://ur_description/... URIs through GZ_SIM_RESOURCE_PATH; without it the UR links
         # have no visual and no collision geometry in gz (only the primitives of the lift, tool and sensor link exist)
@@ -264,6 +277,8 @@ def generate_launch_description():
                               description='wall_scene.json / SceneModel YAML; generates the world'),
         DeclareLaunchArgument('wall_id', default_value='0'),
         DeclareLaunchArgument('standoff', default_value='0.9', description='wall distance in front of the base (m)'),
+        DeclareLaunchArgument('rviz', default_value='true', description='open the same RViz window as the MuJoCo sim (mp_rviz); skipped without a display, rviz:=false opts out'),
+        DeclareLaunchArgument('rviz_profile', default_value='mission_overview', description='mp_rviz profiles/<name>.rviz'),
         DeclareLaunchArgument('gui', default_value='false', description='true opens the gz GUI (server only otherwise)'),
         DeclareLaunchArgument('controller', default_value='jtc', description='jtc | jtac | none'),
         DeclareLaunchArgument('ft_conditioner', default_value='false',
