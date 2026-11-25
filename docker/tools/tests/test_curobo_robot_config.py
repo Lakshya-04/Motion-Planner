@@ -54,3 +54,10 @@ def test_the_7dof_script_defaults_to_the_hop_ignore_rule():
     the 6-joint robot_assets.py stage already passes it, the 7-joint script must too."""
     text = (TOOLS / 'generate_curobo_7dof.sh').read_text()
     assert re.search(r'\$\{CUROBO_SPHERE_ARGS-+ignore-hops 2\}', text)
+
+
+def test_ignore_pair_check_does_not_see_the_hop_table():
+    """--ignore-hops 2 --ignore-pair A:B failed 'links without collision spheres' because the check ran on the merged
+    table, whose hop entries name frames without spheres (found on a GPU run, docs/curobo_v2_notes.md)."""
+    src = (TOOLS / 'generate_curobo_robot.py').read_text()
+    assert 'unknown_links(merge_ignore(None, args.ignore_pair, args.ignore_group)' in src

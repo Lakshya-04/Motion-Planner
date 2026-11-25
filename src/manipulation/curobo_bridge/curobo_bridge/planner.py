@@ -256,8 +256,9 @@ class CuroboPlanner:
         `precheck_endpoints`: before planning, `plan_joint` asks cuRobo's state check (the one `check_states`
         exposes) about the start and the goal and returns `start_in_collision` / `goal_in_collision` at the
         `precheck` stage when either is invalid, instead of running every attempt to a `no_path`. It costs
-        one batched check (milliseconds). Hypothesis, not yet run on a GPU: the docked-to-stow `no_path`
-        after 37 to 40 s at a low lift is such an invalid start; False restores the old behaviour.
+        one batched check (milliseconds). Measured on a GPU (docs/curobo_v2_notes.md): the docked-to-stow `no_path`
+        after 37 to 40 s at a low lift was such an invalid start (lift stage spheres against base_link); False
+        restores the old behaviour.
 
         `free_space_optimize` (default False): the optimal mode of `plan_joint`, for quality instead of speed.
         The planner is built with more trajectory-optimisation seeds (`optimal_trajopt_seeds`), more B-spline

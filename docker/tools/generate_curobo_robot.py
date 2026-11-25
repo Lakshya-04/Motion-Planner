@@ -130,8 +130,9 @@ def main():
                          '(or --spheres-urdf has no <sphere> collisions)')
     custom = ignore_within_hops(urdf, args.ignore_hops) if args.ignore_hops else None
     if args.ignore_pair or args.ignore_group:
+        # Only the names the user typed are checked: the hop table names links without spheres (frames), which is fine.
+        bad = unknown_links(merge_ignore(None, args.ignore_pair, args.ignore_group), builder.collision_link_names)
         custom = merge_ignore(custom, args.ignore_pair, args.ignore_group)
-        bad = unknown_links(custom, builder.collision_link_names)
         if bad:
             raise SystemExit(f'--ignore-pair / --ignore-group name links without collision spheres: {bad}')
     builder.compute_collision_matrix(batch_size=args.batch_size, custom_ignore=custom)
