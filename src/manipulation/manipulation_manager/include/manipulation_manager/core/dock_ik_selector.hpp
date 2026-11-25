@@ -5,7 +5,9 @@
 // dock, the live state, folded seeds), every solution is measured against a reference configuration (the previous
 // dock, else the live state) and the cheapest acceptable one wins:
 //
-//   cost     max_i |dq_i| with the joints that are not `linear_joints` wrapped to [-pi, pi]
+//   cost     max_i w_i |dq_i| with the joints that are not `linear_joints` wrapped to [-pi, pi]; w_i is
+//            lift_cost_weight (default 2) for a linear joint, 1 otherwise. max_dq_rad and the exclusion tolerance
+//            use the raw (unweighted) max |dq|.
 //   rejected a branch change (the sign of a `branch_joints` entry flips, a value inside the deadband counts as
 //            either sign), a wrist joint outside [wrist_min_rad, wrist_max_rad] (winding), a cost over max_dq
 //
@@ -46,7 +48,11 @@ struct DockIkSelectorParams
   int wrist_joint{-1};                      ///< joint index whose absolute value is limited; -1 = no check
   double wrist_min_rad{-3.2};
   double wrist_max_rad{3.2};
-  double max_dq_rad{3.2};                   ///< candidates with a larger cost are rejected
+  double max_dq_rad{3.2};                   ///< candidates with a larger raw max |dq| are rejected (unweighted)
+  /// Cost multiplier of a linear (lift) joint's delta in the candidate cost (param `dock_ik_lift_cost_weight`): 2.0
+  /// makes lift motion twice as costly as arm motion, so the choice prefers arm motion over lift motion. 1.0 = the
+  /// plain max |dq|.
+  double lift_cost_weight{2.0};
   // Reach preference (see the header comment); reach_target_fraction <= 0 or reach_m <= 0 = off.
   double reach_target_fraction{0.0};        ///< wanted upper bound of tool distance / reach_m
   double reach_m{0.0};                      ///< arm reach from the arm base frame origin (m)
@@ -107,9 +113,11 @@ inline bool allFiniteJoints(const std::vector<double> & q)
   return std::all_of(q.begin(), q.end(), [](double x) {return std::isfinite(x);});
 }
 
-/// max_i |dq_i| between `q` and `ref`, wrapping every joint that is not linear. Infinity on a size mismatch or a non-finite joint.
+/// max_i w_i |dq_i| between `q` and `ref`, wrapping every joint that is not linear; w_i is p.lift_cost_weight for a
+/// linear joint when `weighted`, else 1. Infinity on a size mismatch or a non-finite joint.
 inline double dockIkCost(
-  const std::vector<double> & q, const std::vector<double> & ref, const DockIkSelectorParams & p)
+  const std::vector<double> & q, const std::vector<double> & ref, const DockIkSelectorParams & p,
+  bool weighted = true)
 {
   if (q.size() != ref.size()) {
     return INFINITY;
@@ -119,6 +127,8 @@ inline double dockIkCost(
     double d = q[i] - ref[i];
     if (std::find(p.linear_joints.begin(), p.linear_joints.end(), i) == p.linear_joints.end()) {
       d = wrapToPi(d);
+    } else if (weighted && std::isfinite(p.lift_cost_weight) && p.lift_cost_weight > 0.0) {
+      d *= p.lift_cost_weight;
     }
     if (std::isnan(d)) {
       return INFINITY;   // std::max(worst, NaN) keeps `worst`, so a NaN joint would look free
@@ -303,7 +313,7 @@ inline DockIkChoice selectDockIk(
     if (exclusion != nullptr) {
       bool seen = false;
       for (const auto & u : exclusion->used) {
-        if (dockIkCost(*sol, u, p) <= exclusion->tol_rad) {
+        if (dockIkCost(*sol, u, p, false) <= exclusion->tol_rad) {
           seen = true;
           break;
         }
@@ -318,7 +328,7 @@ inline DockIkChoice selectDockIk(
       continue;
     }
     const double cost = dockIkCost(*sol, reference, p);
-    if (!(cost <= p.max_dq_rad)) {   // also rejects a NaN cost or limit
+    if (!(dockIkCost(*sol, reference, p, false) <= p.max_dq_rad)) {   // also rejects a NaN cost or limit
       ++best.rejected_cost;
       continue;
     }

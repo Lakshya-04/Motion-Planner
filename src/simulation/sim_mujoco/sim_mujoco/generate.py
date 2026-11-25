@@ -103,9 +103,10 @@ def base_motion_options(profile_data):
 
 
 def generate(profile_data, urdf_text, out_dir, scene=None, scene_offset=(0, 0, 0, 0), thickness=0.1,
-             base_motion=False, **options):
+             base_motion=False, floor=True, **options):
     """Write `out_dir/robot.xml`; returns (path, list of skipped scene objects).
 
+    floor        a visual-only floor (no contacts) so the viewer shows a ground; default on here
     base_motion  True adds the planar base joints (x, y, yaw) driven from /cmd_vel; off by default.
     """
     if base_motion:
@@ -117,7 +118,7 @@ def generate(profile_data, urdf_text, out_dir, scene=None, scene_offset=(0, 0, 0
     path = urdf_to_mjcf(
         urdf_text, out_dir, home=profile_data.get('home'), commanded=command_joints(profile_data),
         ft_link=frames.get('tool_mount', 'tool_mount_link'), tcp_link=frames.get('tcp', 'tcp_link'),
-        world_geoms=geoms, **options)
+        world_geoms=geoms, floor=floor, **options)
     return path, skipped
 
 
@@ -133,6 +134,7 @@ def main(argv=None):
     ap.add_argument('--base-motion', action='store_true', help='add the planar base joints (/cmd_vel)')
     ap.add_argument('--depth-sensor', type=float, nargs=6, metavar=('X', 'Y', 'Z', 'ROLL', 'PITCH', 'YAW'),
                     help='add a ray-cast depth sensor at this pose in the root link frame (x forward)')
+    ap.add_argument('--no-floor', action='store_true', help='omit the visual-only floor')
     ap.add_argument('--timestep', type=float, default=0.002)
     args = ap.parse_args(argv)
 
@@ -142,7 +144,7 @@ def main(argv=None):
     path, skipped = generate(profile, text, args.out, scene=args.scene,
                              scene_offset=tuple(args.scene_offset), thickness=args.wall_thickness,
                              urdf_dir=urdf.parent if urdf else '.', timestep=args.timestep,
-                             base_motion=args.base_motion,
+                             base_motion=args.base_motion, floor=not args.no_floor,
                              depth_sensor=(dict(pos=args.depth_sensor[:3], rpy=args.depth_sensor[3:])
                                            if args.depth_sensor else None))
     for s in skipped:

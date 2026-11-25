@@ -280,6 +280,9 @@ public:
       // Reach preference of the continuity choice (needs dock_ik_continuity and the TF arm_base_frame
       // in frame_id): > 0 keeps the tool at or below this fraction of dock_ik_reach_m from the arm base by using the
       // lift joint (dock_ik_lift_joint, clamped into [dock_ik_lift_min_m, dock_ik_lift_max_m]). 0 = off (default).
+      // Cost multiplier of the lift's delta in the continuity cost: 2.0 = lift motion twice as costly as arm motion, so
+      // the choice prefers arm motion (and, with the reach preference, a lift that moves only as far as needed). 1.0 = off.
+      dock_ik_sel_.lift_cost_weight = this->declare_parameter<double>("dock_ik_lift_cost_weight", 2.0);
       dock_ik_sel_.reach_target_fraction = this->declare_parameter<double>("dock_ik_reach_fraction", 0.0);
       dock_ik_sel_.reach_m = this->declare_parameter<double>("dock_ik_reach_m", 0.0);
       dock_ik_sel_.lift_joint = static_cast<size_t>(std::max<int64_t>(0, this->declare_parameter<int>("dock_ik_lift_joint", 0)));

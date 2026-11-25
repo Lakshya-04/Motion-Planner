@@ -1,5 +1,7 @@
 #include "motion_planner_moveit/ompl_planner.hpp"
 
+#include <cstdlib>
+
 #include <chrono>
 #include <algorithm>
 #include <exception>
@@ -20,6 +22,18 @@
 
 namespace motion_planner
 {
+
+namespace
+{
+// Peak jerk of a free-space transition = ratio x the joint's acceleration limit (full accel in 1/ratio s).
+// Default 0 = bang-bang TOTG (smoothing is opt-in: MP_TRANSITION_JERK_RATIO=4 turns it on; the sim run showed Ruckig failures).
+double transitionJerkRatioFromEnv()
+{
+  const char * v = std::getenv("MP_TRANSITION_JERK_RATIO");
+  return v ? std::atof(v) : 0.0;  // opt-in: default off, Ruckig failed on short moves in the sim
+}
+const double kTransitionJerkRatio = transitionJerkRatioFromEnv();
+}  // namespace
 
 OmplPlanner::OmplPlanner(std::shared_ptr<MoveItPlanningBackend> backend)
 : backend_(std::move(backend))
@@ -51,7 +65,7 @@ bool OmplPlanner::planOptimized(
     return false;
   }
   MoveItTimeParameterizer retimer(robot_model, move_group_name_);
-  const auto limits = retimer.modelLimits(direct_default_acceleration_, 0.0);
+  const auto limits = retimer.smoothLimits(direct_default_acceleration_, kTransitionJerkRatio);
 
   // Weighted by 1/range so the lift's metres and the arm's radians are comparable.
   PathQualityConfig quality;
@@ -61,6 +75,13 @@ bool OmplPlanner::planOptimized(
     ranges.push_back(b.position_bounded_ ? b.max_position_ - b.min_position_ : 0.0);
   }
   quality.weights = weightsFromRanges(ranges);
+  // Lift (prismatic) travel costs optimize_.lift_cost_weight times an arm joint's (default 2): candidate scoring and
+  // shortcut/smoothing acceptance both use these weights. 1.0 = the plain 1/range weighting.
+  std::vector<bool> is_lift;
+  for (const auto * joint : jmg->getActiveJointModels()) {
+    is_lift.push_back(joint->getType() == moveit::core::JointModel::PRISMATIC);
+  }
+  quality.weights = applyLiftCostWeight(quality.weights, is_lift, optimize_.lift_cost_weight);
   for (const auto & l : limits) {
     quality.velocity_limits.push_back(l.velocity);
     quality.acceleration_limits.push_back(l.acceleration);
@@ -240,7 +261,7 @@ bool OmplPlanner::tryCartesianLine(
   MoveItTimeParameterizer retimer(robot_model, move_group_name_);
   std::string message;
   if (!retimer.retime(
-      piece, SegmentRole::kTransition, retimer.modelLimits(direct_default_acceleration_, 0.0), 0.0, message))
+      piece, SegmentRole::kTransition, retimer.smoothLimits(direct_default_acceleration_, kTransitionJerkRatio), 0.0, message))
   {
     RCLCPP_WARN(log, "cartesian candidate: retiming failed (%s), dropped", message.c_str());
     return false;
@@ -308,7 +329,7 @@ bool OmplPlanner::tryDirectJointPath(
   MoveItTimeParameterizer retimer(robot_model, move_group_name_);
   std::string message;
   if (!retimer.retime(
-      piece, SegmentRole::kTransition, retimer.modelLimits(direct_default_acceleration_, 0.0), 0.0,
+      piece, SegmentRole::kTransition, retimer.smoothLimits(direct_default_acceleration_, kTransitionJerkRatio), 0.0,
       message))
   {
     RCLCPP_WARN(log, "direct path retiming failed (%s), falling back to OMPL", message.c_str());

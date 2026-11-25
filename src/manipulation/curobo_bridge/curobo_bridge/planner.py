@@ -233,6 +233,7 @@ class CuroboPlanner:
                  max_attempts: int = 20, precheck_endpoints: bool = True,
                  free_space_optimize: bool = False, free_space_time_budget_s: float = 20.0,
                  free_space_num_candidates: int = 6, free_space_objective: str = 'length',
+                 lift_cost_weight: float = path_quality.DEFAULT_LIFT_COST_WEIGHT,
                  optimal_trajopt_seeds: int = 32, optimal_num_knots: int = 24,
                  optimal_interpolation_dt: float = 0.01, optimal_finetune_attempts: int = 8,
                  optimal_max_attempts: int = 60, optimal_seed: int = 1234):
@@ -294,6 +295,9 @@ class CuroboPlanner:
         self._budget_s = float(free_space_time_budget_s)
         self._num_candidates = max(1, int(free_space_num_candidates))
         self._objective = free_space_objective
+        # lift (prismatic_joints) travel counts this many times an arm joint's in the optimal-mode path length
+        self._lift_cost_weight = float(lift_cost_weight)
+        self._lift_joints = list(prismatic_joints)
         self._finetune_attempts = max(1, int(optimal_finetune_attempts))
         self._seed0 = int(optimal_seed)
         self._interpolation_dt = 0.025
@@ -485,6 +489,9 @@ class CuroboPlanner:
         t0 = time.monotonic()
         limits = self._joint_limits()
         weights = path_quality.joint_weights(*limits) if limits else None
+        if weights is not None:
+            weights = path_quality.apply_lift_cost_weight(
+                weights, self.joint_names, self._lift_joints, self._lift_cost_weight)
         cands, results = [], {}
         straight = self._straight_candidate(start, goal, weights)
         if straight is not None:
