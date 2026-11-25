@@ -69,6 +69,15 @@ TEST(MoveItTimeParameterizerTest, ModelLimitsFollowTheGroup)
   EXPECT_DOUBLE_EQ(limits[2].jerk, 5.0);
 }
 
+TEST(MoveItTimeParameterizerTest, SmoothLimitsScaleJerkWithEachJointAcceleration)
+{
+  MoveItTimeParameterizer retimer(makeModel(), "g");
+  const auto l = retimer.smoothLimits(2.0, 4.0);
+  ASSERT_EQ(l.size(), 3u);
+  EXPECT_DOUBLE_EQ(l[1].jerk, 8.0);
+  EXPECT_DOUBLE_EQ(retimer.smoothLimits(2.0, 0.0)[0].jerk, 0.0);
+}
+
 TEST(MoveItTimeParameterizerTest, TransitionIsTimeOptimalWithinLimits)
 {
   MoveItTimeParameterizer retimer(makeModel(), "g");

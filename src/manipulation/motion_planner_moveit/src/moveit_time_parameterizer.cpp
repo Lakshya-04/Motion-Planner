@@ -46,6 +46,17 @@ std::vector<JointLimit> MoveItTimeParameterizer::modelLimits(double default_acc,
   return out;
 }
 
+std::vector<JointLimit> MoveItTimeParameterizer::smoothLimits(double default_acc, double jerk_ratio) const
+{
+  auto out = modelLimits(default_acc, 0.0);
+  if (jerk_ratio > 0.0) {
+    for (auto & l : out) {
+      l.jerk = jerk_ratio * l.acceleration;
+    }
+  }
+  return out;
+}
+
 bool MoveItTimeParameterizer::retime(
   core_types::Trajectory & piece, SegmentRole role, const std::vector<JointLimit> & limits,
   double stroke_speed, std::string & message)
