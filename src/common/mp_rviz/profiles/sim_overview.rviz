@@ -1,3 +1,6 @@
+# Performance: Frame Rate 15, 1100x720 window, TF axes off, RobotModel visual only, tool trace off, mp_viz_markers publishes
+# the executed TCP line at 1 Hz (1 cm steps, <= 6000 points). Exactly ONE display draws the robot (RobotModel); the three
+# moveit_rviz_plugin displays each draw another copy and stay off unless view.launch.py moveit_displays:=true.
 # sim_overview: the one window for the Gazebo and MuJoCo sims (default rviz_profile of both launches). Fixed frame odom.
 # Wall, coverage plan columns, stands and the coverage paint come from mp_viz_scene.py (scene:=true, plan_file,
 # wall_scene_json, frame odom) and coverage_paint; the motion plan from move_group (/display_planned_path, free-space
@@ -37,6 +40,13 @@ Visualization Manager:
     Name: RobotModel
     Enabled: true
     Alpha: 1
+    Collision Enabled: false
+    Visual Enabled: true
+    Update Interval: 0
+    Mass Properties:
+      Inertia: false
+      Mass: false
+    TF Prefix: ''
     Description Topic:
       Depth: 5
       Durability Policy: Transient Local
@@ -47,7 +57,7 @@ Visualization Manager:
     Name: TF (odom, base, tool)
     Enabled: true
     Show Names: false
-    Show Axes: true
+    Show Axes: false
     Show Arrows: false
     Marker Scale: 0.3
     Frame Timeout: 15
@@ -264,7 +274,7 @@ Visualization Manager:
   Global Options:
     Background Color: 48; 48; 48
     Fixed Frame: odom
-    Frame Rate: 30
+    Frame Rate: 15
   Name: root
   Tools:
   - Class: rviz_default_plugins/MoveCamera
@@ -294,8 +304,8 @@ Visualization Manager:
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 900
-  Width: 1400
+  Height: 720
+  Width: 1100
   X: 40
   Y: 30
   Hide Left Dock: false

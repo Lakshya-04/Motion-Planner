@@ -29,6 +29,7 @@ from the first target: its point, and the opposite of its tool z axis); max_targ
 import json
 import os
 import sys
+import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -73,6 +74,8 @@ class MpVizScene(Node):
         self.plan_file = p('plan_file', '').value
         self.wall_scene_json = p('wall_scene_json', '').value
         self.wall_id = int(p('wall_id', 0).value)
+        self.wall_mjcf = p('wall_mjcf', '').value   # MuJoCo MJCF whose geom wall_geom is the wall (wins over wall_scene_json)
+        self.wall_geom = p('wall_geom', 'wall_0').value
         self.strip_width = float(p('strip_width', 0.1).value)
         is_reach_srv = p('is_reachable_service', '/reachability/is_reachable').value
         self.max_reach = int(p('max_reach_targets', 150).value)
@@ -124,14 +127,18 @@ class MpVizScene(Node):
 
     # wall
     def _publish_wall(self):
-        if not self.wall_scene_json:
+        if not (self.wall_scene_json or self.wall_mjcf):
             return False
         try:
-            with open(self.wall_scene_json) as f:
-                scene = json.load(f)
-            wall = logic.wall_from_scene(scene, self.wall_id)
-        except (OSError, ValueError, KeyError) as e:
-            self.get_logger().error('wall_scene_json %s: %s' % (self.wall_scene_json, e))
+            if self.wall_mjcf:
+                scene = {}
+                wall = logic.wall_from_mjcf(self.wall_mjcf, self.wall_geom)
+            else:
+                with open(self.wall_scene_json) as f:
+                    scene = json.load(f)
+                wall = logic.wall_from_scene(scene, self.wall_id)
+        except (OSError, ValueError, KeyError, ET.ParseError) as e:
+            self.get_logger().error('wall %s: %s' % (self.wall_mjcf or self.wall_scene_json, e))
             return False
         self._wall = wall
         frame = self.frame or scene.get('frame_id') or 'map'
@@ -156,10 +163,21 @@ class MpVizScene(Node):
         t.pose.orientation.w = 1.0
         t.scale.z = 0.15
         t.color = _color((1.0, 1.0, 1.0))
-        t.text = 'wall %.1f x %.1f m = %.1f m2' % (
+        t.text = 'wall %.1f x %.1f m = %.1f m2, face %.3f m' % (
             abs(wall['u_range_m'][1] - wall['u_range_m'][0]), abs(wall['v_range_m'][1] - wall['v_range_m'][0]),
-            logic.wall_area_m2(wall))
+            logic.wall_area_m2(wall), logic.wall_plane_distance(wall))
         arr.markers += [q, o, t]
+        back = logic.wall_back_outline(wall)
+        if back:   # the world wall's thickness: back face outline plus the four edges
+            b = Marker(type=Marker.LINE_LIST, action=Marker.ADD, ns='wall_back', id=0)
+            b.header.frame_id = frame
+            b.pose.orientation.w = 1.0
+            b.scale.x = 0.01
+            b.color = _color((0.3, 0.55, 0.95), 0.6)
+            front = logic.wall_outline(wall)
+            segs = list(zip(back, back[1:])) + list(zip(front[:4], back[:4]))
+            b.points = [Point(x=x, y=y, z=z) for a, c in segs for x, y, z in (a, c)]
+            arr.markers.append(b)
         self.wall_pub.publish(arr)
         self.get_logger().info('wall layer: %s' % t.text)
         return True

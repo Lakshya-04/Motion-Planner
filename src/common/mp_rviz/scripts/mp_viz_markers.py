@@ -8,11 +8,11 @@ Reads:   force_topic (geometry_msgs/WrenchStamped; default /ft_conditioner/wrenc
          TF fixed_frame -> tool_frame (default tcp_link, the frame the manager looks up).
 Writes:  /mp_viz/mission_text (visualization_msgs/Marker, TEXT_VIEW_FACING above the tool),
          /mp_viz/tool_trace (visualization_msgs/MarkerArray, one LINE_STRIP of the tool positions, green to red by
-         force against force_limit_n, at most trace_max_points points),
+         force against force_limit_n, at most trace_max_points points, 1 Hz, only while something subscribes),
          /mp_viz/tcp_executed (visualization_msgs/Marker, ONE thick bright-green LINE_STRIP: the TCP motion actually
-         executed, TF fixed_frame -> tool_frame sampled at path_rate_hz (10), kept for path_max_points samples
-         (default 36000 = 1 h at 10 Hz, older ones are thinned 2:1 instead of dropped, so the whole pass stays
-         visible), published at path_publish_hz (2)). This is the main trail; the force trace is the secondary one.
+         executed, TF fixed_frame -> tool_frame sampled at path_rate_hz (5), kept for path_max_points samples
+         (default 6000 at 1 cm steps, sampled at 5 Hz, older ones are thinned 2:1 instead of dropped, so the whole pass stays
+         visible), published at path_publish_hz (1) only on change and while subscribed). This is the main trail; the force trace is the secondary one.
 """
 import math
 import os
@@ -47,16 +47,18 @@ class MpVizMarkers(Node):
         self.tool_frame = p('tool_frame', 'tcp_link').value
         self.fixed_frame = p('fixed_frame', 'base_footprint').value
         self.limit = float(p('force_limit_n', 50.0).value)
-        max_points = int(p('trace_max_points', 2000).value)
-        rate = float(p('rate_hz', 20.0).value)
+        max_points = int(p('trace_max_points', 1000).value)
+        rate = float(p('rate_hz', 4.0).value)   # mission text; was 20 Hz (RViz redraws every message)
         self.trace = logic.TraceBuffer(max_points, float(p('trace_min_step_m', 0.002).value))
         self.force = None
         self.fb = None
-        self.path_max = int(p('path_max_points', 36000).value)
-        self.path_min_step = float(p('path_min_step_m', 0.002).value)
+        self.path_max = int(p('path_max_points', 6000).value)
+        self.path_min_step = float(p('path_min_step_m', 0.01).value)   # 1 cm: the line stays smooth, 5x fewer points than 2 mm
         self.path_width = float(p('path_line_width_m', 0.02).value)
         self.path_pts = []
         self._path_dirty = False
+        self._trace_dirty = False
+        self._path_subs = 0
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -69,8 +71,9 @@ class MpVizMarkers(Node):
         self.trace_pub = self.create_publisher(MarkerArray, '/mp_viz/tool_trace', 1)
         self.path_pub = self.create_publisher(Marker, '/mp_viz/tcp_executed', 1)
         self.create_timer(1.0 / rate, self._tick)
-        self.create_timer(1.0 / float(p('path_rate_hz', 10.0).value), self._sample_path)
-        self.create_timer(1.0 / float(p('path_publish_hz', 2.0).value), self._publish_path)
+        self.create_timer(1.0 / float(p('path_rate_hz', 5.0).value), self._sample_path)
+        self.create_timer(1.0 / float(p('path_publish_hz', 1.0).value), self._publish_path)
+        self.create_timer(1.0 / float(p('trace_publish_hz', 1.0).value), self._publish_trace)
 
     def _sample_path(self):
         try:
@@ -89,7 +92,11 @@ class MpVizMarkers(Node):
             self.path_pts = self.path_pts[:half:2] + self.path_pts[half:]
 
     def _publish_path(self):
-        if not self._path_dirty:
+        subs = self.path_pub.get_subscription_count()
+        if subs > self._path_subs:   # a late RViz (Volatile topic) gets the whole line on its first tick
+            self._path_dirty = True
+        self._path_subs = subs
+        if not self._path_dirty or subs == 0:
             return
         self._path_dirty = False
         m = Marker()
@@ -116,7 +123,8 @@ class MpVizMarkers(Node):
             return
         pos = t.transform.translation
         now = self.get_clock().now().to_msg()
-        self.trace.add(pos.x, pos.y, pos.z, self.force if self.force is not None else 0.0)
+        if self.trace.add(pos.x, pos.y, pos.z, self.force if self.force is not None else 0.0) is not False:
+            self._trace_dirty = True
 
         fb = self.fb
         text = Marker()
@@ -131,6 +139,12 @@ class MpVizMarkers(Node):
             self.force, self.limit, fb.column if fb else None)
         self.text_pub.publish(text)
 
+    def _publish_trace(self):
+        # the force-coloured trace is off in RViz by default and was 61 KB x 20 Hz: only with a subscriber, 1 Hz, on change
+        if not self._trace_dirty or self.trace_pub.get_subscription_count() == 0:
+            return
+        self._trace_dirty = False
+        now = self.get_clock().now().to_msg()
         line = Marker()
         line.header.frame_id, line.header.stamp = self.fixed_frame, now
         line.ns, line.id, line.type, line.action = 'mp_viz_trace', 0, Marker.LINE_STRIP, Marker.ADD

@@ -64,7 +64,8 @@ def _setup(context, *args, **kwargs):
             package='mp_rviz', executable='mp_viz_scene.py', name='mp_viz_scene', output='screen',
             parameters=[{'use_sim_time': sim_time, 'frame_id': LaunchConfiguration('scene_frame').perform(context),
                          'plan_file': LaunchConfiguration('plan_file').perform(context),
-                         'wall_scene_json': LaunchConfiguration('wall_scene_json').perform(context)}]))
+                         'wall_scene_json': LaunchConfiguration('wall_scene_json').perform(context),
+                         'wall_mjcf': LaunchConfiguration('wall_mjcf').perform(context)}]))
     return actions
 
 
@@ -79,6 +80,8 @@ def generate_launch_description():
         DeclareLaunchArgument('scene_frame', default_value='odom', description='frame the plan_file / wall poses are in'),
         DeclareLaunchArgument('plan_file', default_value='', description='coverage_output.json for mp_viz_scene'),
         DeclareLaunchArgument('wall_scene_json', default_value='', description='wall_scene.json for mp_viz_scene'),
+        DeclareLaunchArgument('wall_mjcf', default_value='',
+                              description='MuJoCo MJCF whose geom wall_0 is drawn as the wall (the wall the sim really has)'),
         DeclareLaunchArgument('moveit_profile', default_value='',
                               description='description profile: gives RViz the MoveIt parameters (Trajectory display)'),
         DeclareLaunchArgument('moveit_displays', default_value='false',

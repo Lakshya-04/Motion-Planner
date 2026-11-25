@@ -36,7 +36,7 @@ def test_sim_overview_topics_frame_and_window():
     cfg = _sim_overview()
     vm = cfg['Visualization Manager']
     assert vm['Global Options']['Fixed Frame'] == 'odom'
-    assert cfg['Window Geometry']['Width'] >= 1400 and cfg['Window Geometry']['Height'] >= 900
+    assert cfg['Window Geometry']['Width'] <= 1200 and cfg['Window Geometry']['Height'] <= 800   # small window, cheap to draw
     topics = {}
     for d in vm['Displays']:
         t = d.get('Topic')
@@ -74,3 +74,19 @@ def test_sim_launches_default_to_sim_overview():
     for rel in ('sim_gazebo/launch/sim.launch.py', 'sim_mujoco/launch/sim_mujoco.launch.py'):
         with open(os.path.join(root, rel)) as f:
             assert "'rviz_profile', default_value='sim_overview'" in f.read(), rel
+
+
+def test_sim_overview_draws_exactly_one_robot_and_is_light():
+    """Every RobotModel / PlanningScene robot / Trajectory display draws a robot copy: only one may be enabled."""
+    cfg = _sim_overview()
+    vm = cfg['Visualization Manager']
+    robots = [d for d in vm['Displays'] if d.get('Enabled', True) and (
+        d['Class'] in ('rviz_default_plugins/RobotModel', 'moveit_rviz_plugin/Trajectory')
+        or (d['Class'] == 'moveit_rviz_plugin/PlanningScene'
+            and (d.get('Scene Robot') or {}).get('Show Robot Visual', True)))]
+    assert [d['Class'] for d in robots] == ['rviz_default_plugins/RobotModel']
+    assert robots[0].get('Collision Enabled') is False
+    assert vm['Global Options']['Frame Rate'] <= 15
+    tf = next(d for d in vm['Displays'] if d['Class'] == 'rviz_default_plugins/TF')
+    assert not tf.get('Show Axes', True) and not tf.get('Show Names', False)
+    assert all(not d.get('Enabled', True) for d in vm['Displays'] if 'tool_trace' in str(d.get('Topic')))

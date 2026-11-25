@@ -170,7 +170,9 @@ def _setup(context, *args, **kwargs):
                 launch_arguments={'profile': arg('rviz_profile'), 'use_sim_time': 'false',
                                   'markers': arg('rviz_markers'), 'scene': arg('rviz_scene'), 'fixed_frame': 'odom',
                                   'scene_frame': 'odom', 'plan_file': arg('rviz_plan_file'),
-                                  'wall_scene_json': arg('rviz_wall_scene') or arg('scene'),
+                                  'wall_scene_json': arg('rviz_wall_scene'),
+                                  # the wall geom of the generated MJCF is the wall the sim has; an explicit rviz_wall_scene wins
+                                  'wall_mjcf': '' if arg('rviz_wall_scene') or not arg('scene') else str(mjcf),
                                   'moveit_profile': arg('profile')}.items()))
     if arg('base_motion') == 'true':
         # the plugin publishes the base pose as geometry_msgs only; this turns it into /odom and TF
