@@ -61,6 +61,20 @@ Tools come from `config/tool_profiles.yaml` (`tool_profiles_file`, `tool_name`, 
 `scripts/example_client.py`, `publish_3m_2m_wall.py` and `sample_map_publisher.py` exercise the service
 and publish test grids.
 
+Parameters of the two test-grid scripts (`ros2 run`-style `--ros-args -p name:=value`; they are test tools,
+not part of the planner):
+
+| Script | Parameter | Default | Meaning |
+|---|---|---|---|
+| `publish_3m_2m_wall.py` | `width_m`, `height_m` | 3.0, 3.0 | wall grid size (m) |
+| | `offset_x`, `offset_y`, `offset_z` | 0.70, -0.25, 0.40 | grid origin offset (m) |
+| | `obstacle_profile` | `none` | obstacle pattern burned into the grid: `none`, `center_block`, `pillars`, `window_frame`, `moving_bar`; anything else warns and falls back to `none` |
+| | `dynamic_obstacles` | `false` | regenerate the grid every publish with a moving phase (used by `moving_bar`) |
+| | `request_path_on_start` | `true` | call `generate_coverage_path` once when the service is up |
+| `sample_map_publisher.py` | `vertical_wall` | `false` | publish a vertical wall grid instead of a horizontal one |
+| | `offset_x`, `offset_y` | 1.0, -0.5 | grid origin offset (m); `offset_z` is 1.0 |
+| | `orientation_offset_r`, `orientation_offset_p`, `orientation_offset_y` | 0.0 | roll / pitch / yaw offset of the grid origin (deg) |
+
 ## Boustrophedon in short
 
 Inflate obstacles (`obstacle_inflation_radius`), 4-connect free cells into components (drop those under
