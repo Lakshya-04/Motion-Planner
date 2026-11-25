@@ -47,7 +47,7 @@ inline bool recoveryConfigOnBranch(
       return false;
     }
   }
-  return dockIkCost(q, live, p) <= p.max_dq_rad;
+  return dockIkCost(q, live, p, false) <= p.max_dq_rad;
 }
 
 /// The configuration to jog toward from `live`, on the live branch: last_good, else branch_seed; none -> ok false.

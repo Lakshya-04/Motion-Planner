@@ -27,12 +27,10 @@ python3 src/common/sim_overlay/scripts/gz_overlay.py --from-json /tmp/mp_sim_ove
 
 ```bash
 ros2 run sim_overlay overlay_dump.py --ros-args -p path:=/tmp/mp_sim_overlay.json
-# one-time hook, not applied to the repo:
-git apply src/common/sim_overlay/patches/mujoco_viewer_hook.patch
 SIM_MUJOCO_OVERLAY_JSON=/tmp/mp_sim_overlay.json python3 <your usual viewer.py command>
 ```
 
-The patch adds an env variable `SIM_MUJOCO_OVERLAY_JSON` (off when unset), and in the viewer loop, before `viewer.sync()`, redraws `viewer.user_scn` when that file's mtime changed. It imports `sim_overlay`, so the workspace must be sourced. The marker frame to MuJoCo world transform is set on `overlay_dump.py` (same `frame_*` parameters).
+`viewer.py` has the hook built in (`sim_mujoco/viewer_overlay.py`): env variable `SIM_MUJOCO_OVERLAY_JSON` (off when unset); in the viewer loop, before `viewer.sync()`, it redraws `viewer.user_scn` when that file's mtime changed. It imports `sim_overlay`, so the workspace must be sourced. The marker frame to MuJoCo world transform is set on `overlay_dump.py` (same `frame_*` parameters).
 
 ## Coverage paint: live done / not done map
 
@@ -47,10 +45,12 @@ The node publishes `/mp_viz/coverage_paint` (MarkerArray: one TRIANGLE_LIST per 
 ros2 launch sim_overlay coverage_paint.launch.py wall_scene_json:=/path/wall_scene.json source:=mujoco   # or gazebo
 # Gazebo (GUI on): the same launch draws it in the gz GUI
 ros2 launch sim_overlay coverage_paint.launch.py wall_scene_json:=... source:=gazebo feed:=gazebo plan_file:=coverage_output.json
-# MuJoCo: writes /tmp/mp_sim_overlay.json, the viewer hook (patches/mujoco_viewer_hook.patch, not applied) polls it
+# MuJoCo: writes /tmp/mp_sim_overlay.json, the viewer (SIM_MUJOCO_OVERLAY_JSON) polls it
 ros2 launch sim_overlay coverage_paint.launch.py wall_scene_json:=... source:=mujoco feed:=mujoco
 ros2 service call /coverage_paint/save_png std_srvs/srv/Trigger   # PNG of the live map (png_path)
 ```
+
+Wired into the passes: `MULTI_STAND_PAINT=1 bash run_multi_stand_pass.sh` (sim_mujoco and sim_gazebo, default off) starts the paint node on the pass's wall scene in `odom` with `plan_file` = the pass's `coverage_output.json`; RViz then shows `/mp_viz/coverage_paint` by enabling the `Coverage paint (done / not done)` display (off by default) in the `mission_overview` or `layers` mp_rviz profile. `MULTI_STAND_PAINT_FEED=gazebo` (sim launched with `gui:=true`) or `=mujoco` (the sim_mujoco default; writes `$OUT/mp_sim_overlay.json` and exports `SIM_MUJOCO_OVERLAY_JSON` so the viewer, `viewer:=true` in `MULTI_STAND_LAUNCH_ARGS`, draws it) also paints the simulator view; `MULTI_STAND_PAINT_ARGS` adds launch arguments. Not yet validated in a sim run.
 
 Force inputs: `source:=mujoco` reads `/sim_mujoco/ft_ground_truth`, `source:=gazebo` `/ft_sensor/ground_truth_wrench` (both WrenchStamped, `|Fz|`, like `record_run.py`); `force_msg:=info` reads `/ft_sensor/ground_truth_info` (`max_point_norm`). TCP pose: TF `tcp_frame` (tcp_link) in `frame_id`, which must be the frame of the wall json. Parameters: `cell_m`, `swath_m`, `force_threshold_n` (<= 0 ignores force, for a spray pass), `plane_tol_m`, `sample_hz`, `publish_hz`, `lift_m`.
 

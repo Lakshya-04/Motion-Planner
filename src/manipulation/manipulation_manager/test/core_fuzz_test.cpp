@@ -5,6 +5,7 @@
 // run with -fsanitize=address,undefined as well (see the package CMakeLists / report for the standalone command).
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -254,7 +255,7 @@ TEST(CoreFuzz, SelectDockIkMatchesAnIndependentOracleAndNeverReturnsABadCandidat
         ASSERT_LE(w, p.wrist_max_rad);
       }
       ASSERT_TRUE(std::isfinite(ch.cost));
-      ASSERT_TRUE(ch.cost <= p.max_dq_rad) << "cost " << ch.cost << " max " << p.max_dq_rad;
+      ASSERT_TRUE(ch.cost <= p.max_dq_rad * std::max(1.0, p.lift_cost_weight)) << "cost " << ch.cost << " max " << p.max_dq_rad;
       ASSERT_DOUBLE_EQ(ch.cost, dockIkCost(ch.q, reference, p));
       ASSERT_LT(ch.seed_index, seeds.size() * 2);
     } else {
@@ -279,7 +280,7 @@ TEST(CoreFuzz, SelectDockIkMatchesAnIndependentOracleAndNeverReturnsABadCandidat
       }
       if (dockBranchChanged(s, reference, p)) {++rb; continue;}
       const double cost = dockIkCost(s, reference, p);
-      if (!(cost <= p.max_dq_rad)) {++rc; continue;}
+      if (!(dockIkCost(s, reference, p, false) <= p.max_dq_rad)) {++rc; continue;}
       bool under = true;
       if (prefer) {under = dockReachFraction(s[p.lift_joint], ctx, p) <= p.reach_target_fraction + 1e-9;}
       if (best == nullptr || (under && !best_under) || (under == best_under && cost < best_cost)) {

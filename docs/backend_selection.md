@@ -59,7 +59,7 @@ planning:
 | Name | Base class | Package | Notes |
 |---|---|---|---|
 | `moveit_cartesian` | Planner | motion_planner_moveit | jump detection, reachability-tilt retry, wall-contact ACM; opt-in `cartesian_joint_goal` (false) and `cartesian_joint_goal_tolerance` (0.05): the Cartesian-first attempt also for joint-goal segments (stow, seeded approach), see [free_space_comparison.md](free_space_comparison.md) |
-| `moveit_ompl` | Planner | motion_planner_moveit | pose and joint goals; params `free_space_direct_first` (default false), `direct_revolute_step` (0.05 rad), `direct_prismatic_step` (0.01 m), `direct_default_acceleration` (2.0, used only by the direct path retiming); optimal mode: `free_space_optimize` (false), `free_space_time_budget_s` (20), `free_space_num_candidates` (5), `free_space_objective` (`length`\|`duration`), `free_space_planners`, `free_space_shortcut_iterations` (300), `free_space_smoothing_rounds` (4), `free_space_cartesian_candidate` (true, in the optimal mode), `free_space_cartesian_eef_step` (0.01), `free_space_cartesian_goal_tolerance` (0.05), `free_space_cartesian_revolute_jump` (0.3), `free_space_cartesian_prismatic_jump` (0.05) |
+| `moveit_ompl` | Planner | motion_planner_moveit | pose and joint goals; params `free_space_direct_first` (default false), `direct_revolute_step` (0.05 rad), `direct_prismatic_step` (0.01 m), `direct_default_acceleration` (2.0, used only by the direct path retiming); optimal mode: `free_space_optimize` (false), `free_space_time_budget_s` (20), `free_space_num_candidates` (5), `free_space_objective` (`length`\|`duration`), `lift_cost_weight` (2.0: lift travel counts twice an arm joint's in candidate scoring and shortcutting; 1.0 = off), `free_space_planners`, `free_space_shortcut_iterations` (300), `free_space_smoothing_rounds` (4), `free_space_cartesian_candidate` (true, in the optimal mode), `free_space_cartesian_eef_step` (0.01), `free_space_cartesian_goal_tolerance` (0.05), `free_space_cartesian_revolute_jump` (0.3), `free_space_cartesian_prismatic_jump` (0.05) |
 | `moveit_ik` | Ik | motion_planner_moveit | params `ik_extra_seeds`, `ik_seed_perturbation` |
 | `moveit_collision` | Collision | motion_planner_moveit | |
 | `moveit_scene` | Scene | motion_planner_moveit | param `octomap_resolution` |
@@ -97,7 +97,7 @@ long path costs wall time that no planning time can win back, so the planning ti
 3. per OMPL result: randomised shortcutting (`free_space_shortcut_iterations`, 300) and corner-cutting smoothing
    (`free_space_smoothing_rounds`, 4, a repeated quadratic B-spline corner cut), every replacement segment densified and checked with
    `PlanningScene::isStateValid`, so the result is valid and never longer; then the MoveIt TOTG time parameterisation;
-4. `selectBestCandidate`: `free_space_objective: length` picks the smallest joint path length weighted by 1/(joint range) (the lift's
+4. `selectBestCandidate`: `free_space_objective: length` picks the smallest joint path length weighted by 1/(joint range) and by `lift_cost_weight` for the lift (the lift's
    metres and the arm's radians become comparable), `duration` the smallest TOTG duration. Ties keep the earlier candidate, so a clear
    straight line (the direct path) always wins.
 

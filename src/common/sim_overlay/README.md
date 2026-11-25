@@ -4,7 +4,7 @@ Draws the coverage plan columns and stand poses (the `mp_rviz` topics `/mp_viz/p
 
 - `sim_overlay/overlay.py`: marker dicts to sim-neutral primitives (pure python), fixed frame to world transform.
 - `scripts/gz_overlay.py`: Gazebo via the gz-sim `/marker` service (`gz service`), `--dry-run` prints the commands.
-- `sim_overlay/mujoco_overlay.py`, `scripts/overlay_dump.py`, `patches/mujoco_viewer_hook.patch`: MuJoCo `user_scn` adapter, JSON feed, viewer hook (not applied).
+- `sim_overlay/mujoco_overlay.py`, `scripts/overlay_dump.py`: MuJoCo `user_scn` adapter and JSON feed (the viewer hook is `sim_mujoco/sim_mujoco/viewer_overlay.py`).
 - `sim_overlay/touch_up.py`, `scripts/touch_up_plan.py`: not-done cells of a run -> vertical-strip touch-up `coverage_output.json` for the manager.
 - `sim_overlay/coverage_paint.py`, `scripts/coverage_paint.py`, `scripts/coverage_replay.py`, `launch/coverage_paint.launch.py`: live done / not done wall paint and offline replay to PNG (see the doc).
 
