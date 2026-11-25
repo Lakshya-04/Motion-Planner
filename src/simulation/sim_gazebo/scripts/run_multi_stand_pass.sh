@@ -22,6 +22,8 @@
 #   MULTI_STAND_LIFT_STROKE=1.5    the lift's stroke in m (manager `dock_ik_lift_max_m`)
 #   MULTI_STAND_LIFT_COST_WEIGHT=2.0     lift delta counts this many times an arm joint delta in the dock IK continuity cost (manager `dock_ik_lift_cost_weight`; 1.0 = off)
 #   MULTI_STAND_MIN_CLEARANCE=0.5        stand planner floor on the chassis-to-wall clearance in m (default 0 = off)
+#   MULTI_STAND_BALANCE_REACH=true       stand planner centres each stand's columns in the reach (`stand_balance_reach`, default false = off)
+#   MULTI_STAND_MAX_REACH_FRACTION=0.85  stand planner rejects poses beyond this fraction of MULTI_STAND_ARM_REACH (`stand_max_reach_fraction`, default 0 = off)
 #   MULTI_STAND_SPEED / _SWATH / _OVERLAP / _TOOL_YAW / _TARGET / _PRESS / _STANDOFF / _APPROACH_EXTRA / _DOCK_ATTEMPTS / _MIN_COVERAGE
 #                                  the stroke speed, swath and overlap of the plan, tool yaw, target force, press depth, dock standoff and
 #                                  approach distance, dock tries and the score's minimum coverage (defaults in the script)
@@ -112,7 +114,9 @@ eval gz_start sim_launch ros2 launch sim_gazebo sim.launch.py $(gz_sim_args) bas
   wall_scene:=$OUT/data/smoke_wall_scene.json standoff:=0.915 ${MULTI_STAND_LAUNCH_ARGS:-}
 gz_start coverage_planner ros2 run coverage_planner coverage_planner_node
 gz_start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
-  -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0}
+  -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0} \
+  -p stand_max_reach_fraction:=${MULTI_STAND_MAX_REACH_FRACTION:-0.0} -p stand_balance_reach:=${MULTI_STAND_BALANCE_REACH:-false} \
+  -p arm_reach_m:=${MULTI_STAND_ARM_REACH:-0.0}
 gz_start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE
 
 # 1. coverage plan for the wall's contact region, in the world frame
