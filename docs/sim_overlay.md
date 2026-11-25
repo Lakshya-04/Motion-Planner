@@ -52,6 +52,8 @@ ros2 launch sim_overlay coverage_paint.launch.py wall_scene_json:=... source:=mu
 ros2 service call /coverage_paint/save_png std_srvs/srv/Trigger   # PNG of the live map (png_path)
 ```
 
+Wired into the passes: `MULTI_STAND_PAINT=1 bash run_multi_stand_pass.sh` (sim_mujoco and sim_gazebo, default off) starts the paint node on the pass's wall scene in `odom` with `plan_file` = the pass's `coverage_output.json`; RViz then shows `/mp_viz/coverage_paint` by enabling the `Coverage paint (done / not done)` display (off by default) in the `mission_overview` or `layers` mp_rviz profile. `MULTI_STAND_PAINT_FEED=gazebo` (sim launched with `gui:=true`) or `=mujoco` (writes `$OUT/mp_sim_overlay.json`; the MuJoCo viewer hook patch is still not applied) also paints the simulator view; `MULTI_STAND_PAINT_ARGS` adds launch arguments. Not yet validated in a sim run.
+
 Force inputs: `source:=mujoco` reads `/sim_mujoco/ft_ground_truth`, `source:=gazebo` `/ft_sensor/ground_truth_wrench` (both WrenchStamped, `|Fz|`, like `record_run.py`); `force_msg:=info` reads `/ft_sensor/ground_truth_info` (`max_point_norm`). TCP pose: TF `tcp_frame` (tcp_link) in `frame_id`, which must be the frame of the wall json. Parameters: `cell_m`, `swath_m`, `force_threshold_n` (<= 0 ignores force, for a spray pass), `plane_tol_m`, `sample_hz`, `publish_hz`, `lift_m`.
 
 ### Replay from a recorded run (report / README picture)
