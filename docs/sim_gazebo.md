@@ -742,7 +742,6 @@ build volumes), waits for the host's memory slots, runs `run_multi_stand_pass.sh
 environment, and writes `<name>_out`. The paths in them are the maintainer's host layout; copy and adapt.
 
 The sim container runs as `--user 1000:1000` with `--gpus all`, `NVIDIA_DRIVER_CAPABILITIES=all`, `__GLX_VENDOR_LIBRARY_NAME=nvidia` and
-`__NV_PRIME_RENDER_OFFLOAD=1`, so the Gazebo GUI renders on the NVIDIA GPU of a hybrid-graphics laptop (the `xhost +SI:localuser:root`
-step is not needed for a non-root container user). `MULTI_STAND_TCP_SETTLE_TOL` (default 0.002 m) is the arm-arrival tolerance next to
+`__NV_PRIME_RENDER_OFFLOAD=1`, so the Gazebo GUI renders on the NVIDIA GPU of a hybrid-graphics laptop. `MULTI_STAND_TCP_SETTLE_TOL` (default 0.002 m) is the arm-arrival tolerance next to
 `MULTI_STAND_TCP_SETTLE`: with the position loop's 10 s time constant a larger settle time and a tighter tolerance make the dock check
 wait for the arm instead of rejecting a pose it is still approaching.
