@@ -158,7 +158,7 @@ software rendering, no display) and bridges `/rgb_camera/image` (`sensor_msgs/Im
 after a base move it moves with it (a multi-stand run with stills showed this: the base drives toward the wall and the camera ends up against it, every later frame is a blank wall) (`rgb_camera_frame:=world` below fixes this). `scripts/capture_still.py OUT_DIR --every S --count N` writes PNGs (no imaging library).
 `GZ_PASS_STILLS=N` in the pass scripts turns the camera on and runs it.
 
-`GZ_PASS_JOINT_LOG=1` in `run_multi_stand_pass.sh` records the arm/lift controller's reference, feedback and error per joint to `joint_track.csv` (`scripts/joint_track_log.py`, about 10 Hz). Use it when the arm stops short of a commanded pose: the error column shows whether the controller or the planner left the gap.
+`GZ_PASS_JOINT_LOG=1` in `run_multi_stand_pass.sh` records the joint positions (`/joint_states`, about 10 Hz) to `joint_track.csv` (`scripts/joint_track_log.py`). Use it when the arm stops short of a commanded pose: compare it with the plan offline. (The plain joint trajectory controller's `controller_state` topic does not exist under JTAC, so reference and error are not recorded.)
 
 `rgb_camera_frame:=world` (also `GZ_PASS_CAMERA_FRAME=world` in the pass scripts) makes the camera a static model in the world at
 `rgb_camera_pose` (now a world pose), so it stays put while the base drives: the multi-stand pass can be filmed (the default `base`

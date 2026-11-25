@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Record the arm/lift controller's reference, feedback and error per joint to a CSV (about 10 Hz).
+"""Record the joint positions (/joint_states) to a CSV (about 10 Hz), one column per joint.
 
-Diagnostic for "the arm stops a few cm short of the commanded pose" in Gazebo: the trajectory controller publishes
-control_msgs/JointTrajectoryControllerState (reference, feedback, error). The columns are
-t, then <joint>_ref, <joint>_fb, <joint>_err for every joint, in the controller's joint order.
+Diagnostic for "the arm stops a few cm short of the commanded pose" in Gazebo: with the JTAC controller there is no
+controller_state topic (that is the plain joint_trajectory_controller's), so the measured positions are recorded and
+compared offline with the plan (manager.log ARMSTATE lines, the executed trajectories).
 
-usage: joint_track_log.py --out FILE [--topic /lift_arm_controller/controller_state] [--rate 10] [--timeout SEC]
+usage: joint_track_log.py --out FILE [--topic /joint_states] [--rate 10] [--timeout SEC]
 """
 import argparse
 import csv
 import time
 
 import rclpy
-from control_msgs.msg import JointTrajectoryControllerState
 from rclpy.node import Node
+from sensor_msgs.msg import JointState
 
 
 class JointTrackLog(Node):
@@ -25,27 +25,20 @@ class JointTrackLog(Node):
         self._period = 1.0 / max(rate, 0.1)
         self._last = 0.0
         self._t0 = time.monotonic()
-        self.create_subscription(JointTrajectoryControllerState, topic, self._on_state, 10)
+        self.create_subscription(JointState, topic, self._on_state, 10)
 
     def _on_state(self, msg):
         now = time.monotonic()
         if now - self._last < self._period:
             return
         self._last = now
-        names = list(msg.joint_names)
+        names = list(msg.name)
         if not self._header:
-            cols = ['t']
-            for n in names:
-                cols += [f'{n}_ref', f'{n}_fb', f'{n}_err']
-            self._writer.writerow(cols)
+            self._names = names
+            self._writer.writerow(['t'] + names)
             self._header = True
-        row = [f'{now - self._t0:.3f}']
-        for i in range(len(names)):
-            ref = msg.reference.positions[i] if i < len(msg.reference.positions) else float('nan')
-            fb = msg.feedback.positions[i] if i < len(msg.feedback.positions) else float('nan')
-            err = msg.error.positions[i] if i < len(msg.error.positions) else float('nan')
-            row += [f'{ref:.5f}', f'{fb:.5f}', f'{err:.5f}']
-        self._writer.writerow(row)
+        pos = dict(zip(names, msg.position))
+        self._writer.writerow([f'{now - self._t0:.3f}'] + [f'{pos.get(n, float("nan")):.5f}' for n in self._names])
         self._file.flush()
 
     def close(self):
@@ -55,7 +48,7 @@ class JointTrackLog(Node):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', required=True)
-    ap.add_argument('--topic', default='/lift_arm_controller/controller_state')
+    ap.add_argument('--topic', default='/joint_states')
     ap.add_argument('--rate', type=float, default=10.0)
     ap.add_argument('--timeout', type=float, default=0.0, help='stop after this many seconds (0 = until killed)')
     a = ap.parse_args()

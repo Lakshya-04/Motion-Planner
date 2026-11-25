@@ -40,7 +40,7 @@
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented)
 #   STAND_MAP                      a built reachability map (skips the build, which takes a few minutes)
-#   GZ_PASS_JOINT_LOG=1            controller reference / feedback / error per joint to OUT/joint_track.csv
+#   GZ_PASS_JOINT_LOG=1            joint positions (/joint_states, ~10 Hz) to OUT/joint_track.csv
 #   GZ_PASS_STILLS=N               colour camera on, N PNG stills into OUT/stills, one every GZ_PASS_STILLS_EVERY s
 # Needs a sourced ROS environment with sim_gazebo, reachability, stand_navigator, ft_conditioner,
 # compliant_trajectory_controller, ft_bridge_hardware, coverage_planner, manipulation_manager, coverage_task_msgs and
@@ -192,7 +192,7 @@ if [ "${MULTI_STAND_PAINT:-0}" = 1 ]; then
 fi
 
 # 4. the manager as an action server, one goal
-# GZ_PASS_JOINT_LOG=1: controller reference / feedback / error per joint to $OUT/joint_track.csv (diagnoses an arm that
+# GZ_PASS_JOINT_LOG=1: joint positions to $OUT/joint_track.csv (diagnoses an arm that
 # stops short of a commanded pose, e.g. the lift-0 low poses)
 if [ "${GZ_PASS_JOINT_LOG:-0}" = 1 ]; then
   gz_start joint_track_log python3 "$PKG/lib/sim_gazebo/joint_track_log.py" --out "$OUT/joint_track.csv" --timeout 3600
