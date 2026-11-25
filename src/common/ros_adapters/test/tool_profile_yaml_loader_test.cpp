@@ -277,5 +277,124 @@ TEST(ToolProfileYamlLoader, ThrowsOnBadContactAreaOrEdgeSpacing)
   EXPECT_THROW(loadToolProfile(non_contact_edge.path(), "bad"), std::runtime_error);
 }
 
+
+namespace tilt_helpers
+{
+std::string tiltYaml(const std::string & geometry)
+{
+  return "schema_version: 1\ntools:\n  t:\n    geometry: " + geometry +
+         "\n    task: {contact: false, standoff_m: 0.3}\n";
+}
+}  // namespace tilt_helpers
+using tilt_helpers::tiltYaml;
+
+TEST(ToolProfileYamlLoader, TiltDefaultsToZeroWhenAbsent)
+{
+  TempYamlFile f(tiltYaml("{tcp_xyz: [0, 0, 0.1]}"));
+  const auto p = loadToolProfile(f.path(), "t");
+  EXPECT_DOUBLE_EQ(p.geometry.tilt_deg, 0.0);
+  EXPECT_EQ(p.geometry.tilt_axis, (std::array<double, 3>{0, 0, 0}));
+}
+
+TEST(ToolProfileYamlLoader, LoadsTiltAndNormalisesAxis)
+{
+  TempYamlFile f(tiltYaml("{tilt_deg: 30.0, tilt_axis: [0.0, 2.0, 0.0]}"));
+  const auto p = loadToolProfile(f.path(), "t");
+  EXPECT_DOUBLE_EQ(p.geometry.tilt_deg, 30.0);
+  EXPECT_DOUBLE_EQ(p.geometry.tilt_axis[1], 1.0);
+}
+
+TEST(ToolProfileYamlLoader, NegativeTiltBecomesPositiveAboutOppositeAxis)
+{
+  TempYamlFile f(tiltYaml("{tilt_deg: -20.0, tilt_axis: [1.0, 0.0, 0.0]}"));
+  const auto p = loadToolProfile(f.path(), "t");
+  EXPECT_DOUBLE_EQ(p.geometry.tilt_deg, 20.0);
+  EXPECT_DOUBLE_EQ(p.geometry.tilt_axis[0], -1.0);
+}
+
+TEST(ToolProfileYamlLoader, RejectsTiltAtOrAboveEightyDegrees)
+{
+  for (const char * g : {"{tilt_deg: 80.0, tilt_axis: [1, 0, 0]}", "{tilt_deg: -85.0, tilt_axis: [1, 0, 0]}",
+      "{tilt_deg: 120.0, tilt_axis: [1, 0, 0]}"})
+  {
+    TempYamlFile f(tiltYaml(g));
+    EXPECT_THROW(loadToolProfile(f.path(), "t"), std::runtime_error) << g;
+  }
+  TempYamlFile ok(tiltYaml("{tilt_deg: 79.0, tilt_axis: [1, 0, 0]}"));
+  EXPECT_NO_THROW(loadToolProfile(ok.path(), "t"));
+}
+
+TEST(ToolProfileYamlLoader, RejectsNonFiniteTilt)
+{
+  for (const char * g : {"{tilt_deg: .nan, tilt_axis: [1, 0, 0]}", "{tilt_deg: .inf, tilt_axis: [1, 0, 0]}",
+      "{tilt_deg: 10.0, tilt_axis: [.nan, 0, 0]}"})
+  {
+    TempYamlFile f(tiltYaml(g));
+    EXPECT_THROW(loadToolProfile(f.path(), "t"), std::runtime_error) << g;
+  }
+}
+
+TEST(ToolProfileYamlLoader, RejectsTiltWithoutAxisOrWithAxisOutOfSurface)
+{
+  TempYamlFile no_axis(tiltYaml("{tilt_deg: 10.0}"));
+  EXPECT_THROW(loadToolProfile(no_axis.path(), "t"), std::runtime_error);
+  TempYamlFile along_z(tiltYaml("{tilt_deg: 10.0, tilt_axis: [0, 0, 1]}"));
+  EXPECT_THROW(loadToolProfile(along_z.path(), "t"), std::runtime_error);
+  TempYamlFile bad_len(tiltYaml("{tilt_deg: 10.0, tilt_axis: [1, 0]}"));
+  EXPECT_THROW(loadToolProfile(bad_len.path(), "t"), std::runtime_error);
+}
+
+TEST(ToolProfileYamlLoader, ZeroTiltIgnoresTheAxis)
+{
+  TempYamlFile f(tiltYaml("{tilt_deg: 0.0, tilt_axis: [0, 0, 1]}"));
+  EXPECT_NO_THROW(loadToolProfile(f.path(), "t"));
+}
+
+TEST(ToolProfileYamlLoader, RefusesTiltOnAContactTool)
+{
+  TempYamlFile f(
+    "schema_version: 1\ntools:\n  pad:\n"
+    "    geometry: {tilt_deg: 20.0, tilt_axis: [1, 0, 0]}\n"
+    "    task: {contact: true, target_force_n: 20.0}\n"
+    "    control: {controller: admittance_chain, admittance: {wrench_reference_z_n: 20.0}}\n");
+  try {
+    loadToolProfile(f.path(), "pad");
+    FAIL() << "expected a refusal";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find("contact tool"), std::string::npos) << e.what();
+  }
+}
+
+TEST(ToolProfileYamlLoader, RefusesTiltTogetherWithNominalTilt)
+{
+  TempYamlFile f(
+    "schema_version: 1\ntools:\n  pad:\n"
+    "    geometry: {tilt_deg: 30.0, tilt_axis: [1, 0, 0]}\n"
+    "    task: {contact: true, target_force_n: 20.0}\n"
+    "    coverage: {contact_area: {pad_width_m: 0.2, nominal_tilt_deg: 30.0}}\n"
+    "    control: {controller: admittance_chain, admittance: {wrench_reference_z_n: 20.0}}\n");
+  try {
+    loadToolProfile(f.path(), "pad");
+    FAIL() << "expected a refusal";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find("nominal_tilt_deg"), std::string::npos) << e.what();
+  }
+}
+
+TEST(ToolProfileYamlLoader, RefusesFixedPlusEdgeTiltAtEightyFiveDegrees)
+{
+  const std::string head = "schema_version: 1\ntools:\n  t:\n    geometry: ";
+  TempYamlFile bad(
+    head + "{tilt_deg: 79.0, tilt_axis: [1, 0, 0]}\n"
+    "    task: {contact: false, standoff_m: 0.3, tool_normal_policy: tilt_at_edges,"
+    " max_edge_tilt_deg: 40.0}\n");
+  EXPECT_THROW(loadToolProfile(bad.path(), "t"), std::runtime_error);
+  TempYamlFile ok(
+    head + "{tilt_deg: 30.0, tilt_axis: [1, 0, 0]}\n"
+    "    task: {contact: false, standoff_m: 0.3, tool_normal_policy: tilt_at_edges,"
+    " max_edge_tilt_deg: 40.0}\n");
+  EXPECT_NO_THROW(loadToolProfile(ok.path(), "t"));
+}
+
 }  // namespace
 }  // namespace ros_adapters

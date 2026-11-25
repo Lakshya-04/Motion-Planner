@@ -19,7 +19,7 @@ PKG = pathlib.Path(__file__).resolve().parents[1]
 NAME = 'mobile_manipulator_description'
 PROFILES = PKG / 'config' / 'profiles'
 BASES = ['generic_base', 'ranger_mini', 'scout_mini', 'scout', 'husky', 'mpo_500', 'mir100',
-         'turtlebot3_burger', 'turtlebot3_waffle']
+         'turtlebot3_burger', 'turtlebot3_waffle', 'jackal', 'dingo_o', 'tiago_style', 'fetch_style']
 DRIVE_TYPES = {'omni', 'diff', 'skid', '4ws'}
 TOL = 1e-6
 
@@ -343,3 +343,26 @@ def test_profile_arm_mount_matches_the_arm_base_position(path):
             assert all(abs(a) < TOL for a in origin.rpy), f'{name} rotates'
             x, y = x + origin.xyz[0], y + origin.xyz[1]
     assert profile['base']['arm_mount_xy'] == pytest.approx([x, y], abs=1e-6)
+
+
+NEW_BASES = {
+    # base: (drive_type, profile, lift type, lift stroke)
+    'jackal': ('diff', 'kinova_gen3_jackal_nolift', 'none', None),
+    'dingo_o': ('omni', 'xarm7_dingo_o_nolift', 'none', None),
+    'tiago_style': ('diff', 'fr3_tiago_style_torso', 'telescopic', 0.35),
+    'fetch_style': ('diff', 'generic_6dof_fetch_style_torso', 'telescopic', 0.386),
+}
+
+
+@pytest.mark.parametrize('base', NEW_BASES)
+def test_new_bases_profiles_state_drive_and_lift(base):
+    drive, profile, lift_type, stroke = NEW_BASES[base]
+    data = _load(PROFILES / f'{profile}.yaml')
+    assert data['base']['name'] == base and data['base']['drive_type'] == drive
+    assert data['lift']['type'] == lift_type
+    if stroke is not None:  # torso lift: a one-carriage column, lift range from the profile
+        assert data['lift']['stages'] == 0 and data['lift']['stroke_m'] == stroke
+        assert 0.0 <= data['home']['lift_joint'] <= stroke
+        robot = URDF.from_xml_string(_render(**_profile_args(data)))
+        assert robot.joint_map['lift_joint'].limit.upper == pytest.approx(stroke)
+        assert not [j for j in robot.joints if j.mimic is not None]

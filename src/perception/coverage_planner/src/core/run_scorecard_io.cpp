@@ -16,14 +16,19 @@ std::vector<RunSample> parseRunCsv(std::istream & in)
   std::vector<RunSample> out;
   std::string line;
   bool header_seen = false;
+  size_t columns = 6;
   size_t line_no = 0;
   while (std::getline(in, line)) {
     ++line_no;
     if (!line.empty() && line.back() == '\r') {line.pop_back();}
     if (line.empty() || line[0] == '#') {continue;}
     if (!header_seen) {
-      if (line != "t,x,y,z,force,active") {
-        throw std::runtime_error("sample csv: the header must be t,x,y,z,force,active");
+      if (line == "t,x,y,z,force,active") {
+        columns = 6;
+      } else if (line == "t,x,y,z,force,active,tilt_deg") {
+        columns = 7;
+      } else {
+        throw std::runtime_error("sample csv: the header must be t,x,y,z,force,active[,tilt_deg]");
       }
       header_seen = true;
       continue;
@@ -40,11 +45,13 @@ std::vector<RunSample> parseRunCsv(std::istream & in)
         throw std::runtime_error("sample csv line " + std::to_string(line_no) + ": '" + cell + "' is not a number");
       }
     }
-    if (v.size() != 6) {
-      throw std::runtime_error("sample csv line " + std::to_string(line_no) + ": expected 6 columns");
+    if (v.size() != columns) {
+      throw std::runtime_error(
+              "sample csv line " + std::to_string(line_no) + ": expected " + std::to_string(columns) + " columns");
     }
     RunSample s;
     s.t_s = v[0]; s.x = v[1]; s.y = v[2]; s.z = v[3]; s.force_n = v[4]; s.tool_active = v[5] != 0.0;
+    if (columns == 7) {s.tilt_deg = v[6];}
     out.push_back(s);
   }
   if (!header_seen) {throw std::runtime_error("sample csv: empty, no header");}
@@ -104,6 +111,18 @@ std::vector<ObstacleRegion> obstaclesFromJson(const nlohmann::json & j, uint32_t
   return out;
 }
 
+void validateGateOptions(const ScorecardOptions & options, const ScorecardLimits & limits)
+{
+  const bool gap_gate = options.contact && options.max_wall_gap_m > 0.0;   // ignored for a non-contact tool
+  if (limits.max_bad_pose_fraction >= 0.0 && !gap_gate && options.max_tilt_deg <= 0.0) {
+    throw std::runtime_error(
+      "--max-bad-pose needs --max-wall-gap (contact runs only) or --max-tilt, otherwise no sample can be a bad pose");
+  }
+  if (options.nominal_tilt_deg != 0.0 && options.max_tilt_deg <= 0.0) {
+    throw std::runtime_error("--nominal-tilt needs --max-tilt, otherwise the tilt is not checked");
+  }
+}
+
 nlohmann::json scorecardToJson(const RunScorecard & c)
 {
   nlohmann::json j = {
@@ -122,6 +141,11 @@ nlohmann::json scorecardToJson(const RunScorecard & c)
       {"in_band_fraction", c.in_band_fraction}}},
     {"time", {{"duration_s", c.duration_s}, {"engaged_s", c.engaged_s}}},
     {"obstacle", {{"contacts", c.obstacle_contacts}, {"contact_samples", c.obstacle_contact_samples}}},
+    {"pose", {
+      {"bad_pose_samples", c.bad_pose_samples}, {"off_wall_samples", c.off_wall_samples},
+      {"tilted_samples", c.tilted_samples}, {"bad_pose_fraction", c.bad_pose_fraction},
+      {"tilt_mean_deg", c.tilt_mean_deg}, {"tilt_max_deg", c.tilt_max_deg},
+      {"wall_gap_mean_m", c.wall_gap_mean_m}, {"wall_gap_max_abs_m", c.wall_gap_max_abs_m}}},
     {"strokes", c.strokes}};
   if (c.coverage.thickness.valid) {
     j["thickness"] = {

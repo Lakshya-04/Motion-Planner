@@ -19,14 +19,23 @@ add_library(reachability_core
   src/core/map4d.cpp
   src/core/arm_model.cpp
   src/core/builder.cpp
+  src/core/redundancy.cpp
   src/core/lift_bands.cpp
   src/core/station.cpp
+  src/core/free_space.cpp
   src/core/base_model.cpp
   src/core/stands.cpp
   src/core/horizontal_stands.cpp
   src/core/stand_cover.cpp
   src/core/stand_verifier.cpp
   src/core/global_stands.cpp
+  src/core/pose_quality.cpp
+  src/core/path_quality_audit.cpp
+  src/core/column_sequence.cpp
+  src/core/column_ik_chain.cpp
+  src/core/column_stands.cpp
+  src/core/column_analysis.cpp
+  src/core/base_placement.cpp
   src/core/io.cpp
 )
 target_include_directories(reachability_core PUBLIC
@@ -37,6 +46,14 @@ target_compile_features(reachability_core PUBLIC cxx_std_17)
 
 add_executable(rm4d_tool apps/rm4d_tool.cpp)
 target_link_libraries(rm4d_tool reachability_core)
+
+add_executable(column_reach_tool apps/column_reach_tool.cpp)
+target_link_libraries(column_reach_tool reachability_core)
+
+# Monte Carlo split-avoidance benchmark on planar fake arms (header-only model, shared with its gtest).
+add_executable(split_benchmark apps/split_benchmark.cpp)
+target_link_libraries(split_benchmark reachability_core)
+target_include_directories(split_benchmark PRIVATE apps)
 
 # ros/: services over a loaded map. Optional: the core builds without rclcpp.
 find_package(rclcpp QUIET)
@@ -60,13 +77,13 @@ install(TARGETS ${REACHABILITY_TARGETS}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
-install(TARGETS rm4d_tool DESTINATION lib/${PROJECT_NAME})
+install(TARGETS rm4d_tool column_reach_tool split_benchmark DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/urdf_to_chain.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
-  foreach(t map4d builder lift_bands io station base_model stands global_stands stand_verifier stands_verified horizontal_stands)
+  foreach(t map4d builder lift_bands io station station_fuzz plane_stands base_model stands global_stands stand_verifier stand_reach_margin stands_verified stands_redundant horizontal_stands pose_quality path_quality_audit column_sequence column_ik_chain column_stands redundancy base_placement)
     ament_add_gtest(${t}_test test/core/${t}_test.cpp)
     target_link_libraries(${t}_test reachability_core)
     target_include_directories(${t}_test PRIVATE test/core)
@@ -77,6 +94,9 @@ if(BUILD_TESTING)
   else()
     message(WARNING "reachability: ${_profiles} not found, the shipped-profile schema test will be skipped")
   endif()
+  ament_add_gtest(split_benchmark_test test/core/split_benchmark_test.cpp)
+  target_link_libraries(split_benchmark_test reachability_core)
+  target_include_directories(split_benchmark_test PRIVATE apps)
   if(TARGET reachability_ros)
     ament_add_gtest(reachability_node_test test/ros/reachability_node_test.cpp)
     target_link_libraries(reachability_node_test reachability_ros)

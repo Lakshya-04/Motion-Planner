@@ -995,9 +995,17 @@ void BoustrophedonPlanner::generateHorizontalSweeps(
   int connectors_accepted = 0;
   int connectors_rejected = 0;
 
+  const int zone_cells = static_cast<int>(std::lround(params.edge_zone_m / map.info.resolution));
+  std::vector<int> obstacle_edges;
+  if (zone_cells > 0 && params.edge_spacing_scale < 1.0) {
+    obstacle_edges = obstacleEdgeCells(
+      min_y, max_y, min_x, max_x, [&](int y, int x) {
+        const size_t i = static_cast<size_t>(y) * map.info.width + x;
+        return i >= inflated_grid.size() || !isCellFree(inflated_grid[i], params.allow_unknown);
+      });
+  }
   const std::vector<int> ys = stripCellPositions(
-    min_y, max_y, start_from_top, step_cells,
-    static_cast<int>(std::lround(params.edge_zone_m / map.info.resolution)), params.edge_spacing_scale);
+    min_y, max_y, start_from_top, step_cells, zone_cells, params.edge_spacing_scale, obstacle_edges);
   for (size_t yi = 0; yi < ys.size(); ++yi) {
     const int y = ys[yi];
     sweep_count++;
@@ -1178,9 +1186,17 @@ void BoustrophedonPlanner::generateVerticalSweeps(
   int connectors_accepted = 0;
   int connectors_rejected = 0;
 
+  const int zone_cells = static_cast<int>(std::lround(params.edge_zone_m / map.info.resolution));
+  std::vector<int> obstacle_edges;
+  if (zone_cells > 0 && params.edge_spacing_scale < 1.0) {
+    obstacle_edges = obstacleEdgeCells(
+      min_x, max_x, min_y, max_y, [&](int x, int y) {
+        const size_t i = static_cast<size_t>(y) * map.info.width + x;
+        return i >= inflated_grid.size() || !isCellFree(inflated_grid[i], params.allow_unknown);
+      });
+  }
   const std::vector<int> xs = stripCellPositions(
-    min_x, max_x, start_from_left, step_cells,
-    static_cast<int>(std::lround(params.edge_zone_m / map.info.resolution)), params.edge_spacing_scale);
+    min_x, max_x, start_from_left, step_cells, zone_cells, params.edge_spacing_scale, obstacle_edges);
   for (size_t xi = 0; xi < xs.size(); ++xi) {
     const int x = xs[xi];
     int sweep_start = bottom_to_top ? max_y : min_y;

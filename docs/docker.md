@@ -73,6 +73,34 @@ named volumes, so it does not pollute the repo and survives container restarts.
 
 Set a different distro with `ROS_DISTRO=humble` (the packages build as C++17 on both).
 
+## Compiler cache (default)
+
+Every image ships `ccache` and `mold` (installed once in the `base` stage, so `dev`, `build`, `gpu`, `sim`,
+`sim-gazebo`, `vamp-build` and `full` all have them). The environment is preset: `CCACHE_DIR=/ccache`,
+`CCACHE_MAXSIZE=6G`, `CCACHE_COMPILERCHECK=content` (identical toolchains share hits), `CCACHE_BASEDIR=/ws`,
+`CMAKE_{C,CXX,CUDA}_COMPILER_LAUNCHER=ccache`, and `COLCON_DEFAULTS_FILE=/etc/colcon/defaults.yaml`
+(source: `docker/colcon-defaults.yaml`: the launchers plus `-fuse-ld=mold`). A plain `colcon build` in any
+container is therefore cached; the build type stays whatever you pass. `docker/build.sh` repeats the arguments because a
+`--cmake-args` on the command line replaces the defaults file. In the `gpu`/`sim` stages the pip installs put
+`/usr/lib/ccache` first on `PATH`, so gcc/g++ calls of extension builds (torch `cpp_extension`, sdists) are cached too;
+nvcc is cached where CMake drives it (`CMAKE_CUDA_COMPILER_LAUNCHER`). `/ccache` exists in the image with mode 1777
+(any UID); the image declares no `VOLUME`, callers mount it.
+
+- **Compose** mounts the named volume `ccache` at `/ccache` for every service. To share with other worktrees and
+  scripts use a host directory: `MP_CCACHE_DIR=$HOME/.cache/mp-ccache docker compose -f docker/compose.yaml run --rm test`.
+- **Plain `docker run`**: `-v $HOME/.cache/mp-ccache:/ccache`.
+- **Sharing across worktrees**: hits need the same source path, so mount each worktree at `/ws` (the compose and
+  script default) and the same cache dir; `CCACHE_BASEDIR=/ws` makes paths relative.
+- **Statistics**: `docker/tools/ccache_stats.sh [CACHE_DIR] [IMAGE]` prints the hit rate; set `CCACHE_STATS=1` to
+  have `docker/build.sh` zero the counters and print them after the build.
+- **Clear**: `docker run --rm -v $HOME/.cache/mp-ccache:/ccache motion-planner:dev ccache -C` (or `docker volume rm
+  motion-planner_ccache`).
+- **Speed-up** (measured on one machine, one shared cache): 81% hit rate and repeat builds 8.5 times faster. Your
+  numbers depend on how much changed. These numbers were measured before this change made it the default in all images.
+- **Caveats**: different compiler flags or build type, or a different toolchain/image content, miss; link steps are not
+  cached (that is what mold is for); the first build into an empty cache is slightly slower; the cache is capped at 6 GB
+  (`CCACHE_MAXSIZE`); the image build stages `build` and `vamp-build` use a BuildKit cache mount at `/ccache`.
+
 ## Where the dependencies are listed
 
 | Kind | File |
@@ -84,7 +112,7 @@ Set a different distro with `ROS_DISTRO=humble` (the packages build as C++17 on 
 
 ## Run all checks
 
-There is no CI by decision ([CONTRIBUTING.md](../CONTRIBUTING.md)). One script runs lines 1 to 3 below:
+CI ([`ci.yml`](../.github/workflows/ci.yml)) runs the build, the colcon tests and the readiness scan on free runners; simulators and GPU stay local ([CONTRIBUTING.md](../CONTRIBUTING.md)). One script runs lines 1 to 3 below:
 
 ```bash
 docker/run_all_checks.sh                 # colcon build + test, pytest, public-readiness scan
@@ -175,8 +203,8 @@ first build is recorded in the notes of the documents that use them ([curobo_v2_
 ## Publishing prebuilt images (manual)
 
 `docker/tools/publish_images.sh` tags and pushes `deps`, `build` and `sim` (and with `--gpu` the `full` image) to
-`ghcr.io/<owner>/motion-planner:<target>`. It is a dry run unless `--push` is given. There is no CI, so publishing is a
-deliberate manual step, done after a full end-to-end workflow test passes. Notes:
+`ghcr.io/<owner>/motion-planner:<target>`. It is a dry run unless `--push` is given. Publishing is a
+deliberate manual step (CI does not push images), done after a full end-to-end workflow test passes. Notes:
 
 - `sim` is built on `gpu`, so it contains the 12 GB torch and cuRobo layers; layers shared with `full` upload once.
 - Push images built from the Dockerfile (`docker build --target <name>`), not a hand-committed container: the

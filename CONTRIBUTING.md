@@ -5,6 +5,8 @@ Thanks for helping. This page is the working agreement; the design rules are in
 [docs/ROADMAP.md](docs/ROADMAP.md) (pick an unchecked item, or open an issue first for anything large).
 By contributing you agree your work is licensed under the Apache License 2.0 ([LICENSE](LICENSE)).
 
+Please also read the [code of conduct](CODE_OF_CONDUCT.md); report security problems as described in the [security policy](SECURITY.md).
+
 ## Repository layout
 
 ```
@@ -38,10 +40,13 @@ Inside the shell, `docker/build.sh test` is the one build entry point. For a sin
 GPU tests (cuRobo) need the `gpu` image and skip without CUDA; simulator tests need the `sim` /
 `sim-gazebo` images (and the MuJoCo SDK for the plugin) and skip what they lack.
 
-## There is deliberately no CI
+## Checks: CI and local
 
-No workflow files are kept in this repository, by decision. The replacement is that every contributor
-runs the checks locally before opening a pull request. The commands are collected in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the repository checks, the colcon build and all
+colcon tests on every pull request, on standard GitHub-hosted runners only (free for a public repository). It cannot
+run what needs a GPU, a display or a robot: the simulator passes, cuRobo and VAMP, hardware. Those stay local, and
+anything that would cost money (larger runners, a private repository) is run locally too. Run the checks yourself
+before opening a pull request. The commands are collected in
 [docs/docker.md](docs/docker.md#run-all-checks); "run all checks" today is:
 
 1. `docker compose -f docker/compose.yaml run --rm test` (all colcon tests, C++ and Python).
@@ -50,8 +55,8 @@ runs the checks locally before opening a pull request. The commands are collecte
    `ros2 run sim_gazebo smoke_test.py` and `contact_control_test.py` ([docs/sim_gazebo.md](docs/sim_gazebo.md)),
    `scripts/run_smoke.sh` and `run_contact.sh` of `sim_mujoco` ([docs/sim_mujoco.md](docs/sim_mujoco.md)).
    These are not part of `colcon test` yet (roadmap section 10).
-4. `python3 docker/tools/check_public_readiness.py` and a link check over the Markdown you touched
-   (relative links must resolve). Before a release: [docs/release_checklist.md](docs/release_checklist.md).
+4. `python3 docker/tools/check_public_readiness.py`, `python3 docker/tools/check_params.py` (every parameter the manager and reachability nodes declare is documented, every config key is declared) and a link check over the Markdown you touched
+   (relative links must resolve). Before a release: [docs/release_checklist.md](docs/release_checklist.md). Reading the output of a simulated pass: [docs/how_to_read_a_run.md](docs/how_to_read_a_run.md).
 
 ## Code style
 
@@ -73,7 +78,7 @@ runs the checks locally before opening a pull request. The commands are collecte
 
 | To add | Start here |
 |---|---|
-| An arm | [docs/robot_description.md](docs/robot_description.md), "Adding an arm": xacro macro, profile YAML, ACM, MoveIt controller configs; swap tests pick it up from their profile lists |
+| An arm (6 or 7+ joints) | [docs/robot_description.md](docs/robot_description.md), "Adding an arm" and the arm table: xacro macro (primitives, published parameters, cite the source), profile YAML, ACM, MoveIt controller family; swap tests pick it up from their profile lists (`PROFILES` / `SEVEN_DOF` in `test_arm_swap.py`); a redundant arm needs a map policy ([docs/reachability.md](docs/reachability.md), "Redundant arms") |
 | A base | same doc, "Swapping parts" and "Bases": a `<name>_base` macro, one branch in `urdf/base/base.xacro`, a `base:` section in the profile |
 | A lift | same doc, "Lift variants": keep the three lift outputs, add one branch in `lift/lift.xacro`; recipe for a chain / column lift |
 | Per-robot planner assets (spheres, cuRobo config, VAMP header, reach map) | [docs/robot_assets.md](docs/robot_assets.md): one command from the profile |

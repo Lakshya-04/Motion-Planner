@@ -13,6 +13,7 @@
 
 #include "reachability/core/base_model.hpp"
 #include "reachability/core/global_stands.hpp"
+#include "reachability/core/io.hpp"
 #include "reachability/core/stand_verifier.hpp"
 #include "reachability/core/stands.hpp"
 #include "reachability/core/map4d.hpp"
@@ -39,9 +40,20 @@ private:
   void handlePlanStands(
     const reachability_msgs::srv::PlanStands::Request & request,
     reachability_msgs::srv::PlanStands::Response & response, bool verified);
+  /// ~/plan_stands with verification (request flag or `verify_by_default`): planStandsVerified, so the stand cap,
+  /// `stand_strategy` and `max_rounds` apply. Unverified requests never reach this.
+  void handleVerifiedPlan(
+    const StationRequest & r, const std::optional<Stand> & start, uint32_t max_stands,
+    reachability_msgs::srv::PlanStands::Response & response);
   std::shared_ptr<StandVerifier> verifier_;
+  bool verify_by_default_{false};
+  double stand_max_reach_fraction_{0.0};   ///< Parameter `stand_max_reach_fraction`: reach cap for stand poses, 0 = off.
+  bool stand_balance_reach_{false};        ///< Parameter `stand_balance_reach`: centre each stand's group in the reach.
+  double arm_reach_m_{0.0};                ///< Reach used by the two above: parameter `arm_reach_m`, else the map's estimate.
+  double stand_min_clearance_m_{0.0};   ///< Parameter `stand_min_clearance_m`: floor for the request clearance, 0 = off.
   VerifyOptions verify_options_;
   std::shared_ptr<Map4D> map_;
+  MapInfo map_info_;   ///< Header of the loaded map: joint count and redundancy policy (reported by ~/plan_stands).
   std::optional<BaseModel> base_;
   StandStrategy stand_strategy_{StandStrategy::Greedy};   ///< Parameter `stand_strategy`: greedy | set_cover.
   rclcpp::Service<reachability_msgs::srv::IsReachable>::SharedPtr is_reachable_;

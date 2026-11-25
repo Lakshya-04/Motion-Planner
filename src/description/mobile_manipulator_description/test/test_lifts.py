@@ -238,3 +238,166 @@ def test_lift_specific_acm_is_up_to_date(lift):
     committed = {tuple(sorted(m)) for m in re.findall(r'link1="([^"]+)" link2="([^"]+)"', text)}
     assert generated == committed, (
         f'stale: run scripts/generate_acm.py --arm generic_6dof --lift {lift} --out srdf/acm_generic_6dof_{lift}.xacro')
+
+
+# ---- column geometry from the profile: stage count, sizes, continuity ------------------------------
+
+def _geometry_profiles():
+    return [p for p in PROFILES if ((_profile(p).get('lift') or {}).get('geometry') or {}).get('stages')]
+
+
+def _lift_args(path, **extra):
+    """Xacro arguments of a profile's lift, on the dependency-free arm so no ur_description is needed."""
+    args = _args_module().xacro_args(_profile(path))
+    args['arm'] = 'generic_6dof'
+    args.update({k: str(v) for k, v in extra.items()})
+    return args
+
+
+def _stage_spans(robot, q):
+    """(name, bottom, top, width) of the fixed column and every stage, in lift_base_link, at lift q."""
+    def size(link):
+        return robot.link_map[link].visuals[0].geometry.size
+
+    column = size('lift_base_link')
+    spans = [('lift_base_link', 0.0, column[2], min(column[0], column[1]))]
+    parent_bottom, link, index = 0.0, 'lift_base_link', 1
+    while f'lift_stage_{index}_link' in robot.link_map:
+        joint = robot.joint_map[f'lift_stage_{index}_joint']
+        assert joint.parent == link
+        travel = joint.mimic.multiplier * q + joint.mimic.offset if joint.mimic else 0.0
+        bottom = parent_bottom + joint.origin.xyz[2] + travel
+        dims = size(joint.child)
+        spans.append((joint.child, bottom, bottom + dims[2], min(dims[0], dims[1])))
+        parent_bottom, link, index = bottom, joint.child, index + 1
+    return spans
+
+
+def _stack_violations(robot, stroke, min_overlap=0.05, samples=9):
+    """Everything wrong with a telescoping stack over the whole stroke: stages that no longer overlap
+    the tube below (a gap), a stage not narrower than the one below, a carriage off the last stage."""
+    problems = []
+    carriage_z = robot.joint_map['lift_joint'].origin.xyz[2]
+    for k in range(samples):
+        q = stroke * k / (samples - 1)
+        spans = _stage_spans(robot, q)
+        for (below, b0, t0, w0), (above, b1, t1, w1) in zip(spans, spans[1:]):
+            overlap = min(t0, t1) - max(b0, b1)
+            if overlap < min_overlap - 1e-9:
+                problems.append(f'{above} overlaps {below} by {overlap:.3f} m at lift {q:.2f}')
+            if w1 >= w0:
+                problems.append(f'{above} is not narrower than {below}')
+        top = spans[-1][2]
+        if abs(top - (carriage_z + q)) > 1e-9:
+            problems.append(f'the carriage is {carriage_z - top:+.4f} m off the last stage at lift {q:.2f}')
+    return problems
+
+
+@pytest.mark.parametrize('path', _geometry_profiles(), ids=lambda p: p.stem)
+def test_profile_stage_geometry_is_continuous_over_the_whole_stroke(path):
+    lift = _profile(path)['lift']
+    robot = _robot(**_lift_args(path))
+    assert _stack_violations(robot, lift['stroke_m']) == []
+    stages = lift['geometry']['stages']
+    assert len(stages) == lift['stages'] == len(_stage_spans(robot, 0.0)) - 1
+    # every stage is the size and rest height the profile states
+    spans = _stage_spans(robot, 0.0)
+    for st, (_, bottom, top, width) in zip(stages, spans[1:]):
+        assert bottom == pytest.approx(st['rest_z_m'])
+        assert top - bottom == pytest.approx(st['size_m'][2])
+        assert width == pytest.approx(min(st['size_m'][:2]))
+    # the last stage follows the lift joint one to one, each lower one is a share of it
+    for i, stage in enumerate(stages, start=1):
+        assert robot.joint_map[f'lift_stage_{i}_joint'].mimic.multiplier == pytest.approx(1.0 / len(stages))
+    # the output moves with the joint from the profile's mount height
+    z0 = sum(robot.joint_map[j].origin.xyz[2] for j in ('lift_joint', 'lift_output_joint'))
+    assert z0 == pytest.approx(lift['mount_height_m'])
+    assert robot.joint_map['lift_joint'].limit.upper == pytest.approx(lift['stroke_m'])
+
+
+def test_reference_profile_has_the_measured_stroke_and_nested_tube_widths():
+    path = PKG / 'config' / 'profiles' / 'ur10e_lift_reference.yaml'
+    lift = _profile(path)['lift']
+    assert (lift['stroke_m'], lift['stages']) == (0.8, 2)
+    assert lift['max_velocity_mps'] > 0 and lift['max_acceleration_mps2'] > 0
+    assert lift['geometry']['shape'] == 'box'
+    widths = [lift['geometry']['column']['size_m'][0]] + [s['size_m'][0] for s in lift['geometry']['stages']]
+    assert widths == sorted(widths, reverse=True) and len(set(widths)) == 3
+
+
+def test_a_stroke_the_stages_cannot_cover_is_reported_as_a_gap():
+    """The same tubes asked to travel 1.2 m: the second stage leaves the first, which the check sees."""
+    path = PKG / 'config' / 'profiles' / 'ur10e_lift_reference.yaml'
+    robot = _robot(**_lift_args(path, lift_stroke=1.2))
+    problems = _stack_violations(robot, 1.2)
+    assert any('lift_stage_2_link overlaps lift_stage_1_link' in p for p in problems), problems
+
+
+def test_the_stack_must_end_where_the_carriage_starts():
+    path = PKG / 'config' / 'profiles' / 'ur10e_lift_reference.yaml'
+    with pytest.raises(Exception) as err:
+        _render(**_lift_args(path, lift_stage_rest_z='-0.014 0.2'))
+    assert 'not continuous' in str(err.value)
+
+
+def test_a_stage_that_is_not_narrower_than_the_one_below_is_rejected():
+    path = PKG / 'config' / 'profiles' / 'ur10e_lift_reference.yaml'
+    with pytest.raises(Exception) as err:
+        _render(**_lift_args(path, lift_stage_sizes='0.164 0.164 0.69 0.17 0.146 0.49'))
+    assert 'narrower' in str(err.value)
+
+
+def test_a_stage_list_of_the_wrong_length_is_rejected():
+    path = PKG / 'config' / 'profiles' / 'ur10e_lift_reference.yaml'
+    with pytest.raises(Exception) as err:
+        _render(**_lift_args(path, lift_stages=3))
+    assert 'stage_sizes needs 3 numbers' in str(err.value)
+
+
+@pytest.mark.parametrize('stages', [1, 2, 3])
+def test_explicit_geometry_for_any_stage_count(stages):
+    """Tubes as tall as one stage's travel plus 0.15 m, so 0.1 m of overlap is left at full extension."""
+    stroke = 0.9
+    widths = [0.2 - 0.03 * i for i in range(stages + 1)]
+    rests = [0.05 * (i + 1) for i in range(stages)]
+    height = stroke / stages + 0.15
+    stack = rests[-1] + height
+    sizes = ' '.join(f'{w} {w} {height}' for w in widths[1:])
+    robot = _robot(arm='generic_6dof', lift_stroke=stroke, lift_stages=stages, lift_shape='box',
+                   lift_column_size=f'{widths[0]} {widths[0]} {height}', lift_stage_sizes=sizes,
+                   lift_stage_rest_z=' '.join(str(r) for r in rests), lift_mount_height=stack + 0.02)
+    assert len([j for j in robot.joints if j.mimic is not None]) == stages
+    assert _stack_violations(robot, stroke, min_overlap=0.1) == []
+    assert robot.joint_map['lift_joint'].origin.xyz[2] == pytest.approx(stack)
+
+
+def test_geometry_arguments_come_from_the_profile_section():
+    args = _args_module().geometry_args({
+        'shape': 'box', 'column': {'size_m': [0.1, 0.2, 0.3]},
+        'stages': [{'size_m': [0.09, 0.19, 0.29], 'rest_z_m': 0.01}, {'size_m': [0.08, 0.18, 0.28], 'rest_z_m': 0.02}],
+        'carriage': {'size_m': [0.3, 0.3, 0.03]}})
+    assert args == {'lift_shape': 'box', 'lift_column_size': '0.1 0.2 0.3',
+                    'lift_stage_sizes': '0.09 0.19 0.29 0.08 0.18 0.28', 'lift_stage_rest_z': '0.01 0.02',
+                    'lift_carriage_size': '0.3 0.3 0.03'}
+    assert _args_module().geometry_args(None) == {}
+    assert _args_module().geometry_args({}) == {}
+
+
+@pytest.mark.parametrize('stages', [0, 1, 2, 3])
+@pytest.mark.parametrize('lift', [0.0, 0.4, 1.5])
+def test_telescopic_stages_are_continuous_with_the_lift(stages, lift):
+    """With lift_joint = L the stage joints sum to L: the top of the last stage is the carriage height."""
+    robot = _robot(arm='generic_6dof', lift='telescopic', lift_stroke=1.5, lift_stages=stages)
+    master = robot.joint_map['lift_joint']
+    column = master.origin.xyz[2]
+    mimics = [robot.joint_map[f'lift_stage_{i}_joint'] for i in range(1, stages + 1)]
+    for j in mimics:
+        assert j.mimic.joint == 'lift_joint' and j.mimic.offset == 0.0
+        assert j.mimic.multiplier == pytest.approx(1.0 / stages)
+    travel = sum(j.mimic.multiplier * lift + j.mimic.offset for j in mimics)
+    if stages:
+        assert travel == pytest.approx(lift)
+        tube = robot.link_map[f'lift_stage_{stages}_link'].visual.geometry.length
+        assert tube == pytest.approx(column)
+        top = travel + tube  # stage 1 starts at the column base, each tube is `column` tall
+        assert top == pytest.approx(column + lift)  # = lift_carriage_link height

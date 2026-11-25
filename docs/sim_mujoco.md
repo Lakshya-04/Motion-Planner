@@ -111,7 +111,7 @@ revolute and `100 * effort_limit` (N/m) for prismatic joints, `kv = 0.1 kp`, for
 limit. The plugin applies `ctrl = q* + kv/kp * v*`, which is exactly the PD law
 `kp (q* - q) + kv (v* - qdot)`: velocity feed-forward without a second actuator. Arm links and the
 lift are gravity compensated (`gravcomp`), so the PD holds poses; everything beyond the F/T site
-is not (see below). Joint damping and armature are small defaults (2 N m s/rad plus
+is not (see below). The generator option `gravcomp` takes `True` (default, as described), `False`, or a list of link names to compensate exactly those bodies. Joint damping and armature are small defaults (2 N m s/rad plus
 `0.0005 * effort`; lift 100 N s/m and 2 kg) chosen so the implicit-fast integrator stays stable at
 2 ms and a 100 Hz controller.
 
@@ -417,7 +417,7 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    lift left at 0.4. So the failure follows the low lift with the arm swung out, not the size of the move and not the wall:
    cuRobo's sphere model most likely treats those configurations as in collision (with the base or itself) although MuJoCo does
    not; not confirmed (a `check_motion` on the docked pose would show it). Consequence: a docked-to-stow plan by cuRobo does not
-   exist, so the manager waits out its timeout; a MoveIt fallback for failed free-space segments is what a pass needs.
+   exist, so the manager waits out its timeout; a MoveIt fallback for failed free-space segments is what a pass needs. Code-side follow-up (unrun, hypotheses listed): [curobo_v2_notes.md](curobo_v2_notes.md), "Low-lift docked-to-stow `no_path`".
 
    **Fourth run, with `free_space_fallback: moveit_ompl` (PR #141) in `planning_curobo.yaml`: the pass passes.** MuJoCo,
    `two_panels_plain`, two stands, one run, 2026-11-20, node with `--max-boxes 3000`, default per-call timeout 60 s: manager
@@ -440,6 +440,10 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    kind (4 to 8 s), so what those trajectories actually moved is not shown (the next segment, dock, completed from where the arm was);
    cuRobo takes 11 s per plan on this GPU; the node's world was refused loads while busy.
 
+   **Filmed run (the video in the README):** `MULTI_STAND_FILM=1 MULTI_STAND_LAUNCH_ARGS="out_dir:=..."` with the same setup, then `render_run.py stills` and `video --max-speed 12`
+and `encode`: 10 of 10 columns, coverage 1.0 (2790/2790), peak 69.3 N, in-band 0.33, RMS 5.1 N, 1126 s simulated; 7 segments planned by cuRobo (priming plus 6
+approaches, 10 to 16 s each), 6 free-space segments by OMPL (cuRobo `unavailable` for the stow).
+
    **Sixth run (new logging, PR #146): passes** (10 of 10 columns, coverage 1.0, peak 46.8 N). The segment lines now carry the planned
    trajectory (`traj_pts`, `traj_s`). Answer to the 0.5 s question: the five stand-0 approaches were cuRobo plans of 16 to 21 points,
    0.375 to 0.5 s long (dt 0.025 s), each a 0.1 m step of the tool along the wall (TCP y 0.809, 0.708, 0.606, 0.506, 0.407; the
@@ -451,6 +455,21 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
    went to OMPL (whether cuRobo was tried and failed first, or not tried, is not logged in this run: the fallback was silent; since the change
    that follows, a fallback is logged at INFO with the primary's reason code and message). The second stand's cuRobo world load also timed out once (`cuRobo planner call timed out`, 10 s attempt
    limit while the node was busy), so stand 1 planned against a stale or empty cuRobo world.
+
+   **Speed limits (fix after that finding, authored and unit-tested, not run in the sim):** cuRobo's limits come from its robot
+   yml, not from the MoveIt `joint_limits.yaml` the controller side uses. The `curobo` plugin now checks every trajectory it
+   returns against per-joint velocity and acceleration limits (`curobo_planner/joint_limit_guard.hpp`, ROS-free): speed and
+   acceleration are finite differences of the positions over the trajectory's time stamps, and a trajectory above
+   `limit * limit_safety_factor` is either stretched in time (`limit_mode: retime`, the default once limits are given; the path is
+   unchanged, v scales by 1/s and a by 1/s^2) or refused with `failure_reason_code: limit_violation` (`limit_mode: reject`); a joint of
+   the trajectory with no limit is `limit_missing`, not unlimited. `planning_curobo.yaml` sets `joint_limits_file:
+   package://mobile_manipulator_moveit_config/config/joint_limits.yaml` (the description's file, found through the ament index at
+   start-up; the plugin fails to initialise if it cannot be read), `limit_safety_factor: 0.9` and `limit_use_file_scaling: true`
+   (multiply by the file's 0.5 default scaling factors, as MoveIt's retiming does), so a 0.1 m tool step should now take seconds,
+   like the MoveIt-retimed ones, instead of 0.4 s. That last claim is not measured: the 14x comparison above is the only measurement
+   and no pass was rerun. Limits are velocity and acceleration (an optional jerk limit exists, off by default: `docs/curobo_v2_notes.md`), the guard stretches the whole trajectory by one factor
+   (not time-optimal), and it only runs inside the plugin: a trajectory that reaches a controller by another path is not checked.
+   Leaving the three `joint_limits*` keys out restores cuRobo's own timing, which must not go to a real arm unchecked.
 
    Checks made afterwards: with an EMPTY world the node plans stow to stow (`plan_joint`, start = goal = the run's arrival
    pose, `route=trajopt`, success), so the robot model is not the problem; the collision message came with the wall loaded. The
@@ -598,6 +617,157 @@ the lift, `generate_acm.py`), a press-then-stroke sequence with a 2 s settle (`p
 tool's swath (0.14 m, `MANAGER_PASS_SWATH`) instead of the profile's 0.20 m. Next: the contact force (slower stroke,
 F/T filtering, JTAC gains).
 
+### Running another robot profile
+
+The manager passes (`run_manager_pass.sh`, `run_sensed_pass.sh`, `run_spray_pass.sh`, `run_wall_pass.sh`,
+`run_multi_stand_pass.sh`; `run_scenarios.sh` refuses it) take the robot from `MP_PROFILE` (default `ur10e_telescopic`;
+`STAND_PROFILE` still wins in the multi-stand script). With the default nothing changes: the stock wall, the UR10e joint
+pose in `ready_pose.py` and the manager's default profile. Another profile, for example
+`MP_PROFILE=xarm7_telescopic run_manager_pass.sh` (also `panda_`, `fr3_`, `iiwa7_`, `kinova_gen3_telescopic`), changes:
+
+| Step | Default (UR10e) | Another profile |
+|---|---|---|
+| sim launch and manager launch | `profile:=ur10e_telescopic` (the manager used its default) | `profile:=$MP_PROFILE` for both; group names, joint names and controllers come from the profile |
+| wall | stock: plane x = 0.98 m, patch y 0..0.3, z 1.0..1.3 | `scripts/profile_reach.py` picks the plane x and the z band; `shift_wall_scene.py` moves the three scene files (a `DZ` argument was added); manager `coverage_z_min_m/max_m` and the recorder (`record_run.py --wall-x/--wall-z`, so `run.csv.wall.json` matches the shifted wall) follow |
+| pre-contact pose | unplanned joint move to `smoke_test.FREE` | `ready_pose.py --pose x y z qx qy qz qw`: a MoveIt pose goal (plan only, collision-checked) on the whole-body group for the tool pointing at the wall, 3 cm in front of it at the band's mid height, executed through the controller |
+| tool roll `tool_frame_yaw_deg` | -90 | `profile_reach.py` output: -90 unless the profile has `coverage: {tool_frame_yaw_deg: ..}`; `MANAGER_PASS_TOOL_YAW` overrides |
+| multi-stand | UR10e reachability map and dock seed | map built for the profile's arm and tcp, dock seed `[]` (chained), arm mount height and stroke from the profile |
+| joint names in the scripts | UR names | read from the profile (`smoke_test.active_joints`) |
+
+What `profile_reach.py` derives, and what is a guess:
+
+- Derived from the profile: arm base height (`base.lift_mount_height_m` + `lift.mount_height_m`; the ur10e profiles on the
+  Husky, MiR100, MPO-500, Ranger Mini, Scout and Scout Mini bases have no `lift.mount_height_m`, so the xacro default of a
+  telescopic lift is used, 0.8 m column + 0.02 m arm mount, and a non-telescopic lift without the key is an error), lift stroke, tcp offset along z, footprint front, joint names, group and tcp link.
+- Wall distance: the stock UR10e wall defines the ratio (distance from the arm base to the patch's far corner over the arm's
+  published reach, about 0.69); the same ratio is applied to the published reach of the arm (`ARM_REACH_M`: xArm 7 0.70 m,
+  Panda and FR3 0.855, iiwa 7 0.80, Gen3 0.902, UR3e 0.50 which is too short for a 0.3 m band). **Guesses to confirm by
+  a run:** that ratio carries over to other arms, the reach figures (taken from vendor data sheets, to be re-checked), the
+  band (0.3 m high, centred 2 cm under the retracted shoulder, as for the UR10e), the 0.10 m clearance in front of the
+  base footprint (the xArm 7 on the generic base hits it: the wall is placed at 0.55 m and the script prints a warning;
+  the arm may not reach it, use a longer arm or a smaller base for a real test).
+- Tool roll: **not derived.** -90 is the roll that suited the UR10e's ready posture (wrist_3 at +90 degrees folds the arm
+  away from the lift column). It depends on the arm's flange convention and joint ranges, and the profiles have no `tcp_rpy`
+  field to derive it from. Try `MANAGER_PASS_TOOL_YAW=90` or `0` if planning to the first pose fails.
+- The 7-DOF `home` postures are unchecked (docs/robot_description.md); the passes no longer use them, the pre-contact pose
+  is planned.
+
+Profiles that are refused: `profile_reach.py` exits 2 with `profile_reach: profile NAME: ...` on stderr and the pass scripts
+stop with `profile NAME is not supported`, never running against the UR10e defaults. Shipped profiles that fail: `ur3e_telescopic`
+(published reach 0.5 m, too short for a 0.3 m band) and `generic_6dof_telescopic`, `generic_6dof_turtlebot3_burger_telescopic`,
+`generic_6dof_turtlebot3_waffle_telescopic` (no published reach: pass `--reach` to `profile_reach.py` to inspect them, the passes
+have no way to give one). All other shipped profiles derive a wall.
+
+Not run: none of this was run in a simulator, for any profile. `bash -n`, `py_compile` and the unit tests of
+`profile_reach.py` and `shift_wall_scene.py` (`test/test_profile_reach.py`, `test/test_shift_wall_scene.py`) are the
+only checks. `smoke_test.py` and `contact_test.py` stay UR10e-only (joint-space poses) and exit with a message for another
+`MP_PROFILE`; `run_stand_pass.sh`, `run_depth_wall.sh` and the other helper scripts are unchanged.
+
+#### Scoring gates
+
+`MANAGER_PASS_SCORE_ARGS` (default empty) is passed to every `score_run` call of these scripts (also the spray, wall,
+multi-stand and scenario scripts). For the spray pass `--max-wall-gap` is ignored by `score_run` (a non-contact run, the nozzle
+is 0.30 m from the wall by design), so the variable is safe to export; `--max-tilt` still applies.
+The gated tilt and gap statistics (`tilt_mean_deg`, `tilt_max_deg`, `wall_gap_*`) cover every would-be-working sample, also the
+ones the gate refused, so a run that fails the gate still shows how far off it was. `score_run` exits 2 when `--max-bad-pose` is given
+without a gate that can produce bad poses (`--max-wall-gap` on a contact run, or `--max-tilt`) and when `--nominal-tilt` is given without `--max-tilt`. The recommended tool-pose gates are
+
+```bash
+MANAGER_PASS_SCORE_ARGS="--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.05" run_manager_pass.sh
+```
+
+(tool point within 1 cm of the wall while in contact, tool axis within 10 degrees of the wall normal, at most 5 percent of the
+contact samples off either). They are not on by default. Two measured passes (UR10e and xArm 7, below, one run each) both have zero refused samples at these thresholds, so `--max-bad-pose 0.0` is a candidate demo gate; it has been seen to pass once per robot, not tested over many runs.
+The `tilt_deg` column of `run.csv` comes from the recorder (`record_run.py`, `contact_test.py`), measured on the tool's z axis
+against the wall normal in the frame the wall is in.
+
+#### First 7-DOF run: xArm 7 (`MP_PROFILE=xarm7_telescopic`, one MuJoCo single-stand pass)
+
+Measured 2026-11-22 on the branch of this change (it includes the single-stand crash fix; `main` crashes on a single-stand run without it; the run directories are not kept in the repository), one run per variant, scored with `--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0.0` (a single
+force-bearing sample with the tool tilted over 10 degrees or more than 1 cm off the wall fails the run). The UR10e pass
+is the reference: 4 of 4 columns, tool tilt at most 0.19 degrees, wall gap at most 0.9 mm, peak 19.3 N.
+
+| Variant | Columns done | Coverage | Bad samples | Peak force | Where the bad samples are |
+|---|---|---|---|---|---|
+| planning scene = contact patch only, ready pose | 4 of 4 | 1.0 | 91 | 34.8 N | the ready-pose transit (tilt to 62 degrees) |
+| + dock pose gate | 3 of 4 | 0.80 | 88 | 72 N | the manager's dock, pushed into the unmodelled wall |
+| patch only, no ready pose | 3 of 4 | 0.93 | 552 | 67 N | the manager's dock from the stowed pose |
+| full wall in the scene, ready pose | 4 of 4 | 1.0 | 116 | 57 N | only the ready-pose transit (before the manager starts) |
+| full wall, no ready pose | 3 of 4 | 0.93 | 3548 | 198 N | the dock from the stowed pose (tilt to 85 degrees) |
+| full wall, no ready pose, approach stage 0.15 m | 1 of 4 | 0.27 | 196 | 53 N | docks of columns 1 to 3 fail |
+| **full wall, two-stage ready pose (default for another profile)** | **4 of 4** | **1.0 (930 of 930 cells)** | **0** | **16.9 N** | tilt at most 1.0 degree, wall gap at most 0.96 mm, force RMS error 2.1 N |
+
+What this shows:
+
+- The planning scene was built from `walls.pcd`, the 0.4 x 0.4 m contact patch only, while the simulator wall is the
+  whole 1.8 x 2.6 m wall. Every tilted contact was in wall the planner did not know about. The UR10e's short ready-pose
+  move stays inside the patch, so it never showed. For another profile the pass now loads `walls_sim.pcd`
+  (`MANAGER_PASS_WORLD_PCD` is a file name inside the pass's data directory, for example `walls.pcd`, and overrides the file for any profile; the manager pass and the spray pass honour it, the other passes still use the patch).
+- A single planned move from the stowed pose to a pose 3 cm from the wall swings the tool down the wall and grazes it
+  with the pad edge before the manager has started. The pass now reaches a pre-pose `MP_READY_PRE_M` (default 0.15 m)
+  further from the wall first. Skipping the ready pose, or the manager's own approach stage
+  (`dock_approach_extra_m`), were worse in these runs.
+- The manager now checks, before the press, that the tool is within `dock_tolerance_m` (0.02 m) and
+  `dock_tolerance_rad` (0.17 rad) of the standoff pose (`verify_dock`), and it has a TF buffer in every run (it had one only
+  with a `world_frame`, which made the first-column arm-state log dereference a null buffer).
+- Repeats of the final variant with the shipped defaults (two more runs, same build): both 4 of 4 columns, coverage 1.0, zero
+  refused samples, but the force differs a lot between runs. Run 1: peak 16.9 N, force RMS error 2.1 N, tilt at most 1.0 degree,
+  gap at most 0.96 mm. Repeat 1: peak **159 N**, force RMS error 13.8 N, tilt at most 9.3 degrees, gap at most 4.7 mm; the
+  force spikes (113 to 159 N, under one second) are in all four columns, each at the moment the contact stroke hands over to the
+  retract. Repeat 2: peak 22.9 N, force RMS error 2.3 N, tilt at most 0.99 degrees, gap at most 0.8 mm. So the alignment
+  holds in all three runs, but whether the end-of-column force spike occurs depends on the run (probably on which arm
+  configuration the dock lands on); it is not understood or fixed, and the tool's 60 N overload threshold is not enforced
+  on this path. The two-stand UR10e pass had a 49 N peak and one 3 s episode of tilt just over 10 degrees (10.85) at the second stand.
+- End-of-column force spike (cause and fix, xArm 7, MuJoCo): at the end of a column the force target goes to 0 and the
+  admittance is switched off. The tool lags its reference along the wall (friction and the admittance's own time constant:
+  still creeping up the wall at about 9 mm/s when the stroke is reported done), and switching the admittance off lets it jump
+  to the reference with the pad on the wall: z +6 mm in 0.1 s, tilt rising to 4 degrees, 88 to 175 N. Waiting for the force to
+  decay alone made it worse (peaks 231 to 248 N in three runs: the admittance had retreated further before the snap);
+  `unload_m: 0.01` alone reduced it (137 to 175 N in three runs). The manager now backs the reference off the wall
+  (`unload_m`, default 0.01 m) and releases the admittance only when the force is below `unload_release_force_n` (2 N) and the
+  tool speed has stayed below `unload_release_speed_mps` (1 mm/s) for 0.3 s, at most `unload_timeout_s` (4 s) after it starts
+  waiting (then it releases anyway and says so in the log together with the force and the speed). With this, three xArm 7
+  runs: run 1 peak 21.2 N, run 3 peak 18.1 N with tilt at most 1.3 degrees and gap under 0.7 mm; run 2 failed three columns
+  for a different reason (below). The tool speed at release was 0.8 to 4 mm/s and the 4 s timeout ended most waits, so the
+  speed criterion is mostly the timeout in practice and a longer or smarter settle may still be worth trying.
+- A tilted pad edge can still graze the wall before the manager starts (run 2 above: tilt 67 degrees, gap 29 mm, 102 N,
+  before the first manager event, and the arm state was damaged for the rest of the run). Likely cause, not yet fixed: the
+  planner's tool (`generic_tool.xacro`) is a 0.1 m mount cylinder with a bare TCP frame at 0.165 m and no pad, while the simulator
+  adds a 3 cm radius pad disc at the TCP, so the planner thinks the tool ends 6.5 cm short of it. The contact gaps seen (23
+  to 29 mm at tilts of 54 to 67 degrees) are what a 3 cm radius pad gives: gap = 0.03 sin(tilt) = 24 and 28 mm.
+- End-of-column force spike (xArm 7, MuJoCo), what was tried and measured. At the end of a column the force target goes to 0
+  and the admittance was switched off while the pad was still pressed on the wall. The tool lags its reference along the wall
+  (still creeping at about 9 mm/s when the stroke is reported done), so switching off lets it jump to the reference with the
+  pad on the wall: z +6 mm in 0.1 s, tilt to 4 degrees, 88 to 233 N. Peak force per run (three runs per variant unless noted):
+
+  | Variant | Peaks |
+  |---|---|
+  | switch off after a fixed 1.5 s (before) | 16.9, 159, 22.9 N |
+  | wait for the force to decay below 2 N, then switch off | 231, 240, 248 N (worse: the admittance had retreated further before the snap) |
+  | `unload_m: 0.01` (reference backed off the wall) | 137, 175, 167 N |
+  | decay and tool-speed wait with `unload_m` 0.01 (4 s timeout) | 21, 102 (a wall graze before the manager started), 18 N; with the pad in the planner 116, 233, 22 N |
+  | **retract first with the admittance engaged, switch off only once the tool is off the wall** | **23.2, 73.3, 19.2 N** |
+
+  The last variant is the shipped one (`unload_m` default 0.01 m, `unload_release_force_n` 2 N and `unload_release_speed_mps`
+  1 mm/s with a 4 s timeout, then the retract, then the release; the force and tool speed at each wait are logged). Two of
+  the three runs have no force above 40 N; the third has one moderate spike (46 to 73 N) at the handover of every column, so
+  the end-of-column handover is much better and still not clean. The tool speed rarely settled below 1 mm/s, so the timeout does
+  much of the waiting in practice. UR10e with the same build: 4 of 4, peak 20.0 N.
+- The tool pad in the planner (`generic_tool.xacro`): the planner's tool used to be a 0.1 m mount cylinder with a bare TCP frame
+  at 0.165 m and no pad, while the simulator adds a 3 cm radius, 1 cm thick pad disc at the TCP, so MoveIt believed the tool
+  ended 6.5 cm short of the TCP and a tilted pad edge reached the wall before it expected it (gaps of 23 to 29 mm at tilts of
+  54 to 67 degrees are what `0.03 sin(tilt)` gives). The URDF tool now carries the same pad (collision `tool_pad`,
+  `pad_radius` argument, 0 removes it) and the simulator generator uses it instead of adding a second one. With the pad in the
+  planner three things that had never mattered had to be fixed before a contact path could plan: the manager now names the wall
+  octomap (`target_collision_object_id`) on its press and contact segments (nothing set it, so the planner's contact exclusion
+  was dead code); the exclusion's link defaults to the parent of the TCP frame, the link that carries the pad (`contact_link`
+  was never set either, and the TCP frame has no geometry); and the planner's validity callback applies the exclusion to its
+  own copy of the ACM (the exclusion was pushed only to the `move_group` process while the callback checks the planner's
+  own mirror of the scene). The exclusion lifts the whole tool link for contact segments, not only the pad; the wall-penetration
+  bound on the TCP stays the safety limit of the contact path.
+- One run per variant is not a distribution: the xArm 7 result is a first working run, not a reliability figure. Not
+  checked: other 7-DOF arms, multi-stand, the unconfirmed tool yaw of -90 degrees, the guessed wall distance.
+
 ### Spray pass (non-contact tool)
 
 `scripts/run_spray_pass.sh` is the manager pass for a non-contact tool (the contact script is unchanged). The coverage
@@ -717,6 +887,7 @@ sim (`wall_world.py`), a blocked region for the coverage planner and a surface i
 | `protrusion` | 0.5 m | 0.07 x 0.07 m box, 35 mm proud, socket-like | one stand |
 | `two_panels` | 0.9 m | full-height 40 mm rib, 30 mm proud, between the panels | multi-stand (two stands) |
 | `two_panels_plain` | 0.9 m | none (control) | multi-stand |
+| `two_panels_tall` | 0.9 m, wall z 0.3..2.3 m | none; patch z 0.6..2.0 m, so the lift has to telescope | multi-stand |
 
 Scoring: each recording is scored twice with `score_run` (`docs/coverage_patterns.md`): `cov_wall` is the covered fraction of the wall
 minus the obstacle's own footprint, `cov_reach` the fraction of the wall minus the obstacle grown by the planner's 0.07 m
@@ -959,7 +1130,8 @@ one segment); the stand is kept for information only, since stands are planned a
   `resume`). A pause takes effect at the next column boundary (the mission FSM, `core/mission_fsm.hpp`: IDLE, ACTIVE, PAUSED,
   STOPPED, RECOVERY); the stroke in flight is not interrupted. Cancel is unchanged and works while paused.
   The typed form: `ros2 service call /manipulation_manager/mission_command coverage_task_msgs/srv/MissionCommand "{command: status}"`
-  (`pause`, `resume`, `status`); the reply carries `accepted`, the FSM `state` and `pause_pending`. Not yet run in a sim pass.
+  (`pause`, `resume`, `status`); the reply carries `accepted`, the FSM `state` and `pause_pending`. The same state is the `mission_state` field of the
+  `execute_coverage` feedback. Not yet run in a sim pass.
 
 Acceptance test (kill mid-wall, restart, only unfinished segments rerun): start `run_multi_stand_pass.sh` with
 `MULTI_STAND_MANAGER_EXTRA` set to `ledger_path: /tmp/mission.json`, kill the manager (`pkill -f manipulation_manager_node`)
@@ -983,3 +1155,62 @@ Result (3 mm range noise): detected normal (-1.0000, 0.0002, -0.0001), d 0.9801,
 coverage 1.00 (930 of 930), peak 23.6 N, RMS error 3.4 N, in-band 0.46, scorer exit 0. The detected wall schema needed nothing
 added: the planner reads only the plane, extents and `plane_rms_mm` / `spread_p95_mm` / `spread_p99_mm`, and the observed mask
 comes from `walls.pcd`. Single runs, not repeated.
+
+
+#### Perception in the two-stand pass (`MULTI_STAND_PERCEPTION=1`)
+
+Until now `run_multi_stand_pass.sh` never ran perception: the coverage planner read the baked `wall_pass_coverage_scene.json` and the planning
+scene a baked `walls_sim.pcd`; `wall_detector` was only used by the single-stand sensed pass. With `MULTI_STAND_PERCEPTION=1` (default off)
+the pass first publishes `walls_sim.pcd` as `PointCloud2` on `/perception/points` (frame `odom`, `wall_detector/scripts/pcd_to_cloud.py`),
+runs `wall_detector` on it (`target_frame:=odom`), waits for `wall_scene.json`, freezes it (stops both), crops it with `crop_wall_scene.py`
+to the contact patch (wall y range x `MP_Z_LO..MP_Z_HI`) and plans on that. It then prints `compare_wall_scene.py` (detected crop against the
+baked scene: normal angle, plane offset, edge errors and IoU, obstacle recall; files in `$OUT/perception/`);
+`MULTI_STAND_PERCEPTION_STRICT=1` aborts when they are out of tolerance (2 deg, 20 mm, 50 mm).
+
+```bash
+MULTI_STAND_PERCEPTION=1 MULTI_STAND_SCENARIO=two_panels_plain MULTI_STAND_OUT=/tmp/ms_perception \
+  src/simulation/sim_mujoco/scripts/run_multi_stand_pass.sh      # installed: lib/sim_mujoco/run_multi_stand_pass.sh
+```
+
+Limits: the cloud is the sim wall's exact point grid (no sensor noise, occlusion or holes; the sim's ray-cast depth sensor only sees
+0.76 x 0.70 m from the start pose, too little for a 0.9 m+ wall, so it is not used); the MoveIt octomap and the scorer's wall still come from the files;
+`wall_detector` finds one plane and no obstacles, so a scenario with obstacles (`two_panels`) is planned without them and the pass warns. On the
+host (python mirror of the detector, no sim) the chain on `two_panels_plain` gives 0.000 deg, 0.00 mm, edge errors 0.0 mm. The C++ node in this
+pass has not been run yet.
+
+## Two-stand pass with the MoveIt planners, 2026-11-22
+
+`run_multi_stand_pass.sh`, scenario `two_panels_plain`, default `planning.yaml`, on main at `347ded0`, filmed with `MULTI_STAND_FILM=1`; frames rendered
+with `render_run.py video --max-speed 12` and encoded with `encode` (1380 frames, 46 s). Two runs of the same pass:
+
+| run | columns | coverage | peak force (scored) | tilt max | wall gap max | notes |
+|---|---|---|---|---|---|---|
+| A, no viewer, host quiet (8e41d7e) | 10 / 10 | 1.0 | 22.1 N | 0.15 deg | 0.9 mm | the first video (drawn without the base pose, replaced) |
+| B, live viewer on the GPU, host busy (347ded0) | 10 / 10 | 1.0 | 142.2 N | 31.8 deg (0 tilted samples by the scorer) | 15.8 mm | the video in the README; one force spike between the stands; cause not found |
+
+What was wrong with the first video and the live viewer: `/joint_states` carries the lift and the six arm joints only, the base pose (x, y, yaw) comes
+from the plugin as `sim_mujoco/base_pose`, and the telescopic lift stages follow the lift by an MJCF equality constraint that `mj_forward` does not solve.
+Without the base pose the arm was drawn at the origin with yaw 0 (90 degrees off the wall at stand 0); without the stage polynomials the column was drawn
+0.4 m too short at 0.4 m of lift. `render_run.py record` now stores the base pose, the replay and `viewer.py` apply it and the stage polynomials, and the
+viewer shows the ground-truth contact force and redraws at 15 Hz by default (`SIM_MUJOCO_VIEWER_HZ`; software GL at 33 Hz used 4 to 5 cores and starved the
+pass). Media: `docs/media/two_stand_moveit.mp4` and `.gif`.
+
+## Tall wall and run metrics (lift used, chassis clearance, reach)
+
+Feedback on the two-stand pass was that the lift is not complete and the base looks too close to the wall. Measured from the run: the dock
+poses used 0.05 to 0.17 m of the lift's 1.5 m stroke (the stock contact patch is z 1.0..1.3 m and the arm base sits at 1.17 m retracted, so the
+column never telescopes), the arm base was 0.80 m from the wall face, the tool about 1.1 m from the arm base of a 1.3 m reach.
+
+- Scenario `two_panels_tall` (`make_scenario_scene.py`): wall z 0.3..2.3 m, patch z 0.6..2.0 m. The sim wall, the planned wall, `walls.pcd` and
+  the planning-scene curtain (`walls_sim.pcd`, top at the wall's top + 0.3 m, at least 2.6 m) follow. `MULTI_STAND_SCENARIO=two_panels_tall
+  run_multi_stand_pass.sh` also sets the manager's `coverage_z_min_m/max_m` and the recorder's band from the scenario (`MP_Z_LO`, `MP_Z_HI`).
+  `MULTI_STAND_PATCH_Z="lo,hi"` (with a scenario) overrides the patch, the wall then reaches 0.3 m beyond it. Stock scenarios are unchanged.
+- `scripts/run_metrics.py RUN_DIR` (parsing in `sim_mujoco/run_metrics.py`, ROS-free, `test/test_run_metrics.py`) reads `manager.log` and
+  prints: the lift range (min, max, span, path travel, from the `ARMSTATE` lines; `q[0]` is the lift), per stand the chassis-to-wall
+  clearance (rotated base footprint of the profile against the wall plane in `data/wall_pass_coverage_scene.json`; stand poses from the `stand N: arm base ... yaw`
+  lines) and the tool reach fraction (arm base to `tcp_in_odom` over the 1.3 m reach, arm base height 1.17 m + lift). `FLAG:` lines mark a lift
+  span under 25 % of the stroke, a chassis under 0.30 m from the wall, a tool beyond 85 % of the reach. `run_multi_stand_pass.sh` prints it
+  at the end of a run. It is a report, not a gate. The lift comes from `ARMSTATE` samples only (stow and dock moments), not from the
+  continuous joint states, so its path travel is a lower bound.
+- Not run: the tall-wall scenario in the simulator (whether the planner finds stands, docks and strokes at z 0.6 and 2.0 is not known), the
+  shell script end to end. Tested on the host: parsing, the metrics, the scenario files.

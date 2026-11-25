@@ -37,7 +37,8 @@ ros2 launch coverage_planner wall_coverage_demo.launch.py tool_name:=spray_gun s
 
 Four facets. The coverage planner reads the ones marked (C); the rest are for the manager and the force layer.
 
-- `geometry`: `mesh`, `mesh_origin_xyz/rpy`, `tcp_xyz/rpy` (flange to `link_tcp`), `contact_allowed_links`
+- `geometry`: `mesh`, `mesh_origin_xyz/rpy`, `tcp_xyz/rpy` (flange to the contact frame `link_tcp`, +Z into the work), `tilt_deg` and `tilt_axis` (intended
+  tilt, see "Contact frame, tilt and offset tools"), `contact_allowed_links`
   (links allowed to touch the wall; empty for a non-contact tool).
 - `task`: `contact` (C), `standoff_m` (C, 0 for contact), `tool_normal_policy` (C, `constant` or
   `tilt_at_edges`), `max_edge_tilt_deg` (C), `tool_frame_yaw_deg` (C), `target_force_n`, `force_band_n`,
@@ -57,7 +58,10 @@ The loader rejects: contact without `admittance_chain` (and the reverse); `wrenc
 from `target_force_n`; a non-contact tool with `standoff_m <= 0` or with `contact_allowed_links`;
 `reachability_tilt_deg_max > 0` on a contact tool; a spray cone on a contact tool, a half-angle outside
 (0, 90) deg or a fraction outside (0, 1]; `contact_area` or `edge_*` on a non-contact tool, a
-`contact_area` with a factor, tilt, stiffness or curvature out of range, `edge_spacing_scale` outside (0, 1].
+`contact_area` with a factor, tilt, stiffness or curvature out of range, `edge_spacing_scale` outside (0, 1];
+`geometry.tilt_deg` not finite or `|tilt_deg| >= 80`, a tilt without an in-surface `tilt_axis`, a tilt on a
+contact tool, a tilt together with `contact_area.nominal_tilt_deg`, and `tilt_deg + max_edge_tilt_deg >= 85` with
+`tilt_at_edges`.
 
 ## Contact and non-contact tools in planning
 
@@ -70,6 +74,53 @@ from `target_force_n`; a non-contact tool with `standoff_m <= 0` or with `contac
 | Segments | `requires_contact` true: the executor engages and holds force | no force engage; holds the standoff |
 | Control | admittance chain on the normal axis | trajectory controller only; any force above `unexpected_contact_abort_n` is a collision |
 | Obstacle inflation | usually `uniform` | usually `primary_axis` (the fan is long across the travel direction) |
+
+## Contact frame, tilt and offset tools
+
+`geometry.tcp_xyz` / `tcp_rpy` are the CONTACT frame (`tcp_link`) relative to the flange, not just "the tool
+tip": its origin is the point that touches the work and its +Z points into the work at the nominal pose. An
+offset or angled tool (a side-mounted pad, an angled sander) puts its offset and angle in these two fields,
+so the controller, the force path and the coverage lift all see the same frame. The loader does not yet
+compare them with the running URDF (`tcp_link` there is a separate source until the URDF generator reads the
+profile).
+
+`geometry.tilt_deg` and `geometry.tilt_axis` (both optional, default 0) are the intended angle between the tool
+axis and the surface normal, and the in-surface axis the tool tilts about, given in the contact frame as
+`[x, y, 0]` (any length; the loader normalises it). A negative tilt is stored as the positive tilt about the
+opposite axis. The loader rejects non-finite values, `|tilt_deg| >= 80`, a tilt without an axis and an axis
+with a z component. For now a tilt is refused on a contact tool (`task.contact: true`): the force path still
+presses along the tool Z, so a tilted contact tool would press with `F cos` and shear with `F sin` until the JTAC
+and conditioner frame checks exist. A tilt together with `contact_area.nominal_tilt_deg` is refused (both would
+narrow or widen the same swath), and so is a fixed tilt plus `max_edge_tilt_deg` of 85 degrees or more. The two
+shipped tools have no tilt, and with `tilt_deg == 0` nothing changes: the lift output is bit-identical.
+
+What the tilt does:
+
+- Lift (`wall_pose_lift`): the nominal tool Z (-normal) is rotated by `tilt_deg` about the axis (rotated with
+  `tool_frame_yaw_deg`, because the axis belongs to the tool). The standoff is measured along the tilted axis:
+  the nozzle sits at `strip point - axis * standoff`, so the axis meets the wall at the strip point (at tilt 0
+  this is the plain offset along the normal, bit-identical). The lift clamps the axis to 85 degrees from
+  into-wall as a defensive bound (the loader already refuses larger totals). The edge tilt of a non-contact tool (`tilt_at_edges`) composes
+  afterwards: the intended tilt is applied first, the edge tilt rotates that axis toward the wall edge.
+- Swath: a tilted flat pad's footprint is stretched by `1/cos(tilt)` along the tilt direction (perpendicular to
+  the tilt axis, in the surface). The swath across the stroke becomes `w (1 + k sin^2 phi) + l |k sin phi cos phi|`
+  with `k = 1/cos(tilt) - 1`, `phi` the angle from the stroke to the tilt direction, `w` the pad width and `l`
+  the pad length. Tilt along the stroke leaves `w`, tilt across it gives `w / cos(tilt)`
+  (`core_types/tool_footprint.hpp`). `toolSwath` applies it to the spray cone of a non-contact tool;
+  the contact-area model keeps its own width model (a fixed tilt is refused on a contact tool) and a fixed
+  `swath_m` is left as the author set it. The panel and bottom rows of a wall pattern take the swath from the
+  tool as turned for those rows (horizontal sweep, yaw plus `panel_tool_turn_deg`), not from the tool's own sweep
+  direction. For the spray cone this is a first-order approximation (the
+  cone asymmetry and the longer slant range are ignored). `contact_area.nominal_tilt_deg` is the older, separate
+  narrowing for a tilted wall; the loader refuses it together with `geometry.tilt_deg`.
+- Force path: the wrench is already moved from the sensor to the tool frame by `force_core::moveWrench` with the
+  conditioner's `tool_in_sensor` offset, so it is expressed at the contact frame provided `tcp_link` is the
+  contact frame. A tilted tool's normal force is then along the tool Z, not the wall normal; the JTAC
+  and conditioner frame checks (the conditioner's tool frame equals the controller's tip, the tilt in the
+  force reference) are a later step and are not made yet.
+
+Not done: maps per tool offset (cache key), the URDF generator reading `tilt_*`, the MuJoCo angled-tool
+scenario, anything on hardware.
 
 ## Spray swath model
 
@@ -126,9 +177,15 @@ Spacing never exceeds the uniform one. Limits: the model is static and quasi-fla
 mechanics solver); the boustrophedon (columns and cells) and sweepline planners apply the same rule on their grid through
 `CoveragePlannerParams::edge_zone_m` / `edge_spacing_scale` (`stripCellPositions`; node parameters of the same
 names, default 0 / 1.0 = uniform, plans unchanged; `test_edge_spacing_planner`). Only the two ends of the stepover
-axis (of a cell, for the cell decomposition) open a zone there; obstacle edges are not passed to the planners, and
-the tool profile's values are not yet copied into the planner parameters automatically. Shipped profiles are
-unchanged.
+axis (of a cell, for the cell decomposition) open a zone there. In the sweepline planner and in the boustrophedon column
+sweeps the borders of every obstacle (the lowest and highest stepover position of each blocked region inside the free
+span, `obstacleEdgeCells`) open the same zone; the cell decomposition already ends its cells at obstacle borders, so
+its zones sit there without extra input. Both values are in the tool profile and in `ToolOverrides` / node parameters of
+the same names (`edge_zone_m`, `edge_spacing_scale`); `wall_coverage_service_node` and `wall_coverage_demo_node` copy the
+profile's values into the new `edge_zone_m` / `edge_spacing_scale` fields of `GenerateCoveragePath` (zone <= 0 or scale
+outside (0, 1) = use the planner node's parameter, `resolveEdgeSpacing`). Shipped profiles are unchanged (uniform). Not
+verified: the effect on a real wall's coverage or on a run, only that the generated strip positions are finer near the
+obstacle borders (`test_edge_spacing_planner`).
 
 ### Deposition and thickness uniformity
 

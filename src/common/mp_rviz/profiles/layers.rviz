@@ -1,0 +1,145 @@
+# Toggleable layers: wall, full plan, reachable, stands, tool trace. Fixed frame: pass rviz2 -f <frame> (map default)
+Panels:
+- Class: rviz_common/Displays
+  Name: Displays
+  Property Tree Widget:
+    Expanded:
+    - /Global Options1
+    Splitter Ratio: 0.5
+  Tree Height: 400
+- Class: rviz_common/Views
+  Name: Views
+  Expanded:
+  - /Current View1
+  Splitter Ratio: 0.5
+Visualization Manager:
+  Class: ''
+  Displays:
+  - Class: rviz_default_plugins/Grid
+    Name: Grid
+    Enabled: true
+    Plane Cell Count: 10
+    Cell Size: 1
+  - Class: rviz_default_plugins/TF
+    Name: TF
+    Enabled: true
+    Show Names: false
+  - Class: rviz_default_plugins/RobotModel
+    Name: RobotModel
+    Enabled: true
+    Description Topic:
+      Value: /robot_description
+  - Class: rviz_common/Group
+    Name: Plan layers
+    Enabled: true
+    Displays:
+    - Class: rviz_default_plugins/MarkerArray
+      Name: 1 Real wall (full size)
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /mp_viz/wall
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Coverage paint (done / not done)
+      Enabled: false
+      Namespaces: {}
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /mp_viz/coverage_paint
+    - Class: rviz_default_plugins/MarkerArray
+      Name: 2 Full coverage plan
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /mp_viz/plan_columns
+    - Class: rviz_default_plugins/MarkerArray
+      Name: 2b Transitions (arrows) + visit order
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /mp_viz/transitions
+    - Class: rviz_default_plugins/MarkerArray
+      Name: 3 Reachable (green) / not (red)
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /mp_viz/reachable
+    - Class: rviz_default_plugins/MarkerArray
+      Name: 4 Stands
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /mp_viz/stands
+    - Class: rviz_default_plugins/MarkerArray
+      Name: 5 Executed tool trace
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /mp_viz/tool_trace
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+  - Class: rviz_default_plugins/Interact
+    Hide Inactive Objects: true
+  - Class: rviz_default_plugins/MoveCamera
+  - Class: rviz_default_plugins/Select
+  - Class: rviz_default_plugins/FocusCamera
+  - Class: rviz_default_plugins/Measure
+    Line color: 128; 128; 0
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 6
+      Focal Point:
+        X: 1.0
+        Y: 0
+        Z: 1.0
+      Name: Current View
+      Near Clip Distance: 0.01
+      Pitch: 0.45
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz)
+      Yaw: 3.64
+    Saved: null
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 846
+  Width: 1200
+  X: 60
+  Y: 40

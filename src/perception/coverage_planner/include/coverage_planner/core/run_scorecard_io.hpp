@@ -33,6 +33,11 @@ WallPlane wallFromJson(const nlohmann::json & j);
 /// @throws std::runtime_error for an entry with a missing or reversed range.
 std::vector<ObstacleRegion> obstaclesFromJson(const nlohmann::json & j, uint32_t wall_id);
 
+/// Rejects pose-gate options that would silently do nothing: a bad-pose limit with no gate that can produce bad poses
+/// (`max_wall_gap_m` for a contact run, or `max_tilt_deg`), and a nominal tilt without `max_tilt_deg`.
+/// @throws std::runtime_error with the option names.
+void validateGateOptions(const ScorecardOptions & options, const ScorecardLimits & limits);
+
 nlohmann::json scorecardToJson(const RunScorecard & card);
 
 /// `[{"id": 0, "t_start": 0.0, "t_end": 2.1}, ...]`.

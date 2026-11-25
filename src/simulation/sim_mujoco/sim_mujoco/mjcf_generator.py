@@ -23,6 +23,8 @@ What is generated
     `base_x_joint`, `base_y_joint` (slide) and `base_yaw_joint` (hinge) on the root body, each with a
     stiff position actuator the plugin drives from /cmd_vel, plus `<custom>` numerics carrying the drive
     type and the velocity limits. The wheels stay visual.
+  * optionally (`floor`, on in generate() and the launch, `--no-floor` on the CLI) a visual-only checker floor: no contacts, so the kinematic base
+    and the wall contact scoring behave exactly as without it.
 """
 import math
 import pathlib
@@ -93,7 +95,7 @@ class UrdfLink:
             self.collisions.append({
                 'pos': _floats(org.get('xyz') if org is not None else None),
                 'rpy': _floats(org.get('rpy') if org is not None else None),
-                'kind': geo.tag, 'attrib': dict(geo.attrib)})
+                'kind': geo.tag, 'attrib': dict(geo.attrib), 'name': col.get('name')})
 
 
 class UrdfJoint:
@@ -149,14 +151,20 @@ class UrdfRobot:
         return None if j is None else self.group_of(j.parent)
 
     def tree_distance(self, a, b):
+        """Joints between two groups. A mimic joint is slaved to another joint and moves with it, so it
+        adds no hop: the stages of a telescopic lift all travel together and their geometry touches or
+        overlaps by design (carriage vs the second stage was 3 hops apart and kept a permanent
+        self-contact whose stick-slip jerked the lift)."""
         def chain(g):
-            out = [g]
+            out, cost = [g], [0]
             while self.group_parent(out[-1]) is not None:
+                j = self.joint_by_child[out[-1]]
+                cost.append(cost[-1] + (0 if j.mimic else 1))
                 out.append(self.group_parent(out[-1]))
-            return out
-        ca, cb = chain(a), chain(b)
+            return out, cost
+        (ca, wa), (cb, wb) = chain(a), chain(b)
         common = next(x for x in ca if x in cb)
-        return ca.index(common) + cb.index(common)
+        return wa[ca.index(common)] + wb[cb.index(common)]
 
     def ignored_pairs(self, links, hops):
         """Pairs among `links` that may not collide: same rigid group or <= hops joints apart."""
@@ -204,6 +212,8 @@ DEFAULTS = dict(
     tool_pad_radius=0.03,
     tool_pad_thickness=0.01,
     friction=(0.8, 0.005, 0.0001),
+    floor=False,                     # True: a visual-only checker floor at z = floor_z (no contacts, not scanned by the depth sensor)
+    floor_z=0.0,
     base_motion=None,                # None, or dict(drive='omni'|'diff', max_linear=, max_angular=)
     base_kp=(2.0e4, 2.0e4, 1.0e4),   # N/m, N/m, N m/rad: stiff hold, so wall contact barely moves it
     base_kv_over_kp=0.1,             # seconds
@@ -233,7 +243,21 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
     if unknown:
         raise TypeError(f'unknown options {sorted(unknown)}')
     opt.update(options)
+    # gravcomp: True/False (all bodies before the F/T site) or a list, tuple, set or frozenset of link
+    # names to compensate. Dicts and other types raise TypeError (a dict used to fall through to bool()).
+    gc = opt['gravcomp']
+    if isinstance(gc, bool):
+        gravcomp_all, gravcomp_links = gc, frozenset()
+    elif isinstance(gc, str):
+        gravcomp_all, gravcomp_links = False, frozenset([gc])
+    elif isinstance(gc, (list, tuple, set, frozenset)):
+        gravcomp_all, gravcomp_links = False, frozenset(gc)
+    else:
+        raise TypeError(f'gravcomp must be a bool or a list/tuple/set of link names, got {type(gc).__name__}')
     robot = UrdfRobot(urdf_text)
+    unknown_links = gravcomp_links - set(robot.links)
+    if unknown_links:
+        raise ValueError(f'gravcomp names unknown links {sorted(unknown_links)}')
     out = pathlib.Path(out_dir)
     (out / 'meshes').mkdir(parents=True, exist_ok=True)
     home = dict(home or {})
@@ -246,7 +270,18 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
     default = ET.SubElement(mj, 'default')
     ET.SubElement(default, 'geom', contype='1', conaffinity='1', friction=_fmt(opt['friction']))
     asset = ET.SubElement(mj, 'asset')
+    if opt['floor']:
+        ET.SubElement(asset, 'texture', name='floor_tex', type='2d', builtin='checker', width='256',
+                      height='256', rgb1='0.32 0.34 0.38', rgb2='0.42 0.44 0.48')
+        ET.SubElement(asset, 'material', name='floor_mat', texture='floor_tex', texrepeat='8 8',
+                      texuniform='true', reflectance='0.05')
     world = ET.SubElement(mj, 'worldbody')
+    if opt['floor']:
+        # the planar base is driven kinematically by its slide/hinge joints (no wheel contact), so the floor
+        # only has to be seen: contype = conaffinity = 0 means no contacts, and group 2 keeps it out of the
+        # depth sensor's group-1 rays. The wall, the obstacles and every contact force are unchanged.
+        ET.SubElement(world, 'geom', name='floor', type='plane', size='6 6 0.1', pos=f'0 0 {opt["floor_z"]:g}',
+                      material='floor_mat', contype='0', conaffinity='0', group='2')
     ET.SubElement(world, 'light', pos='0 0 4', dir='0 0 -1', diffuse='0.8 0.8 0.8')
 
     mesh_assets = {}
@@ -257,7 +292,7 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
         for k, c in enumerate(link.collisions):
             a = c['attrib']
             common = dict(pos=_fmt(c['pos']), quat=_fmt(quat_from_rpy(*c['rpy'])),
-                          name=f'{link.name}_col{k}')
+                          name=c.get('name') or f'{link.name}_col{k}')
             kind = c['kind']
             if kind == 'box':
                 geom = ET.SubElement(body, 'geom', type='box',
@@ -293,8 +328,9 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
         if joint is not None:
             body.set('pos', _fmt(joint.pos))
             body.set('quat', _fmt(quat_from_rpy(*joint.rpy)))
-        if opt['gravcomp'] and not in_tool:
+        if gravcomp_all and not in_tool or link_name in gravcomp_links:
             # Everything beyond the F/T site keeps its real weight so the sensor reads it.
+            # A list of link names compensates exactly those bodies (even beyond the F/T site).
             body.set('gravcomp', '1')
         if link.inertial and link.inertial['mass'] > 0:
             i = link.inertial
@@ -327,7 +363,10 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
         add_geoms(body, link)
         if link_name == ft_link:
             ET.SubElement(body, 'site', name='ft_sensor', size='0.01', group='4')
-            if opt['tool_pad_radius'] > 0:
+            # a tool that already carries its pad as a URDF collision named tool_pad (generic_tool.xacro does, so that the
+            # planners see the same pad as the simulator) is not given a second one: two identical geoms double the contact
+            urdf_pad = any(c.get('name') == 'tool_pad' for c in link.collisions)
+            if opt['tool_pad_radius'] > 0 and not urdf_pad:
                 # The TCP frame sits ahead of the tool body; a thin pad there makes the wall touch
                 # happen at the point coverage poses target.
                 tcp = robot.joint_by_child.get(tcp_link)

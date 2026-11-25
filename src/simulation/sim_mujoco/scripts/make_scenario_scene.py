@@ -14,6 +14,11 @@ Obstacles (wall_scene.json schema, `obstacles[]`; the extra key `kind` is ignore
     sim, a blocked region for the planner, a surface in the point cloud;
   * `opening`: a hole through the wall (a window): the sim wall is cut around it (wall_world.py), the planner
     avoids it, the point cloud has no points there.
+A scenario may set `patch_z=(lo, hi)` (the contact patch's height, default PATCH_Z) and `wall_z=(lo, hi)` (the sim
+wall's height, default the stock 0.7 m around the patch): the planned wall, the sim wall, walls.pcd and the
+planning-scene curtain (walls_sim.pcd) follow. `--patch-z lo,hi` overrides the patch (the wall then spans
+lo - 0.3 .. hi + 0.3 unless the scenario sets it). A patch that tall makes the lift telescope (the arm base rides
+the lift: 1.17 m retracted, 2.67 m at the 1.5 m stroke).
 Positions are given relative to the contact patch's centre: `dy` along the wall (+y), `dz` up, size `w` along y,
 `h` along z, `depth` off the wall.
 """
@@ -44,6 +49,10 @@ SCENARIOS = {
     'two_panels': dict(mode='multi', dx=0.0, dy=0.3, width=0.9,
                        obstacles=[dict(kind='box', dy=0.0, dz=0.0, w=0.04, h=0.5, depth=0.03)],
                        about='0.9 m wide (two stands), a full-height 40 mm rib 30 mm proud of the wall between the panels'),
+    # a wall 2 m tall: the arm base (1.17 m retracted) must ride the lift to reach z 0.6 and 2.0
+    'two_panels_tall': dict(mode='multi', dx=0.0, dy=0.3, width=0.9, obstacles=[],
+                            patch_z=(0.6, 2.0), wall_z=(0.3, 2.3),
+                            about='0.9 m wide, wall z 0.3..2.3 m, patch z 0.6..2.0 m: the lift has to telescope'),
     'two_panels_plain': dict(mode='multi', dx=0.0, dy=0.3, width=0.9, obstacles=[],
                              about='0.9 m wide (two stands), no rib (the control for two_panels)'),
 }
@@ -164,15 +173,66 @@ def obstacles_from_scene(path):
     return out
 
 
+# ------------------------------------------------------------------ tall walls
+WALL_MARGIN_Z = 0.3     # wall above and below the patch when only the patch is given
+CURTAIN_ABOVE_M = 0.3   # the planning-scene curtain stands this far above the wall's top (at least 2.6 m)
+
+
+def patch_and_wall_z(sc, patch_z=None):
+    """(patch_z, wall_z) of a scenario; wall_z is None for the stock wall (nothing to retarget)."""
+    pz = tuple(patch_z) if patch_z else tuple(sc.get('patch_z', PATCH_Z))
+    wz = sc.get('wall_z') if not patch_z else None
+    if wz is None and pz != PATCH_Z:
+        wz = (round(pz[0] - WALL_MARGIN_Z, 6), round(pz[1] + WALL_MARGIN_Z, 6))
+    if pz[0] >= pz[1]:
+        raise ValueError(f'patch z range {pz} is empty')
+    if wz is not None and not (wz[0] <= pz[0] and pz[1] <= wz[1]):
+        raise ValueError(f'wall z {wz} does not contain the patch z {pz}')
+    return pz, (tuple(wz) if wz else None)
+
+
+def retarget_scene_z(path, patch_z, wall_z, sim):
+    """Moves the wall's origin to the patch centre height and sets v_range (basis_v = -z, v = origin z - z): the sim
+    file gets the wall's extent, the planner file the patch's."""
+    with open(path) as f:
+        scene = json.load(f)
+    w = scene['walls'][0]
+    c = round((patch_z[0] + patch_z[1]) / 2, 6)
+    w['origin_xyz'][2] = c
+    lo, hi = wall_z if sim else patch_z
+    w['v_range_m'] = [round(c - hi, 6), round(c - lo, 6)]
+    if not sim and 'observed_area_m2' in w:
+        u0, u1 = w['u_range_m']
+        w['observed_area_m2'] = round((u1 - u0) * (patch_z[1] - patch_z[0]), 4)
+    with open(path, 'w') as f:
+        json.dump(scene, f, indent=2)
+
+
+def retarget_pcd_z(path, patch_z, margin=0.05):
+    """walls.pcd (the planner's observed mask, the contact patch with a 0.05 m rim) regenerated over the patch's z."""
+    header, points = read_pcd(path)
+    x = points[0][0]
+    ys = sorted({float(p[1]) for p in points})
+    zs = sorted({float(p[2]) for p in points})
+    step = zs[1] - zs[0]
+    cloud = [[x, f'{y:.4f}', f'{z:.4f}', '0'] for y in ys for z in frange(patch_z[0] - margin, patch_z[1] + margin, step)]
+    write_pcd(path, header, cloud)
+
+
 # ------------------------------------------------------------------ build
-def build(src, out, name):
+def build(src, out, name, patch_z=None):
     sc = SCENARIOS[name]
+    pz, wz = patch_and_wall_z(sc, patch_z)
     os.makedirs(out, exist_ok=True)
     dx, dy, width = sc['dx'], sc['dy'], sc['width']
     sws.shift_scene(os.path.join(src, 'smoke_wall_scene.json'), os.path.join(out, 'smoke_wall_scene.json'), dx, dy, width)
     sws.shift_scene(os.path.join(src, 'wall_pass_coverage_scene.json'),
                     os.path.join(out, 'wall_pass_coverage_scene.json'), dx, dy, width)
     sws.shift_pcd(os.path.join(src, 'walls.pcd'), os.path.join(out, 'walls.pcd'), dx, dy, width)
+    if wz is not None:
+        retarget_scene_z(os.path.join(out, 'smoke_wall_scene.json'), pz, wz, sim=True)
+        retarget_scene_z(os.path.join(out, 'wall_pass_coverage_scene.json'), pz, wz, sim=False)
+        retarget_pcd_z(os.path.join(out, 'walls.pcd'), pz)
     obstacles = []
     for fn in ('smoke_wall_scene.json', 'wall_pass_coverage_scene.json'):
         obstacles = add_obstacles(os.path.join(out, fn), sc['obstacles'])
@@ -182,16 +242,19 @@ def build(src, out, name):
         edit_pcd(os.path.join(out, 'walls.pcd'), os.path.join(out, 'walls.pcd'), obstacles, wall)
     # MoveIt's octomap: the sim wall's whole extent (with the obstacles cut / added like walls.pcd)
     sws.sim_wall_pcd(os.path.join(out, 'smoke_wall_scene.json'), os.path.join(out, 'walls.pcd'),
-                     os.path.join(out, 'walls_sim.pcd'))
+                     os.path.join(out, 'walls_sim.pcd'),
+                     curtain_top=max(sws.CURTAIN_TOP_M, (wz[1] + CURTAIN_ABOVE_M) if wz else 0.0))
     if obstacles:
         edit_pcd(os.path.join(out, 'walls_sim.pcd'), os.path.join(out, 'walls_sim.pcd'), obstacles, wall)
     return {'MODE': sc['mode'], 'DX': dx, 'DY': dy, 'WIDTH': width, 'WALL_X': round(0.98 + dx, 6),
-            'WALL_Y0': dy, 'WALL_Y1': round(dy + width, 6), 'OBSTACLES': len(obstacles)}
+            'WALL_Y0': dy, 'WALL_Y1': round(dy + width, 6), 'OBSTACLES': len(obstacles),
+            'PATCH_Z_LO': pz[0], 'PATCH_Z_HI': pz[1], 'WALL_Z_LO': wz[0] if wz else 'default', 'WALL_Z_HI': wz[1] if wz else 'default'}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--list', action='store_true', help='print the scenario names and what they are')
+    ap.add_argument('--patch-z', metavar='LO,HI', help='contact patch height in m, replacing the scenario\'s')
     ap.add_argument('src', nargs='?')
     ap.add_argument('out', nargs='?')
     ap.add_argument('name', nargs='?')
@@ -204,7 +267,18 @@ def main():
         ap.error('SHARE_DATA_DIR OUT_DIR NAME are required')
     if a.name not in SCENARIOS:
         sys.exit(f'unknown scenario {a.name!r}; one of {", ".join(SCENARIOS)}')
-    for k, v in build(a.src, a.out, a.name).items():
+    pz = None
+    if a.patch_z:
+        try:
+            pz = tuple(float(v) for v in a.patch_z.split(','))
+            assert len(pz) == 2
+        except (ValueError, AssertionError):
+            sys.exit(f'--patch-z wants LO,HI in metres, got {a.patch_z!r}')
+    try:
+        info = build(a.src, a.out, a.name, pz)
+    except ValueError as e:
+        sys.exit(str(e))
+    for k, v in info.items():
         print(f'{k}={v}')
 
 

@@ -34,6 +34,9 @@ struct ToolOverrides
   std::optional<double> boundary_offset_m;
   std::optional<std::string> obstacle_inflation;
   std::optional<double> obstacle_inflation_radius_m;
+  /// Contact tools: edge-spacing zone width and spacing factor (see contactStripOffsets).
+  std::optional<double> edge_zone_m;
+  std::optional<double> edge_spacing_scale;
   /// true forces the two-pass (forward, then reversed) strategy; false/unset keeps the profile's.
   std::optional<bool> double_pass;
 };

@@ -58,15 +58,84 @@ planning:
 
 | Name | Base class | Package | Notes |
 |---|---|---|---|
-| `moveit_cartesian` | Planner | motion_planner_moveit | jump detection, reachability-tilt retry, wall-contact ACM |
-| `moveit_ompl` | Planner | motion_planner_moveit | pose and joint goals |
+| `moveit_cartesian` | Planner | motion_planner_moveit | jump detection, reachability-tilt retry, wall-contact ACM; opt-in `cartesian_joint_goal` (false) and `cartesian_joint_goal_tolerance` (0.05): the Cartesian-first attempt also for joint-goal segments (stow, seeded approach), see [free_space_comparison.md](free_space_comparison.md) |
+| `moveit_ompl` | Planner | motion_planner_moveit | pose and joint goals; params `free_space_direct_first` (default false), `direct_revolute_step` (0.05 rad), `direct_prismatic_step` (0.01 m), `direct_default_acceleration` (2.0, used only by the direct path retiming); optimal mode: `free_space_optimize` (false), `free_space_time_budget_s` (20), `free_space_num_candidates` (5), `free_space_objective` (`length`\|`duration`), `lift_cost_weight` (2.0: lift travel counts twice an arm joint's in candidate scoring and shortcutting; 1.0 = off), `free_space_planners`, `free_space_shortcut_iterations` (300), `free_space_smoothing_rounds` (4), `free_space_cartesian_candidate` (true, in the optimal mode), `free_space_cartesian_eef_step` (0.01), `free_space_cartesian_goal_tolerance` (0.05), `free_space_cartesian_revolute_jump` (0.3), `free_space_cartesian_prismatic_jump` (0.05) |
 | `moveit_ik` | Ik | motion_planner_moveit | params `ik_extra_seeds`, `ik_seed_perturbation` |
 | `moveit_collision` | Collision | motion_planner_moveit | |
 | `moveit_scene` | Scene | motion_planner_moveit | param `octomap_resolution` |
-| `curobo` | Planner | curobo_planner | needs the cuRobo node (GPU); params `node_name`, `wait_for_service_sec`, `timeout_sec` (default 45 s), `base_frame` |
+| `curobo` | Planner | curobo_planner | needs the cuRobo node (GPU); params `node_name`, `wait_for_service_sec`, `timeout_sec` (default 45 s), `base_frame`, joint limit params (below) |
 | `curobo_ik`, `curobo_collision`, `curobo_scene` | Ik, Collision, Scene | curobo_planner | share the client of `curobo` |
 | `vamp` | Planner | vamp_planner | params `robot`, `max_iterations`, `range`, `point_radius`, `nominal_joint_speed`, `simplify`, `require_world`, `base_frame` |
 | `vamp_collision`, `vamp_scene` | Collision, Scene | vamp_planner | share the planner of `vamp` for the same robot (a `base_frame` param on any of them applies to the shared planner) |
+
+### Direct joint-space fast path (`moveit_ompl`, opt-in)
+
+With `plugin_params: {moveit_ompl: {free_space_direct_first: true}}` a free-space segment first tries the straight line in joint space
+from the start to the goal (a joint target as given, a pose goal solved by IK seeded from the start). The line is densified (at most
+`direct_revolute_step` per revolute joint and `direct_prismatic_step` per prismatic joint between samples), every sample is checked
+with `PlanningScene::isStateValid` (collision and joint bounds), and the result is retimed with the MoveIt TOTG time parameterizer
+(`MoveItTimeParameterizer`), so the duration is set by the slowest joint instead of by a wandering path. One invalid sample, a failed
+IK or a retiming failure falls back to the normal OMPL plan unchanged. Log lines: `direct joint path: N points, X s` and
+`direct path invalid at sample K, falling back to OMPL`. Pure logic: `motion_planner/core/direct_joint_path.hpp`.
+Why: the OMPL joint path was measured up to 16x longer than the straight-line joint distance (a stow took 37 s).
+
+### Optimal free-space mode (`moveit_ompl`, opt-in)
+
+Why: a free-space plan from the default OMPL planner (RRTConnect) was measured with a joint path 1.7x to 16x the straight-line joint
+distance for simple transitions (stow: 375 points, 37 s; "approach" between adjacent columns: 70 to 108 points, 7 to 11 s). Executing a
+long path costs wall time that no planning time can win back, so the planning time is spent on finding the shortest path.
+
+`plugin_params: {moveit_ompl: {free_space_optimize: true}}` replaces the single OMPL call of a free-space segment by:
+
+1. the direct joint-space line (same code as the fast path above, whether or not `free_space_direct_first` is set) as candidate 1;
+2. `free_space_num_candidates - 1` runs (at least 1) of asymptotically optimal planners, round robin over `free_space_planners`
+   (default `BITstarkConfigDefault,RRTstarkConfigDefault,AITstarkConfigDefault,InformedRRTstarkConfigDefault`, defined in
+   `mobile_manipulator_moveit_config/config/ompl_planning.yaml` with `optimization_objective: PathLengthOptimizationObjective`).
+   `free_space_time_budget_s` (default 20) is the total OMPL time, split equally; an asymptotically optimal planner keeps improving
+   until its slice is over. MoveIt's OMPL interface here (2.12) accepts the objectives PathLength, Minimax, StateCostIntegral,
+   MechanicalWork and MaximizeMinClearance; path length is used;
+3. per OMPL result: randomised shortcutting (`free_space_shortcut_iterations`, 300) and corner-cutting smoothing
+   (`free_space_smoothing_rounds`, 4, a repeated quadratic B-spline corner cut), every replacement segment densified and checked with
+   `PlanningScene::isStateValid`, so the result is valid and never longer; then the MoveIt TOTG time parameterisation;
+4. `selectBestCandidate`: `free_space_objective: length` picks the smallest joint path length weighted by 1/(joint range) and by `lift_cost_weight` for the lift (the lift's
+   metres and the arm's radians become comparable), `duration` the smallest TOTG duration. Ties keep the earlier candidate, so a clear
+   straight line (the direct path) always wins.
+
+One line per plan: `free-space plan: candidates N, best length=X (baseline straight Y, efficiency Z), <planner> used` (for `duration`
+the values are seconds). Baseline = straight joint line between the ends of the chosen path in the same unit (for `duration`, the
+slowest-joint rest-to-rest time); efficiency = baseline / value, 1 = straight. A pose goal gets a different IK solution per OMPL run;
+the direct candidate exists only when IK from the start succeeds. When no candidate is found the plan fails as before. Default off.
+The planning time of one free-space segment becomes about `free_space_time_budget_s` seconds (plus the direct path and the post-processing).
+Pure logic: `motion_planner/core/path_quality.hpp` (weighted length, duration estimate, baseline, efficiency, selection) and
+`motion_planner/core/path_shortcut.hpp` (shortcut and smoothing), both with host gtests (`path_quality_test`, `path_shortcut_test`).
+The straight tool line (Cartesian) is one more candidate, and the comparison harness and the recommended routing are in [free_space_comparison.md](free_space_comparison.md).
+Status: host gtests pass; the MoveIt part is syntax-checked only, not yet run in a simulator.
+
+Path shortcutting after OMPL in the default mode: the MoveIt OMPL interface already simplifies each solution (`simplify_solutions`, default true, bounded
+by the planning time) and `ompl_planning.yaml` does not switch it off, so no extra shortcut stage was added.
+
+### cuRobo: joint limits
+
+cuRobo times its trajectories with the limits of its own robot yml, which are not the MoveIt `joint_limits.yaml` the controller side
+uses (in one sim pass they ran about 14x faster than the same move retimed by MoveIt). With limits configured, the `curobo` plugin
+checks each returned trajectory (`curobo_planner/joint_limit_guard.hpp`) and either slows it down or refuses it. Without any of
+these params the trajectory is returned as cuRobo timed it (unchanged behaviour; `planning_curobo.yaml` sets them).
+
+For the shortest/fastest free-space path regardless of planning time, the cuRobo node has an opt-in optimal mode (`free_space_optimize`, N candidates plus the straight joint-space line, best by path quality; see [curobo_free_space_optimal.md](curobo_free_space_optimal.md)).
+
+| Param | Meaning |
+|---|---|
+| `joint_limits_file` | MoveIt `joint_limits.yaml` (reads `max_velocity` / `max_acceleration` where `has_*_limits` is true), a path or `package://<pkg>/<path>` |
+| `joint_limits` | inline `name:max_velocity:max_acceleration,...`; adds to or overrides the file's entries |
+| `limit_safety_factor` | fraction of each limit that may be used, in (0, 1], default 0.9 |
+| `limit_mode` | `retime` (default: scale the time axis) or `reject` |
+| `limit_use_file_scaling` | multiply the file's limits by its `default_velocity/acceleration_scaling_factor`, as MoveIt does (default false) |
+
+Failure codes: `limit_violation` (reject mode), `limit_missing` (a trajectory joint has no limit: an error, not "unlimited"),
+`limits_invalid`, `invalid_trajectory`; all at stage `planning`. A bad param (unreadable file, unknown mode, malformed entry) makes
+the plugin's `initialize` fail with `invalid_param`. Limits apply to the `curobo` planner plugin only. Velocity and acceleration only
+(no jerk); speed is taken from finite differences of the positions, so a coarse trajectory under-reads its peaks. Gtests with
+hand-made trajectories and a stub node; not run against the real node or in a sim.
 
 ### cuRobo: base frame, world size and timeouts
 

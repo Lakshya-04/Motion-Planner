@@ -3,9 +3,9 @@
      UR and generic arms, 7 for the Panda-like arm; the profile says).
 
      Every part is swappable behind a small contract (see each file's header):
-       base  urdf/base/base.xacro  (generic_base | ranger_mini | scout_mini | scout | husky | mpo_500 | mir100 | turtlebot3_*)
+       base  urdf/base/base.xacro  (generic_base | ranger_mini | scout_mini | scout | husky | mpo_500 | mir100 | turtlebot3_* | jackal | dingo_o | tiago_style | fetch_style)
        lift  urdf/lift/lift.xacro  (telescopic | scissor | fixed | none)
-       arm   urdf/arms/arm.xacro  (generic_6dof | panda | ur3 | ur5 | ur10 | ur10e | ur16e | ur20 | ...)
+       arm   urdf/arms/arm.xacro  (generic_6dof | panda | fr3 | iiwa7 | kinova_gen3 | xarm7 | ur3 | ur5 | ur10 | ur10e | ur16e | ur20 | ...)
        tool  urdf/tools/generic_tool.xacro
 
      Render:  xacro mobile_manipulator.urdf.xacro arm:=ur10e lift_stroke:=1.5 tcp_xyz:="0 0 0.165"
@@ -28,10 +28,19 @@
   <!-- Empty = moving lift. A number (m) pins the lift at that extension: an arm-only robot
        (lift:=fixed does the same and defaults to 0.4 m). -->
   <xacro:arg name="lift_fixed_height" default=""/>
+  <!-- Column geometry from primitives, all empty = the legacy cylinders (telescopic_lift.xacro):
+       shape cylinder|box, "x y h" of the fixed column, "x y h" per stage, rest z per stage, "x y z" of the carriage. -->
+  <xacro:arg name="lift_shape" default="cylinder"/>
+  <xacro:arg name="lift_column_size" default=""/>
+  <xacro:arg name="lift_stage_sizes" default=""/>
+  <xacro:arg name="lift_stage_rest_z" default=""/>
+  <xacro:arg name="lift_carriage_size" default=""/>
   <xacro:arg name="lift_mount_xyz" default="0 0 0"/>
   <xacro:arg name="arm_mount_xyz" default="0 0 0.02"/>
   <xacro:arg name="arm_mount_rpy" default="0 0 0"/>
   <xacro:arg name="tcp_xyz" default="0 0 0.165"/>
+  <!-- radius of the contact pad at the TCP (generic_tool.xacro; the simulator uses the same disc); 0 removes it -->
+  <xacro:arg name="pad_radius" default="0.03"/>
   <xacro:arg name="tcp_rpy" default="0 0 0"/>
   <!-- "none" (description only) or "mock" (adds the ros2_control block with mock hardware). -->
   <xacro:arg name="hardware" default="none"/>
@@ -51,6 +60,10 @@
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/mir100.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/turtlebot3_burger.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/turtlebot3_waffle.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/jackal.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/dingo_o.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/tiago_style.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/fetch_style.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/base/base.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/lift/telescopic_lift.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/lift/scissor_lift.xacro"/>
@@ -58,6 +71,11 @@
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/tools/generic_tool.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/generic_6dof_arm.xacro"/>
   <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/panda_arm.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/serial_arm_common.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/fr3_arm.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/iiwa7_arm.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/kinova_gen3_arm.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/xarm7_arm.xacro"/>
   <xacro:if value="${'$(arg arm)'.startswith('ur')}">
     <xacro:include filename="$(find mobile_manipulator_description)/urdf/arms/ur_arm.xacro"/>
   </xacro:if>
@@ -69,6 +87,8 @@
     stroke="$(arg lift_stroke)" stages="$(arg lift_stages)" max_velocity="$(arg lift_max_velocity)"
     max_acceleration="$(arg lift_max_acceleration)" mount_height="$(arg lift_mount_height)"
     fixed_height="$(arg lift_fixed_height)"
+    shape="$(arg lift_shape)" column_size="$(arg lift_column_size)" stage_sizes="$(arg lift_stage_sizes)"
+    stage_rest_z="$(arg lift_stage_rest_z)" carriage_size="$(arg lift_carriage_size)"
     arm_mount_xyz="$(arg arm_mount_xyz)" arm_mount_rpy="$(arg arm_mount_rpy)">
     <origin xyz="$(arg lift_mount_xyz)" rpy="0 0 0"/>
   </xacro:lift>
@@ -80,7 +100,7 @@
   <!-- hardware:=gazebo mounts the tool on ft_sensor_link (zero offset from the flange, defined in
        sim_gazebo) so the F/T sensor sits between the flange and the tool. There the tool body has no
        collision of its own: sim_gazebo adds a spring-loaded tip link that carries it. -->
-  <xacro:generic_tool parent="${'ft_sensor_link' if '$(arg hardware)' == 'gazebo' else 'arm_flange_link'}" tcp_xyz="$(arg tcp_xyz)" tcp_rpy="$(arg tcp_rpy)"
+  <xacro:generic_tool parent="${'ft_sensor_link' if '$(arg hardware)' == 'gazebo' else 'arm_flange_link'}" tcp_xyz="$(arg tcp_xyz)" tcp_rpy="$(arg tcp_rpy)" pad_radius="$(arg pad_radius)"
     collision="${'$(arg hardware)' != 'gazebo'}">
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </xacro:generic_tool>

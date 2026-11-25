@@ -13,6 +13,8 @@ ToolCoverageProfile toCoverageProfile(const core_types::ToolProfile & profile)
   out.task.tool_normal_policy = profile.task.tool_normal_policy;
   out.task.max_edge_tilt_deg = profile.task.max_edge_tilt_deg;
   out.task.tool_frame_yaw_deg = profile.task.tool_frame_yaw_deg;
+  out.task.tool_tilt_deg = profile.geometry.tilt_deg;
+  out.task.tool_tilt_axis = profile.geometry.tilt_axis;
 
   const auto & c = profile.coverage;
   out.coverage.swath_m = c.swath_m;
@@ -59,8 +61,13 @@ void applyToolOverrides(ToolCoverageProfile & tool, const ToolOverrides & o)
   if (o.obstacle_inflation_radius_m) {
     tool.coverage.obstacle_inflation_radius_m = *o.obstacle_inflation_radius_m;
   }
-  if (o.double_pass && *o.double_pass) {
-    tool.coverage.passes = {PassVariant{}, PassVariant{0.0, true}};
+  if (o.edge_zone_m) {tool.coverage.edge_zone_m = *o.edge_zone_m;}
+  if (o.edge_spacing_scale) {tool.coverage.edge_spacing_scale = *o.edge_spacing_scale;}
+  if (o.double_pass) {
+    // An explicit double_pass:=false also overrides a profile that ships two passes (a wiper).
+    tool.coverage.passes = *o.double_pass ?
+      std::vector<PassVariant>{PassVariant{}, PassVariant{0.0, true}} :
+      std::vector<PassVariant>{PassVariant{}};
   }
   if (tool.coverage.obstacle_inflation_radius_m <= 0.0) {
     tool.coverage.obstacle_inflation_radius_m = toolSwath(tool) / 2.0;

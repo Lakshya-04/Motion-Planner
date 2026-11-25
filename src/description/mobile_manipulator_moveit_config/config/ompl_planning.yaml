@@ -20,12 +20,31 @@ planner_configs:
     range: 0.0
     goal_bias: 0.05
     delay_collision_checking: 1
+    optimization_objective: PathLengthOptimizationObjective
   PRMstarkConfigDefault:
     type: geometric::PRMstar
+    optimization_objective: PathLengthOptimizationObjective
+  # Asymptotically optimal planners for the free_space_optimize mode of the moveit_ompl plugin: they keep improving
+  # the path until the planning time is up (MoveIt's default objective is path length too; stated here on purpose).
+  BITstarkConfigDefault:
+    type: geometric::BITstar
+    optimization_objective: PathLengthOptimizationObjective
+  AITstarkConfigDefault:
+    type: geometric::AITstar
+    optimization_objective: PathLengthOptimizationObjective
+  InformedRRTstarkConfigDefault:
+    type: geometric::InformedRRTstar
+    range: 0.0
+    goal_bias: 0.05
+    optimization_objective: PathLengthOptimizationObjective
 
 arm:
   default_planner_config: RRTConnectkConfigDefault
-  planner_configs: [RRTConnectkConfigDefault, RRTstarkConfigDefault, PRMstarkConfigDefault]
+  planner_configs: [
+    RRTConnectkConfigDefault, RRTstarkConfigDefault, PRMstarkConfigDefault, BITstarkConfigDefault,
+    AITstarkConfigDefault, InformedRRTstarkConfigDefault]
 lift_arm:
   default_planner_config: RRTConnectkConfigDefault
-  planner_configs: [RRTConnectkConfigDefault, RRTstarkConfigDefault, PRMstarkConfigDefault]
+  planner_configs: [
+    RRTConnectkConfigDefault, RRTstarkConfigDefault, PRMstarkConfigDefault, BITstarkConfigDefault,
+    AITstarkConfigDefault, InformedRRTstarkConfigDefault]

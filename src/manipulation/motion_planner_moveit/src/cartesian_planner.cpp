@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <string>
+#include <unordered_map>
 #include <exception>
 #include <vector>
 
@@ -16,9 +19,11 @@
 #include "moveit/robot_state/cartesian_interpolator.h"
 #include "moveit/robot_trajectory/robot_trajectory.h"
 #include "moveit/trajectory_processing/time_optimal_trajectory_generation.h"
+#include <moveit/trajectory_processing/ruckig_traj_smoothing.hpp>
 #include "rclcpp/rclcpp.hpp"
 
 #include "motion_planner_moveit/moveit_planning_backend.hpp"
+#include "motion_planner/core/path_quality.hpp"
 #include "motion_planner/core/planners/reachability_tilt.hpp"
 #include "motion_planner/core/planners/wall_penetration_check.hpp"
 #include "ros_adapters/ros_conversions.hpp"
@@ -403,6 +408,35 @@ bool CartesianPlanner::applyFallbackTimeParameterization(
   }
 
   if (success) {
+    // TOTG is bang-bang in acceleration; round it with Ruckig (jerk = ratio x accel limit per joint).
+    // A failure keeps the TOTG timing.
+    const char * env = std::getenv("MP_TRANSITION_JERK_RATIO");
+    const double ratio = env ? std::atof(env) : 0.0;  // opt-in
+    const auto * jmg = rt.getGroup();
+    if (ratio > 0.0 && jmg) {
+      std::unordered_map<std::string, double> vel, acc, jerk;
+      for (const auto * joint : jmg->getActiveJointModels()) {
+        const auto & b = joint->getVariableBounds(joint->getName());
+        if (!b.velocity_bounded_ || !b.acceleration_bounded_) {
+          vel.clear();
+          break;
+        }
+        vel[joint->getName()] = b.max_velocity_;
+        acc[joint->getName()] = b.max_acceleration_;
+        jerk[joint->getName()] = ratio * b.max_acceleration_;
+      }
+      if (!vel.empty()) {
+        robot_trajectory::RobotTrajectory smoothed(rt, true);
+        try {
+          if (trajectory_processing::RuckigSmoothing::applySmoothing(
+              smoothed, vel, acc, jerk, 1.0, 1.0, true, 0.01))
+          {
+            rt = smoothed;
+          }
+        } catch (const std::exception &) {
+        }
+      }
+    }
     rt.getRobotTrajectoryMsg(trajectory_msg);
   }
   return success;
@@ -417,6 +451,57 @@ PlanningResult CartesianPlanner::plan(const PlanningRequest & request)
           std::chrono::steady_clock::now() - planning_start)
         .count());
     };
+
+  if (request.target_poses.empty() && joint_goal_mode_ && !request.target_joint_state.empty() &&
+    !hasWallReference(request.wall_reference_pose))
+  {
+    std::string joint_init_error;
+    const auto joint_model = ensureMoveGroup(request.planning_group, joint_init_error) ?
+      move_group_->getRobotModel() : nullptr;
+    const auto * goal_group = joint_model ? joint_model->getJointModelGroup(move_group_name_) : nullptr;
+    const auto * goal_tip = joint_model ? joint_model->getLinkModel(move_group_->getEndEffectorLink()) : nullptr;
+    if (goal_group && goal_tip && request.target_joint_state.size() == goal_group->getVariableCount()) {
+      moveit::core::RobotState goal_state(joint_model);
+      goal_state.setToDefaultValues();
+      goal_state.setJointGroupPositions(goal_group, request.target_joint_state);
+      goal_state.update();
+      const Eigen::Isometry3d & tip_pose = goal_state.getGlobalLinkTransform(goal_tip);
+      const Eigen::Quaterniond q(tip_pose.linear());
+      PlanningRequest pose_request = request;
+      pose_request.target_joint_state.clear();
+      pose_request.frame_id.clear();  // the forward-kinematics pose is already in the planning frame
+      pose_request.min_path_fraction = 1.0;
+      core_types::Pose goal_pose;
+      goal_pose.x = tip_pose.translation().x();
+      goal_pose.y = tip_pose.translation().y();
+      goal_pose.z = tip_pose.translation().z();
+      goal_pose.qx = q.x();
+      goal_pose.qy = q.y();
+      goal_pose.qz = q.z();
+      goal_pose.qw = q.w();
+      pose_request.target_poses = {goal_pose};
+      pose_request.waypoint_indices.clear();
+      PlanningResult line = plan(pose_request);
+      const bool whole = line.success && line.path_fraction >= 0.999 && !line.trajectory.points.empty();
+      if (whole && reachesJointGoal(
+          line.trajectory.points.back().positions, request.target_joint_state, joint_goal_tolerance_))
+      {
+        line.message = "Cartesian line to the joint goal's tool pose.";
+        return line;
+      }
+      PlanningResult result;
+      result.success = false;
+      result.status = "failed";
+      result.message = whole ?
+        "Cartesian line to the joint goal's tool pose ends on another joint branch than the goal." :
+        "Cartesian line to the joint goal's tool pose was not found in full: " + line.message;
+      result.failure_reason_code = whole ? "joint_goal_branch_mismatch" : "joint_goal_line_blocked";
+      result.failure_stage = FailureStage::kPlanning;
+      result.path_fraction = line.path_fraction;
+      result.planning_time_ms = elapsed_ms();
+      return result;
+    }
+  }
 
   if (request.target_poses.empty()) {
     PlanningResult result;
@@ -554,6 +639,9 @@ PlanningResult CartesianPlanner::plan(const PlanningRequest & request)
       start_state.setToDefaultValues();
     }
   }
+  // Joint encoders can report a hair outside the limits (1e-14 on a prismatic lift); MoveIt's
+  // start-state bounds check rejects that outright, so clamp it into the bounds first.
+  start_state.enforceBounds(joint_model_group);
   start_state.update();
   if (node_) {
     const Eigen::Isometry3d & start_pose = start_state.getGlobalLinkTransform(tip_link_model);
@@ -575,8 +663,14 @@ PlanningResult CartesianPlanner::plan(const PlanningRequest & request)
     // wall-penetration-bound FK check -- that's about the coverage path's controlled point, a
     // different concern). Falls back to tool_tcp_link only when the caller hasn't set
     // contact_link, preserving prior behavior for any not-yet-updated caller.
+    // Nobody sets contact_link, and tool_tcp_link is a frame without geometry: the exclusion did nothing until the tool
+    // had a collision pad. The link that carries the pad is the parent of the TCP frame, so that is the default.
+    std::string default_contact_link = tool_tcp_link;
+    if (tip_link_model != nullptr && tip_link_model->getParentLinkModel() != nullptr) {
+      default_contact_link = tip_link_model->getParentLinkModel()->getName();
+    }
     const std::string & contact_collision_link =
-      request.contact_link.empty() ? tool_tcp_link : request.contact_link;
+      request.contact_link.empty() ? default_contact_link : request.contact_link;
     std::string acm_error;
     if (setWallContactAcmEntry(
         contact_collision_link, request.target_collision_object_id, true,
@@ -626,15 +720,32 @@ PlanningResult CartesianPlanner::plan(const PlanningRequest & request)
       moveit::core::GroupStateValidityCallbackFn validity_callback;
       if (check_collisions && planning_scene_monitor_) {
         auto last_accepted = std::make_shared<moveit::core::RobotState>(seed);
+        // The scoped contact exclusion (see the ACM guard above) is applied to move_group's scene; this callback checks
+        // the planner's own mirror of it, which is updated later (or never in time). So the callback applies the
+        // exclusion itself, to a copy of the mirror's ACM, whenever the guard is active.
+        const std::string excl_link = acm_guard.active ? acm_guard.tool_link : std::string();
+        const std::string excl_object = acm_guard.active ? acm_guard.object_id : std::string();
         validity_callback = [this, last_accepted, revolute_jt, prismatic_jt, saw_collision_out,
-          saw_jump_out](
+          saw_jump_out, excl_link, excl_object](
           moveit::core::RobotState * robot_state, const moveit::core::JointModelGroup * jmg,
           const double * joint_positions) -> bool {
             robot_state->setJointGroupPositions(jmg, joint_positions);
             robot_state->update();
             bool collision_free = true;
             std::string error_message;
-            if (!backend_->isStateCollisionFree(
+            if (!excl_link.empty()) {
+              planning_scene_monitor::LockedPlanningSceneRO scene(planning_scene_monitor_);
+              if (!scene) {
+                return false;
+              }
+              collision_detection::AllowedCollisionMatrix acm = scene->getAllowedCollisionMatrix();
+              acm.setEntry(excl_link, excl_object, true);
+              collision_detection::CollisionRequest request_cc;
+              request_cc.group_name = move_group_name_;
+              collision_detection::CollisionResult result_cc;
+              scene->checkCollision(request_cc, result_cc, *robot_state, acm);
+              collision_free = !result_cc.collision;
+            } else if (!backend_->isStateCollisionFree(
                 *robot_state, move_group_name_, collision_free,
                 error_message))
             {

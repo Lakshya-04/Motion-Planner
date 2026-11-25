@@ -76,7 +76,11 @@ sensor reads minus the setpoint.
 
 - Joints: lift + six arm joints with the `jtac_mock` interfaces (position and velocity command,
   position, velocity and effort state). The base is pinned to the world through a `world` link
-  (static base). Mimic lift stages follow through `robot_state_publisher`.
+  (static base). The telescopic lift stages (`lift_stage_N_joint`) are declared in the ros2_control block
+  with `mimic` / `multiplier` (1/stages) / `offset` params, state interfaces only: gz-sim does not apply the URDF
+  `<mimic>`, so without them the stages stayed at 0 while `lift_joint` carried the arm up and the arm base floated
+  above the column. Scissor lift linkage joints are not declared yet (they still stay at 0 in Gazebo). Not run in
+  Gazebo here; check: move the lift and read `/joint_states`, `lift_stage_*_joint` must equal `lift_joint / stages`.
 - F/T sensor: link `ft_sensor_link` sits between the arm flange and the tool, at the flange pose
   (kinematics equal the other backends). The tool hangs behind it, offset by `tcp_xyz` along the
   tool axis. gz `force_torque` sensor on `ft_sensor_joint`, exposed as ros2_control sensor
@@ -351,6 +355,23 @@ The MuJoCo twin is coverage 1.0.
 about 9 minutes, `base_motion:=true`, contact pass at 10 N). The reachability map is built once (`STAND_MAP`). The Gazebo world wall
 is the stock 3 m wall centred on the robot (the generator always centres the wall), its one obstacle moved out of the patch.
 
+Env knobs, the same names and defaults as the MuJoCo script (the header of each script lists them; `docker/tools/tests/test_multi_stand_script_parity.py`
+checks that the header and the variables the script reads agree in both): `MULTI_STAND_DOUBLE_PASS` (default `false`, every strip once;
+`true` = up and back down, passed to the coverage demo as `double_pass`), `MULTI_STAND_REACH_FRACTION` / `MULTI_STAND_ARM_REACH` /
+`MULTI_STAND_LIFT_STROKE` (manager `dock_ik_reach_fraction` 0 = off, `dock_ik_reach_m` 1.3, `dock_ik_lift_max_m` 1.5; the fraction needs
+`MULTI_STAND_DOCK_IK_CONTINUITY=true`), `MULTI_STAND_MIN_CLEARANCE` (reachability node `stand_min_clearance_m`, 0 = off),
+`MULTI_STAND_COVERAGE_EXTRA`, `MULTI_STAND_TOOL_YAW`. Both scripts end with one line `multi_stand knobs: sim=... patch_z=... double_pass=...`
+so a run's output says which knobs it used.
+
+Tall wall: `MULTI_STAND_PATCH_Z="0.6,2.0"` moves the patch (coverage scene, `walls.pcd`, the manager's `coverage_z_min_m`/`_max_m`, the
+recorder's wall band) and makes the sim wall `hi + 0.3` m high (`shift_wall_scene.py`, argument 6; the stock wall is 2 m and the world
+generator puts its bottom on the floor). `MULTI_STAND_SCENARIO` (`make_scenario_scene.py`, obstacles and named walls) is MuJoCo only and
+stops the Gazebo script with exit 2. NOT verified in Gazebo (no run): the 2.3 m wall in the generated world, the tool reaching z 2.0 with the
+lift near its top (the tool sits 6.5 cm short of the tcp, see above), the MoveIt octomap, which is only the patch plus a 5 cm rim here (MuJoCo
+pushes the whole sim wall as `walls_sim.pcd` and a curtain), and the reach settings that go with a tall wall (MuJoCo needed `MULTI_STAND_MIN_CLEARANCE`
+about 0.42 and `MULTI_STAND_REACH_FRACTION` 0.8). Command:
+`MULTI_STAND_PATCH_Z=0.6,2.0 MULTI_STAND_DOCK_IK_CONTINUITY=true MULTI_STAND_REACH_FRACTION=0.8 MULTI_STAND_MIN_CLEARANCE=0.42 bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_multi_stand_pass.sh`.
+
 | run | columns | coverage | peak (score) | RMS error | in band | result |
 |---|---|---|---|---|---|---|
 | a | 9 of 9 (stand 0: 6, stand 1: 3) | 0.997 (2782/2790) | 922 N | 13.9 N | 0.82 | scorer passes |
@@ -430,7 +451,7 @@ the spray with a different wall x, and a run with a wall that the tool tip reall
 
 ## Running a pass with cuRobo as the planner
 
-Authored, **not run** (no sim pass has used cuRobo yet). It makes cuRobo v0.9.0 the free-space planner of the manager in a
+Run twice on 2026-11-21 in the multi-stand pass: **no usable result** (see below). It makes cuRobo v0.9.0 the free-space planner of the manager in a
 Gazebo pass; contact seams stay on MoveIt Cartesian. The selection file is
 `manipulation_manager/config/planning_curobo.yaml` (`free_space: curobo`, everything else as the default `planning.yaml`;
 each choice is explained in the file: IK and collision stay MoveIt because the manager's planners do not call the selected
@@ -476,6 +497,56 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
 4. `docker/tools/run_curobo_node.sh stop` afterwards.
 
 `gz_pass_common.sh` is unchanged: it does not write the manager parameters, each pass script does.
+
+### What the first Gazebo runs showed (2026-11-21)
+
+The multi-stand script now also pushes the wall to the node at every stand arrival (`MANAGER_PASS_CUROBO_WORLD=1`, `source_frame:=odom`) and sets
+`seed_start_from_live_state` and the dock seed, as the MuJoCo script does. Three findings, none a pass:
+- With the sim container on the default user (root in this image) and the node on uid 1000, every cuRobo call timed out; a second try with the sim as
+  uid 1000 left the manager without a goal. Forcing UDP transport for both (`FASTDDS_BUILTIN_TRANSPORTS=UDPv4` in both containers) fixed discovery:
+  the wall loaded in under a second.
+- With cuRobo, the first approach "completed" through cuRobo but the tool stayed at the stow pose; the OMPL retry ended 0.83 m short of the approach pose.
+- **The same pass without cuRobo fails too** (control run, default planning config, 0 of 10 columns, coverage 0): `move_group` reports
+  `Invalid goal state` for the dock goal and `Start state out of bounds`, and 140 approach plans fail. Adding the MuJoCo dock seed did not change it
+  (0 done, 6 failed within the first stand). So the Gazebo multi-stand pass is broken independently of cuRobo; the earlier runs recorded below completed
+  at least the first stand. Not isolated (suspects: the whole-wall octomap and approach-pose check merged for MuJoCo, the lift joint a hair below its
+  limit in the start state).
+
+### Gazebo two-stand pass: findings and fixes of 2026-11-21
+
+Same-session runs of `run_multi_stand_pass.sh` (two stands, ten columns, no cuRobo), one run each, host load 1 to 3:
+
+| code | columns done / failed | score |
+|---|---|---|
+| commit before the second-stand fix (#110) | 9 / 1 | peak force 583.9 N in the feedback; the pass itself ended `SUCCEEDED` with 1 failed column |
+| main with the seeded dock IK (no Gazebo changes) | 0 / 10 | coverage 0.0 |
+| main, seeded dock IK off for Gazebo (`dock_ik_seeded: false`) | 4 / 6 | coverage 0.42, peak 39.7 N |
+| main, seeded dock IK off and the live start state clamped into the joint bounds (this change) | 6 / 4 | coverage 0.66, peak force 68.6 N in the feedback, 1820 N in the scored contact trace |
+| main after #157 (the Cartesian planner start state clamped too), same script | 1 / 9 | coverage 0.16, peak 41.6 N in the feedback, 1240 N in the scored trace; stand 1 not reached (the arm could not stow) |
+
+- **Cause of the regression:** the seeded dock IK (a joint goal on the previous dock's branch, added for the second-stand fix in MuJoCo) gives a configuration
+  MoveIt calls an invalid goal in Gazebo, and the arm ends in poses from which later plans fail; with it off the Gazebo script uses the planner's pose goal
+  as before. MuJoCo keeps it on (`dock_ik_seeded` defaults to true; `MULTI_STAND_DOCK_IK_SEEDED=true` turns it back on in the Gazebo script).
+- **Second cause:** `Joint 'lift_joint' from the starting state is outside bounds by -2e-14` (a rounding error, 0.00000000000002 m below the lift's lower limit): MoveIt's
+  `CheckStartStateBounds` rejects such a start state and every plan then fails in milliseconds. `OmplPlanner` already clamped an explicit start state; it now also
+  clamps the live state it takes when none is given.
+- **Still failing:** 4 columns (the two stand-1 columns' approach and the stow among them), 19 start-out-of-bounds errors remain in the run with magnitudes of 1e-16 to
+  2e-14 even with the clamp, so some request path still sends an unclamped start state (not found; the only caller of `MoveGroupInterface::plan` is `OmplPlanner`);
+  force peaks of 1820 N in the scored trace (583.9 N before the second-stand fix) are an unrelated problem of the Gazebo contact model that this pass shows and
+  does not explain. The Gazebo two-stand pass is therefore still failing; the numbers above are single runs.
+
+- **Run after #157 (2026-11-21):** no `Start state out of bounds` error at all (0 of the 19 earlier ones), so the unclamped path was the Cartesian planner. The pass is still
+  failing and was worse in this single run (1 / 9; the earlier run was 6 / 4, so the pass varies a lot between runs). What the log shows: the first dock approach on stand 0
+  ends in one IK branch (`q2 = -0.62`), the next attempt jumps to another (`q2 = +2.49`, shoulder folded back) and every column after it fails `dock failed` from that
+  pose, with the wrist joint winding down to -4.6 rad on the one column that docks (column 9); the stow then fails 36 times (`OMPL plan failed`). That is the IK-branch and
+  wrist-winding problem of `docs/development_plan.md` section 4 (`ColumnIkChain` is the first piece; it is not yet in the manager). Not caused by cuRobo (this is the MoveIt pass).
+
+- **Opt-in dock continuity (`dock_ik_continuity`, default off; not built or run):** `manipulation_manager` can choose the dock joint goal among IK solutions from the previous dock, the live
+  state and `dock_seed_joint_state` (`core/dock_ik_selector.hpp`, ROS-free): the closest to the previous dock wins (max |dq|, non-lift joints wrapped), a flip of the sign of a
+  `dock_ik_branch_joints` joint (default `[1, 3]`, the shoulder pan and the elbow: in the Gazebo log the pan went -0.62 to +2.49 and the elbow +0.87 to -0.94) or a `dock_ik_wrist_joint` (default 6) outside `[dock_ik_wrist_min_rad, dock_ik_wrist_max_rad]` (default +-3.2) is dropped; none left means
+  the old seeded IK. Turn it on with `MULTI_STAND_DOCK_IK_CONTINUITY=true` in this script (it works with `dock_ik_seeded: false`). The default joint indices are a guess for the
+  lift-first UR10e group, check them against the `q2` of the log before relying on it. Gtested with a fake IK only; whether it fixes the pass is not measured.
+- **Opt-in recovery on the same branch (`recovery_keeps_branch`, default off; not built or run):** the rerun showed `approach_short`, then a jump to another branch. `recoverArm` jogged toward `last_good_state_` of any branch and the next attempt used a planner-sampled pose goal. With the flag the jog goes only toward a configuration on the live branch (last good, else the last docked one, else the arm stays) and the attempts after a short approach keep a joint goal from `selectDockIk` with the live state as reference (`core/recovery_branch.hpp`, 6 gtests with fake IK, host g++). Uses the `dock_ik_*` branch and wrist limits. Whether it fixes the 9 failed columns is not measured.
 
 ### Log lines that show it
 
@@ -532,6 +603,69 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
 - **Same network, two containers.** Mismatched `ROS_DOMAIN_ID`, RMW or SHM settings show up as `service is not available`.
 - Not verified: everything above was read from source; nothing was built or run.
 
+## Contact-force discrepancy (Gazebo 1240 to 1820 N scored, 40 to 70 N feedback, MuJoCo 22 N): hypotheses, not a diagnosis
+
+Found by reading the code and config only. Nothing was built or run for this section (no colcon, no Docker, no Gazebo): the cause is **not found**;
+the ranked list says what each suspect rests on and which run would confirm or kill it. Two traces are compared and they are not the same signal:
+
+| | feedback peak (`peak_force_n`) | scored trace (`run.csv` -> `score_run`) |
+|---|---|---|
+| source | `/ft_conditioner/wrench_conditioned` (the gz `force_torque` sensor on the flange joint, payload removed), `|F|` of all three axes | `/ft_sensor/ground_truth_wrench`: the gz `contact` sensor on `tool_tip_link_collision`, `|Fz|` along the tool |
+| window | only while `tracking_peak_` is set: the press and stroke segments of a column (`manipulation_manager_node.cpp`, `tracking_peak_ = true` before `_contact`, false after) | the whole run: dock, approach, retract, stow, and every stand change |
+| sampling | 200 Hz sensor, latest sample at each message | 200 Hz contact sensor on a 1 kHz physics step: one physics step's contact force per sample, no averaging |
+
+Ranked hypotheses:
+
+1. **Different windows (the scored trace includes motion the feedback never watches).** The recorder keeps every ground-truth sample, the manager's peak ignores dock,
+   approach, retract and stow. The same pass logs `dock failed` columns, IK branch flips and a wrist winding to -4.6 rad; a tool driven into the wall (or an obstacle) outside a
+   contact segment is in the trace and not in the feedback. MuJoCo passes finish every column and never leave the contact segments in contact. Evidence: the code above, and
+   the large scored peaks (583.9, 1240, 1820 N) all coming from runs that failed columns; the run with a 39.7 N feedback peak has no scored figure in this document. Does not by itself
+   explain a 20 to 40 fold ratio unless the tool really is pushed past its travel.
+2. **The tool is pushed past the compliant range and the contact is rigid there.** The tip is 5 N/mm over 20 mm, then 50 N/mm over 5 mm, then a joint limit (rigid). The wall,
+   obstacles and floor are rigid primitives. docs/sim_gazebo.md measured 106 N quasi-static at 35 mm and "contact impacts of 1.2 to 1.8 kN for a sample" on this model; the spike
+   is the constraint solver resolving a joint-limit plus contact impact inside one 1 ms step against a position-servoed arm (large effective mass, no compliance, joint effort limits
+   not enforced in `gz_ros2_control`). The F/T sensor behind it reports the same load but conditioned and at a different instant, so it can read lower. Evidence: `gazebo_tags.xacro`
+   (`stop_travel` 5 mm then rigid limit; damping 100 and 500 N s/m), the Limits section.
+3. **Contact solver parameters are not what the SDF reads like.** The world sets only `mu`/`mu2` (and, since this change, explicit SDF-default `kp 1e12`, `kd 1`, `max_vel 0.01`,
+   `min_depth 0`, restitution 0). gz-sim 8 uses dartsim by default (`<physics type="ignored">`, no engine chosen in `sim.launch.py`: `gz sim -r -s <world>`); to our knowledge (unverified) it
+   solves contacts as hard LCP constraints and does not read `kp/kd/max_vel/min_depth`, so there is no soft-contact tuning knob in this world, and a contact force is whatever impulse
+   the solver needs to stop the penetration within a step. MuJoCo uses a soft contact model (solref/solimp), which is the plausible reason it stays near 22 N.
+4. **Step size and sampling of an impulsive force.** 1 ms step, force sampled for one step. The force of a hard impact is impulse / dt; a shorter step raises the peak, a longer
+   one lowers it, and a 5 ms controller period (200 Hz) cannot see it. A peak that is one sample wide and absent in the F/T sensor is this, not a sustained load.
+5. **Counting: several contact points summed, or points reported twice.** `contact_ground_truth.py` adds `body_N_wrench.force` over every point of every pair that involves the tool.
+   A cylinder face on a box gives several points; if gz reports the whole-pair force on each point (instead of its share), the sum is N times too large. Evidence for: the docs'
+   rigid-tool figure was 108 N for any penetration of 0.05 mm or more, i.e. independent of depth, as a constant per-point impulse would be; evidence against: none either way, the
+   per-point values were never logged. This change makes it visible (see below).
+6. **Other collisions on the tool link.** The sensor is on `tool_tip_link_collision` only, so the ground and other links are included only if they touch the tip: the tip against the
+   obstacle boxes (the 0.04 m radius edge on a 0.1 m wall-front box), the floor (stow near the floor is not expected at z 1.0 to 1.3), or a robot link if self-collision were on (not
+   checked; `self_collide` is not set). The include/exclude filter below and `contact_summary`'s `others` (not published) are there to rule it in or out.
+7. **Frame and sign.** `abs(force.z)` in `tcp_link` throws away x and y; this can only make the trace lower than `|F|`, so it does not explain a larger value. Not a suspect for the size.
+
+What this change adds (all opt-in or evaluation-only; the default sum is unchanged):
+
+- `sim_gazebo/contact_summary.py` (ROS-free, unit-tested): the tool wrench sum with per-message statistics.
+- `contact_ground_truth.py` publishes `/ft_sensor/ground_truth_info` (`[pairs, points, filtered_pairs, sum_point_norm, max_point_norm, duplicate_points]`) and takes
+  `include_other` / `exclude_other` (substrings of the other collision's name; empty = every pair). Example: `ros2 run sim_gazebo contact_ground_truth.py --ros-args -p include_other:="['wall']"`
+  (the launch starts the node itself: pass the parameter in `sim.launch.py` to change it for a pass).
+- `record_run.py` writes `PATH.contacts.csv` beside `PATH` (`t,force_norm,pairs,points,sum_point_norm,max_point_norm,dup_points`), same time base as `run.csv`.
+- The ground and the generated wall carry an explicit `<surface>` (friction, restitution 0, contact ode with the SDF defaults), commented as believed ignored by dartsim; a test
+  (`test_wall_world.py`) checks every collision of both worlds has positive friction and contact parameters, a step of at most 1 ms and the Contact system.
+
+What to run to confirm or reject each (all in the `sim-gazebo` image; none of these has been run):
+
+| hypothesis | run | observation that confirms it | observation that rejects it |
+|---|---|---|---|
+| 1 windows | a normal `run_multi_stand_pass.sh`; join `run.csv` with the manager's state/segment log by time (`segment_exec` lines carry labels) | the samples above 100 N fall in dock, approach, retract or stow segments | the largest samples are inside `press`/`stroke` segments |
+| 2 past the travel | `ros2 topic echo /joint_states` during a pass and read `tool_tip_joint` and `tool_tip_stop_joint` (whether the broadcaster lists these uncontrolled joints was not checked; if not, `gz topic -e -t /world/<world>/model/<robot>/joint_state` does) | at the force peak `tool_tip_joint` is at -0.020 and `tool_tip_stop_joint` at about -0.005 (both limits) | the peak occurs with the tip joints mid-travel |
+| 3 solver parameters | `gz sim -r -s --physics-engine gz-physics-bullet-plugin <world>` (or `gz-physics-bullet-featherstone-plugin` if installed) with the same pass, then again with explicit large `kp` and `kd` in the SDF | peak force changes by a large factor when the engine or `kp/kd` changes | identical trace for both engines and for different kp/kd (dartsim ignores them, as believed, and the engine is not the cause) |
+| 4 step size | `max_step_size` 0.0005 and 0.002 in the world (`wall_world_gen.py` `step_size`, and `empty.sdf`), the same press script `contact_control_test.py` | the peak scales roughly with 1/step | the peak does not move with the step |
+| 5 counting | the pass with the new recorder; look at `PATH.contacts.csv` | `points` > 1 with `max_point_norm` ~ `force_norm` and `dup_points` > 0, or `sum_point_norm` several times `force_norm` | `points` is 1 to 2, `force_norm` ~ `max_point_norm` at the peaks |
+| 6 other collisions | the same pass with `include_other:=['wall']`, and again with `exclude_other:=['wall']` | the peak survives only without the wall filter, and `others` names something else (obstacle, ground, a robot link) | the filtered peak equals the unfiltered one |
+| (sanity) quasi-static | `contact_control_test.py` as in the table above | 8.0 N at 5 mm, 105.6 N at 35 mm (unchanged by this change) | a different value means the SDF change altered the contact |
+
+`others` (the names of the collisions summed) is returned by `contact_summary.tool_wrench_world` but is not published; to read it, call it from a short script on `/tool_contact/contacts`,
+or run the include/exclude pair above. The cheapest first step is hypothesis 1 and 5: both need only a normal pass and the new `PATH.contacts.csv`.
+
 ## Limits
 
 - Contact is compliant only through the tool tip spring (5 N/mm, 20 mm travel) and the bump stage behind it (50 N/mm, 5 mm). Past the travel the tool is
@@ -548,3 +682,49 @@ in the workspace; `motion_planner_ros` loads the `curobo` plugin from `curobo_pl
   description's primitives.
 - Gazebo needs the `sim-gazebo` image; it is not a rosdep dependency of the package, so the
   common `deps` image stays small.
+
+
+### Two-stand pass: the obstacle in the world, and what remains (2026-11-22)
+
+Runs on `fix/gazebo-two-stand` (main plus the recovery option, the dock-continuity option with its seed fix, the contact diagnostics and the lift-stage fix), one run each:
+
+| run | columns done / failed | coverage | scored peak force | wall gap max | notes |
+|---|---|---|---|---|---|
+| stock wall with its obstacle left in the sim world | 0 / 10 | 0.0 | 1230.8 N | 81.7 mm | stand 1 not reached (the arm could not stow) |
+| plain wall (no obstacle, as in the MuJoCo pass) | 2 / 8 | 0.24 | 18.1 N (feedback 23.5 N) | 6.8 mm | both stands reached; 0 start-state bound errors |
+
+What the contact sidecar (`run.csv.contacts.csv`, 1.33 million samples over 1700 s) showed in the first run: no contact until sim time 76.6 s, then a 1400 N impact at 2 points, afterwards a constant 3 to 6 N for the remaining 1600 s (the tool stuck against something), 1.5 % of the samples above 100 N, per-sample point counts of 1 to 3 and a sum of per-point norms equal to the reported force within 1 % (so the points are not double counted). The Gazebo script kept the stock wall's obstacle in the simulated world (moved along the wall) while the planner's scene never contains it, and the MuJoCo pass uses the plain scenario: the arm drove into an obstacle the planner did not know about. The script now builds a plain wall (`MULTI_STAND_OBSTACLES=1` keeps the obstacle). This confirms hypothesis 6 of the contact analysis above (a collision other than the tool-wall pair) and rejects hypothesis 5 (counting); the 1400 N spike is a hard impact.
+
+Still failing in the plain-wall run (8 of 10 columns): `MoveGroupInterface::plan() failed or timeout` 23 times with 62 `Failed to fetch current robot state` and 107 `No state update received within 100ms` from the current state monitor (the joint states reach MoveIt late or not as a full set; a possible link to the new state-only stage joints is not checked); 16 times `docked N m off the standoff pose, not pressing from there` (the Cartesian dock path ends short); collision truncation at `arm_forearm_link <-> arm_wrist_{2,3}_link`. The dock continuity selector rejected the first dock of each stand (its reference is the stow pose, a different branch by construction) and fell back to the seeded IK; the recovery option refused its jog ("too far") in some cases. Not run yet: the same pass with PR #184 (tool pad in the planner model, a contact exclusion that works).
+
+### Two-stand plain wall: what the run log showed, and the fixes (2026-11-22)
+
+Read from the plain-wall run's `manager.log` and `sim_launch.log` (10 columns, 2 of 10 done, peak 18 N):
+
+- **The current-state-monitor timeouts and the plan failures behind them.** Every `Didn't receive robot state ... latest received state has time 0.000000`
+  (62 of them, never any other value) is the `MoveGroupInterface`'s own state monitor on the backend node `motion_planner_backend`, which nothing spins:
+  it never receives a `/joint_states` message. `move_group` then planned from its own state, and 20 of the 62 plan requests were refused by the
+  `CheckStartStateBounds` adapter (`Joint 'lift_joint' ... outside bounds by -2.2e-14`, the lift read at its lower stop). The planner clamps the start
+  into the joint bounds, but only on the path that got a state from that monitor. `OmplPlanner` now reads the live state from the planning scene monitor
+  first (the one `CartesianPlanner` already uses, which has its own spinner), clamps it, and falls back to the `MoveGroupInterface` state only without
+  it. The joint states themselves were never starved (`/joint_states` reaches `wait_arm_settled.py` and the manager's own subscription).
+- **Docks ending off the standoff.** All 16 `docked N m off the standoff pose` warnings read 0.027 to 0.108 m with 0.0 to 0.7 deg, after a dock segment
+  of 7 trajectory points over 0.52 s. The tool track in `run.csv` still moves 6 cm in the second after the check (x 0.87 to 0.94 m between 167.0 and
+  168.0 s, check at about 167 s), so the arm trails its trajectory by more than the fixed 0.5 s the check waits. New manager parameter
+  `tcp_settle_timeout_s` (default 0 = the old fixed wait; the Gazebo pass sets 4 s, `MULTI_STAND_TCP_SETTLE`): the approach and dock checks then wait
+  until the tool position changes by less than `tcp_settle_tolerance_m` (2 mm) over 0.4 s, at most that long, before comparing.
+- **Forearm and wrist collision.** In the first rerun (the two fixes above only) every plan failed at the first dock: its joint goal (wrist 1 at -4.25 rad)
+  had `arm_forearm_link` against `arm_wrist_2_link` in contact ("Unable to sample any valid states for goal tree"), and after a drive to another branch
+  79 of 140 plan requests were refused by `CheckStartStateCollision` with the same pair (51 more with `arm_upper_arm_link` against `lift_carriage_link`),
+  64 Cartesian truncations at that pair. The UR matrix (`srdf/acm_ur*.xacro`, from `scripts/generate_acm.py`, `arm_never_pairs`) now lists the forearm
+  against wrist 2 and wrist 3 as `Never`: the wrist 1 link separates them on the real arm, and the description's cylinders overlap at angles the arm reaches.
+  Not changed: `arm_upper_arm_link` against `lift_carriage_link` (a pair that can touch for real).
+
+| run (plain wall, two stands, 10 columns, same script and options) | columns done / failed | coverage | scored peak | feedback peak | in band | result |
+|---|---|---|---|---|---|---|
+| before (`fix/gazebo-two-stand` tree) | 2 / 8 | 0.24 | 18.1 N | 23.5 N | n/a | fails |
+| start state from the scene monitor + tool settle (no matrix change) | 0 / 10 | 0.0 | none | none | n/a | fails (start and goal states in forearm/wrist contact) |
+| + forearm/wrist `Never` pairs | 10 / 0 (columns 3 and 4 retried once after docking 0.07 and 0.04 m off) | 1.000 (2790 of 2790 cells) | 872.5 N | 33.5 N | 0.876 | scorer passes (RMS error 9.7 N, wall gap max 18.9 mm) |
+
+One run each. The 872.5 N is a single episode at sim time 399.9 to 401.2 s (32 samples above 350 N, 774 above 100 N of 282663), on stand 1 (y 0.48 to 0.59 m,
+z 1.18 to 1.27 m); the feedback peak of the pass was 33.5 N. Not investigated, and one run does not show the pass is stable.

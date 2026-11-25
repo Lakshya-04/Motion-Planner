@@ -37,12 +37,13 @@ ReachabilityNode::ReachabilityNode(const rclcpp::NodeOptions & options)
   const auto file = declare_parameter<std::string>("map_file", "");
   const auto fingerprint = declare_parameter<std::string>("robot_fingerprint", "");
   try {
-    map_ = std::make_shared<Map4D>(loadMap(file, fingerprint));
+    map_ = std::make_shared<Map4D>(loadMap(file, fingerprint, &map_info_));
   } catch (const std::exception & e) {
     RCLCPP_ERROR(get_logger(), "cannot load map '%s': %s", file.c_str(), e.what());
     return;
   }
-  RCLCPP_INFO(get_logger(), "loaded map %s (%zu non-zero cells)", file.c_str(), map_->nonzeroCells());
+  RCLCPP_INFO(get_logger(), "loaded map %s (%zu non-zero cells; %s)", file.c_str(), map_->nonzeroCells(),
+    describeMapInfo(map_info_).c_str());
   const auto base_file = declare_parameter<std::string>("base_profile", "");
   if (!base_file.empty()) {
     try {
@@ -56,10 +57,26 @@ ReachabilityNode::ReachabilityNode(const rclcpp::NodeOptions & options)
     }
   }
 
+  verify_by_default_ = declare_parameter<bool>("verify_by_default", false);
   const auto strategy = declare_parameter<std::string>("stand_strategy", "greedy");
   stand_strategy_ = parseStandStrategy(strategy, StandStrategy::Greedy);
   if (strategy != "greedy" && strategy != "set_cover") {
     RCLCPP_WARN(get_logger(), "stand_strategy '%s' is not greedy or set_cover; using greedy", strategy.c_str());
+  }
+
+  // Opt-in floor for the chassis-to-wall clearance of every plan_stands request (m); 0 = off, requests as sent.
+  stand_min_clearance_m_ = declare_parameter<double>("stand_min_clearance_m", 0.0);
+
+  // Opt-in reach margin for stand planning: a cap on the tool distance as a fraction of the arm reach (0 = off,
+  // 0.85 recommended) and a balance switch that centres each stand's columns in the reach. `arm_reach_m` 0 = the
+  // largest tool distance in the map.
+  stand_max_reach_fraction_ = declare_parameter<double>("stand_max_reach_fraction", 0.0);
+  stand_balance_reach_ = declare_parameter<bool>("stand_balance_reach", false);
+  arm_reach_m_ = declare_parameter<double>("arm_reach_m", 0.0);
+  if (map_ && (stand_max_reach_fraction_ > 0.0 || stand_balance_reach_)) {
+    if (!(arm_reach_m_ > 0.0)) {arm_reach_m_ = map_->estimateReach();}
+    RCLCPP_INFO(get_logger(), "stand reach margin: cap %.2f of the reach, balance %s, reach %.3f m",
+      stand_max_reach_fraction_, stand_balance_reach_ ? "on" : "off", arm_reach_m_);
   }
 
   using namespace reachability_msgs::srv;
@@ -139,6 +156,52 @@ void ReachabilityNode::setVerifier(std::shared_ptr<StandVerifier> verifier, cons
   verify_options_ = options;
 }
 
+void ReachabilityNode::handleVerifiedPlan(
+  const StationRequest & r, const std::optional<Stand> & start, uint32_t max_stands,
+  reachability_msgs::srv::PlanStands::Response & res)
+{
+  if (!verifier_) {
+    res.message = "verification requested but no stand verifier configured (run reachability_verified_node, which "
+      "brings the IK and collision backend)";
+    return;
+  }
+  VerifiedPlanOptions opt;
+  opt.verifier = verifier_;
+  opt.verify = verify_options_;
+  opt.max_rounds = verify_options_.max_rounds;
+  const VerifiedStandPlan vp = planStandsVerified(*map_, r, start, max_stands, stand_strategy_, {}, opt);
+  for (size_t i = 0; i < vp.plan.stands.size(); ++i) {
+    const auto & a = vp.plan.stands[i];
+    reachability_msgs::msg::Stand m;
+    m.x = a.stand.arm_xy.x();
+    m.y = a.stand.arm_xy.y();
+    m.yaw = a.stand.yaw;
+    m.standoff = a.station.standoff;
+    m.footprint_clearance = a.station.footprint_clearance;
+    m.travel_s = a.travel_s;
+    m.target_indices.assign(a.targets.begin(), a.targets.end());
+    for (const auto & b : a.station.plan.bands) {   // the bands IK confirmed
+      reachability_msgs::msg::LiftBand lb;
+      lb.lift_height = b.lift_height;
+      lb.pose_indices.assign(b.pose_indices.begin(), b.pose_indices.end());
+      m.bands.push_back(lb);
+    }
+    res.stands.push_back(m);
+  }
+  // `unreachable` = no stand can (RM4D) or none was confirmed (IK / collision); the message tells them apart
+  std::vector<uint32_t> bad(vp.plan.unreachable.begin(), vp.plan.unreachable.end());
+  bad.insert(bad.end(), vp.rejected_by_verifier.begin(), vp.rejected_by_verifier.end());
+  std::sort(bad.begin(), bad.end());
+  res.unreachable = bad;
+  res.not_planned.assign(vp.plan.not_planned.begin(), vp.plan.not_planned.end());
+  res.total_travel_s = vp.plan.total_travel_s;
+  res.success = bad.empty() && res.not_planned.empty() && !vp.plan.stands.empty();
+  res.message = "verified: " + std::to_string(vp.rounds) + " round(s), " + std::to_string(vp.verifier_calls) +
+    " verifier batch(es), " + std::to_string(vp.refused.size()) + " stand-target pair(s) refused by IK or collision, " +
+    std::to_string(vp.rejected_by_verifier.size()) + " target(s) no stand confirmed" +
+    (vp.converged ? "" : " (not converged: round or verifier-call limit reached)");
+}
+
 void ReachabilityNode::handlePlanStands(
   const reachability_msgs::srv::PlanStands::Request & request, reachability_msgs::srv::PlanStands::Response & response,
   bool verified)
@@ -146,6 +209,13 @@ void ReachabilityNode::handlePlanStands(
   const auto * req = &request;
   auto * res = &response;
   {
+    // which null-space samples the map was built from: the stands below are only as good as that policy
+    res->arm_dof = map_info_.arm_dof;
+    res->redundancy = map_info_.redundancy;
+    if (map_info_.arm_dof > 6) {
+      RCLCPP_INFO(get_logger(), "plan_stands on a map of a %u-joint arm, redundancy: %s", map_info_.arm_dof,
+        map_info_.redundancy.empty() ? "not recorded" : map_info_.redundancy.c_str());
+    }
     if (req->targets_world.empty()) {
       res->message = "no targets";
       return;
@@ -161,7 +231,7 @@ void ReachabilityNode::handlePlanStands(
     r.wall_normal = n.normalized();
     auto pos = [](double v, double dflt) {return v > 0.0 ? v : dflt;};
     const StationRequest d;
-    r.min_clearance = pos(req->min_clearance, d.min_clearance);
+    r.min_clearance = effectiveMinClearance(pos(req->min_clearance, d.min_clearance), stand_min_clearance_m_);
     r.max_standoff = pos(req->max_standoff, d.max_standoff);
     r.grid_step = pos(req->grid_step, d.grid_step);
     r.lateral_margin = pos(req->lateral_margin, d.lateral_margin);
@@ -178,15 +248,7 @@ void ReachabilityNode::handlePlanStands(
       return;
     }
     // the search is stations x lift heights x targets per round: refuse requests far beyond a real wall
-    double x_lo = 1e18, x_hi = -1e18, y_lo = 1e18, y_hi = -1e18;
-    for (const auto & t : r.targets_world) {
-      x_lo = std::min(x_lo, t.translation().x());
-      x_hi = std::max(x_hi, t.translation().x());
-      y_lo = std::min(y_lo, t.translation().y());
-      y_hi = std::max(y_hi, t.translation().y());
-    }
-    const double span = std::hypot(x_hi - x_lo, y_hi - y_lo) + 2.0 * r.lateral_margin;
-    const double stations = ((r.max_standoff - r.min_clearance) / r.grid_step + 1.0) * (span / r.grid_step + 1.0);
+    const double stations = stationGridPointCount(r);
     const double heights = (r.lift_max - r.lift_min) / r.lift_step + 1.0;
     const double work = stations * heights * static_cast<double>(r.targets_world.size());
     if (!std::isfinite(work) || work > kMaxStandWork) {
@@ -195,6 +257,9 @@ void ReachabilityNode::handlePlanStands(
       return;
     }
     r.arm_mount_offset_z = req->arm_mount_offset_z;
+    r.reach.reach_m = arm_reach_m_;
+    r.reach.max_fraction = stand_max_reach_fraction_ > 0.0 ? stand_max_reach_fraction_ : 0.0;
+    r.reach.balance = stand_balance_reach_;
     r.base = base_;
     std::optional<Stand> start;
     if (req->has_start) {
@@ -238,6 +303,10 @@ void ReachabilityNode::handlePlanStands(
           " of " + std::to_string(sel.verification.verified_pairs) + " RM4D pairs refused by IK or collision" +
           (sel.verification.converged ? "" : " (not converged: round limit reached)");
       }
+      return;
+    }
+    if (req->verified || verify_by_default_) {
+      handleVerifiedPlan(r, start, req->max_stands > 0 ? req->max_stands : 32, *res);
       return;
     }
     const StandPlan plan = planStands(*map_, r, start, req->max_stands > 0 ? req->max_stands : 32, stand_strategy_);

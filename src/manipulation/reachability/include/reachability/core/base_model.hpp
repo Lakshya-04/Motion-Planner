@@ -26,6 +26,7 @@ struct BaseModel
   std::vector<Eigen::Vector2d> footprint;  ///< Polygon in base_footprint (x forward, y left), m.
   Eigen::Vector2d arm_mount{0.0, 0.0};     ///< Arm base position in base_footprint (m).
   std::optional<double> lift_mount_height;  ///< lift_mount_link above the ground (m), when the profile has it.
+  std::optional<double> lift_carriage_offset;  ///< arm mount above lift_mount_link with the lift retracted (m): the profile's `lift.mount_height_m`.
   double max_linear{1.0};                  ///< m/s
   double max_angular{1.0};                 ///< rad/s
 };
@@ -42,8 +43,8 @@ struct Stand
 BaseModel loadBaseProfile(const std::string & path);
 
 /// Height of the arm base above the ground with the lift at zero stroke: the base's
-/// `lift_mount_height_m` plus the telescopic lift's fixed column (0.8 m) and arm mount (0.02 m),
-/// the defaults of urdf/lift/telescopic_lift.xacro. Pass it as `arm_mount_offset_z`. Empty when the
+/// `lift_mount_height_m` plus the lift's retracted mount height (the profile's `lift.mount_height_m`; the
+/// 0.82 m of the stock telescopic lift (0.8 m column and 0.02 m arm mount) when the profile has no lift section). Pass it as `arm_mount_offset_z`. Empty when the
 /// profile carries no mount height.
 std::optional<double> armBaseHeightAtLiftZero(const BaseModel & base);
 

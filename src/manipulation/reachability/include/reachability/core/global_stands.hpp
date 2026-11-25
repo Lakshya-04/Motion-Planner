@@ -34,7 +34,7 @@ namespace reachability
 struct CandidateStand
 {
   Stand stand;                     ///< Arm base position and base yaw.
-  double standoff{0.0};            ///< Arm base distance from the wall plane (m).
+  double standoff{0.0};            ///< Arm base distance from the wall plane (m; 0 on a horizontal plane).
   double footprint_clearance{0.0}; ///< Footprint to wall distance (m; 0 without a base model).
 };
 
@@ -45,6 +45,7 @@ enum class StandSelectionCode
   kInvalidRequest,      ///< Bad grid step, wall normal, lift range or options.
   kNoCandidates,        ///< No candidate stand fits (footprint clearance) or reaches any target.
   kUnreachableTargets,  ///< Some targets are reachable from no candidate; the rest are covered.
+  kNoFreeStand,         ///< The request's free space filtered out every candidate stand (see StationRequest::free_space).
 };
 
 const char * toString(StandSelectionCode code);
@@ -82,6 +83,8 @@ struct VerificationSummary
   size_t confirmed_pairs{0};
   std::vector<RefusedPair> refused;     ///< RM4D promised, IK / collision refused (in the order found).
   size_t verifier_calls{0};
+  size_t verifier_poses{0};             ///< Target poses in those batches.
+  bool budget_hit{false};               ///< `verify.max_verifier_calls` stopped it (then also converged = false).
   double optimism() const
   {
     return verified_pairs ? static_cast<double>(refused.size()) / static_cast<double>(verified_pairs) : 0.0;

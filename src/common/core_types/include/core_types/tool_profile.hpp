@@ -22,15 +22,31 @@ namespace core_types
 
 /**
  * @struct ToolGeometry
- * @brief Mesh + flange-to-TCP transform, consumed by URDF/xacro + MoveIt collision.
+ * @brief Mesh + flange-to-contact-frame transform, consumed by URDF/xacro + MoveIt collision.
+ * @details Contact frame convention. `tcp_xyz` / `tcp_rpy` give the CONTACT frame (the `tcp_link`)
+ *          relative to the flange. Its origin is the point that touches the work (the nozzle
+ *          tip for a spray tool) and its +Z points INTO the work at the nominal pose. Tools
+ *          with an offset contact point (an angled sander, a side-mounted pad) fold the offset
+ *          into `tcp_xyz` / `tcp_rpy`, so the controller, the wrench conditioner (moveWrench
+ *          to the tcp_link) and the coverage lift all see the same frame.
+ *
+ *          `tilt_deg` and `tilt_axis` are the INTENDED angle between the tool axis (contact
+ *          +Z) and the surface normal, and the in-surface axis the tool tilts about. The
+ *          axis is given in the contact frame (x, y, z) and must lie in the surface plane,
+ *          so its z component is 0; it need not be normalised (the loader does that). With
+ *          `tilt_deg == 0` (default) the tool axis is anti-parallel to the surface normal
+ *          and `tilt_axis` is ignored. Positive tilt is a right-handed rotation about the
+ *          axis.
  */
 struct ToolGeometry
 {
   std::string mesh;                              ///< Mesh filename (relative to the tool package).
   std::array<double, 3> mesh_origin_xyz{0, 0, 0}; ///< Mesh origin translation.
   std::array<double, 3> mesh_origin_rpy{0, 0, 0}; ///< Mesh origin rotation (roll, pitch, yaw).
-  std::array<double, 3> tcp_xyz{0, 0, 0};         ///< Flange -> link_tcp translation.
-  std::array<double, 3> tcp_rpy{0, 0, 0};         ///< Flange -> link_tcp rotation.
+  std::array<double, 3> tcp_xyz{0, 0, 0};         ///< Flange -> contact frame translation (m).
+  std::array<double, 3> tcp_rpy{0, 0, 0};         ///< Flange -> contact frame rotation (rad).
+  double tilt_deg{0.0};                           ///< Intended tool-axis tilt to the surface normal, deg.
+  std::array<double, 3> tilt_axis{0, 0, 0};       ///< In-surface tilt axis in the contact frame (z == 0).
   /// Links allowed to contact the wall collision object (ACM exclusion), empty for non-contact tools.
   std::vector<std::string> contact_allowed_links;
 };

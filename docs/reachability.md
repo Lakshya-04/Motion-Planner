@@ -3,7 +3,7 @@
 Answers, for a given robot arm: **can the tool reach this pose** (forward query) and **where
 should the base be so that it can** (inverse query), from one compact precomputed map.
 Package: [`src/manipulation/reachability`](../src/manipulation/reachability) (ROS-free core,
-28 tests). Implemented here from the paper's idea; the other pieces below describe how it fits. Method: **RM4D**, Rudorfer, *"RM4D: A Combined Reachability and
+28 tests plus `redundancy_test`). Implemented here from the paper's idea; the other pieces below describe how it fits. Method: **RM4D**, Rudorfer, *"RM4D: A Combined Reachability and
 Inverse Reachability Map for Common 6-/7-Axis Robot Arms by Dimensionality Reduction to 4D"*,
 ICRA 2025, [arXiv:2410.06968](https://arxiv.org/abs/2410.06968) (project page
 mrudorfer.github.io/rm4d). Per the paper's abstract, the map is far more compact and builds
@@ -23,7 +23,7 @@ assumptions are only partly satisfied.
 | Use | How |
 |---|---|
 | **Base stationing** | inverse query for the coverage poses of a wall region gives candidate base poses; pick stations that cover the most poses ([cleaning / stationing work in the roadmap]) |
-| **Lift band design** | build the map for the **6-DOF arm only**; the lift shifts pz, so the map tells which wall rows each lift height covers. Choose the fewest bands, then index the lift between bands with it locked (see [design_principles.md](design_principles.md) section 4) |
+| **Lift band design** | build the map for the **arm only** (6 or 7 joints, see "Redundant arms"); the lift shifts pz, so the map tells which wall rows each lift height covers. Choose the fewest bands, then index the lift between bands with it locked (see [design_principles.md](design_principles.md) section 4) |
 | **Feasibility pre-filter** | reject unreachable coverage waypoints in microseconds before IK / planning (the manager's coverage feasibility analyzer) |
 | **Recovery targets** | prefer known-state targets that are reachable from the current station ([learned_recovery.md](learned_recovery.md)) |
 | **Arm / lift selection** | compare candidate arms and lift strokes on the same wall layout before buying hardware |
@@ -44,6 +44,7 @@ adds an orientation constraint (tool normal to the wall); query with the constra
 | Versioned binary map file with a robot fingerprint (a map for another robot is rejected) | `core/io.hpp` |
 | `scripts/urdf_to_chain.py`: URDF -> chain YAML (folds fixed joints, records axes and limits) | `scripts/` |
 | `rm4d_tool build / info / bands` | `apps/rm4d_tool.cpp` |
+| Column pose sequences: approach, contact, strokes, retract checked against the map per stand and lift height; per-pose score (`scorePose`), singular value and joint-limit margin of a verifier's solution; stands that keep columns whole (`planColumnStands`); the "how much can we do" analysis and its JSON; `column_reach_tool` | `core/column_sequence.hpp`, `pose_quality.hpp`, `column_stands.hpp`, `column_analysis.hpp`, `apps/column_reach_tool.cpp` |
 
 Backends other than the built-in chain (Pinocchio, VAMP, cuRobo, MoveIt, with self-collision)
 implement `ArmModel`; none is written yet, so the built-in chain only checks joint limits.
@@ -60,6 +61,162 @@ rm4d_tool bands ur10e.rm4d --wall-x 0.8 --z-min 0.1 --z-max 3.0 --lift-max 1.5 -
 Measured on this machine (8 threads): 3 million samples in 0.5 s. UR10e, a 3 m wall 0.8 m in
 front of the base: **2 bands** (lift 0.95 m covers 25 of 30 targets, 1.45 m the other 5). The same
 wall 3 m away: all targets unreachable. Generic arm: 3 bands.
+
+## Reach report: what reach do we really get, top to bottom?
+
+`docker/tools/reach_report.py` (python3 + numpy, ROS-free; matplotlib only for `--png`) answers it from
+an RM4D map file. It places a vertical wall patch in front of the arm and, for every lift height,
+asks the map whether the tool can stand on each wall cell with its axis **normal to the wall**
+(approach axis horizontal, so polar angle pi/2 and azimuth +x: the cell key is `pz = wall z - arm
+base z`, `x* = arm-base-to-wall distance`, `y* = lateral offset`; no rotation needed).
+
+Inputs and geometry:
+
+- arm base to wall `D = --clearance + --arm-offset` (chassis edge to wall plus the arm base set back from the
+  chassis edge). Arm base height at lift q is `arm_base_z0 + q`, where `arm_base_z0` is the base's
+  `lift_mount_height_m` plus the profile's `lift.mount_height_m` (the `armBaseHeightAtLiftZero` of
+  the C++ `BaseModel`; 0.35 + 0.82 = 1.17 m for `ur10e_telescopic`). `--profile` reads it and the
+  stroke (`lift.stroke_m`) from the yaml; `--stroke` / `--arm-base-z0` override it.
+- `--reach R` is the reach the fractions refer to. Without it the tool uses the largest tool distance
+  stored in the map, which includes the tool offset past the arm flange (1.7 m for the UR10e map
+  with its tcp), so pass the datasheet reach (1.3 m) when you think in arm reach.
+- "Reachable at fraction f" = the map holds the cell AND the tool is within `f * R` of the arm base.
+  0.7 / 0.85 / 1.0 are the defaults (`--fractions`): the margin kept from the singular full stretch.
+- A warning is printed when the map's z window or xy half-width is narrower than the reach: cells
+  outside the window count as unreachable and the lowest/highest z would be clipped (build the map
+  with `--zmin -1.8 --zmax 2.0 --extent 2.0` as in "Try it").
+
+It reports, per reach fraction: the reachable fraction of the patch at every lift height; the lowest
+and highest reachable wall z at lift min and lift max (scanned over z 0..3 m on the patch's centre
+line, not clipped to the patch); the **minimum number of lift positions** that cover the patch bottom
+to top and which heights (exact search over the lift grid, ties broken by the least lift travel;
+`--lift-step`, default 0.05 m); a FLAG with the z runs when patch cells are never reachable at any
+lift; and a heat strip (ASCII; `--png` writes a matplotlib figure of reachable fraction over lift x
+wall height plus the strip). `--json` dumps the numbers. The older `rm4d_tool bands` answers the lift
+band question for arbitrary tool normals; this one adds the reach fractions, the extent at the ends of the
+stroke, the flags and the strip for the wall-normal case.
+
+### Worked example: UR10e tall wall
+
+Patch z 0.6..2.0 m, chassis clearance 0.42 m, arm base 0.3 m behind the chassis edge (D = 0.72 m),
+1.5 m stroke, datasheet reach 1.3 m, map built as in "Try it":
+
+```bash
+python3 docker/tools/reach_report.py --map ur10e.rm4d \
+  --profile src/description/mobile_manipulator_description/config/profiles/ur10e_telescopic.yaml \
+  --patch-z 0.6 2.0 --patch-y -0.5 0.5 --clearance 0.42 --arm-offset 0.3 --reach 1.3 --lift-step 0.1
+```
+
+Output (excerpt; the full per-lift table has 16 rows):
+
+```
+  arm base to wall 0.720 m (clearance 0.420 + arm offset 0.300), reach 1.300 m
+  arm base height at lift 0: 1.170 m, stroke 1.500 m, lift step 0.100 m
+At 70% of reach:
+  reachable wall z at lift min (0.00): 0.65 .. 1.70 m; at lift max (1.50): 2.15 .. 3.00 m
+  patch coverable by any lift: 90.3%; minimum lift positions: 4 at 0.00, 0.10, 0.40, 0.60 m
+  FLAG: 59 patch cells never reachable (z runs 0.60..0.90, y -0.50..0.50)
+At 85% of reach:
+  reachable wall z at lift min (0.00): 0.35 .. 2.00 m; at lift max (1.50): 1.85 .. 3.00 m
+  patch coverable by any lift: 100.0%; minimum lift positions: 2 at 0.00, 0.30 m
+At 100% of reach:
+  reachable wall z at lift min (0.00): 0.10 .. 2.25 m; at lift max (1.50): 1.60 .. 3.00 m
+  patch coverable by any lift: 100.0%; minimum lift positions: 2 at 0.30, 0.40 m
+```
+
+Check against the analytic sphere: with the arm base 0.72 m from the wall and reach 1.3 m, the tool can
+reach wall points up to `sqrt(1.3^2 - 0.72^2) = 1.08 m` above and below the arm base (on the line in front
+of it). At lift 0 the base is at 1.17 m, so the span is 0.09 .. 2.25 m; the report gives 0.10 .. 2.25 m
+(one 5 cm cell). At 0.7 of reach (0.91 m) the half-span is 0.556 m, span 0.61 .. 1.73 m; the report
+gives 0.65 .. 1.70 m. At lift max the span moves up by 1.5 m (1.6 .. 3.75 m, scan cut at 3.0 m). The
+same numbers come out of `test_reach_report.py` on an analytic sphere-shell map.
+
+What it says about the tall wall: the whole 0.6..2.0 m patch is reachable at 0.85 and 1.0 of reach
+from the lift range 0..0.3 m (a 1.4 m tall wall fits inside the 2.2 m span; the lift is needed for walls
+above about 2.25 m or below about 0.1 m, not for this one). Keeping 0.7 of reach is not possible at this
+stand: the bottom 0.6..0.9 m of a 1 m wide patch is never reachable at any lift (the lift cannot go
+below its zero, so the lowest reach is the arm base height minus the half-span). At 0.7 the arm base
+would have to be closer than 0.72 m or the patch narrower. Heat strip at 0.85 of reach (columns: lift
+min, mid, max, best lift):
+
+```
+Heat strip at 85% of reach: wall z vs patch width reachable (full bar = all, empty = none)
+  z[m]  lift 0.00               lift 0.80               lift 1.50               best lift             
+ 2.00    |#####               |  |##################  |  |################### |  |####################|
+ 1.95    |###########         |  |####################|  |################    |  |####################|
+ 1.90    |################    |  |####################|  |###########         |  |####################|
+ 1.85    |##################  |  |####################|  |#######             |  |####################|
+ 1.80    |################### |  |####################|  |                    |  |####################|
+ 1.75    |####################|  |####################|  |                    |  |####################|
+ 1.70    |####################|  |################### |  |                    |  |####################|
+ 1.65    |####################|  |#################   |  |                    |  |####################|
+ 1.60    |####################|  |####################|  |                    |  |####################|
+ 1.55    |##################  |  |####################|  |                    |  |####################|
+ 1.50    |####################|  |####################|  |                    |  |####################|
+ 1.45    |####################|  |####################|  |                    |  |####################|
+ 1.40    |####################|  |####################|  |                    |  |####################|
+ 1.35    |####################|  |################### |  |                    |  |####################|
+ 1.30    |################### |  |################### |  |                    |  |####################|
+ 1.25    |################### |  |################    |  |                    |  |####################|
+ 1.20    |##################  |  |###########         |  |                    |  |####################|
+ 1.15    |####################|  |#######             |  |                    |  |####################|
+ 1.10    |####################|  |                    |  |                    |  |####################|
+ 1.05    |####################|  |                    |  |                    |  |####################|
+ 1.00    |####################|  |                    |  |                    |  |####################|
+ 0.95    |####################|  |                    |  |                    |  |####################|
+ 0.90    |################### |  |                    |  |                    |  |####################|
+ 0.85    |#################   |  |                    |  |                    |  |####################|
+ 0.80    |####################|  |                    |  |                    |  |####################|
+ 0.75    |####################|  |                    |  |                    |  |####################|
+ 0.70    |####################|  |                    |  |                    |  |####################|
+ 0.65    |####################|  |                    |  |                    |  |####################|
+ 0.60    |####################|  |                    |  |                    |  |####################|
+```
+
+## Redundant arms (7 or more joints)
+
+The builder, the chain model and the file format take any number of revolute joints; the joint count
+comes from the chain (`urdf_to_chain.py` on the profile's arm, one entry per `joints.arm`), nothing in the
+map depends on six. A 7-axis arm reaches a tool pose with a one-parameter family of configurations (the
+elbow swivel), so a map has to say what "reachable" means for it. Policy, stored in the map header:
+
+- **Union (default).** Joints are sampled uniformly over their limits, so a cell is set when **some**
+  null-space value reaches it. The map answers "is there any arm configuration (within joint limits)
+  that puts the tool here". This is also exactly what a 6-DOF map is (no freedom to choose), and for a 6-DOF
+  chain the sampling is unchanged: a gtest replays the previous builder and compares every cell for a seed.
+- **Restricted (`BuildOptions::redundancy`).** One joint (`joint`, usually joint 3, the upper-arm roll of
+  the 7-axis arms) is drawn only from `values` (+- `tolerance`), the others uniformly. The map then
+  answers "reachable with that joint near one of these values", which is the right question when the
+  controller or IK keeps the elbow near a preferred setting. `rm4d_tool build chain.yaml out.rm4d
+  --redundant-joint 3 --redundant-values -0.5,0,0.5 --redundant-tol 0.05` (joint index is 1-based on the
+  command line).
+- **Header.** Map format version 2 stores the arm's joint count and a text describing the policy
+  (`rm4d_tool info` prints it; `MapInfo` / `loadMap(path, fingerprint, &info)` in C++). Version 1 files
+  still load and report "not recorded".
+
+Limits, stated plainly: the union is optimistic for a planner that holds the swivel fixed, and a cell
+says nothing about how many elbow angles reach it beyond the sample count; joint 3 is a proxy for the
+null-space parameter, not the swivel angle itself (they coincide only for a spherical shoulder with no
+offsets, which none of the shipped arms has exactly); restricting one joint does not guarantee the
+remaining six can realise the pose away from singularities; the 4D reduction still assumes joint 1 and the
+tool-axis joint rotate fully (Gen3 and xArm 7 do; iiwa 7 and the Panda family stop short of a full turn, which the
+paper reports as a small accuracy loss). Self-collision and obstacles are not in the map, as before. Tested on
+a Panda-kinematics chain at 0.1 m resolution (`redundancy_test`: fresh samples reachable, out-of-reach poses
+not, inverse query finds the true base, restricted map smaller than the union and consistent with it);
+not compared against IK or a simulator.
+
+**Stands on a 7-DOF map.** `planStands`, `selectStands`, `planColumnStands`, the stand verifier and the node read only
+the map and tool poses; none of them assumes six joints (the verifier's joint solutions are plain vectors, any length),
+so no code change was needed there. `stands_redundant_test` runs them on the Panda-kinematics map: a wall patch gets
+stands whose every target is reachable in the map from that stand and lift height, columns stay whole under the
+union, set cover is no worse than greedy, and a fake IK (7-joint solutions) that refuses a stand makes the plan route
+around it, or report the targets as `rejected_by_verifier`. What the policy changes: pinning joint 3 at 0 (+- 0.05)
+left 22101 of 22216 non-zero cells (0.1 m, 20 degree cells, 2 million samples), and about 1 percent of poses reached
+with the elbow swung out are missing from it, so at this resolution the restriction is a small subset of the union.
+Cell counts do change (the pinned map concentrates the same samples), so `count_ref` of `MarginConfig` is per map.
+`~/plan_stands` and `~/plan_verified_stands` now return `arm_dof` and `redundancy` (the map header text) and the
+node logs them at start and per request, so a result says which null-space samples it rests on. Unverified against
+IK of a real 7-axis arm; the union stays optimistic for a planner that holds the elbow fixed.
 
 ## Base-aware stationing
 
@@ -164,7 +321,7 @@ no Gazebo or MuJoCo run.
 
 ## Horizontal surfaces (ceiling, floor)
 
-`chooseStation` needs a wall plane and a free side, so it refuses a horizontal one. `planHorizontalStands(map,
+`chooseStation` also accepts a horizontal plane now (see "Plane-generic stands and base free space" below); `planHorizontalStands` is the older, separate planner. `planHorizontalStands(map,
 request)` (`core/horizontal_stands.hpp`) is the counterpart for a ceiling (tool pointing up) or a floor (tool
 pointing down). The tool axis is vertical, so the map has no azimuth: a cell depends only on the horizontal
 distance and the height between base and target, and one stand reaches a ring around itself.
@@ -264,9 +421,9 @@ pass of `selectStands` uses it.
   `max_rounds` (8). What no stand confirms is `rejected_by_verifier`, never covered, and `refused` lists every
   (stand, target, reason). With a base model the travel legs are recomputed for the final order. Without a verifier it is
   `planStands`. Tested with fake verifiers (`stands_verified_test`: accepting verifier changes nothing, a refused stand is
-  replaced, targets refused everywhere are reported, everything refused terminates, set cover, travel). Not wired:
-  `~/plan_stands`, `~/plan_verified_stands` (still `selectStands`) and the manager's `base_check` do not call it, and it
-  has not run against MoveIt. A refused stand is avoided as a point (radius 5 cm by default), not as a region, so a
+  replaced, targets refused everywhere are reported, everything refused terminates, set cover, travel). Wired behind
+  `~/plan_stands` as opt-in (below); `~/plan_verified_stands` is still `selectStands` and the manager's `base_check` does not
+  call it, and it has not run against MoveIt. A refused stand is avoided as a point (radius 5 cm by default), not as a region, so a
   verifier that refuses a whole neighbourhood needs several rounds.
 - **cuRobo verifier: not built.** The bridge (`curobo_bridge_msgs`) has `SolveIk` and `CheckMotion` (state validity)
   but no batched IK, no way to fix the lift height of the 7-joint group, and a world loaded separately (`SetWorld`).
@@ -286,6 +443,45 @@ solver branch will refuse many stands RM4D rightly likes; and the selection pass
 (stand, height) per round, so against a real backend bound it with `max_lift_probes`, fewer candidates or a smaller
 `max_rounds`.
 
+#### Where the verified cost goes, and what bounds it
+
+No profile was taken against MoveIt (that needs the live demo); the cost model below is read from the code and from the
+measured counts above (1278 pairs, 701 batches, about 5 minutes, so roughly 0.4 s a batch of a few poses). Per
+(stand, target) pair the cost is one IK-plus-collision probe per lift height tried (up to `max_lift_probes`), and `selectStands`
+repeats the pass once per round, one new stand per round when whole stands are refused. The RM4D recomputation per round
+(CPU, no IK) is cheap by comparison. What the code now does about it:
+
+- **Verdict cache across rounds (already there, now tested).** `selectStands` keeps a verdict per (candidate stand, target) pair,
+  so a later round sends only pairs it has not seen; `SelectStandsCost.EveryPairIsVerifiedAtMostOnceAcrossRounds` fails if a pair
+  is ever sent twice. A pair confirmed in one round is never re-sent. `planStandsVerified` needs no cache: a stand that
+  refused or only partly confirmed its targets goes on the avoid list, so the same stand is not planned again.
+- **Rounds that learn nothing stop.** A round that sends no new pair ends `selectStands`; a round that plans nothing and
+  refuses nothing ends `planStandsVerified`. The RM4D reachability query of a stand is no longer computed when all its pairs
+  are already cached.
+- **`VerifyOptions::stop_at_first_ok`** (node parameter `stop_at_first_ok`, default true on `reachability_verified_node`,
+  false in the core): a target's lift heights are probed lowest first and probing stops at the first height that solves, so a
+  confirmed pair costs its position in the probe list instead of all of them. The confirmed set and each target's best
+  height (the lowest ok one) are the same as with full probing; refused targets still cost every height. The price: the
+  margin of a confirmed target becomes 1 / (heights tried), a lowest-first ordinal rather than the share of ok heights, and
+  with `jitter_m` > 0 the offset probes run at that first ok height only. The ranking among stands therefore can differ
+  in `selectStands`, which weighs margins; the gtests below compare covered and rejected targets, not stand identity there.
+- **`VerifyOptions::max_verifier_calls`** (node parameter, 0 = unlimited): a hard bound on batches. When reached the run stops
+  verifying, reports `converged = false` (`budget_hit` in the summary), and in `planStandsVerified` the targets of
+  stands not yet verified go to `not_planned`, never reported as covered.
+- `verifier_poses` next to `verifier_calls` in `StandVerification`, `VerificationSummary` and `VerifiedStandPlan`: poses sent are
+  the IK cost, batches only the call overhead.
+
+Measured with counting fake verifiers in `stands_verified_test` (one run; the fake refuses a neighbourhood of the preferred
+stand and every lift height under 0.2 m; a call-count measure, not wall time, and the fake costs nothing per pose):
+`planStandsVerified` 72 poses in 12 batches without `stop_at_first_ok` against 60 poses in 10 batches with it (-17% poses), same stands,
+same targets, same refusals, same lift-band heights; `selectStands` (several rounds because a stand is refused) 720 poses
+against 399 (-45%), same covered and rejected targets. The two gains differ because they depend on how many probe heights a
+pair has and how early the first one solves; they are properties of this fake, not predictions for a real wall.
+Wall-clock gain on a real backend is expected to follow the pose count but was not measured. Not done: refusing a
+whole neighbourhood of a refused stand at once (needs a policy; today a refused stand is avoided as a point, so a
+verifier that refuses a region still costs about one round per candidate), batching several stands per verifier call, and
+a measured run on the MoveIt demo.
+
 ### The verified service (`reachability_verified_node`)
 
 `reachability_moveit` ships `reachability_verified_node`: the plain `ReachabilityNode` plus the MoveIt IK and collision
@@ -297,9 +493,274 @@ and the cover is recomputed. The response carries the IK-confirmed lift bands an
 at 64 rounds), so use a long client timeout. Parameters of the verifier (`ik_group`, `ik_link`, `collision_group`,
 `arm_mount_offset_z`, `arm_base_x/y`, `lift_max`, `seed_set`, `max_lift_probes`, `jitter_m`, `max_rounds`) are on the node
 `reachability_verified_config`. Without a verifier (the plain `reachability_node`) the service answers with a message and no
-stands. Status: unit-tested through the service with a fake verifier (accepting, and refusing a target everywhere);
+stands. Cost bounds: `stop_at_first_ok` (default true here) and `max_verifier_calls` (default 0 = none), see "Where the
+verified cost goes".
+
+**Verified or not in `~/plan_stands`.** `PlanStands.srv` has a `bool verified` (default false = RM4D only, exactly as
+before) and the node a parameter `verify_by_default` (default false; true verifies requests that leave the flag false). A
+verified `~/plan_stands` request runs `planStandsVerified`, so the request's `max_stands`, the node's `stand_strategy` and
+`max_rounds` apply (unlike `~/plan_verified_stands`, which runs `selectStands` with its tour). Targets no stand confirms
+land in `unreachable` (the message counts them separately), `success` is false for them, and the message reports rounds, verifier
+batches and refusals. The flag on a node without a verifier answers `success = false` and says so; it never falls back
+silently. Tested through the service with fake verifiers (default path never calls the verifier; flag; flag without verifier;
+a target refused everywhere; the parameter). Status: unit-tested through the service with a fake verifier (accepting, and refusing a target everywhere);
 the node itself has not been run against MoveIt, the stand cap and `stand_strategy` do not apply to it, the scene is
 whatever `move_group` holds (stand-relative obstacle posing is not wired), and the manager does not call it yet.
+
+## Column pose sequences: approach, contact, retract, margins, splits
+
+A column of a wall plan is more than its stroke poses. The manager docks at an approach pose (the dock pose pulled back by
+`dock_approach_extra_m`), closes to the dock pose (`dock_standoff_m` from the plan surface), presses, strokes and retracts.
+A column whose strokes are in reach but whose approach is not cannot be run, so `buildColumnSequence` makes the sequence
+(approach, contact when `press_depth_m > 0`, strokes, retract; `SequenceParams`, the wall normal pointing into the free side as in
+`StationRequest`) and `evaluateColumn` checks all of it against the map for one stand and one lift height (the lift is locked while
+a column runs; the best of the offered heights is taken: a height where everything is usable, else usable end poses and the most
+usable strokes). Per (stand, column) the answer is **whole** (every pose usable), **split** (approach and retract fine, only some
+strokes usable: the column would be broken into pieces) or **unreachable** (no stroke usable, or an end pose is not). The pose that
+limits it is reported with its role and reason.
+
+**Margins.** The map stores a sample count per cell, not a manipulability index. `scorePose` turns it into a score in [0, 1]:
+the smaller of `min(count, count_ref) / count_ref` and the share of the 8 neighbouring cells (one step in x*, y*, z, theta) that are
+reachable, so a pose near the edge of the workspace (arm stretched or folded: the reach limit and the usual singular configurations)
+scores low. `MarginConfig::min_score` (default 0.15) makes such a pose not usable even though its cell is reachable. This is an
+estimate: counts depend on the sampler and the build's sample count, so `count_ref` and `min_score` have to be tuned against the map in
+use; nothing here was calibrated against a real arm. When a `StandVerifier` returns a joint solution, `minSingularValue` (6 x dof
+Jacobian by finite differences of `ArmModel::evaluate`, any dof, unscaled: metres and radians share one matrix) and
+`jointLimitMargin` (share of the range to the nearest limit, continuous joints ignored) can be held against
+`min_singular_value` / `min_limit_margin` (off by default) in `confirmColumnWithVerifier`.
+
+**Stands that keep columns whole.** `planColumnStands(map, station, columns, start, options)`: every candidate stand of
+`makeCandidateStands` is evaluated per column; a weighted greedy cover over *whole* columns picks the stands (cost 1 +
+`margin_penalty` * (1 - mean margin)), redundant stands are dropped, the stands are ordered by `travelTime` (with a base model) or
+distance. Only the columns no candidate does whole are cut: into the fewest pieces by greedy cover, each piece with its own approach
+and retract built from its own strokes, preferring stands already chosen, and every split is listed with its pieces
+(`allow_splits = false` leaves them out, `skipped_to_avoid_split`). One lift height per column visit: a column taller than the lift
+plus arm window is cut only as far as one height reaches, the rest is reported as not covered. `stands_if_splitting_allowed`
+is the stand count when strokes may be taken one by one (end poses ignored), i.e. the price of keeping columns whole. An optional
+verifier re-checks each chosen (stand, column) and the totals follow; a refused column is reported, not moved to another stand.
+
+**How much can we do.** `analyzeColumnCoverage` runs that and `toJson` writes: per stand (position, lift heights, columns whole or
+as pieces, points covered, travel) and overall (columns whole / split / unreachable, covered fraction of plan points, stands, the
+splitting-allowed stand count), and for every column that is not whole its pieces and the limiting pose
+(`approach`, `contact`, `stroke` with its index, `retract`; `out_of_reach`, `low_margin`, `refused`, `singular`, `joint_limit`).
+`plan.json` format and example: the header of `apps/column_reach_tool.cpp`:
+
+```
+column_reach_tool map.rm4d plan.json [--out report.json] [--base-profile profile.yaml] [--start-x X --start-y Y --start-yaw A]
+```
+
+**Manager hook.** `manipulation_manager/core/column_reach_port.hpp` defines `ColumnReachabilityPort` (columns in, a verdict per column
+out) without depending on this package. `CoverageFeasibilityAnalyzer::setColumnReachability(port)` makes the analyzer send every
+contact column to it before any IK: an unreachable column is excluded whole (reason `approach_out_of_reach`, ...), a split one loses its
+unusable strokes (`stroke_low_margin`), and the verdicts come back in `FeasibilityReport::column_reach`. `ReachabilityColumnPort`
+(`manipulation_manager/adapters/reachability_column_port.hpp`, library `manipulation_manager_column_reach`) implements the port over a
+loaded `Map4D`: per column it runs `buildColumnSequence` (from `dock_standoff_m`, `dock_approach_extra_m`, the press depth,
+`dock_at_stroke_start`, the negated `wall_direction`) and `evaluateColumn` for the arm base position and the lift heights it is given.
+It sits in the manager package, outside `manipulation_manager_core`, so the core stays free of this package; `reachability` does not
+depend on `manipulation_manager`, so the dependency is one-way and there is no cycle.
+
+The node builds it only when `column_reachability_map_file` (an RM4D `.rm4d` file, default empty = off) is set; `world_frame` must be
+set too, the arm base position comes from TF (`world_frame` <- `arm_base_frame`). Other parameters: `column_reachability_min_score`
+(0.15), `column_reachability_count_ref` (8), `column_reachability_lift_step_m` (0.05, steps between `base_check_lift_min_m` and
+`base_check_lift_max_m`), `column_reachability_press_depth_m` (negative = `contact_y_overshoot_m`; 0 for a non-contact tool);
+`base_check_arm_mount_z_m` is the arm mount height. With a map loaded the port is handed to `ManipulationManager::setColumnReachability`
+(used by `analyzeFeasibleSegments`) and, in a single-stand `execute_coverage` run, every contact column is checked from where the arm
+base stands before the run and split / unreachable ones are logged with the limiting pose and reason. That log is advisory: nothing is
+skipped or refused. The multi-stand loop does not use it (the stand is not known before the drive; `plan_stands` already decides there).
+Poses go to the map as the plan has them (as in the base check), z measured from the floor.
+
+Status: gtests with a synthetic map and fake verifiers (approach unreachable with reachable strokes, retract, low-margin pose,
+singular joint solution, split versus whole, totals and JSON, verifier downgrade, analyzer hook). All of it is RM4D-level (no IK,
+no collision, no obstacles) unless the verifier is given; the thresholds are starting values; no real arm map, sim run or hardware
+run was involved. The adapter has gtests against a hand-made map (whole, approach / retract / low-margin limits, split, lift heights,
+unknown stand); the node wiring (parameters, TF stand provider, the log) was written without a build and has not been run.
+
+### How splits are avoided
+
+A column that is "whole" in the map can still have no continuous joint path: IK solved pose by pose may land on another branch
+(elbow or wrist flip, a lift jump) for the next pose. Implemented (ROS-free, `core/column_ik_chain.hpp`, `ColumnIkChain`): it
+solves a column's pose sequence in order through an injected IK callable, seeding each pose from the previous solution and then
+from caller-supplied folded seeds; per step it computes the continuity ratio `max |dq_i| / jump` (jump is the Cartesian distance
+of the two poses), compares each joint with the limit of its type (continuous and revolute in rad per m, prismatic lift in m per
+m; continuous joints wrapped) and a branch signature (signs of chosen joints, a deadband around zero). A step that stays
+discontinuous after reseeding is `PoseFailure::kBranchBreak`. It reports `split_count`, `branch_changes`, `max_continuity_ratio`,
+`reseeds` and `lift_travel_m`. Tested only against a fake 2-link planar IK; no real arm, no adapter, no build run yet.
+
+Used by the manager (opt-in, `column_ik_check:=true`, default off; `manipulation_manager` `core/column_ik_gate.hpp`,
+`adapters/reachability_column_ik_port.hpp`): before a column is docked, `ColumnIkChain` runs over the planner's IK in the base
+frame (approach, strokes and retract built from `dock_standoff_m`, `dock_approach_extra_m` and the press depth). A continuous chain
+lets the column run. A branch break from the current seed is retried from the other lift heights (`column_ik_lift_step_m` over the
+base check's lift range; the first continuous one becomes the dock IK seed); if every attempt breaks the column is skipped with the
+reason `plan_failed` and the log names the failing pose and its role. A pose the IK refuses in every attempt is let through with a
+warning (the planner's pose-goal search may still solve it) unless `column_ik_reject_on_refused`. The default branch joints are
+the shoulder pan and the elbow (`column_ik_branch_joints: [1, 3]`, the joints that flipped in the Gazebo run). Gtested with fake IKs
+only; never run on a real arm or in a simulator, so the thresholds (`column_ik_ratio_limit`, rad per metre) are starting values.
+
+Planned, not implemented: re-standing and re-ordering columns on a break, splitting a column at the break and running the pieces
+from another stand, an IK adapter over the stand verifier, and the split numbers in the column analysis, scorecard, verify result
+and the execution-time count. See `docs/development_plan.md` section 4.
+
+### Split avoidance, measured
+
+`reachability/apps/split_benchmark.cpp` (model and runner in `apps/split_benchmark.hpp`, gtest `split_benchmark_test` with N = 50) is a Monte Carlo
+check of the claim above. Per column it draws a wall standoff (0.40 to 0.95 m), a stroke start and length (0.3 to 0.9 m, 3 cm steps, an approach and
+a retract pose 0.15 m off the wall) and, for 3 links, a tool angle (+-0.4 rad), and solves it with a planar arm: a vertical lift (it tracks half the pose
+height, so lift travel is the same for every method) plus 2 revolute links (0.55, 0.50 m) or 3 (0.45, 0.40, 0.20 m, tool angle held), closed-form IK
+returning both elbow branches within the joint limits ("loose" or "tight" limits). Columns with a pose no branch reaches are discarded (86 to 1924
+per setting), so every kept column is whole in the reachability sense and only the joint path can break. All methods are scored by the same
+`ColumnIkChain` yardstick (break = normalised continuity ratio over 1, limit 6 rad/m, or an elbow sign change). Methods: per-pose IK taking the
+first solution (`first_fixed`: elbow + first, always the same order; `first_random`: random order per pose, a solver that lands in either basin),
+per-pose lowest cost (`lowest_cost`: sum of |q|), and the chain (previous-solution seeding plus two folded seeds). 1000 kept columns per setting,
+fixed seeds (`--seed 20240611`), `g++ -O2`, under a second on the host:
+
+| setting | method | whole | breaks | branch changes | mean / p95 ratio | near singular | near limit | columns worse than chain |
+|---|---|---|---|---|---|---|---|---|
+| 2link_loose | first_fixed | 996 | 4 | 0 | 2.58 / 3.67 | 1 | 0 | 0 |
+| 2link_loose | first_random | 0 | 10582 | 10580 | 112.6 / 150.0 | 1 | 0 | 1000 |
+| 2link_loose | lowest_cost | 414 | 586 | 582 | 65.7 / 148.3 | 1 | 0 | 582 |
+| 2link_loose | chain | 996 | 4 | 0 | 2.58 / 3.67 | 1 | 0 | - |
+| 2link_tight | first_fixed | 648 | 352 | 343 | 18.7 / 118.2 | 1 | 148 | 343 |
+| 2link_tight | first_random | 0 | 10529 | 10525 | 96.8 / 122.6 | 1 | 114 | 1000 |
+| 2link_tight | lowest_cost | 374 | 626 | 617 | 60.4 / 121.9 | 1 | 0 | 617 |
+| 2link_tight | chain | 991 | 9 | 0 | 2.81 / 3.74 | 1 | 0 | - |
+| 3link_loose | first_fixed | 962 | 46 | 7 | 3.52 / 5.23 | 1 | 0 | 6 |
+| 3link_loose | first_random | 0 | 10536 | 10514 | 114.5 / 147.6 | 1 | 0 | 1000 |
+| 3link_loose | lowest_cost | 890 | 136 | 98 | 9.25 / 69.9 | 1 | 0 | 88 |
+| 3link_loose | chain | 966 | 40 | 1 | 3.36 / 4.99 | 1 | 0 | - |
+| 3link_tight | first_fixed | 518 | 495 | 471 | 20.1 / 111.0 | 1 | 150 | 451 |
+| 3link_tight | first_random | 0 | 10165 | 10154 | 94.9 / 117.7 | 1 | 113 | 1000 |
+| 3link_tight | lowest_cost | 638 | 406 | 382 | 18.1 / 107.0 | 1 | 110 | 347 |
+| 3link_tight | chain | 969 | 34 | 10 | 3.64 / 5.05 | 1 | 0 | - |
+
+What it shows, and what it does not:
+
+- Where the IK order is fixed and the limits are loose (`2link_loose`) the chain gives **no gain**: it is identical to `first_fixed` (996 whole, 4 breaks).
+  Always taking the elbow + solution already stays on one branch, so only the few columns that stretch the arm (ratio blow-up near the reach limit) break, and
+  the chain cannot fix those: a break there is geometry, not a branch choice. In `3link_loose` the gain is small (966 against 962 whole columns, 40 against 46
+  breaks; the chain was never worse than `first_fixed` and better on 6 columns).
+- With limits that take one branch away for part of the workspace (`*_tight`) a fixed order is forced onto the other branch mid-column: 52 to 65 % whole
+  against 97 to 99 % for the chain. A chain break that remains is mostly a branch change the limits force (10 in `3link_tight`), which no seeding can avoid.
+- A random order per pose or the lowest-cost pick breaks almost every column. `first_random` is a worst case, not a realistic solver; `lowest_cost` is a cost
+  that has no continuity term, so its poor result says "do not pick per pose by a pose-only cost", not that it is a typical planner. Because the per-pose
+  methods here are scored by the chain's own break rule, the comparison is only as honest as that rule.
+- `lowest_cost` beat the chain on 1 column in `3link_loose` and 10 in `3link_tight` (per-column `better_than_chain` in the CSV): the chain is not dominant per column.
+- Lift travel (0.26 m mean) does not discriminate: the lift policy ignores the branch. Near-singular strokes do not either (1 column in 1000 in every
+  method): the singular value of a planar arm does not depend on the elbow side, so it is a property of the geometry, not of the method. Near-limit counts
+  are zero for the chain because it was never started near a limit here, not because it avoids limits.
+
+Limits of the model: planar fake arms with a closed-form IK that returns exactly two branches, a lift tied to the height, hand-picked link lengths and
+joint limits, one break rule, tool position (and angle for 3 links) only, no collision, no obstacles, no real IK solver basin behaviour, no wrist flips,
+no redundancy resolution. It is not a real arm and not hardware; the numbers say that the chain logic behaves as designed on a fake with real branches,
+not how many columns of a real wall would split. Run: `split_benchmark [--n 1000] [--seed S] [--csv out.csv]`. Written and run with host `g++` and gtest only;
+the colcon build, the new CMake targets and the ROS install were not built here.
+
+### Singularities and joint limits
+
+Implemented (`reachability/core/pose_quality.hpp`, `path_quality_audit.hpp`; ROS-free, gtested with planar 2- and 3-link fakes, not run against a real arm or a sim):
+
+- `minSingularValue`, `conditionNumber` and `manipulability` (Yoshikawa product of singular values) of a Jacobian, and of an `ArmModel` at a joint vector (`armJacobian`, finite differences); `jointLimitMargin` as before.
+- `auditPathQuality`: takes stroke joint trajectories plus injected `JacobianFn` / `LimitMarginFn` (`armJacobianFn`, `armLimitMarginFn`, `limitMarginFromBounds` build them) and returns per stroke the min sigma, min limit margin, the worst waypoint index and a reason `near_singular` / `near_limit` / `ok`, with aggregate counts. `PathQualityConfig` defaults are `min_sigma = 0.02` and `min_limit_margin = 0.02` (share of the joint range); 0 switches a check off. The Jacobian is unscaled, so these are starting values, not calibrated. It only reports; it does not change a path.
+
+Planned, not built: calling the audit from the Cartesian planner and a `manipulation_manager` gate (opt-in parameter, default off, report and flag only); profile-level thresholds into the stand verifier and the cuRobo guard (which checks velocity and acceleration only); a damped least-squares / null-space IK decorator; an opt-in monitor that slows and then faults; per-pass reporting and an A/B on one wall.
+
+## Plane-generic stands and base free space
+
+The stand search no longer assumes a vertical wall. `core/surface_frame.hpp` builds the in-plane axes for any normal
+(`surfaceFrame`): for a vertical or tilted plane `u = normalize(UnitZ x n)` exactly as before (every wall result is
+unchanged, tested bit for bit), for a horizontal plane `u` is +x projected into the plane and `v = n x u`.
+`chooseStation`, `makeCandidateStands`, the set-cover enumeration and the column-stand ordering all go through one
+grid generator, `stationGrid`.
+
+- **Ceiling and floor.** For a horizontal patch the grid covers the patch area (bounding box of the targets, plus
+  `lateral_margin`), the base stands under a ceiling or over a floor patch, `standoff` is 0 and `min_clearance` /
+  `max_standoff` do not apply (no plane clearance). `normal` points into the free side (down for a ceiling, up for a
+  floor). A zero or non-finite normal is still `invalid_request`.
+- **Free space.** `StationRequest::free_space` (`core/free_space.hpp`, default unset = no change) holds walls other
+  than the work plane (half-planes in the floor plane) and obstacle polygons (`FreeSpace::box` for axis-aligned
+  ones; a finite wall is a thin polygon). `footprintFree(pose, base, margin)` is a hard filter on every candidate
+  in `chooseStation`, `makeCandidateStands` and the set-cover candidates: all 24 yaw samples are tested with the full
+  footprint inflated by `free_space_margin` (default 0.05 m), a candidate is kept when at least one yaw fits and
+  takes the feasible yaw with the most work-plane clearance. At an inside corner the footprint is therefore kept off
+  the perpendicular wall; without a base model only the arm-base point is tested.
+- **Wall end and outside corner.** The work plane is infinite by default. With `FreeSpace::has_work_span` (a
+  `[work_span_lo, work_span_hi]` interval along `u` from `wall_point`) the work-plane clearance applies only to the
+  footprint points inside the span, so a stand beyond the end is allowed; put the wall's end in `obstacles` to keep the
+  footprint off it.
+- **Reason codes.** `Station::code` (`StationCode`: `ok`, `invalid_request`, `no_free_stand`, `no_reachable_stand`) and
+  `StandSelectionCode::kNoFreeStand` (`no_free_stand`) say that every candidate was removed by the footprint
+  (work-plane clearance or free space), as against "free stands exist but reach nothing". A too-narrow alcove ends in
+  `no_free_stand` with all targets in `unreachable`; no stand is invented.
+- **Non-planar surfaces: not done, the frame abstraction is the hook.** `SurfaceFrame` (origin, outward normal,
+  tangents u and v) is the local frame of the work surface at a point; a plane has one everywhere, a curved patch
+  could supply one per candidate point. The free-space filter only needs the other obstacles and the footprint, not
+  the surface type. Nothing here handles curvature yet (the grid, the work-plane clearance and the span are planar).
+- **Limits.** Obstacles are 2D (heights are not modelled); the stand stays on the free side of the work plane except
+  through the work span (the search does not go behind a wall end); the arm and tool are not checked against an
+  adjacent wall; the stand search itself has no navigation-feasibility (connectivity) check, so a free stand may not be
+  reachable by the base (the [Base placement optimiser](#base-placement-optimiser) section adds one); yaw samples are 24 fixed steps. Tested with hand-made maps (`test/core/plane_stands_test.cpp`: 13 tests, ceiling,
+  floor, inside corner, wall end, narrow alcove, determinism); not run in any simulation or on hardware.
+
+## Base placement optimiser
+
+`planBasePlacement` (`core/base_placement.hpp`, ROS-free) decides where the base stands from the reachability of the
+whole column sequence, not from single targets. It composes the existing pieces; nothing is reimplemented.
+
+**Decides from.** The surface frame (`SurfaceFrame`: a plane, or any frame with an origin and an outward normal), the
+columns as stroke lists (each turned into approach, contact, strokes and retract by `buildColumnSequence` with the
+manager's `dock_standoff_m`, `dock_approach_extra_m`, press depth and retract conventions, checked against the RM4D map per
+stand and lift height), the base footprint, a `FreeSpace` (obstacles and other walls), the navigation start pose and the
+options (`allow_splits`, `MarginConfig`, optional verifier, `max_stands`, yaw window). One map is taken (several maps are not
+combined).
+
+**Steps.**
+1. Candidate stands: `makeCandidateStands` (grid on the free side, footprint and work-plane clearance, `FreeSpace` over all yaw samples).
+2. Navigation filter (hard, before selection): a `NavFeasibility` port; the shipped `GridNavFeasibility` floods a grid
+   over the free space plus the work wall, inflated by the footprint's circumscribed radius plus a margin, from the start
+   pose, and every candidate must be connected (the stand and the start may sit up to circumscribed minus inscribed radius
+   plus one cell inside the inflation, since the real footprint was already tested). A Nav2 costmap can replace the grid
+   by implementing the port (`BasePlacementOptions::nav`). Without a start pose nothing is filtered by navigation.
+3. Yaw window: with a base that cannot strafe, the yaw must stay within `diff_yaw_window_rad` (default 0.7) of facing the
+   surface and keep the footprint clear; a base that can strafe is unrestricted (`yaw_window_rad` overrides). The stand takes
+   the feasible yaw closest to facing.
+4. `planColumnStands` over the surviving candidates (rejected ones are avoided).
+5. Verifier loop (the `planStandsVerified` semantics): a (stand, column) the verifier cut puts that stand on the avoid list and
+   the columns are planned again, at most `verifier_rounds`; the best round (most strokes, then whole columns, then fewer stands)
+   is kept. A stand avoided for one column is avoided for all (coarse).
+
+**Escalation when a column is not whole at its best stand**, in this order: another lift height of the same column (every
+candidate is evaluated at all heights); another candidate stand that does it whole (whole-column set cover); column re-order
+is the caller's (the optimiser reports and does not re-order); a split only as the last resort, reported. `allow_splits =
+false` leaves such a column out (`skipped_to_avoid_split`). `BpoColumn::escalation` names the cheapest step at which a whole
+stand exists: `none` (whole at the stand nearest the column at the nominal lift, the one that puts the arm base level with the
+column's middle), `lift_height`, `other_stand`, or `split` / `skipped` / `unreachable`.
+
+**Reason codes** (`BpoReason`, stable strings): `ok`, `split_no_whole_stand`, `skipped_to_avoid_split`, `out_of_reach`,
+`low_margin`, `refused_by_verifier`, `near_singular`, `near_joint_limit`, `unreachable_by_nav` and `yaw_window` (a candidate
+the filters removed would have done better), `no_free_stand`, `max_stands`. Each non-whole column also carries the limiting
+pose (role, stroke, failure, score). No column is dropped: whole + split + unreachable equals the columns given.
+
+**Outputs.** Stands in visiting order with the columns each covers, yaw, standoff, travel (time with a base model, and
+metres) and the footprint clearance; `covered_fraction`; `reachable_fraction` (strokes usable at some navigable stand with
+usable end poses: what the arm and the stands allow at best); `stand_count`; `exact_min_stands` (iterative-deepening
+exact cover of the whole-coverable columns over the navigable candidates, up to `exact_max_columns` columns and a node
+budget, a lower bound on the stands for whole columns, taken before verification); `split_count`; travel; rejected candidates
+with their reasons.
+
+**Tested** (`test/core/base_placement_test.cpp`, 19 tests, hand-made maps, no arm, no ROS): the plain wall against
+`planColumnStands`; inside corner (coverage non-decreasing with the distance from the second wall, no stand inside the corner);
+outside corner / wall end; window border with a bench; a pillar; a narrow alcove (`no_free_stand`, nothing invented); a corridor
+(a diff base cannot turn in it: `yaw_window`; omni can); partition (`unreachable_by_nav`); a costmap port; a refusing
+verifier; stand cap; allowed and forbidden splits; 40 random inside corners (angle 60 to 120 degrees, finite or infinite
+walls, wall length, patch offset, ring reach and footprint size from a synthetic ring map, fixed seeds) and 30 random walls
+with obstacles. Asserted on all: covered >= 0.99 of reachable, stands within 1 of the exact minimum, no split when every
+column has a whole stand, stands footprint-clear with the margin, every unreachable column coded, determinism. The run prints
+a metrics table (coverage, stands, exact minimum, splits, travel, clearance).
+
+**Honest limits.** The arm links and the tool against an adjacent wall are not checked; obstacles are 2D; there is no Nav2
+costmap yet (the grid is a stand-in: circle inflation is conservative, so a gap just wider than the footprint can be called
+blocked); the yaw is not an input to reachability (the map is taken as yaw-free, like the rest of the core); the verifier
+loop avoids a refusing stand outright; column re-order is not done here; RM4D is optimistic (no IK, no collision), so
+whole means the map says so. The harness uses hand-made maps, not a built arm, and nothing was run in a simulator or on hardware.
 
 ## Limits and next steps
 
@@ -361,7 +822,36 @@ built with `rm4d_tool` and serves it:
 | `~/plan_lift_bands` | wall targets, base station, lift range and step | bands + unreachable targets |
 | `~/plan_stands` | wall targets and plane, lift range, optional start stand | stands in visiting order (arm base x, y, base yaw, targets, lift bands, travel time) + unreachable targets |
 
-Parameters: `map_file` (required), `stand_strategy` (`greedy` default, or `set_cover`, see the section above), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored; a set `base_profile` that cannot be loaded leaves the node not ready, like a missing `map_file`).
+Parameters: `map_file` (required), `stand_strategy` (`greedy` default, or `set_cover`, see the section above), `stand_min_clearance_m` (default 0 = off; when positive, every `~/plan_stands` request's `min_clearance` is raised to at least this, so the chassis keeps this distance from the wall; the tall-wall MuJoCo run docked at the 0.30 m default, with the tool at up to 87% of reach), `stand_max_reach_fraction` (default 0 = off; recommended 0.85: a pose farther from the arm base than this fraction of the arm reach does not count as reachable from a stand, at any lift height, see "Reach margin of stands" below), `stand_balance_reach` (default false = off), `arm_reach_m` (default 0 = the largest tool distance in the map; the reach the two options above use), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored; a set `base_profile` that cannot be loaded leaves the node not ready, like a missing `map_file`).
+
+### Reach margin of stands
+
+The stand planner maximises the number of reachable poses and, among stands that reach the same poses and need the same
+lift bands, prefers the one the base reaches soonest (the start pose). That keeps the first stand near where the robot
+already is, but not the tool away from the edge of the reach: in the tall-wall two-stand MuJoCo run (UR10e on the lift,
+wall patch z 0.6 to 2.0 m, columns at y 0.31 to 1.19 m, clearance floor 0.42 m) stand 0 stayed at the start pose, 0.3 to
+0.8 m along the wall from its columns and 0.92 m from the wall, so the tool was at 94 to 101 % of the 1.3 m reach on the
+far columns, the dock IK took contorted branches (shoulder -3.6 rad, elbow -3.5 rad), and the run saw force spikes of up
+to 241 N and one column that failed after 300 s of retries. The well centred stand 1 (tool at 71 to 78 % of the reach)
+had none of that.
+
+Two opt-in node parameters (both off by default, so plans are unchanged), reach = `arm_reach_m` or the map's estimate:
+
+- `stand_balance_reach` (bool): `chooseStation` (greedy) and the set-cover candidates rank stations by the worst reach
+  fraction (tool distance from the arm base over the reach, the lift placed to minimise it) of the group, rounded to
+  0.02, before the drive tie-break; the along-wall position and the standoff (from the clearance floor up) are both
+  searched. The start pose is only the tie-breaker among stations with the same margin: the planner does not trade
+  margin for a shorter drive.
+- `stand_max_reach_fraction` (0 to 1, recommended 0.85): a hard cap. A pose beyond the fraction is unreachable at that
+  lift height (the verified plan's height table too), so a stand must cover it within the cap or it is left to another
+  stand, and the unreachable list tells you when no stand can.
+
+`planStands` takes both through `StationRequest::reach` (`ReachLimit`); `LiftBandPlan::max_reach_fraction` reports the
+result. `global_stands` (the cover with a tour) is not changed. Host test:
+`test/core/stand_reach_margin_test.cpp` (analytic sphere-shell reach model, the tall-wall first column group: without the
+options the stand is 0.2 m from the start pose and 0.35 m along the wall from the middle of its columns, with
+`stand_balance_reach` it sits on the middle). The sim script exposes them as `MULTI_STAND_BALANCE_REACH`,
+`MULTI_STAND_MAX_REACH_FRACTION` and `MULTI_STAND_ARM_REACH`.
 
 `~/plan_stands` rejects `grid_step` below 0.02 m, `lift_step` below 0.01 m, `lift_max` (when set) below `lift_min`, and searches whose work (stations x lift heights x targets) exceeds 5e7 per stand, so one request cannot keep the node's callbacks busy for minutes. All positions (targets, wall point, returned stands) are in the same world frame the caller chose; the service does not transform.
 The map does not know which side of a wall is free, so base candidates come back on both sides of

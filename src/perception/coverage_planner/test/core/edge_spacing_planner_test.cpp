@@ -153,3 +153,77 @@ TEST(EdgeSpacingPlanner, DefaultsLeaveThePlansUnchanged)
   SweeplinePlanner s;
   EXPECT_EQ(stripXs(s.generatePath(grid, params(0.0, 1.0))), stripXs(s.generatePath(grid, params(0.3, 1.0))));
 }
+
+namespace
+{
+// A 4 x 3 m wall with a 0.5 m wide obstacle block, x cells 30..39 (1.5 m to 2.0 m), y cells 20..39.
+OccupancyGrid gridWithObstacle()
+{
+  auto g = emptyGrid(80, 60);
+  for (int y = 20; y < 40; ++y) {
+    for (int x = 30; x < 40; ++x) {g.data[static_cast<size_t>(y) * 80 + x] = 100;}
+  }
+  return g;
+}
+
+template<typename Planner>
+void expectObstacleEdgesOpenAZone()
+{
+  const auto grid = gridWithObstacle();
+  const double res = 0.05, zone = 0.3;
+  Planner planner;
+  const auto ru = planner.generatePath(grid, params(0.0, 1.0));
+  const auto ra = planner.generatePath(grid, params(zone, 0.5));
+  ASSERT_TRUE(ru.success) << ru.message;
+  ASSERT_TRUE(ra.success) << ra.message;
+  const auto xu = stripXs(ru), xa = stripXs(ra);
+  EXPECT_GT(xa.size(), xu.size());
+
+  const double edges[2] = {30 * res, 40 * res};   // left and right border of the block
+  const double lo = xa.front(), hi = xa.back();
+  const double margin = 1.5 * res;   // cell centre vs. cell edge, rounding of the zone in cells
+  bool saw_fine_at_obstacle = false, saw_uniform_far = false;
+  for (size_t i = 1; i < xa.size(); ++i) {
+    const double x0 = xa[i - 1], gap = xa[i] - x0;
+    const bool near_end = x0 - lo < zone + margin || hi - x0 < zone + margin;
+    const bool near_edge = std::abs(x0 - edges[0]) < zone - margin || std::abs(x0 - edges[1]) < zone - margin;
+    const bool far = !near_end && std::abs(x0 - edges[0]) > zone + 0.2 + margin &&
+      std::abs(x0 - edges[1]) > zone + 0.2 + margin;
+    if (near_edge && !near_end) {
+      EXPECT_LE(gap, 0.1 + 1e-6) << "gap after x=" << x0 << " beside the obstacle";
+      saw_fine_at_obstacle = true;
+    } else if (far) {
+      EXPECT_NEAR(gap, 0.2, 1e-6) << "gap after x=" << x0 << " far from every edge";
+      saw_uniform_far = true;
+    }
+  }
+  EXPECT_TRUE(saw_fine_at_obstacle);
+  EXPECT_TRUE(saw_uniform_far);
+
+  // Without any obstacle in the grid the obstacle edge changes nothing in the middle.
+  const auto rempty = planner.generatePath(emptyGrid(80, 60), params(zone, 0.5));
+  const auto xe = stripXs(rempty);
+  EXPECT_LT(xe.size(), xa.size());
+}
+}  // namespace
+
+TEST(EdgeSpacingPlanner, SweeplineObstacleEdgesOpenAZone)
+{
+  expectObstacleEdgesOpenAZone<SweeplinePlanner>();
+}
+
+TEST(EdgeSpacingPlanner, BoustrophedonColumnsObstacleEdgesOpenAZone)
+{
+  expectObstacleEdgesOpenAZone<BoustrophedonPlanner>();
+}
+
+TEST(EdgeSpacingPlanner, ObstacleEdgesDoNothingWhenTheZoneIsOff)
+{
+  const auto grid = gridWithObstacle();
+  SweeplinePlanner s;
+  BoustrophedonPlanner b;
+  for (const auto & p : {params(0.0, 0.5), params(0.3, 1.0)}) {
+    EXPECT_EQ(stripXs(s.generatePath(grid, p)), stripXs(s.generatePath(grid, params(0.0, 1.0))));
+    EXPECT_EQ(stripXs(b.generatePath(grid, p)), stripXs(b.generatePath(grid, params(0.0, 1.0))));
+  }
+}

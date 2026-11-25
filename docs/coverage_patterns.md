@@ -50,6 +50,16 @@ by `CoverageVerifier`): `two_panels` 0.46 (largest only) -> 0.92 (all components
 
 Not done yet: exact cell ordering by a routing solver, and spiral.
 
+## Does the arm reach the plan? Columns, approach and retract
+
+A planner's column is one stroke line; the arm also has to get to it and away. `buildColumnSequence` / `planColumnStands` in the
+reachability module check the approach pose, the contact pose, the strokes and the retract of each column against the RM4D map per
+stand, score each pose against the workspace edge (reach limit, near-singular stretch or fold), and choose stands so that a column
+is not broken between stands unless no stand does it whole; `analyzeColumnCoverage` reports whole / split / unreachable columns, the
+covered share of the plan points and the pose that limits each failing one (`docs/reachability.md`, "Column pose sequences").
+Strokes the planner itself splits (an obstacle cuts a stroke line: `num_obstacle_splits`, `gap_fill` strokes) arrive as separate
+strokes or segments and are separate columns to this check; it does not merge them and the planners are unchanged. RM4D-level estimate, no sim run.
+
 ## Wall patterns
 
 Patterns come from an earlier coverage workflow (vertical strokes, panelled horizontal rows,
@@ -152,7 +162,7 @@ recording (a wall column); it fails when the tool never worked in it, its force 
 its in-band fraction is under the minimum. Coverage is a whole-run figure and is not attributed to segments. `score_run
 --mode contact|non_contact|spray [--segments segments.json] [--result-out result.json] [--report-out card.json]` writes
 the contract (`segments.json` is `[{"id": 0, "t_start": 0.0, "t_end": 2.1}, ...]`). `source` is `telemetry` (v1); a
-perception-derived v2 is not implemented. "No controller switch under load" has no signal in the recording and is not checked.
+perception-derived v2 is not implemented. The manager can write the same keys at the end of a mission from what it knows (columns done, force peak; `verify_result_path`, `docs/stand_navigation.md`), with `source: manager` and `coverage_percent` counting columns, not area. "No controller switch under load" has no signal in the recording and is not checked.
 
 Obstacles on the wall: the wall JSON may carry `"obstacles": [{"id": 0, "u": [min,max], "v": [min,max], "height_m": 0.04}]`
 (u, v in the wall's coordinates, `height_m` how far the obstacle stands off the wall, against `u x v`; 0 for a window

@@ -48,8 +48,9 @@ RunScorecard scoreRun(
       }
     };
 
-  double sq_err = 0.0;
-  size_t engaged_n = 0, in_band = 0;
+  double sq_err = 0.0, tilt_sum = 0.0, gap_sum = 0.0;
+  size_t tilt_n = 0;
+  size_t engaged_n = 0, in_band = 0, working_n = 0;
   bool in_obstacle = false;
   for (size_t i = 0; i < samples.size(); ++i) {
     const auto & s = samples[i];
@@ -74,12 +75,35 @@ RunScorecard scoreRun(
       }
       in_obstacle = inside;
     }
-    const bool engaged = options.contact ? s.force_n >= options.engaged_force_n : s.tool_active;
+    const bool working = options.contact ? s.force_n >= options.engaged_force_n : s.tool_active;
+    const Eigen::Vector3d p = Eigen::Vector3d(s.x, s.y, s.z) - basis.origin;
+    const double gap = -p.dot(basis.normal_outward);   // + = in front of the wall
+    bool engaged = working;
+    if (working) {
+      // tilt and gap statistics cover every would-be-working sample, refused ones included
+      if (s.tilt_deg >= 0.0) {
+        tilt_sum += s.tilt_deg;
+        ++tilt_n;
+        card.tilt_max_deg = std::max(card.tilt_max_deg, s.tilt_deg);
+      }
+      gap_sum += gap;
+      ++working_n;
+      card.wall_gap_max_abs_m = std::max(card.wall_gap_max_abs_m, std::fabs(gap));
+      // a non-contact tool works at a standoff by design: the wall-gap gate is for contact tools only
+      const bool off_wall = options.contact && options.max_wall_gap_m > 0.0 && std::fabs(gap) > options.max_wall_gap_m;
+      const bool tilted = options.max_tilt_deg > 0.0 && s.tilt_deg >= 0.0 &&
+        std::fabs(s.tilt_deg - options.nominal_tilt_deg) > options.max_tilt_deg;
+      if (off_wall || tilted) {
+        engaged = false;   // force or valve without the tool on the wall and square to it is not coverage
+        ++card.bad_pose_samples;
+        if (off_wall) {++card.off_wall_samples;}
+        if (tilted) {++card.tilted_samples;}
+      }
+    }
     if (!engaged) {
       flush();   // a disengaged sample ends the stroke
       continue;
     }
-    const Eigen::Vector3d p = Eigen::Vector3d(s.x, s.y, s.z) - basis.origin;
     stroke.samples.push_back({p.dot(basis.basis_u), p.dot(basis.basis_v), true});
     ++engaged_n;
     if (i > 0) {card.engaged_s += std::max(0.0, s.t_s - samples[i - 1].t_s);}
@@ -91,6 +115,12 @@ RunScorecard scoreRun(
   }
   flush();
 
+  if (tilt_n > 0) {card.tilt_mean_deg = tilt_sum / static_cast<double>(tilt_n);}
+  if (working_n > 0) {card.wall_gap_mean_m = gap_sum / static_cast<double>(working_n);}
+  if (engaged_n + card.bad_pose_samples > 0) {
+    card.bad_pose_fraction =
+      static_cast<double>(card.bad_pose_samples) / static_cast<double>(engaged_n + card.bad_pose_samples);
+  }
   card.coverage = verifier.report();
   if (samples.size() > 1) {card.duration_s = samples.back().t_s - samples.front().t_s;}
   if (options.contact && engaged_n > 0) {
@@ -126,6 +156,12 @@ RunScorecard scoreRun(
   }
   if (limits.max_obstacle_contacts >= 0 && card.obstacle_contacts > static_cast<size_t>(limits.max_obstacle_contacts)) {
     m.str(""); m << "obstacle contacts " << card.obstacle_contacts << " > " << limits.max_obstacle_contacts;
+    fail(m.str());
+  }
+  if (limits.max_bad_pose_fraction >= 0.0 && card.bad_pose_fraction > limits.max_bad_pose_fraction) {
+    m.str(""); m << "tool off the wall or tilted in " << card.bad_pose_fraction * 100.0 << " % of the working samples ("
+      << card.off_wall_samples << " off the wall, " << card.tilted_samples << " tilted) > "
+      << limits.max_bad_pose_fraction * 100.0 << " %";
     fail(m.str());
   }
   card.passed = card.failures.empty();

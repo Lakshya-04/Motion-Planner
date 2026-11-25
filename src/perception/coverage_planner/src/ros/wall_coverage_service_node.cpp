@@ -140,6 +140,8 @@ void WallCoverageServiceNode::requestCoveragePath()
   request->enable_boundary_pass = tool_profile.coverage.enable_boundary_pass;
   request->boundary_offset = static_cast<float>(tool_profile.coverage.boundary_offset_m);
   request->requires_contact = tool_profile.task.contact;
+  request->edge_zone_m = static_cast<float>(tool_profile.coverage.edge_zone_m);
+  request->edge_spacing_scale = static_cast<float>(tool_profile.coverage.edge_spacing_scale);
   request->add_strip_connectors = this->get_parameter("add_strip_connectors").as_bool();
   request->allow_unknown = this->get_parameter("allow_unknown").as_bool();
 

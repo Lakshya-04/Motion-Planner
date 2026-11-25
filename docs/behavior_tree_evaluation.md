@@ -8,6 +8,13 @@ It does not rewrite the manager: there is no simulator in this work, so a rewrit
 What exists: this document, a target tree in BT XML ([behavior_trees/coverage_mission.xml](behavior_trees/coverage_mission.xml)), and an opt-in,
 ROS-free prototype package `src/manipulation/manipulation_bt_prototype` with gtests over fake executors.
 
+Status update: the maintainer wants the entire expected behaviour of the stack expressed as a tree. That tree now exists as design plus ROS-free node
+logic: [behavior_trees/mission.md](behavior_trees/mission.md) (diagram, node catalogue, guards, cancel contract, migration plan),
+`manipulation_bt_prototype/trees/mission.xml`, node implementations behind abstract ports and 53 gtests over fake ports (stand and column loops, retry then
+re-stand, re-order, split, skip, safety gate, teleop handover, calibration gate, cancel cleanup order, always-report, resume). It is **not wired to
+ROS, not connected to the manager and not run in a simulator**; the recommendation below (adopt later, staged, each step checked by the sim passes) is unchanged,
+the staged plan is now in the mission document. `coverage_mission.xml` stays as the earlier, smaller design sketch.
+
 ## 1. Availability (checked 2026-11-18 in `motion-planner:build`, Ubuntu 24.04, ROS Jazzy)
 
 | Item | Result |

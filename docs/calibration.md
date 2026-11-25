@@ -13,6 +13,9 @@ TCP), then wall plane, then base-to-wall.
 |---|---|---|
 | F/T sign and bias check | by hand + `ros2 topic echo` | `sign`, `bias` of `ft_conditioner` |
 | Tool TCP position | `core_types::pivotCalibration` (ROS-free) | `tcp_xyz` of the tool profile, `tool_in_sensor_xyz` |
+| Tool TCP from touches on a plane | `core_types::planeTouchCalibration` (ROS-free) | `tcp_xyz`, plane normal |
+| Tool tilt from a measured normal | `core_types::fitToolTilt` (ROS-free) | `tcp_rpy` / `tilt_*` |
+| Calibration record | `tool_calibration::ToolCalibrationRecord` (JSON) | the loader gate for contact tools |
 | Payload (mass, centre of gravity, bias) | `ft_conditioner` services; `force_core` excitation planner | `payload_mass_kg`, `payload_cog_xyz`, `bias` |
 | Wall plane | `wall_detector` node | `wall_scene.json` for the coverage planner |
 | Base-to-wall | `wall_detector` in `base_footprint` + a touch check | stand/base pose, `target_frame` |
@@ -64,6 +67,56 @@ taken from CAD. To measure it, pivot about a fixed point:
 7. Put the result in `tcp_xyz` of the profile, and in the conditioner's `tool_in_sensor_xyz` (or let
    `tool_in_sensor_from_tf: true` take it from TF once the URDF has the new TCP). A wrong TCP shows up as a
    pose-dependent torque residual in section 3's check.
+
+## 2b. Tool TCP from touches on a plane, tilt, and the calibration record
+
+Simulation-only maths: no node, no manager stage, nothing run on hardware. Industry practice is a fixed
+pointer, plate or cone (section 2); the wall touch below is the field option when no fixture is available.
+
+**Plane touch** (`core_types/plane_touch_calibration.hpp`). Press the tool tip on one flat surface at 12 or
+more flange poses (40 or more for the accuracy below) and record the flange pose at each touch together with a flag that
+the contact force confirmed the touch. `planeTouchCalibration(poses, forces_ok, options)` drops the unconfirmed
+touches and solves `n . (p_i + R_i t) + d = 0` for the tip `t` and the plane (unknown offset `d`, normal `n`
+estimated, or `options.known_normal` when you have it from a detector). It reuses the Gauss-Jordan solver
+extracted from `pivotCalibration`. It refuses a set whose flange-frame normals `R_i^T n` vary by less than
+20 degrees (`min_orientation_variation_deg`) or whose Jacobian is ill-conditioned (rotation about one axis
+only), and reports the condition number, the RMS and the maximum residual. The residual includes the arm's
+own kinematic error. In the seeded simulation (0.5 mm noise on each position axis, tool tilted up to 50
+degrees about both axes, 40 touches) the tip is within 1.5 mm for the headline seed, the mean over 30 seeds is
+under 1 mm and the worst seed about 2 mm; with 14 touches and 30 degrees the worst seed was 8 mm. The
+offset along the surface normal is the weakest direction: use wide tilts and many touches, and accept the
+result only with a small residual and a condition number well below the limit. The normal columns use the tips
+relative to their centroid, so the condition number does not depend on where the base origin is. `options.max_residual_m`
+(default infinity, off) refuses the fit when the worst touch is further than that from the plane; the error and
+`worst_touch_index` (an index into the poses given) name the touch to drop or redo, and the index is set on every
+result, so a slipped touch (a +10 mm slip gives a residual of several millimetres against a fraction of a
+millimetre for clean data) can also be found without a limit.
+
+**Tilt** (`fitToolTilt`). Given touches with the commanded tool axis and the surface normal measured by a
+detector (or the normal fitted from the touches above), it returns the rotation that aligns the commanded
+axis with the inward normal, averaged over the touches, in the tool frame when the tool poses are given (a fixed
+mounting error; `tool_pose` is the CONTACT-frame pose, the flange pose composed with `tcp_rpy`, and the roll along
+the commanded axis in that frame is removed, so an angled mount gives the true error) and in the base frame otherwise (e.g. a wall-normal error). It also gives the spread between
+touches. Roll about the tool axis does not move the axis and is not observable; `roll_observable` is always
+false. A tilt estimated from the contact force alone is not offered: friction confounds the force direction
+with the tilt, and it needs validation on a real pad. In simulation 2 and 10 degree errors are recovered within
+0.3 degrees with 0.3 degrees of normal noise.
+
+**Record** (`tool_calibration/calibration_record.hpp`, package `tool_calibration`). `ToolCalibrationRecord`
+holds `tcp_xyz/rpy`, payload mass and centre of gravity, F/T bias, method, ISO 8601 UTC date, operator and robot
+id strings, residuals (RMS, maximum, tilt spread) and validity: `max_age_hours` and the mounting-event counter
+at calibration time. JSON with `toJson` / `fromJson` / `parseRecord` (non-finite numbers and missing fields
+are errors). `isValid(now_epoch_s, current_mounting_events)` is false after `max_age_hours`, for a date in the
+future, for a date that does not exist (2026-02-31, leap years respected), or when the counter differs (the tool was re-mounted).
+`validityReport(...)` returns `valid`, `mounting_checked` (false = no counter was given, the re-mount check was
+skipped) and the error. `requireValidCalibration(tool, record, now,
+mounting_events)` throws for a contact tool with no record, a record of another tool, or an invalid one, and
+also throws when the current mounting counter is not given, and accepts a non-contact tool without a record. Not done: nothing calls it yet (no manager stage, no file
+location convention, no comparison with the profile's `tcp_xyz`), wear tracking, payload and bias are stored
+but not produced by these methods.
+
+Hand-eye and sensor-extrinsic calibration is not written here: use MoveIt Calibration, `easy_handeye2` or
+`robot_calibration` and consume the result (licences to verify, see the reuse map in the roadmap).
 
 ## 3. Payload (mass, centre of gravity, bias)
 

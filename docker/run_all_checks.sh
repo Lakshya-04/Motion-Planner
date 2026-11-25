@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# One command for every check that needs no simulator, GPU or hardware (there is no CI; see
-# CONTRIBUTING.md and docs/docker.md#run-all-checks). Run it from the repo root on the host:
+# One command for every check that needs no simulator, GPU or hardware (CI runs part of this on free
+# runners; see CONTRIBUTING.md and docs/docker.md#run-all-checks). Run it from the repo root on the host:
 #
 #   docker/run_all_checks.sh                  everything below
 #   docker/run_all_checks.sh --skip-sims      leave out sim_gazebo, sim_mujoco, sim_isaac (packages and Python tests)
@@ -9,7 +9,7 @@
 #   docker/run_all_checks.sh --workers N      parallel jobs for colcon and make (default 2)
 #
 # Steps: (1) colcon build and colcon test of all packages, (2) pytest over the Python tests under
-# src/ and docker/tools/tests (both in the container), (3) docker/tools/check_public_readiness.py (host). The simulator scripts
+# src/ and docker/tools/tests (both in the container), (3) docker/tools/check_public_readiness.py and docker/tools/check_params.py (host). The simulator scripts
 # (run_smoke.sh, contact_control_test.py, ...) are not part of this: they start a simulation.
 # Build products live in the Docker volumes mp_build, mp_install and mp_log, not in the checkout.
 # Exit status is non-zero when any step failed; a summary is printed at the end.
@@ -46,13 +46,15 @@ if [ "${INSIDE_CHECKS:-0}" != "1" ]; then
     -w /ws "$IMAGE" bash /ws/docker/run_all_checks.sh 2>&1 | tee "$LOG"
   echo "=== 3/3 public-readiness scan (host) ==="
   python3 docker/tools/check_public_readiness.py; rr=$?
-  fail=$rr
+  python3 docker/tools/check_params.py; pr=$?
+  fail=$((rr || pr))
   echo "=== summary ==="
   for k in colcon pytest; do
     v="$(sed -n "s/^RESULT $k=//p" "$LOG" | tail -1)"
     if [ "$v" = 0 ]; then echo "  $k: ok"; else echo "  $k: FAILED (${v:-no result})"; fail=1; fi
   done
   if [ $rr = 0 ]; then echo "  readiness: ok"; else echo "  readiness: FAILED"; fi
+  if [ $pr = 0 ]; then echo "  params: ok"; else echo "  params: FAILED"; fi
   grep -E "^(Summary:|pytest summary:|[0-9]+ (passed|failed))" "$LOG" | tail -5
   exit $fail
 fi

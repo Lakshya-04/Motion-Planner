@@ -1,0 +1,25 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations: {required: true}
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The exact commands, the robot profile, the backend (MoveIt / VAMP / cuRobo), simulator or hardware.
+    validations: {required: true}
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Commit (`git rev-parse --short HEAD`), Docker image or host OS, GPU if any.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      render: shell

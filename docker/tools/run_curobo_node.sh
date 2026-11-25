@@ -2,8 +2,9 @@
 # Starts the cuRobo planner node (curobo_bridge.ros_node) in the motion-planner:full image, detached, waits until the
 # planner is warm ("cuRobo ready" in its log) and its services are visible, then returns. `stop` removes it.
 #
-#   docker/tools/run_curobo_node.sh start --robot /abs/path/lift_arm.yml [--ws DIR] [--max-boxes N]
+#   docker/tools/run_curobo_node.sh start --robot /abs/path/lift_arm.yml [--ws DIR] [--max-boxes N] [--max-attempts N]
 #                                         [--esdf-dims X,Y,Z [--esdf-voxel M] [--esdf-center X,Y,Z]] [--no-prismatic]
+#                                         [--optimize [--time-budget S] [--candidates N] [--objective length|duration]]
 #                                         [--wait-sec 300] [--name curobo-node]
 #   docker/tools/run_curobo_node.sh stop|status|logs [--name curobo-node]
 #
@@ -27,6 +28,11 @@ ESDF_DIMS=
 ESDF_VOXEL=0.04
 ESDF_CENTER=0.0,0.0,0.0
 PRISMATIC=1
+MAX_ATTEMPTS=
+OPTIMIZE=0
+BUDGET=20
+CANDIDATES=6
+OBJECTIVE=length
 WAIT_SEC=300
 CACHE=${CUROBO_CACHE:-$HOME/.cache/motion-planner-curobo}
 SERVICES=(plan_joint plan_pose set_world set_esdf solve_ik check_motion)
@@ -42,10 +48,15 @@ while [ $# -gt 0 ]; do
     --esdf-dims) ESDF_DIMS=$2; shift 2;;
     --esdf-voxel) ESDF_VOXEL=$2; shift 2;;
     --esdf-center) ESDF_CENTER=$2; shift 2;;
+    --max-attempts) MAX_ATTEMPTS=$2; shift 2;;
+    --optimize) OPTIMIZE=1; shift;;
+    --time-budget) BUDGET=$2; shift 2;;
+    --candidates) CANDIDATES=$2; shift 2;;
+    --objective) OBJECTIVE=$2; shift 2;;
     --no-prismatic) PRISMATIC=0; shift;;
     --wait-sec) WAIT_SEC=$2; shift 2;;
     --name) NAME=$2; shift 2;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0;;
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
@@ -82,6 +93,14 @@ mkdir -p "$CACHE"
 
 ARGS=(-p "robot:=$ROBOT" -p "max_boxes:=$MAX_BOXES")
 [ "$PRISMATIC" = 1 ] && ARGS+=(-p "prismatic_joints:=[lift_joint]")
+[ -n "$MAX_ATTEMPTS" ] && ARGS+=(-p "max_attempts:=$MAX_ATTEMPTS")
+if [ "$OPTIMIZE" = 1 ]; then
+  case $OBJECTIVE in length|duration) ;; *) echo "--objective must be length or duration" >&2; exit 2;; esac
+  ARGS+=(-p "free_space_optimize:=true" -p "free_space_time_budget_s:=$BUDGET" -p "free_space_num_candidates:=$CANDIDATES"
+         -p "free_space_objective:=$OBJECTIVE")
+  echo "optimal free-space mode: up to $CANDIDATES candidates, budget ${BUDGET}s, objective $OBJECTIVE" \
+       "(set the manager's curobo timeout_sec above the budget plus one candidate)"
+fi
 if [ -n "$ESDF_DIMS" ]; then
   ARGS+=(-p "esdf_dims:=[$ESDF_DIMS]" -p "esdf_voxel_size:=$ESDF_VOXEL" -p "esdf_center:=[$ESDF_CENTER]")
 fi

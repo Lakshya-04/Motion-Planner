@@ -7,14 +7,36 @@ tool (contact like a mop, non-contact like a spray gun), in simulation first and
 
 **Status in one line:** the building blocks exist and are tested, and both simulators now run the pipeline
 end to end in headless one-command passes (coverage planner, manager, MoveIt, compliant controller, recorded
-and scored). Nothing here has run on hardware, and the base does not yet move between stands in those passes.
+and scored), including multi-stand passes where the base drives between stands. Nothing here has run on hardware.
 The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
-**Where it stands (2026-11-18):** single-stand wall passes in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
-Multi-stand passes are not: runs fail at the second stand about half the time in MuJoCo (2 of 4 runs failed) and 1 of 3 in Gazebo, causes not yet found,
-see [Obstacle scenarios](#obstacle-scenarios-mujoco). Planning backends are MoveIt/OMPL, VAMP and cuRobo v2 (the pin is the 0.8.0 line; the
-newer cuRoboV2-Fast, v0.9.0, is being evaluated). cuRobo and VAMP are tested standalone and through their ROS clients, but no simulator pass has yet
-used them as the planner. Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md).
+**Where it stands (2026-11-22, main at #173):**
+- **Single-stand wall passes** in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
+- **Two-stand passes in MuJoCo pass**, with MoveIt/OMPL and with cuRobo. The latest run (MoveIt/OMPL, scored on the tool pose after #167 and
+  #172, one run): 10 of 10 columns, coverage 100 %, tool tilt at most 0.15 deg, wall gap at most 0.9 mm, peak force 22.1 N against a 10 N
+  target ([video below](#two-stand-pass-with-moveit-scored-on-the-tool-pose-mujoco)). Earlier same-session batches: 6 of 8 before the
+  second-stand fix and 8 of 8 after (not significant on its own).
+- **cuRobo v0.9.0 as the free-space planner** completed a two-stand MuJoCo pass four times (10 of 10 columns, peaks 46.8 to 72.4 N), but
+  MoveIt/OMPL still planned the stow and the second stand: cuRobo found no docked-to-stow path (its model treats low lift with the arm swung
+  out as in collision) or did not answer in time, and it needs 12 to 16 s per plan on the 4 GB laptop GPU. A `free_space_fallback` makes the
+  hand-over automatic and logged; a start/goal precheck, a 7-joint collision-matrix fix (`--ignore-hops 2`) and a joint limit guard are in,
+  but the cause of the low-lift refusal is a hypothesis until a GPU run confirms it ([docs/curobo_v2_notes.md](docs/curobo_v2_notes.md)).
+- **Gazebo two-stand passes still fail.** After the start-state clamps (#156, #157, no "start state out of bounds" error is left) the pass
+  completed 1 of 10 columns in the latest run (6 of 10 in the one before; the pass varies a lot between runs). The log shows the dock IK
+  jumping to another arm branch (shoulder pan -0.62 to +2.49 rad) and the wrist winding, after which every column fails. An opt-in dock IK
+  continuity choice (`dock_ik_continuity`, #169) targets that; it has not been measured in Gazebo on main yet
+  ([docs/sim_gazebo.md](docs/sim_gazebo.md)).
+- **Merged since the cuRobo work, mostly host-tested only (no simulator, GPU or hardware run unless stated):** column-sequence feasibility
+  (approach, contact, strokes, retract; split avoidance), an RM4D-backed column port in the manager (advisory, off by default), `ColumnIkChain`
+  and a path quality audit (not yet called by the planner), a stand-check gate and dock IK continuity (both opt-in), N-DOF arms and a
+  redundancy policy for maps (FR3, iiwa 7, Kinova Gen3, xArm 7, UR3e to UR20), tool-pose scoring (tilt, wall gap), plane-generic stands and a
+  base placement optimiser (ceilings, corners), a differential-IK core, a runtime safety monitor core (**not a certified safety function**),
+  tool contact frame, tilt and plane-touch calibration, a teleoperation core and a lateral dock term. The list with evidence is
+  [CHANGELOG.md](CHANGELOG.md) and [docs/ROADMAP.md](docs/ROADMAP.md#19-since-143-what-merged-and-what-it-is-worth).
+- **Navigation and perception are the weakest links.** The base drives a straight line to each stand on ground-truth simulator odometry (no map, no obstacle avoidance, no localisation, no Nav2), wall docking and `wall_detector` are not started in the two-stand passes (the wall is pre-baked), and the self filter is not in any pass. [docs/navigation_and_perception.md](docs/navigation_and_perception.md) has the component table and the ordered gap list.
+- **Nothing has run on hardware.**
+- Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md); the handoff: [docs/dev_handoff.md](docs/dev_handoff.md); the order of
+  the next themes: [docs/development_plan.md](docs/development_plan.md).
 
 ```
 sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware) -> base stands
@@ -23,14 +45,14 @@ sensors -> perception -> self filter -> scene -> surface -> coverage (tool-aware
 
 ## Packages
 
-Under `src/`, by area (layout rules: [docs/package_layout.md](docs/package_layout.md)).
+Under `src/`, by area (layout rules: [docs/package_layout.md](docs/package_layout.md); every package has a README, and [docs/modules.md](docs/modules.md) maps them all: tier, what each needs, dependency layers, recipes for reusing a part).
 
 | Area | Packages | What they do |
 |---|---|---|
-| Common | `core_types`, `ros_adapters`, `force_core` | ROS-free types and ports, conversions to ROS messages, the force-control core (contact state machine, wrench conditioning) |
+| Common | `core_types`, `ros_adapters`, `force_core`, `tool_calibration`, `standoff_advisor` | ROS-free types and ports, conversions to ROS messages, the force-control core (contact state machine, wrench conditioning), the tool calibration record, the base-to-wall standoff advisor |
 | Description | `mobile_manipulator_description`, `mobile_manipulator_moveit_config`, `mobile_manipulator_profile` | Generic robot model (base + lift + N-DOF arm + tool, all swappable) with 13 profiles, MoveIt 2 config generated from a profile, header-only profile loader |
 | Perception | `scene_model`, `scene_adapters`, `robot_self_filter`, `wall_detector`, `coverage_planner`, `coverage_planner_msgs` | Scene model (clouds, meshes, voxels, ESDF, loaders), scene to planner geometry, robot self filter (library and node), wall detection from a live point cloud, wall coverage planning (boustrophedon, sweepline, wall patterns, scan to plan) |
-| Manipulation | `motion_planner`, `motion_planner_moveit`, `vamp_planner`, `curobo_bridge`, `curobo_bridge_msgs`, `curobo_planner`, `reachability`, `reachability_msgs`, `manipulation_manager`, `coverage_task_msgs` | Planner, IK, collision and scene ports; MoveIt/OMPL, VAMP and cuRobo v2 backends; RM4D reachability map and multi-stand planning; the manager that runs coverage, planning and execution |
+| Manipulation | `motion_planner`, `motion_planner_moveit`, `vamp_planner`, `curobo_bridge`, `curobo_bridge_msgs`, `curobo_planner`, `reachability`, `reachability_moveit`, `reachability_msgs`, `manipulation_manager`, `coverage_task_msgs`, `stand_navigator`, `stand_navigator_msgs`, `manipulation_bt_prototype` | Planner, IK, collision and scene ports; MoveIt/OMPL, VAMP and cuRobo v2 backends; RM4D reachability map and multi-stand planning; base navigation and wall docking to a stand; the manager that runs coverage, planning and execution |
 | Control | `compliant_trajectory_controller`, `ft_bridge_hardware`, `ft_conditioner` | JTAC (admittance joint trajectory controller for `ros2_control`), F/T sensor bridge, wrench conditioning node |
 | Simulation | `sim_mujoco`, `sim_gazebo`, `sim_isaac` | MuJoCo 4 and Gazebo Harmonic backends behind `hardware:=mujoco` / `hardware:=gazebo`; `sim_isaac` is a stub |
 
@@ -48,7 +70,9 @@ Inside a shell: `docker/build.sh test` builds the workspace and prints the test 
 (`gpu`, `full`: cuRobo v2, VAMP) and the simulator images are described in [docs/docker.md](docs/docker.md).
 Building outside Docker needs ROS 2, MoveIt 2, `ros2_control` and the packages in `docker/apt-extra.txt`.
 The last full run recorded in the roadmap: 736 colcon tests in 26 packages, no failures. There is
-deliberately no CI; [CONTRIBUTING.md](CONTRIBUTING.md) lists how to run every check locally.
+CI runs the build, the colcon tests and the repository checks on free GitHub-hosted runners
+([.github/workflows/ci.yml](.github/workflows/ci.yml)). It does not run simulators, GPU planners or hardware; those
+are run locally, and [CONTRIBUTING.md](CONTRIBUTING.md) lists every check.
 
 ## Showcase
 
@@ -86,6 +110,43 @@ loaded, which also gives the arm collision geometry; that run scored 0.58 covera
 |---|---|
 | ![gazebo seed](docs/media/gazebo_spray_seed.png) | ![gazebo stroke](docs/media/gazebo_spray_stroke.png) |
 
+### Two-stand pass with MoveIt, scored on the tool pose (MuJoCo)
+
+The same `run_multi_stand_pass.sh` on `two_panels_plain` with the default MoveIt/OMPL planners (no GPU node), on main after the tool-pose
+scoring (#167) and the review fixes (#172); filmed 2026-11-22. The video is the run at 12x (551 s of simulated time, 46 s of video) with the
+contact force trace and a close-up of the tool; [mp4](docs/media/two_stand_moveit.mp4). It replaces a first version of this video that was drawn
+without the driven base pose (the arm sat at the origin, 90 degrees off the wall); the renderer and the live viewer now replay the base pose.
+
+![A two-stand MuJoCo pass with MoveIt planners](docs/media/two_stand_moveit.gif)
+
+Scored result of the filmed run (`score_run`, one run, made with the live viewer open and the host busy): 10 columns done, 0 partial, 0 failed
+(stand 0: 6, stand 1: 4); coverage 100 % (2790 of 2790 cells); peak force 142.2 N scored, 20.9 N in the feedback; RMS force error 6.7 N; 34 % of the
+contact samples in the force band; tool tilt at most 31.8 deg (a transient: 0 tilted samples and 0 bad-pose samples by the scorer's rule), wall gap
+at most 15.8 mm; 277 s engaged. The 142 N is one spike between the two stands (visible in the force trace of the video at about 430 s of simulated time);
+its cause is not found. An earlier run of the same pass without the viewer scored 10 of 10, coverage 1.0, peak 22.1 N, tilt at most 0.15 deg, wall gap at
+most 0.9 mm. This pass runs the seeded dock IK (`dock_ik_seeded`), which is tuned for MuJoCo; the same pass in Gazebo still fails
+([docs/sim_gazebo.md](docs/sim_gazebo.md)).
+
+### cuRobo in a two-stand pass (MuJoCo)
+
+`run_multi_stand_pass.sh` on `two_panels_plain` (a free base, two stands, ten columns), with cuRobo v0.9.0 selected as the free-space planner
+(`planning_curobo.yaml`, MoveIt/OMPL as the fallback) and the wall pushed to the cuRobo node at every stand. The video is the run at 12x
+(1128 s of simulated time), with the contact force trace and a close-up of the tool; [mp4](docs/media/multi_stand_curobo.mp4).
+
+![A two-stand MuJoCo pass with cuRobo as the free-space planner](docs/media/multi_stand_curobo.gif)
+
+*Note (2026-11-22): this video was rendered before the renderer replayed the driven base pose, so the arm is drawn at the origin and not where the base was; the numbers below are from the run itself. It needs a rerun with the GPU node to be redrawn.*
+
+Scored result of that run: 10 columns done, 0 partial, 0 failed; coverage 100 % (2790 of 2790 cells); peak force 69.3 N (target 10 N);
+RMS force error 5.1 N; 33 % of the contact samples in the 1.5 N band; one collision-monitor line (a lift link pair at depth 0 in the first
+10 ms). Planner use in the run: cuRobo planned 7 segments (the priming move and 6 stand-0 approaches: 10 to 16 s of planning each, 0.4 to
+0.7 s of motion), MoveIt/OMPL planned the other 6 free-space segments (including the stow and the second stand), 4 to 50 s of motion each, because
+cuRobo's service did not answer for the stow (`unavailable`). Three earlier runs with the same setup also passed (peaks 46.8, 48.2, 72.4 N).
+Before those, three runs failed or stalled and each led to a fix (a 256-box cache that turned the wall into 20 cm slabs, a missing waypoint
+count that made every cuRobo plan look partial, the dock-to-stow move cuRobo cannot plan); the story and the commands:
+[docs/sim_mujoco.md](docs/sim_mujoco.md#running-a-pass-with-curobo-as-the-planner). The cuRobo moves are about 14 times faster than the
+MoveIt-retimed ones in the sim, far above what the MoveIt retiming allows, and have not been checked against the real arm's limits: do not run them on hardware as they are.
+
 ### Obstacle scenarios (MuJoCo)
 
 `run_scenarios.sh` runs named walls through the manager pass (UR10e, each scenario twice). One filmed run per scenario is shown; the
@@ -106,6 +167,11 @@ including on a plain wall, so it is not the obstacle: the approach to the first 
 and recovery finds no safe configuration. The cause is not isolated (the arm's pose at the second stand is the suspect). Several host loads were
 10 to 14 during these runs, recorded per run in the docs. No hardware was involved.
 
+**Update, 2026-11-20 (same-session batches of 8, MuJoCo):** after the second-stand fix `two_panels_plain` passed 8 of 8 (6 of 8 on the code before it) and `two_panels` 8 of 8 on
+both code states, scored on the reachable wall. The `two_panels` row above (0 of 2, coverage 0.670) was measured before the reachability and keep-out changes that
+are now in; the 0.88 wall coverage the pass script prints for `two_panels` is the whole-wall figure, not the reachable-wall one the scenario judges. Details:
+[docs/sim_mujoco.md](docs/sim_mujoco.md#scenario-set-obstacles-on-the-wall).
+
 ## Simulators
 
 Both run headless and sit behind `ros2_control`, so the same controllers run against them as against
@@ -116,7 +182,7 @@ hardware ([docs/simulation.md](docs/simulation.md)).
 | Docs | [docs/sim_mujoco.md](docs/sim_mujoco.md) | [docs/sim_gazebo.md](docs/sim_gazebo.md) |
 | Environment | `build` image with the MuJoCo SDK mounted (`MUJOCO_ROOT`); Python tools also in the `sim` image | `sim-gazebo` image |
 | Can do today | Position and JTAC control of lift + arm, wall worlds from `wall_scene.json`, raw wrist F/T plus ground-truth contact wrench, conditioned force path, a 10 N contact test that holds (10.13 N for a 10 N target) | Same joint control and wall worlds, raw F/T plus ground truth, conditioned path validated against ground truth, holds 10 N with a compliant tip, free base, depth and colour camera, spray and multi-stand passes |
-| Cannot do today | Move the base, simulate sensors | Wheel physics, odom noise; the contact is compliant only through a 20 mm tool tip spring |
+| Cannot do today | Wheel, floor or slip physics; odometry is the simulated pose, no noise; the depth sensor is a ray cast, not a rendered image | Wheel physics, odom noise; the contact is compliant only through a 20 mm tool tip spring |
 
 Isaac Sim is a stub.
 
@@ -145,12 +211,13 @@ Sources: `src/simulation/sim_mujoco/scripts/`, `src/simulation/sim_gazebo/script
 - MoveIt demo on the description with mock hardware: `ros2 launch mobile_manipulator_moveit_config demo.launch.py arm:=ur10e`
 - Wall coverage planning from a scene file: `ros2 launch coverage_planner wall_coverage_demo.launch.py`
 - Reachability map building and stand planning (`rm4d_tool`, `reachability_node`): [docs/reachability.md](docs/reachability.md)
-- The simulated wall passes above, and the smoke and contact tests of each simulator
+- The simulated wall passes above, and the smoke and contact tests of each simulator. Base navigation is a straight-line stand-in on ground-truth odometry, and the two-stand passes use a pre-baked wall rather than live perception: [docs/navigation_and_perception.md](docs/navigation_and_perception.md) says what is real and what is not
+- A two-stand pass with cuRobo as the free-space planner: [docs/sim_mujoco.md](docs/sim_mujoco.md#running-a-pass-with-curobo-as-the-planner)
 
 ## Documentation
 
 [docs/README.md](docs/README.md) is the index: [architecture](docs/architecture.md), [robot description](docs/robot_description.md),
-[design principles](docs/design_principles.md), [decision records](docs/adr/). Third-party software and licences:
+[design principles](docs/design_principles.md), [decision records](docs/adr/), [how to read a run](docs/how_to_read_a_run.md) (the files a pass writes and what each field means), [RViz profiles per module](docs/rviz/README.md). Third-party software and licences:
 [THIRD_PARTY.md](THIRD_PARTY.md). Changes: [CHANGELOG.md](CHANGELOG.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

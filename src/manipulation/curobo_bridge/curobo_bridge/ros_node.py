@@ -3,9 +3,13 @@
 Parameters: `robot` (cuRobo robot config: a bundled name like franka.yml or an absolute path to one
 made by docker/tools/generate_curobo_robot.py), `max_boxes` (obstacle cache size), and optionally
 `esdf_dims` (3 values, m), `esdf_voxel_size`, `esdf_center` to reserve an ESDF grid: set_world points
-then become a distance field instead of cubes. IK picks the solution nearest the seed: name the
+then become a distance field instead of cubes. Latency: `max_attempts` (default 20), `fallback_attempts` (6)
+and `seed_fallback` bound how long a failing plan runs; `precheck_endpoints` (default true) answers an invalid
+start or goal at once as `start_in_collision` / `goal_in_collision`. IK picks the solution nearest the seed: name the
 prismatic joints in `prismatic_joints` (a list of joint names; 1 m then weighs `ik_prismatic_factor`
-rad, default 6) or give `ik_weights` (one per joint, on the squared difference) to override. Services (under
+rad, default 6) or give `ik_weights` (one per joint, on the squared difference) to override. Optimal free-space mode (quality over speed;
+docs/curobo_free_space_optimal.md): `free_space_optimize` (default false), `free_space_time_budget_s` (20),
+`free_space_num_candidates` (6), `free_space_objective` (length | duration). Services (under
 the node name): ~/plan_joint, ~/plan_pose, ~/set_world. Everything is in the robot base frame.
 
 Run it with the Python that has torch and cuRobo (in the gpu image that is the venv, not the system
@@ -104,6 +108,13 @@ class CuroboPlannerNode(Node):
         seed_fallback = bool(self.declare_parameter('seed_fallback', True).value)
         fallback_attempts = int(self.declare_parameter('fallback_attempts', 6).value)
         max_attempts = int(self.declare_parameter('max_attempts', 20).value)
+        precheck_endpoints = bool(self.declare_parameter('precheck_endpoints', True).value)
+        optimal = dict(
+            free_space_optimize=bool(self.declare_parameter('free_space_optimize', False).value),
+            free_space_time_budget_s=float(self.declare_parameter('free_space_time_budget_s', 20.0).value),
+            free_space_num_candidates=int(self.declare_parameter('free_space_num_candidates', 6).value),
+            free_space_objective=str(self.declare_parameter('free_space_objective', 'length').value),
+            lift_cost_weight=float(self.declare_parameter('lift_cost_weight', 2.0).value))
         self._planner = planner
         if self._planner is None:
             try:
@@ -111,6 +122,7 @@ class CuroboPlannerNode(Node):
                     robot, max_boxes=max_boxes, prismatic_joints=prismatic,
                     ik_prismatic_factor=ik_prismatic_factor, ik_weights=ik_weights,
                     seed_fallback=seed_fallback, fallback_attempts=fallback_attempts, max_attempts=max_attempts,
+                    precheck_endpoints=precheck_endpoints, **optimal,
                     esdf=esdf_from_parameters(esdf_dims, esdf_voxel, esdf_center))
                 self.get_logger().info(
                     f'cuRobo ready: {self._planner.dimension} joints, tool {self._planner.tool_frames}')

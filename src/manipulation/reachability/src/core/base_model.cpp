@@ -67,6 +67,9 @@ BaseModel loadBaseProfile(const std::string & path)
     m.arm_mount = Eigen::Vector2d(b["arm_mount_xy"][0].as<double>(), b["arm_mount_xy"][1].as<double>());
   }
   if (b["lift_mount_height_m"]) {m.lift_mount_height = b["lift_mount_height_m"].as<double>();}
+  if (root["lift"] && root["lift"].IsMap() && root["lift"]["mount_height_m"]) {
+    m.lift_carriage_offset = root["lift"]["mount_height_m"].as<double>();
+  }
   if (b["max_linear_velocity_mps"]) {m.max_linear = b["max_linear_velocity_mps"].as<double>();}
   if (b["max_angular_velocity_radps"]) {m.max_angular = b["max_angular_velocity_radps"].as<double>();}
   if (!(m.max_linear > 0.0) || !(m.max_angular > 0.0)) {
@@ -77,10 +80,9 @@ BaseModel loadBaseProfile(const std::string & path)
 
 std::optional<double> armBaseHeightAtLiftZero(const BaseModel & base)
 {
-  constexpr double kLiftColumnHeight = 0.8;   // telescopic_lift.xacro column_height
-  constexpr double kArmMountZ = 0.02;         // telescopic_lift.xacro arm_mount_xyz z
+  constexpr double kStockCarriageOffset = 0.82;   // telescopic_lift.xacro: 0.8 m column + 0.02 m arm mount
   if (!base.lift_mount_height) {return std::nullopt;}
-  return *base.lift_mount_height + kLiftColumnHeight + kArmMountZ;
+  return *base.lift_mount_height + base.lift_carriage_offset.value_or(kStockCarriageOffset);
 }
 
 Eigen::Vector2d baseCentre(const BaseModel & base, const Stand & stand)

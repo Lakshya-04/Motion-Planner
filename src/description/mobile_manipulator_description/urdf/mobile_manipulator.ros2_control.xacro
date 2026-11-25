@@ -17,7 +17,8 @@
        hardware:=gazebo     gz_ros2_control/GazeboSimSystem with the jtac_mock joint interfaces plus
                             effort state, the F/T sensor `ft_sensor` as a gz force_torque sensor on
                             tool_mount_joint, and the base pinned to the world (package sim_gazebo,
-                            docs/sim_gazebo.md).
+                            docs/sim_gazebo.md). The telescopic lift stages are declared with mimic
+                            params (gz-sim ignores the URDF <mimic>).
        hardware:=real       a vendor ros2_control driver chosen from the arm by config/hardware_drivers.yaml
                             (ufactory xarm_ros2, ur_robot_driver, franka_ros2; none is vendored here), or
                             real_driver:=mock for the same wiring on mock_components. Not one block but
@@ -62,6 +63,31 @@
         <xacro:if value="${arm_dof > 9}"><xacro:position_joint name="${arm_joint_names[9]}" initial="${home_arm[9]}" velocity_command="${vel_cmd}" effort_state="${eff_state}"/></xacro:if>
         <xacro:if value="${arm_dof > 10}"><xacro:position_joint name="${arm_joint_names[10]}" initial="${home_arm[10]}" velocity_command="${vel_cmd}" effort_state="${eff_state}"/></xacro:if>
         <xacro:if value="${arm_dof > 11}"><xacro:position_joint name="${arm_joint_names[11]}" initial="${home_arm[11]}" velocity_command="${vel_cmd}" effort_state="${eff_state}"/></xacro:if>
+  </xacro:macro>
+
+  <!-- hardware:=gazebo only. gz-sim does not apply the URDF <mimic> of the telescopic lift stages, so the
+       stages stayed at 0 while lift_joint carried the arm up. gz_ros2_control (Jazzy) takes the mimic
+       from the ros2_control joint: same master, multiplier (1/stages, as telescopic_lift.xacro) and
+       offset 0. State interfaces only: the stage is never commanded. -->
+  <xacro:macro name="gazebo_mimic_stage" params="index of">
+    <joint name="lift_stage_${index}_joint">
+      <param name="mimic">${lift_joint_name}</param>
+      <param name="multiplier">${1.0 / of}</param>
+      <param name="offset">0</param>
+      <state_interface name="position">
+        <param name="initial_value">${home_lift / of}</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="gazebo_mimic_stages">
+    <xacro:if value="${lift_actuated and '$(arg lift)' == 'telescopic'}">
+      <xacro:property name="gz_stages" value="${int('$(arg lift_stages)')}"/>
+      <xacro:if value="${gz_stages > 0}"><xacro:gazebo_mimic_stage index="1" of="${gz_stages}"/></xacro:if>
+      <xacro:if value="${gz_stages > 1}"><xacro:gazebo_mimic_stage index="2" of="${gz_stages}"/></xacro:if>
+      <xacro:if value="${gz_stages > 2}"><xacro:gazebo_mimic_stage index="3" of="${gz_stages}"/></xacro:if>
+    </xacro:if>
   </xacro:macro>
 
   <xacro:macro name="ft_sensor_interfaces" params="name">
@@ -166,6 +192,7 @@
         <xacro:position_joint name="${lift_joint_name}" initial="${home_lift}" velocity_command="${vel_cmd}" effort_state="${eff_state}"/>
       </xacro:if>
       <xacro:arm_position_joints vel_cmd="${vel_cmd}" eff_state="${eff_state}"/>
+      <xacro:if value="${hardware == 'gazebo'}"><xacro:gazebo_mimic_stages/></xacro:if>
       <xacro:if value="${hardware in ('mujoco', 'gazebo')}">
         <sensor name="ft_sensor">
           <state_interface name="force.x"/>

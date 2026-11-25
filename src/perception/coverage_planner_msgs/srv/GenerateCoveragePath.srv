@@ -42,6 +42,12 @@ bool add_strip_connectors  # false = only strip endpoints (default), true = inte
 # MotionPlanSegment.requires_contact for every strip/boundary-pass segment.
 bool requires_contact
 
+# Optional: Edge spacing for contact tools, populated by the caller from the active tool profile
+# (coverage.edge_zone_m, coverage.edge_spacing_scale). Strips within edge_zone_m of the stepover-axis
+# ends or of an obstacle edge are spaced edge_spacing_scale times closer.
+float32 edge_zone_m  # <= 0 = use node default (parameter edge_zone_m)
+float32 edge_spacing_scale  # <= 0 = use node default (parameter edge_spacing_scale); valid range (0, 1]
+
 # Optional: Planning region (empty = use entire free space)
 geometry_msgs/PolygonStamped region
 

@@ -36,3 +36,4 @@ int32 column                # current column, -1 between columns
 uint32 columns_done
 uint32 columns_failed       # failed or partial
 float64 peak_force_n        # so far; -1 when no force topic is read
+string mission_state        # the mission FSM state (IDLE | ACTIVE | PAUSED | STOPPED | RECOVERY), as the mission_command service reports it

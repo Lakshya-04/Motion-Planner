@@ -29,6 +29,7 @@ find_package(motion_planner REQUIRED)
 find_package(moveit_ros_planning REQUIRED)
 find_package(motion_planner_moveit REQUIRED)  # only the tests still link the MoveIt adapter directly
 find_package(mobile_manipulator_profile REQUIRED)
+find_package(reachability REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
 # core/ (zero ROS deps -- verified: only stdlib + core_types/motion_planner headers)
@@ -44,6 +45,7 @@ add_library(${PROJECT_NAME}_core
   src/core/motion_exec_reporter.cpp
   src/core/coverage_feasibility_analyzer.cpp
   src/core/base_stance_check.cpp
+  src/core/stand_check.cpp
   src/core/coverage_task.cpp
   src/ros/execution/jtac_execution_adapter.cpp
   src/ros/coverage/coverage_output_json_source.cpp
@@ -68,6 +70,22 @@ ament_target_dependencies(${PROJECT_NAME}_core
   rclcpp_action
   control_msgs
 )
+
+# RM4D-backed ColumnReachabilityPort (adapters/): its own library so manipulation_manager_core stays free of
+# the reachability package. Only the node and its test link it.
+add_library(${PROJECT_NAME}_column_reach
+  src/adapters/reachability_column_port.cpp
+  src/adapters/reachability_path_quality_port.cpp
+  src/adapters/reachability_column_ik_port.cpp)
+target_link_libraries(${PROJECT_NAME}_column_reach PUBLIC
+  ${PROJECT_NAME}_core
+  reachability::reachability_core
+)
+target_include_directories(${PROJECT_NAME}_column_reach PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_compile_features(${PROJECT_NAME}_column_reach PUBLIC cxx_std_17)
 
 # Opt-in retiming (retime:=true): the one place the node touches the MoveIt adapter.
 add_library(${PROJECT_NAME}_retiming src/ros/execution/retiming_wiring.cpp)
@@ -100,6 +118,7 @@ ament_target_dependencies(manipulation_manager_node
 target_link_libraries(manipulation_manager_node
   ${PROJECT_NAME}_core
   ${PROJECT_NAME}_retiming
+  ${PROJECT_NAME}_column_reach
   ros_adapters::ros_adapters
   motion_planner::motion_planner_ros
   mobile_manipulator_profile::mobile_manipulator_profile
@@ -118,6 +137,7 @@ install(TARGETS tool_actuation_node DESTINATION lib/${PROJECT_NAME})
 install(TARGETS
   ${PROJECT_NAME}_core
   ${PROJECT_NAME}_retiming
+  ${PROJECT_NAME}_column_reach
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -149,6 +169,11 @@ if(BUILD_TESTING)
       motion_planner_moveit::motion_planner_moveit_lib)
   endif()
 
+  ament_add_gtest(reachability_column_port_test test/reachability_column_port_test.cpp)
+  if(TARGET reachability_column_port_test)
+    target_link_libraries(reachability_column_port_test ${PROJECT_NAME}_column_reach core_types::core_types)
+  endif()
+
   ament_add_gtest(motion_exec_reporter_test test/motion_exec_reporter_test.cpp)
   if(TARGET motion_exec_reporter_test)
     target_link_libraries(motion_exec_reporter_test ${PROJECT_NAME}_core core_types::core_types)
@@ -164,6 +189,55 @@ if(BUILD_TESTING)
   ament_add_gtest(base_stance_check_test test/base_stance_check_test.cpp)
   if(TARGET base_stance_check_test)
     target_link_libraries(base_stance_check_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(column_ik_gate_test test/column_ik_gate_test.cpp)
+  if(TARGET column_ik_gate_test)
+    target_link_libraries(column_ik_gate_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+  ament_add_gtest(reachability_column_ik_port_test test/reachability_column_ik_port_test.cpp)
+  if(TARGET reachability_column_ik_port_test)
+    target_link_libraries(reachability_column_ik_port_test ${PROJECT_NAME}_column_reach core_types::core_types)
+  endif()
+
+  ament_add_gtest(reachability_path_quality_port_test test/reachability_path_quality_port_test.cpp)
+  if(TARGET reachability_path_quality_port_test)
+    target_link_libraries(reachability_path_quality_port_test ${PROJECT_NAME}_column_reach)
+  endif()
+
+  # Header-only cores of the verify result: geometric coverage, the tool/joint trace, the verify JSON with them.
+  foreach(t geometric_coverage tool_trace)
+    ament_add_gtest(${t}_test test/${t}_test.cpp)
+    if(TARGET ${t}_test)
+      target_include_directories(${t}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+      target_compile_features(${t}_test PRIVATE cxx_std_17)
+    endif()
+  endforeach()
+  ament_add_gtest(mission_verify_geometry_test test/mission_verify_geometry_test.cpp)
+  if(TARGET mission_verify_geometry_test)
+    target_include_directories(mission_verify_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(mission_verify_geometry_test nlohmann_json::nlohmann_json)
+  endif()
+
+  ament_add_gtest(stand_check_test test/stand_check_test.cpp)
+  if(TARGET stand_check_test)
+    target_link_libraries(stand_check_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(column_chain_test test/column_chain_test.cpp)
+  if(TARGET column_chain_test)
+    target_include_directories(column_chain_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_features(column_chain_test PRIVATE cxx_std_17)
+  endif()
+
+  ament_add_gtest(stand_gate_test test/stand_gate_test.cpp)
+  if(TARGET stand_gate_test)
+    target_link_libraries(stand_gate_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(wall_dock_gate_test test/wall_dock_gate_test.cpp)
+  if(TARGET wall_dock_gate_test)
+    target_link_libraries(wall_dock_gate_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
   ament_add_gtest(coverage_output_json_source_test test/coverage_output_json_source_test.cpp)
@@ -219,6 +293,29 @@ if(BUILD_TESTING)
     target_include_directories(recovery_jog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   endif()
 
+  ament_add_gtest(dock_ik_selector_test test/dock_ik_selector_test.cpp)
+  if(TARGET dock_ik_selector_test)
+    target_include_directories(dock_ik_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  # Property / fuzz tests of the ROS-free decision cores (seeded, 20000 cases, NaN / inf / size-mismatch inputs).
+  ament_add_gtest(core_fuzz_test test/core_fuzz_test.cpp)
+  if(TARGET core_fuzz_test)
+    target_link_libraries(core_fuzz_test ${PROJECT_NAME}_core core_types::core_types)
+    target_include_directories(core_fuzz_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  ament_add_gtest(column_retry_test test/column_retry_test.cpp)
+  if(TARGET column_retry_test)
+    target_include_directories(column_retry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(column_retry_test nlohmann_json::nlohmann_json)
+  endif()
+
+  ament_add_gtest(recovery_branch_test test/recovery_branch_test.cpp)
+  if(TARGET recovery_branch_test)
+    target_include_directories(recovery_branch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
   ament_add_gtest(column_ordering_test test/column_ordering_test.cpp)
   if(TARGET column_ordering_test)
     target_include_directories(column_ordering_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -247,6 +344,13 @@ if(BUILD_TESTING)
     target_link_libraries(mission_ledger_test nlohmann_json::nlohmann_json)
   endif()
 
+  ament_add_gtest(mission_verify_test test/mission_verify_test.cpp)
+  if(TARGET mission_verify_test)
+    target_include_directories(mission_verify_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(mission_verify_test nlohmann_json::nlohmann_json)
+    ament_target_dependencies(mission_verify_test coverage_task_msgs)
+  endif()
+
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)
     set(ament_cmake_copyright_FOUND TRUE)
@@ -267,8 +371,9 @@ ament_export_dependencies(
   core_types
   ros_adapters
   motion_planner
+  reachability
 )
 ament_export_include_directories(include)
-ament_export_libraries(${PROJECT_NAME}_core)
+ament_export_libraries(${PROJECT_NAME}_core ${PROJECT_NAME}_column_reach)
 
 ament_package()

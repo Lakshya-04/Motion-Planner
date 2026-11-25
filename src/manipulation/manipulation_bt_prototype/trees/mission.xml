@@ -1,0 +1,207 @@
+<root BTCPP_format="4" main_tree_to_execute="Mission">
+  <!--
+    Full mission tree of the manipulation stack (design, ROS-free node logic tested on fakes; see
+    docs/behavior_trees/mission.md). One tick walks: always-report root -> work (scan, calibrate, plan, select
+    stands, per stand reach it, per column attempt/escalate) -> wrapup (stow, tool off, report).
+
+    The shared state is the typed MissionCtx injected into every node at registration, not a blackboard entry, so
+    subtrees need no port remapping. Policy numbers (attempts, timeouts) are literals here on purpose: they are what
+    the manager's parameters become (nav_attempts, column_retries, ...).
+  -->
+
+  <BehaviorTree ID="Mission">
+    <!-- ReportOnHalt: a halt (goal canceled) halts the running leaves first, then reports "canceled". -->
+    <ReportOnHalt>
+      <Fallback>
+        <Sequence>
+          <SubTree ID="MissionWork"/>
+          <SubTree ID="Wrapup" outcome="finished"/>
+        </Sequence>
+        <!-- always-report: a failed mission still stows, switches the tool off and reports once -->
+        <ForceFailure>
+          <SubTree ID="Wrapup" outcome="aborted"/>
+        </ForceFailure>
+      </Fallback>
+    </ReportOnHalt>
+  </BehaviorTree>
+
+  <BehaviorTree ID="MissionWork">
+    <Sequence>
+      <StartMission/>                                         <!-- FSM IDLE -> ACTIVE, per-run state reset -->
+      <RetryUntilSuccessful num_attempts="2">
+        <PerceiveSurface/>                                    <!-- scan the surface (wall detector) -->
+      </RetryUntilSuccessful>
+      <SubTree ID="CalibrateTool"/>                           <!-- optional stage, gates contact tools -->
+      <PlanCoverage/>                                         <!-- coverage json, ledger begin(mission, resume) -->
+      <SelectStands/>                                         <!-- reachability plan_stands (single stand: one stand) -->
+      <ForEachStand>
+        <SubTree ID="Stand"/>
+      </ForEachStand>
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- Calibration stage. Non-contact tool: nothing to do. Contact tool: a valid record passes; otherwise the touch
+       sequence runs once and its result must make the record valid, else CALIBRATION_INVALID aborts the mission
+       before any column. Remove the second branch to require a pre-calibrated tool. -->
+  <BehaviorTree ID="CalibrateTool">
+    <Fallback>
+      <ToolCalibrationValid/>
+      <Sequence>
+        <TouchCalibrate/>
+        <ToolCalibrationValid/>
+      </Sequence>
+    </Fallback>
+  </BehaviorTree>
+
+  <!-- One stand (the stand is ctx.stand). FAILURE = stand skipped: ForEachStand marks its unfinished columns SKIPPED
+       with ctx.reason and the mission goes on. -->
+  <BehaviorTree ID="Stand">
+    <Sequence>
+      <Fallback>
+        <SubTree ID="ReachStand"/>
+        <Sequence>                                            <!-- ReStand fallback: another stand pose, once per offer -->
+          <ReStand scope="stand"/>
+          <SubTree ID="ReachStand"/>
+        </Sequence>
+      </Fallback>
+      <ForEachColumn>
+        <SubTree ID="Column"/>
+      </ForEachColumn>
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- Drive to the stand (nav_attempts = 2) and dock at the wall with the stand-pose check (re-dock once). -->
+  <BehaviorTree ID="ReachStand">
+    <Sequence>
+      <RetryUntilSuccessful num_attempts="2">
+        <NavigateToStand/>
+      </RetryUntilSuccessful>
+      <RetryUntilSuccessful num_attempts="2">
+        <DockBase/>
+      </RetryUntilSuccessful>
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- One column = one ledger segment (ctx.column). SUCCESS = column done, FAILURE = skipped (last resort).
+       Escalation order (development plan section 4): attempt + one retry, re-stand, re-order, split, skip.
+       Retryable stops the escalation for causes that no further attempt cures (contact overload, safety timeout). -->
+  <BehaviorTree ID="Column">
+    <Sequence>
+      <PauseGuard/>                                           <!-- column boundary: waits while the FSM is PAUSED -->
+      <Fallback>
+        <SubTree ID="ColumnAttempt"/>
+        <Sequence>
+          <Retryable/>
+          <ReStand scope="column"/>
+          <SubTree ID="ReachStand"/>
+          <SubTree ID="ColumnTry"/>
+        </Sequence>
+        <Sequence>
+          <Retryable/>
+          <DeferColumn/>                                      <!-- SUCCESS: ForEachColumn re-queues it behind the others -->
+        </Sequence>
+        <Sequence>
+          <Retryable/>
+          <SubTree ID="SplitRun"/>
+        </Sequence>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- column_retries = 1: one try, and one more after the arm is freed. -->
+  <BehaviorTree ID="ColumnAttempt">
+    <Fallback>
+      <SubTree ID="ColumnTry"/>
+      <Sequence>
+        <Retryable/>
+        <RecoverArm/>
+        <SubTree ID="ColumnTry"/>
+      </Sequence>
+    </Fallback>
+  </BehaviorTree>
+
+  <!-- A split column runs one ColumnTry per piece. -->
+  <BehaviorTree ID="SplitRun">
+    <Sequence>
+      <SplitColumn pieces="{pieces}"/>
+      <Repeat num_cycles="{pieces}">
+        <Sequence>
+          <SubTree ID="ColumnTry"/>
+          <NextPiece/>
+        </Sequence>
+      </Repeat>
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- One try of a column (or piece). TeleopGuard and SafetyGate wrap the whole motion. -->
+  <BehaviorTree ID="ColumnTry">
+    <TeleopGuard timeout_s="0">
+      <SafetyGate timeout_s="30">
+        <Sequence>
+          <ArmDock/>                                          <!-- approach / arm dock -->
+          <ContactPress/>                                     <!-- contact tools only -->
+          <StrokeColumn/>
+          <Retract/>
+          <VerifyColumn/>
+        </Sequence>
+      </SafetyGate>
+    </TeleopGuard>
+  </BehaviorTree>
+
+  <!-- End of every mission, success or not. StowArm may fail (refused after a safety timeout): ignored. -->
+  <BehaviorTree ID="Wrapup">
+    <Sequence>
+      <ForceSuccess>
+        <StowArm/>
+      </ForceSuccess>
+      <ForceSuccess>
+        <ToolOff/>
+      </ForceSuccess>
+      <ReportResult outcome="{outcome}"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <TreeNodesModel>
+    <Action ID="StartMission"/>
+    <Action ID="PerceiveSurface"/>
+    <Action ID="PlanCoverage"/>
+    <Action ID="SelectStands"/>
+    <Condition ID="ToolCalibrationValid"/>
+    <Action ID="TouchCalibrate"/>
+    <Control ID="ForEachStand"/>
+    <Control ID="ForEachColumn"/>
+    <Action ID="NavigateToStand"/>
+    <Action ID="DockBase"/>
+    <Action ID="ReStand">
+      <input_port name="scope" type="std::string" default="stand">stand | column</input_port>
+    </Action>
+    <Action ID="PauseGuard"/>
+    <Decorator ID="TeleopGuard">
+      <input_port name="timeout_s" type="double" default="0">seconds a handover may last before the mission aborts, 0: no limit</input_port>
+    </Decorator>
+    <Decorator ID="SafetyGate">
+      <input_port name="timeout_s" type="double" default="30">seconds a stop may last before the mission aborts, 0: no limit</input_port>
+    </Decorator>
+    <Action ID="ArmDock"/>
+    <Action ID="ContactPress"/>
+    <Action ID="StrokeColumn"/>
+    <Action ID="Retract"/>
+    <Action ID="VerifyColumn"/>
+    <Condition ID="Retryable"/>
+    <Action ID="RecoverArm"/>
+    <Action ID="DeferColumn"/>
+    <Action ID="SplitColumn">
+      <output_port name="pieces" type="int"/>
+    </Action>
+    <Action ID="NextPiece"/>
+    <Action ID="StowArm"/>
+    <Action ID="ToolOff"/>
+    <Action ID="ReportResult">
+      <input_port name="outcome" type="std::string" default="finished">finished | aborted</input_port>
+    </Action>
+    <Decorator ID="ReportOnHalt"/>
+    <SubTree ID="Wrapup">
+      <input_port name="outcome" default="finished"/>
+    </SubTree>
+  </TreeNodesModel>
+</root>

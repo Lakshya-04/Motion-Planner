@@ -37,6 +37,7 @@ add_library(coverage_planner_core
   src/core/verify_result.cpp
   src/core/tool_profile_loading.cpp
   src/core/contact_spacing.cpp
+  src/core/plan_redundancy.cpp
 )
 target_include_directories(coverage_planner_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -73,6 +74,10 @@ find_package(visualization_msgs REQUIRED)
 find_package(coverage_planner_msgs REQUIRED)
 find_package(ros_adapters REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+
+add_executable(plan_redundancy_report src/core/plan_redundancy_main.cpp)
+target_link_libraries(plan_redundancy_report coverage_planner_core)
+install(TARGETS plan_redundancy_report DESTINATION lib/${PROJECT_NAME})
 
 add_executable(score_run src/core/score_run_main.cpp)
 target_link_libraries(score_run coverage_planner_core)
@@ -182,6 +187,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_spray_deposition test/core/spray_deposition_test.cpp)
   target_link_libraries(test_spray_deposition coverage_planner_core)
 
+  ament_add_gtest(test_plan_redundancy test/core/plan_redundancy_test.cpp)
+  target_link_libraries(test_plan_redundancy coverage_planner_core)
+
   ament_add_gtest(test_run_scorecard test/core/run_scorecard_test.cpp)
   target_link_libraries(test_run_scorecard coverage_planner_core)
 
@@ -199,6 +207,11 @@ if(BUILD_TESTING)
   ament_add_gtest(test_tool_profiles test/core/tool_profiles_test.cpp)
   target_link_libraries(test_tool_profiles coverage_planner_core ros_adapters::ros_adapters)
   target_compile_definitions(test_tool_profiles PUBLIC
+    TOOL_PROFILES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/tool_profiles.yaml")
+
+  ament_add_gtest(test_tool_tilt test/core/tool_tilt_test.cpp)
+  target_link_libraries(test_tool_tilt coverage_planner_core ros_adapters::ros_adapters)
+  target_compile_definitions(test_tool_tilt PUBLIC
     TOOL_PROFILES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/tool_profiles.yaml")
 
   # ros/ tests: message <-> core conversions.

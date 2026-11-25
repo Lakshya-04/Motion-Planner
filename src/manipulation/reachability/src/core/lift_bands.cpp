@@ -28,15 +28,17 @@ std::vector<double> heightRange(double lo, double hi, double step)
 
 std::vector<std::vector<bool>> reachableByHeight(
   const Map4D & map, const std::vector<Pose> & targets_world, double base_x, double base_y,
-  const std::vector<double> & heights, double arm_mount_offset_z)
+  const std::vector<double> & heights, double arm_mount_offset_z, const ReachLimit & limit)
 {
+  const bool cap = limit.active() && limit.max_fraction > 0.0;
   std::vector<std::vector<bool>> out(targets_world.size(), std::vector<bool>(heights.size(), false));
   for (size_t i = 0; i < targets_world.size(); ++i) {
     for (size_t h = 0; h < heights.size(); ++h) {
       // Base yaw is free (the arm's first joint absorbs it), so a base at yaw 0 is enough.
       Pose in_base = targets_world[i];
       in_base.translation() -= Vec3(base_x, base_y, heights[h] + arm_mount_offset_z);
-      out[i][h] = map.isReachable(in_base);
+      out[i][h] = map.isReachable(in_base) &&
+        (!cap || in_base.translation().norm() <= limit.max_fraction * limit.reach_m + 1e-9);
     }
   }
   return out;
@@ -44,10 +46,16 @@ std::vector<std::vector<bool>> reachableByHeight(
 
 LiftBandPlan planLiftBands(
   const Map4D & map, const std::vector<Pose> & targets_world, double base_x, double base_y,
-  const std::vector<double> & candidate_heights, double arm_mount_offset_z)
+  const std::vector<double> & candidate_heights, double arm_mount_offset_z, const ReachLimit & limit)
 {
   LiftBandPlan plan;
-  const auto reach = reachableByHeight(map, targets_world, base_x, base_y, candidate_heights, arm_mount_offset_z);
+  const auto reach = reachableByHeight(map, targets_world, base_x, base_y, candidate_heights, arm_mount_offset_z, limit);
+  const bool active = limit.active();
+  // tool distance over reach for target i with the lift at height h
+  auto fraction = [&](size_t i, size_t h) {
+      const Vec3 d = targets_world[i].translation() - Vec3(base_x, base_y, candidate_heights[h] + arm_mount_offset_z);
+      return d.norm() / limit.reach_m;
+    };
 
   std::vector<bool> covered(targets_world.size(), false);
   for (size_t i = 0; i < targets_world.size(); ++i) {
@@ -62,15 +70,22 @@ LiftBandPlan planLiftBands(
 
   while (true) {
     size_t best_h = 0, best_gain = 0;
+    double best_worst = 0.0;
     for (size_t h = 0; h < candidate_heights.size(); ++h) {
       size_t gain = 0;
+      double worst = 0.0;
       for (size_t i = 0; i < targets_world.size(); ++i) {
-        if (!covered[i] && reach[i][h]) {++gain;}
+        if (!covered[i] && reach[i][h]) {
+          ++gain;
+          if (limit.balance && active) {worst = std::max(worst, fraction(i, h));}
+        }
       }
-      // Ties go to the lower height: the slow axis travels less.
-      if (gain > best_gain) {
+      // Ties go to the lower height: the slow axis travels less. With the balance option a tie goes to the height
+      // that keeps the tool farthest from full stretch (a clearly smaller worst fraction, 0.01 of the reach).
+      if (gain > best_gain || (gain > 0 && gain == best_gain && limit.balance && active && worst < best_worst - 0.01)) {
         best_gain = gain;
         best_h = h;
+        best_worst = worst;
       }
     }
     if (best_gain == 0) {
@@ -88,6 +103,14 @@ LiftBandPlan planLiftBands(
   }
   std::sort(plan.bands.begin(), plan.bands.end(),
     [](const LiftBand & a, const LiftBand & b) {return a.lift_height < b.lift_height;});
+  if (active) {
+    for (const auto & b : plan.bands) {
+      const Vec3 base(base_x, base_y, b.lift_height + arm_mount_offset_z);
+      for (const size_t i : b.pose_indices) {
+        plan.max_reach_fraction = std::max(plan.max_reach_fraction, (targets_world[i].translation() - base).norm() / limit.reach_m);
+      }
+    }
+  }
   return plan;
 }
 

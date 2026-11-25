@@ -69,6 +69,16 @@ def test_ignore_hops():
     assert frozenset(('base_link', 'link1')) in pairs2
 
 
+def test_mimic_stage_adds_no_hop():
+    """Telescope stages move together: a mimic joint is zero hops, so a stage is as close as its driver."""
+    robot = UrdfRobot(URDF.read_text())
+    assert robot.tree_distance('stage_link', 'lift_link') == 1
+    assert robot.tree_distance('stage_link', 'base_link') == 0
+    pairs = {frozenset(p) for p in robot.ignored_pairs(['base_link', 'lift_link', 'stage_link', 'link1'], 1)}
+    assert frozenset(('stage_link', 'lift_link')) in pairs
+    assert frozenset(('stage_link', 'link1')) not in pairs
+
+
 def test_generated_structure(mjcf):
     root = ET.parse(mjcf).getroot()
     assert [j.get('name') for j in root.iter('joint') if j.get('type') in ('hinge', 'slide')] == \
@@ -311,3 +321,100 @@ def test_depth_sensor_model_compiles_and_a_ray_hits_only_the_scene(tmp_path):
     dist = mujoco.mj_ray(m, d, d.site_xpos[site], d.site_xmat[site].reshape(3, 3)[:, 0], groups, 1, -1, geomid)
     assert dist == pytest.approx(1.0, abs=1e-6)
     assert m.geom(geomid[0]).name == 'wall'
+
+
+# ---------------------------------------------------------------- per-body gravcomp
+
+
+def _gravcomp_bodies(path):
+    return {b.get('name') for b in ET.parse(path).getroot().iter('body') if b.get('gravcomp') == '1'}
+
+
+def test_gravcomp_default_unchanged_and_bool_forms(tmp_path, mjcf):
+    default = _gravcomp_bodies(mjcf)
+    assert 'link1' in default and 'tool_mount_link' not in default and 'tcp_link' not in default
+    on = urdf_to_mjcf(URDF.read_text(), tmp_path / 'on', urdf_dir=DATA, home=HOME,
+                      commanded=COMMANDED, gravcomp=True)
+    assert on.read_bytes() == mjcf.read_bytes()
+    off = urdf_to_mjcf(URDF.read_text(), tmp_path / 'off', urdf_dir=DATA, home=HOME,
+                       commanded=COMMANDED, gravcomp=False)
+    assert _gravcomp_bodies(off) == set()
+
+
+def test_gravcomp_per_link_list_selects_exactly_those(tmp_path):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME,
+                        commanded=COMMANDED, gravcomp=['link1'])
+    assert _gravcomp_bodies(path) == {'link1'}
+
+
+def test_gravcomp_unknown_link_rejected(tmp_path):
+    with pytest.raises(ValueError, match='unknown links'):
+        urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, gravcomp=['nope'])
+
+
+@pytest.mark.parametrize('names', [['link1'], ('link1',), {'link1'}, frozenset({'link1'})])
+def test_gravcomp_accepts_any_non_string_iterable(tmp_path, names):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME,
+                        commanded=COMMANDED, gravcomp=names)
+    assert _gravcomp_bodies(path) == {'link1'}
+
+
+@pytest.mark.parametrize('bad', [{'link1': 1}, 3, 1.5, b'link1', object()])
+def test_gravcomp_rejects_dicts_and_other_types(tmp_path, bad):
+    with pytest.raises(TypeError):
+        urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME,
+                     commanded=COMMANDED, gravcomp=bad)
+
+
+def test_a_urdf_pad_replaces_the_generated_one(tmp_path):
+    # generic_tool.xacro carries the pad as a collision named tool_pad (so the planners see it): the generator must use
+    # that one and not add a second, identical geom (two contacts per touch double the force)
+    pad = ('<collision name="tool_pad"><origin xyz="0 0 0.16"/><geometry><cylinder radius="0.03" length="0.01"/>'
+           '</geometry></collision>')
+    text = URDF.read_text().replace('<link name="tool_mount_link">', '<link name="tool_mount_link">' + pad, 1)
+    root = ET.parse(urdf_to_mjcf(text, tmp_path, urdf_dir=DATA, commanded=COMMANDED)).getroot()
+    mount = [b for b in root.iter('body') if b.get('name') == 'tool_mount_link'][0]
+    pads = [g for g in mount.findall('geom') if g.get('name') == 'tool_pad']
+    assert len(pads) == 1
+    assert [float(v) for v in pads[0].get('size').split()] == pytest.approx([0.03, 0.005])
+    assert float(pads[0].get('pos').split()[2]) == pytest.approx(0.16)
+
+
+# ---------------------------------------------------------------- visual-only floor
+def test_floor_off_leaves_the_model_unchanged(tmp_path, mjcf):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME, commanded=COMMANDED, floor=False)
+    assert path.read_text() == mjcf.read_text()
+    assert 'floor' not in path.read_text()
+
+
+def test_floor_is_visual_only_and_leaves_the_wall_alone(tmp_path):
+    wall = ET.Element('geom', name='wall_0', type='box', size='0.05 0.5 1', pos='1 0 1', friction='1 0.005 0.0001')
+    plain = urdf_to_mjcf(URDF.read_text(), tmp_path / 'a', urdf_dir=DATA, home=HOME, commanded=COMMANDED,
+                         world_geoms=[ET.fromstring(ET.tostring(wall))], base_motion=BASE)
+    with_floor = urdf_to_mjcf(URDF.read_text(), tmp_path / 'b', urdf_dir=DATA, home=HOME, commanded=COMMANDED,
+                              world_geoms=[ET.fromstring(ET.tostring(wall))], base_motion=BASE, floor=True)
+    world = ET.parse(with_floor).getroot().find('worldbody')
+    floor = [g for g in world.findall('geom') if g.get('name') == 'floor'][0]
+    assert floor.get('type') == 'plane'
+    assert floor.get('contype') == '0' and floor.get('conaffinity') == '0' and floor.get('group') == '2'
+    walls = [ET.tostring(g) for g in world.findall('geom') if g.get('name') == 'wall_0']
+    assert walls == [ET.tostring(g) for g in ET.parse(plain).getroot().find('worldbody').findall('geom')
+                     if g.get('name') == 'wall_0']
+    assert len(walls) == 1
+
+
+@needs_mujoco
+def test_floor_adds_no_contacts_and_is_not_hit_by_scene_rays(tmp_path):
+    wall = ET.Element('geom', name='wall', type='box', size='0.05 1 1', pos='1.05 0 1')
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME, commanded=COMMANDED,
+                        world_geoms=[wall], depth_sensor=dict(pos=(0, 0, 1)), floor=True)
+    m = load(path)
+    d = mujoco.MjData(m)
+    mujoco.mj_forward(m, d)
+    assert d.ncon == 0
+    floor_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, 'floor')
+    assert m.geom_contype[floor_id] == 0 and m.geom_conaffinity[floor_id] == 0
+    geomid = np.zeros(1, dtype=np.int32)
+    groups = np.array([0, 1, 0, 0, 0, 0], dtype=np.uint8)
+    dist = mujoco.mj_ray(m, d, np.array([0.0, 0.0, 1.0]), np.array([0.0, 0.0, -1.0]), groups, 1, -1, geomid)
+    assert dist == -1

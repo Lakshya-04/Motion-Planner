@@ -31,11 +31,27 @@ HOME = [0.4, 0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]
 # tool axis +x, TCP at (0.95, 0.15, 1.15), and 5 cm further along +x (wall plane at x = 0.98)
 FREE = [0.4, -0.0363, 0.2528, 1.1964, 1.6924, -1.5345, 1.5708]
 PRESS = [0.4, -0.0324, 0.2817, 1.0151, 1.8448, -1.5384, 1.5708]
+DEFAULT_PROFILE = 'ur10e_telescopic'
+
+
+def profile_name():
+    return os.environ.get('MP_PROFILE') or DEFAULT_PROFILE
+
+
+def active_joints():
+    """Lift + arm joint names of the profile the sim runs (env MP_PROFILE): the UR names above for the default
+    profile, otherwise read from the profile YAML. HOME, FREE and PRESS stay UR10e joint poses."""
+    if profile_name() == DEFAULT_PROFILE:
+        return list(JOINTS)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from profile_reach import joint_names, load_profile
+    return joint_names(load_profile(profile_name()))
 
 
 class Smoke(Node):
     def __init__(self, controller):
         super().__init__('sim_mujoco_smoke')
+        self.joints = active_joints()
         self.lock = threading.Lock()
         self.js, self.raw, self.truth = None, None, None
         self.log = []   # (t, q)
@@ -48,9 +64,9 @@ class Smoke(Node):
 
     def _js(self, m):
         q = dict(zip(m.name, m.position))
-        if all(j in q for j in JOINTS):
+        if all(j in q for j in self.joints):
             with self.lock:
-                self.js = [q[j] for j in JOINTS]
+                self.js = [q[j] for j in self.joints]
                 self.log.append((time.monotonic(), self.js))
 
     @staticmethod
@@ -72,12 +88,12 @@ class Smoke(Node):
 
     def move(self, target, seconds):
         goal = FollowJointTrajectory.Goal()
-        goal.trajectory.joint_names = JOINTS
+        goal.trajectory.joint_names = list(self.joints)
         start = self.state()[0]
         for frac in (0.5, 1.0):  # midpoint with rest-to-rest timing keeps the spline well behaved
             p = JointTrajectoryPoint()
             p.positions = [a + (b - a) * frac for a, b in zip(start, target)]
-            p.velocities = [0.0] * 7 if frac == 1.0 else [(b - a) / seconds * 1.5 for a, b in zip(start, target)]
+            p.velocities = [0.0] * len(self.joints) if frac == 1.0 else [(b - a) / seconds * 1.5 for a, b in zip(start, target)]
             p.time_from_start.sec = int(seconds * frac)
             p.time_from_start.nanosec = int((seconds * frac % 1) * 1e9)
             goal.trajectory.points.append(p)
@@ -122,6 +138,9 @@ def main():
     ap.add_argument('--release-timeout', type=float, default=8.0,
                     help='how long after the retreat trajectory ends the force may take to vanish')
     args = ap.parse_args()
+    if profile_name() != DEFAULT_PROFILE:
+        sys.exit(f'smoke_test: its poses are UR10e joint angles; MP_PROFILE={profile_name()} is not supported here '
+                 '(run_manager_pass.sh and run_wall_pass.sh plan the pre-contact pose instead)')
     rclpy.init()
     node = Smoke(args.controller)
     spin = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)

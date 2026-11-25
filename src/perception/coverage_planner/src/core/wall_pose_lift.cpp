@@ -78,6 +78,8 @@ Eigen::Vector3d rotateTowardDirection(
   return (rotation * z_nominal).normalized();
 }
 
+constexpr double kMaxAxisTiltDeg = 85.0;
+
 }  // namespace
 
 Path liftCoveragePathPose(
@@ -98,6 +100,28 @@ Path liftCoveragePathPose(
   // Re-orthogonalize x against y, z for a numerically clean right-handed frame (x*y=z).
   x_tangent = y_tangent.cross(z_nominal).normalized();
 
+  // Intended fixed tool tilt (profile geometry): rotate the nominal frame about the in-surface
+  // axis (given in the contact frame, so it follows tool_frame_yaw_deg). Skipped entirely at 0
+  // so the poses stay bit-identical to the untilted lift. It is applied before the edge tilt.
+  const bool fixed_tilt = tool_task.tool_tilt_deg != 0.0;
+  Eigen::Vector3d z_start = z_nominal;
+  Eigen::Vector3d x_start = x_tangent;
+  if (fixed_tilt) {
+    const double yaw_rad = tool_task.tool_frame_yaw_deg * M_PI / 180.0;
+    const double ax = tool_task.tool_tilt_axis[0];
+    const double ay = tool_task.tool_tilt_axis[1];
+    Eigen::Vector3d axis = (ax * x_tangent + ay * y_tangent);
+    if (axis.norm() > 1e-12) {
+      axis = (Eigen::AngleAxisd(yaw_rad, z_nominal) * axis).normalized();
+      // Defensive bound; the loader already refuses a total (fixed + edge) tilt of 85 degrees.
+      const double tilt_rad =
+        std::clamp(tool_task.tool_tilt_deg, -kMaxAxisTiltDeg, kMaxAxisTiltDeg) * M_PI / 180.0;
+      const Eigen::AngleAxisd tilt(tilt_rad, axis);
+      z_start = (tilt * z_nominal).normalized();
+      x_start = (tilt * x_tangent).normalized();
+    }
+  }
+
   const bool tilt_enabled = tool_task.tool_normal_policy == "tilt_at_edges" && !tool_task.contact &&
                             tool_task.max_edge_tilt_deg > 0.0 && tool_task.standoff_m > 0.0;
   const double margin_m = tool_task.standoff_m;
@@ -115,7 +139,7 @@ Path liftCoveragePathPose(
     const double u = relative.dot(basis_u_unit);
     const double v = relative.dot(basis_v_unit);
 
-    Eigen::Vector3d z_axis = z_nominal;
+    Eigen::Vector3d z_axis = z_start;
     if (tilt_enabled) {
       const EdgeProximity nearest = findNearestEdge(u, v, wall);
       if (nearest.distance_m < margin_m) {
@@ -135,11 +159,19 @@ Path liftCoveragePathPose(
             target_direction = basis_v_unit;
             break;
         }
-        z_axis = rotateTowardDirection(z_nominal, target_direction, fraction * max_tilt_rad);
+        z_axis = rotateTowardDirection(z_start, target_direction, fraction * max_tilt_rad);
       }
     }
+    // Never let the fixed plus edge tilt turn the axis more than kMaxAxisTiltDeg from into-wall.
+    const double cos_limit = std::cos(kMaxAxisTiltDeg * M_PI / 180.0);
+    if (z_axis.dot(z_nominal) < cos_limit) {
+      const Eigen::Vector3d side = z_axis - z_nominal * z_axis.dot(z_nominal);
+      const Eigen::Vector3d dir = side.norm() > 1e-12 ? Eigen::Vector3d(side.normalized()) :
+        x_tangent;
+      z_axis = (z_nominal * cos_limit + dir * std::sqrt(1.0 - cos_limit * cos_limit)).normalized();
+    }
 
-    Eigen::Vector3d x_final = (x_tangent - z_axis * z_axis.dot(x_tangent)).normalized();
+    Eigen::Vector3d x_final = (x_start - z_axis * z_axis.dot(x_start)).normalized();
     Eigen::Vector3d y_final = z_axis.cross(x_final).normalized();
 
     // Rotate the commanded tool frame's own X/Y about its Z (contact-normal) axis -- e.g. to
@@ -159,7 +191,9 @@ Path liftCoveragePathPose(
     Eigen::Quaterniond quaternion(rotation);
     quaternion.normalize();
 
-    const Eigen::Vector3d offset_position = position + normal * tool_task.standoff_m;
+    // The standoff is measured along the tool axis, so the axis meets the strip point at that
+    // distance. Without a fixed tilt z_start == -normal and this is the plain normal offset.
+    const Eigen::Vector3d offset_position = position - z_start * tool_task.standoff_m;
 
     PoseStamped lifted_pose;
     lifted_pose.header = flat_pose.header;

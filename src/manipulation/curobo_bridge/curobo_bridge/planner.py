@@ -13,6 +13,8 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from curobo_bridge import path_quality
+
 
 @dataclass
 class Box:
@@ -200,6 +202,21 @@ def closest_solution(solutions: np.ndarray, success: np.ndarray, seed: Sequence[
     return None if best is None else (best.tolist(), best_distance, best_row)
 
 
+def endpoint_failure(start_valid: Optional[bool], goal_valid: Optional[bool]) -> Optional[PlanResult]:
+    """A precheck PlanResult when cuRobo's own state check calls the start or the goal invalid (in
+    collision with itself or the world, or outside the joint limits), else None. `None` for a flag means
+    the check could not run: that is not a failure. A planner cannot leave an invalid start or reach an
+    invalid goal, and without this check the answer is `no_path` after every attempt (37 to 40 s measured
+    for a docked pose at a low lift); the distinct code says WHICH end to look at, and a sphere model that
+    is too conservative shows up here in milliseconds."""
+    bad = [name for name, ok in (('start', start_valid), ('goal', goal_valid)) if ok is False]
+    if not bad:
+        return None
+    return PlanResult(failure_reason_code=f'{bad[0]}_in_collision', failure_stage='precheck',
+                      message=f"cuRobo's state check rejects the {' and '.join(bad)} state (self-collision, "
+                              f'world collision or joint limits in its sphere model); not planned')
+
+
 # upper bound on the states check_motion interpolates (a 1e-9 rad step would build an unbounded list)
 MAX_MOTION_STATES = 100_000
 
@@ -213,7 +230,13 @@ class CuroboPlanner:
                  ik_weights: Optional[Sequence[float]] = None,
                  graph_planner_algorithm: str = 'prm', enable_trajopt: bool = True,
                  enable_graph_attempt: int = 1, seed_fallback: bool = True, fallback_attempts: int = 6,
-                 max_attempts: int = 20):
+                 max_attempts: int = 20, precheck_endpoints: bool = True,
+                 free_space_optimize: bool = False, free_space_time_budget_s: float = 20.0,
+                 free_space_num_candidates: int = 6, free_space_objective: str = 'length',
+                 lift_cost_weight: float = path_quality.DEFAULT_LIFT_COST_WEIGHT,
+                 optimal_trajopt_seeds: int = 32, optimal_num_knots: int = 24,
+                 optimal_interpolation_dt: float = 0.01, optimal_finetune_attempts: int = 8,
+                 optimal_max_attempts: int = 60, optimal_seed: int = 1234):
         """`graph_planner_algorithm` ('prm' or 'rrt', the GPU bidirectional RRT), `enable_trajopt` (False:
         the graph seed is retimed and validated, trajectory optimisation is skipped) and
         `enable_graph_attempt` (the plan_cspace attempt at which graph seeding starts; 0 = from the
@@ -228,7 +251,24 @@ class CuroboPlanner:
         docs/planner_benchmark.md). Ignored with `enable_trajopt=False`, which is that route already.
         `max_attempts` is cuRobo's attempt cap for the first (normal) pass, 20 by default; a problem the
         optimiser cannot solve costs all of them before the fallback runs (6 to 30 s measured), so lower
-        it when the fallback is on and latency matters."""
+        it when the fallback is on and latency matters.
+
+        `precheck_endpoints`: before planning, `plan_joint` asks cuRobo's state check (the one `check_states`
+        exposes) about the start and the goal and returns `start_in_collision` / `goal_in_collision` at the
+        `precheck` stage when either is invalid, instead of running every attempt to a `no_path`. It costs
+        one batched check (milliseconds). Hypothesis, not yet run on a GPU: the docked-to-stow `no_path`
+        after 37 to 40 s at a low lift is such an invalid start; False restores the old behaviour.
+
+        `free_space_optimize` (default False): the optimal mode of `plan_joint`, for quality instead of speed.
+        The planner is built with more trajectory-optimisation seeds (`optimal_trajopt_seeds`), more B-spline
+        knots (`optimal_num_knots`) and a finer interpolation step (`optimal_interpolation_dt`); every plan then
+        runs up to `free_space_num_candidates` candidates (different graph/linear seeding and random seeds,
+        `optimal_finetune_attempts` finetune passes and up to `optimal_max_attempts` attempts each; cuRobo's
+        time-optimal retiming is on), stopping to start new ones after `free_space_time_budget_s`, plus the
+        straight joint-space line when cuRobo's check finds it valid. Each is scored by path_quality
+        (`free_space_objective` 'length' = joint path length, each joint normalised by its range, or
+        'duration') and the best is returned. A single cuRobo call cannot be interrupted, so the budget can be
+        overrun by one candidate. See docs/curobo_free_space_optimal.md."""
         import torch
         from curobo.motion_planner import MotionPlanner, MotionPlannerCfg
         from curobo.types import JointState
@@ -249,10 +289,30 @@ class CuroboPlanner:
             extra['graph_planner_algorithm'] = graph_planner_algorithm
         if not enable_trajopt:
             extra['enable_trajopt'] = False
+        if free_space_objective not in path_quality.OBJECTIVES:
+            raise ValueError(f'free_space_objective must be one of {path_quality.OBJECTIVES}')
+        self._optimize = bool(free_space_optimize)
+        self._budget_s = float(free_space_time_budget_s)
+        self._num_candidates = max(1, int(free_space_num_candidates))
+        self._objective = free_space_objective
+        # lift (prismatic_joints) travel counts this many times an arm joint's in the optimal-mode path length
+        self._lift_cost_weight = float(lift_cost_weight)
+        self._lift_joints = list(prismatic_joints)
+        self._finetune_attempts = max(1, int(optimal_finetune_attempts))
+        self._seed0 = int(optimal_seed)
+        self._interpolation_dt = 0.025
+        if self._optimize:
+            extra['num_trajopt_seeds'] = int(optimal_trajopt_seeds)
+            extra['num_knots'] = int(optimal_num_knots)
+            extra['interpolation_dt'] = float(optimal_interpolation_dt)
+            extra['enable_timeopt'] = True
+            self._interpolation_dt = float(optimal_interpolation_dt)
+            max_attempts = max(int(max_attempts), int(optimal_max_attempts))
         self._enable_graph_attempt = enable_graph_attempt
         self._seed_fallback = bool(seed_fallback) and enable_trajopt
         self._fallback_attempts = int(fallback_attempts)
         self._max_attempts = int(max_attempts)
+        self._precheck_endpoints = bool(precheck_endpoints)
         self._planner = MotionPlanner(MotionPlannerCfg.create(
             robot=robot, max_goalset=max_goalset, collision_cache=cache, **extra))
         # IK picks the solution nearest the seed: metres of a prismatic joint must not count as radians.
@@ -377,7 +437,12 @@ class CuroboPlanner:
         bad = self._check_state(start, 'start') or self._check_state(goal, 'goal')
         if bad:
             return bad
+        invalid = self._precheck(start, goal)
+        if invalid:
+            return invalid
         cur, tgt = self._state(start), self._state(goal)
+        if self._optimize:
+            return self._plan_joint_optimal(start, goal, cur, tgt)
         result = self._planner.plan_cspace(tgt, cur, max_attempts=self._max_attempts,
                                            enable_graph_attempt=self._enable_graph_attempt)
         out = self._wrap(result, last=goal)
@@ -388,6 +453,99 @@ class CuroboPlanner:
             return out
         fallback.planning_time_s += out.planning_time_s
         return fallback
+
+    def _va_limits(self):
+        """(velocity, acceleration) limits per joint from cuRobo, or None when this build does not expose them."""
+        try:
+            lim = self._planner.kinematics.get_joint_limits()
+            v = np.abs(lim.velocity.detach().cpu().numpy())
+            a = np.abs(lim.acceleration.detach().cpu().numpy())
+            v, a = (x.max(axis=0) if x.ndim == 2 else x for x in (v, a))
+            n = self.dimension
+            if len(v) >= n and len(a) >= n and np.all(v[:n] > 0) and np.all(a[:n] > 0):
+                return v[:n].tolist(), a[:n].tolist()
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger(__name__).warning('cuRobo velocity/acceleration limits unavailable (%s)', e)
+        return None
+
+    def _straight_candidate(self, start, goal, weights) -> Optional['path_quality.Candidate']:
+        """The straight joint-space line as a candidate, valid only when cuRobo's check passes all of it."""
+        limits = self._va_limits()
+        if limits is None and self._objective == 'duration':
+            return None       # no time scale for the line: it cannot be compared on duration
+        v, a = limits if limits else (None, None)
+        rows = path_quality.straight_line(start, goal, self._interpolation_dt, v, a)
+        try:
+            valid = bool(self.check_motion(rows, 0.02))
+        except Exception as e:  # noqa: BLE001 - an unusable check means: not proven valid
+            logging.getLogger(__name__).warning('straight-line validity check failed (%s)', e)
+            valid = False
+        return path_quality.score(path_quality.Candidate('straight', rows, self._interpolation_dt, valid), weights)
+
+    def _plan_joint_optimal(self, start, goal, cur, tgt) -> PlanResult:
+        """Quality mode: N cuRobo candidates + the straight line, best by path_quality (see __init__)."""
+        import time
+        log = logging.getLogger(__name__)
+        t0 = time.monotonic()
+        limits = self._joint_limits()
+        weights = path_quality.joint_weights(*limits) if limits else None
+        if weights is not None:
+            weights = path_quality.apply_lift_cost_weight(
+                weights, self.joint_names, self._lift_joints, self._lift_cost_weight)
+        cands, results = [], {}
+        straight = self._straight_candidate(start, goal, weights)
+        if straight is not None:
+            cands.append(straight)
+        for k in range(self._num_candidates):
+            if k > 0 and time.monotonic() - t0 >= self._budget_s:
+                break
+            self._torch.manual_seed(self._seed0 + k)
+            graph_from = 1 if k % 2 == 0 else 0      # linear seed first on even candidates, graph from the start on odd
+            try:
+                res = self._planner.plan_cspace(tgt, cur, max_attempts=self._max_attempts,
+                                                enable_graph_attempt=graph_from,
+                                                finetune_attempts=self._finetune_attempts + k)
+            except Exception as e:  # noqa: BLE001 - one failed candidate must not lose the others
+                log.warning('free-space candidate %d failed: %s', k, e)
+                continue
+            out = self._wrap(res, last=goal)
+            if out.success:
+                name = f'trajopt-{k}'
+                cands.append(path_quality.score(path_quality.Candidate(name, out.positions, out.dt), weights))
+                results[name] = out
+        best = path_quality.select_best(cands, self._objective, weights)
+        elapsed = time.monotonic() - t0
+        if best is None:
+            fail = self._wrap(None)
+            fail.planning_time_s = elapsed
+            return fail
+        if straight is not None and straight.valid:
+            baseline = straight
+        else:      # no valid line: efficiency is then measured against the unobstructed line's length
+            v, a = self._va_limits() or (None, None)
+            line = path_quality.straight_line(start, goal, self._interpolation_dt, v, a)
+            baseline = path_quality.score(path_quality.Candidate('straight(blocked)', line, self._interpolation_dt),
+                                          weights)
+        log.info(path_quality.summary_line(len(cands), best, self._objective, baseline))
+        if best.name == 'straight':
+            out = PlanResult(joint_names=self.joint_names, positions=best.positions, dt=best.dt,
+                             success=True, failure_stage='none', route='straight',
+                             message='the straight joint-space line is valid and the best candidate')
+        else:
+            out = results[best.name]
+        out.planning_time_s = elapsed
+        return out
+
+    def _precheck(self, start: Sequence[float], goal: Sequence[float]) -> Optional[PlanResult]:
+        """endpoint_failure for this planner's own state check; a check that cannot run is not a failure."""
+        if not self._precheck_endpoints:
+            return None
+        try:
+            start_ok, goal_ok = self.check_states([list(start), list(goal)])
+        except Exception as e:  # noqa: BLE001 - a missing check API must not stop planning
+            logging.getLogger(__name__).warning('endpoint precheck unavailable (%s): planning without it', e)
+            return None
+        return endpoint_failure(start_ok, goal_ok)
 
     def _plan_graph_seed(self, goal_state, current_state) -> Optional[PlanResult]:
         """plan_cspace with trajectory optimisation bypassed: graph seeds are evaluated (fitted, retimed,

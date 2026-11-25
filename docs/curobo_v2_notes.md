@@ -533,3 +533,36 @@ graph calls succeeded.
   (one request also interpolated the line `joint_values -> trajectory[0]`). GPU tests now check that `clear_world()` and a smaller `set_world()` really
   remove cuboids from cuRobo (they do: the stale-layer behaviour noted for voxels does not apply to cuboids).
 
+### Low-lift docked-to-stow `no_path`: what the code shows and what a GPU run must confirm (2026-11-21)
+
+Source: the two-stand runs in [sim_mujoco.md](sim_mujoco.md) ("Running a pass with cuRobo as the planner"). Read from code and config only; nothing here was run on a GPU.
+
+Found in the code (not hypotheses):
+
+- `generate_curobo_7dof.sh` did not pass `--ignore-hops` (its `CUROBO_SPHERE_ARGS` defaulted to empty), while the 6-joint `robot_assets.py` curobo stage does (default 2). A 7-joint config therefore had cuRobo's sampled collision matrix alone, the configuration that rejected 52 of 158 dock-pose problems above. It now defaults to `--ignore-hops 2` (set `CUROBO_SPHERE_ARGS=` to get the old behaviour). Regenerate `lift_arm.yml` to pick it up.
+- A plan with an invalid start ran all `max_attempts` (20) and then the graph-seed fallback, which is where 37 to 40 s of `no_path` comes from, and the code could not say which end was the problem. `plan_joint` now asks the state check (`check_states`) about start and goal first and answers `start_in_collision` / `goal_in_collision` (stage `precheck`) in milliseconds (`precheck_endpoints`, node parameter, default true; fail-open if the check cannot run). The manager's `free_space_fallback` then takes over at once instead of after 40 s.
+- Extra ignore pairs for a pair the sampled matrix keeps although the parts never touch: `generate_curobo_robot.py --ignore-pair A:B` and `--ignore-group A,B,C` (merged on top of the hop rule; names are checked against the links that have spheres). Not used by default, because a wrongly ignored pair hides a real self-collision.
+- Latency knobs that exist: node parameters `max_attempts` (20), `fallback_attempts` (6), `seed_fallback` (true), `run_curobo_node.sh start --max-attempts N`; plugin `timeout_sec` / `wait_for_service_sec` in `planning_curobo.yaml`. The node is single threaded and a plan call holds it, so a `set_world` or a second plan issued meanwhile waits behind it (that is the `unavailable` / timed-out world load seen while busy). `timeout_sec` must exceed the longest plan the node may run (`max_attempts` times one attempt plus the fallback); with 11 to 16 s per successful plan on the shared 4 GB card, 60 s is tight for a failing one. Lowering `max_attempts` to about 6 trades some success on hard problems for a shorter failure; not measured.
+
+Hypotheses that need a GPU run to confirm:
+
+1. The `no_path` is an invalid start (arm links against the lift or base spheres, or self-collision pairs outside the hop rule, at lift 0 to 0.01 with the arm swung out). Check: call `~/check_motion` with the docked state, or `plan_joint` and read the new code. If it is `start_in_collision`, list the pair (cuRobo's debug info or `sphere_self_collision.py` on the spherized URDF with the lift prismatic joint set low) and decide between `--ignore-pair` for that pair and refitting those links with a lower `--sphere-density`. If it is `no_path` instead, the start is valid and the cause is elsewhere (trajectory optimisation, joint range of the lift, the world).
+2. `--ignore-hops 2` alone fixes it. Not known: whether the lift stage links fall inside the hop rule (a mimic joint is a joint, not a rigid one).
+3. A retract-to-safe-lift step before the stow (lift to 0.4 with the arm folded, as `home` in the profile) is the conservative workaround if the low-lift start stays invalid; it is a manager sequence change and is not implemented here.
+4. The 11 to 16 s plan time is dominated by trajectory optimisation attempts on a GPU shared with the simulator; it is not isolated from the sim's load.
+
+Tests (no GPU): `docker/tools/tests/test_curobo_robot_config.py` (ignore-table helpers, the script default), `src/manipulation/curobo_bridge/test/test_endpoint_precheck.py` (precheck logic with a stub state check).
+
+## Jerk limit in the joint limit guard
+
+`curobo_planner/joint_limit_guard.hpp` can also bound jerk (default off: a joint with `jerk` 0 is not checked, so the
+velocity/acceleration behaviour is unchanged). Sources, as for the other limits: `max_jerk` in the MoveIt
+`joint_limits.yaml` when `has_jerk_limits: true` (the shipped file has it false), the optional fourth field of the inline
+`joint_limits` param (`name:v:a:j`), or the plugin param `limit_jerk` (rad/s^3 or m/s^3, applied to every joint that has no
+jerk of its own; `limit_safety_factor` applies). Jerk is the finite difference of the finite-difference acceleration and needs
+at least four waypoints. In `limit_mode: reject` a trajectory over the jerk limit (and inside velocity and acceleration) fails
+with `failure_reason_code: jerk_violation`, naming joint and waypoint; velocity or acceleration over the limit stays
+`limit_violation`. In `retime` mode the time axis is stretched by `max(velocity/acceleration scale, cbrt(peak jerk ratio /
+factor))` (jerk scales by 1/s^3), re-checked in a bounded loop, never shortened; the path is unchanged. Status: unit tests
+built and run on the host with g++/gtest; not built under colcon, not run with the plugin or in the sim. The stock config keeps
+jerk off (`# limit_jerk` in `planning_curobo.yaml`), and the value for the real arm is not chosen here.

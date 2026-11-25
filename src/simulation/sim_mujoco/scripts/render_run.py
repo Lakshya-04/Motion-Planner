@@ -20,6 +20,7 @@ Stills: overview, arm_at_wall (the highest-force sample in the middle of the pre
 has a main view, a close-up inset on the tool and a force trace.
 """
 import argparse
+import math
 import os
 import shutil
 import signal
@@ -32,14 +33,14 @@ import time
 def record(args):
     import numpy as np
     import rclpy
-    from geometry_msgs.msg import WrenchStamped
+    from geometry_msgs.msg import PoseStamped, WrenchStamped
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import JointState
 
     rclpy.init()
     node = Node('render_run_recorder')
-    names, rows, force = [], [], []
+    names, rows, force, base = [], [], [], []
     lock = threading.Lock()
     last = [-1.0]
 
@@ -61,7 +62,15 @@ def record(args):
         with lock:
             force.append((stamp(m), abs(m.wrench.force.z)))
 
+    def on_base(m):
+        p, o = m.pose.position, m.pose.orientation
+        yaw = math.atan2(2.0 * (o.w * o.z + o.x * o.y), 1.0 - 2.0 * (o.y * o.y + o.z * o.z))
+        with lock:
+            if not base or stamp(m) - base[-1][0] >= 1.0 / args.rate:
+                base.append((stamp(m), p.x, p.y, yaw))
+
     node.create_subscription(JointState, '/joint_states', on_js, 10)
+    node.create_subscription(PoseStamped, '/sim_mujoco/base_pose', on_base, qos_profile_sensor_data)
     node.create_subscription(WrenchStamped, '/sim_mujoco/ft_ground_truth', on_ft, qos_profile_sensor_data)
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -73,8 +82,9 @@ def record(args):
     with lock:
         a = np.array(rows) if rows else np.zeros((0, 1))
         f = np.array(force) if force else np.zeros((0, 2))
-        np.savez_compressed(args.out, t=a[:, 0], q=a[:, 1:], names=np.array(names), ft=f)
-    print(f'recorded {len(a)} joint-state samples, {len(f)} force samples to {args.out}', flush=True)
+        bs = np.array(base) if base else np.zeros((0, 4))
+        np.savez_compressed(args.out, t=a[:, 0], q=a[:, 1:], names=np.array(names), ft=f, base=bs)
+    print(f'recorded {len(a)} joint-state samples, {len(f)} force samples, {len(bs)} base poses to {args.out}', flush=True)
     rclpy.shutdown()
 
 
@@ -92,6 +102,7 @@ class Replay:
         self.data = mujoco.MjData(m)
         r = np.load(run, allow_pickle=False)
         self.t, self.q, self.ft = r['t'], r['q'], r['ft']
+        self.base = r['base'] if 'base' in r.files and len(r['base']) else None   # t, x, y, yaw of the driven base
         self.t0 = float(self.t[0])
         self.names = [str(n) for n in r['names']]
         self.adr = {}
@@ -99,6 +110,11 @@ class Replay:
             j = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, n)
             if j >= 0:
                 self.adr[i] = int(m.jnt_qposadr[j])
+        self.base_adr = [int(m.jnt_qposadr[j]) if j >= 0 else -1 for j in (
+            mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, n) for n in ('base_x_joint', 'base_y_joint', 'base_yaw_joint'))]
+        if self.base is not None:
+            self.base = self.base.copy()
+            self.base[:, 3] = np.unwrap(self.base[:, 3])
         self.mimics = []   # (qpos adr of follower, qpos adr of leader, poly c0..c4): q1 = poly(q2)
         for e in range(m.neq):
             if m.eq_type[e] == mujoco.mjtEq.mjEQ_JOINT:
@@ -138,6 +154,10 @@ class Replay:
             v = np.interp(ts, self.t, self.q[:, i])
             if not np.isnan(v):
                 self.data.qpos[a] = v
+        if self.base is not None:
+            for k, adr in enumerate(self.base_adr):
+                if adr >= 0:
+                    self.data.qpos[adr] = np.interp(ts, self.base[:, 0], self.base[:, 1 + k])
         for a1, a2, c in self.mimics:
             x = self.data.qpos[a2]
             self.data.qpos[a1] = sum(c[k] * x ** k for k in range(5))

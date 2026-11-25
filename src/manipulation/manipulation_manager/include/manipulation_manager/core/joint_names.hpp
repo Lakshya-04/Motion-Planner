@@ -31,4 +31,25 @@ inline std::vector<std::string> selectJointNames(
   return {};
 }
 
+/// The joints of the planning group `group`, in the group's order, from the robot profile: the whole-body group is
+/// the lift (when actuated; `lift_joint` empty = none) then the arm joints, the arm group is the arm joints. Empty
+/// for any other group (the tool group, a custom one), where the caller falls back to a fixed list.
+inline std::vector<std::string> groupJointNames(
+  const std::string & group, const std::string & whole_body_group, const std::string & arm_group,
+  const std::string & lift_joint, const std::vector<std::string> & arm_joints)
+{
+  if (group == whole_body_group) {
+    std::vector<std::string> names;
+    if (!lift_joint.empty()) {
+      names.push_back(lift_joint);
+    }
+    names.insert(names.end(), arm_joints.begin(), arm_joints.end());
+    return names;
+  }
+  if (group == arm_group) {
+    return arm_joints;
+  }
+  return {};
+}
+
 }  // namespace manipulation_manager

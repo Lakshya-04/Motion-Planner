@@ -42,10 +42,12 @@ std::string mapFile()
 
 struct Fixture
 {
-  explicit Fixture(const std::string & base_profile = "", const std::string & strategy = "greedy")
+  explicit Fixture(const std::string & base_profile = "", const std::string & strategy = "greedy",
+    bool verify_by_default = false, const std::string & map_file = "")
   {
     rclcpp::NodeOptions o;
-    o.parameter_overrides({{"map_file", mapFile()}, {"base_profile", base_profile}, {"stand_strategy", strategy}});
+    o.parameter_overrides({{"map_file", map_file.empty() ? mapFile() : map_file}, {"base_profile", base_profile}, {"stand_strategy", strategy},
+        {"verify_by_default", verify_by_default}});
     node = std::make_shared<reachability::ReachabilityNode>(o);
     client_node = std::make_shared<rclcpp::Node>("client");
     exec.add_node(node);
@@ -64,6 +66,11 @@ struct Fixture
 
   template<typename Srv>
   static std::string name();
+
+  PlanStands::Response::SharedPtr callPlan(PlanStands::Request::SharedPtr req)
+  {
+    return call<PlanStands>(req);
+  }
 
   PlanStands::Response::SharedPtr callVerified(PlanStands::Request::SharedPtr req)
   {
@@ -255,6 +262,30 @@ TEST(ReachabilityNode, PlanStandsUsesTheBaseProfile)
   for (const auto & s : res->stands) {EXPECT_GE(s.footprint_clearance, 0.3 - 1e-9);}
 }
 
+TEST(ReachabilityNode, PlanStandsReportsTheMapsRedundancyPolicy)
+{
+  const char * dir = std::getenv("TEST_TMPDIR");
+  const std::string path = std::string(dir ? dir : "/tmp") + "/reachability_node_test_info_" +
+    std::to_string(::getpid()) + ".rm4d";
+  reachability::MapInfo info;
+  info.arm_dof = 7;
+  info.redundancy = "joint 3 in {0} +- 0 rad";
+  reachability::saveMap(path, reachability::Map4D(reachability_test::coarse()), "", info);
+  {
+    Fixture f("", "greedy", false, path);
+    ASSERT_TRUE(f.node->ready());
+    const auto res = f.call<PlanStands>(std::make_shared<PlanStands::Request>());   // no targets: answered, not planned
+    EXPECT_FALSE(res->success);
+    EXPECT_EQ(res->arm_dof, 7U);
+    EXPECT_EQ(res->redundancy, info.redundancy);
+  }
+  std::remove(path.c_str());
+  Fixture plain;   // a map without header info reports 0 and no text
+  const auto res = plain.call<PlanStands>(std::make_shared<PlanStands::Request>());
+  EXPECT_EQ(res->arm_dof, 0U);
+  EXPECT_TRUE(res->redundancy.empty());
+}
+
 TEST(ReachabilityNode, PlanStandsRejectsABadRequest)
 {
   Fixture f;
@@ -361,4 +392,77 @@ TEST(ReachabilityNode, VerifiedStandsReportTargetsTheVerifierRefusedEverywhere)
   EXPECT_FALSE(res->success);
   EXPECT_FALSE(res->unreachable.empty()) << res->message;
   EXPECT_FALSE(res->stands.empty());
+}
+
+namespace
+{
+std::shared_ptr<reachability::FunctionStandVerifier> countingVerifier(double refuse_y_below = -1e9)
+{
+  return std::make_shared<reachability::FunctionStandVerifier>(
+    [refuse_y_below](const reachability::Stand &, double, const reachability::Pose & t) {
+      reachability::TargetVerdict v;
+      v.reason = t.translation().y() < refuse_y_below ? reachability::VerifyReason::kIkFailed :
+        reachability::VerifyReason::kOk;
+      return v;
+    });
+}
+}  // namespace
+
+TEST(ReachabilityNode, PlanStandsStaysRm4dOnlyEvenWithAVerifierByDefault)
+{
+  Fixture f;
+  auto v = countingVerifier();
+  f.node->setVerifier(v);
+  const auto res = f.callPlan(wideWall());
+  EXPECT_TRUE(res->success) << res->message;
+  EXPECT_EQ(v->calls(), 0U);   // the default path never calls the verifier
+  EXPECT_EQ(res->message.find("verified"), std::string::npos) << res->message;
+}
+
+TEST(ReachabilityNode, PlanStandsWithTheVerifiedFlagConfirmsWithTheVerifier)
+{
+  Fixture f;
+  auto plain = f.callPlan(wideWall());
+  auto v = countingVerifier();
+  f.node->setVerifier(v);
+  auto req = wideWall();
+  req->verified = true;
+  const auto res = f.callPlan(req);
+  EXPECT_GT(v->calls(), 0U);
+  EXPECT_TRUE(res->success) << res->message;
+  EXPECT_EQ(res->stands.size(), plain->stands.size());   // an accepting verifier changes nothing
+  EXPECT_NE(res->message.find("verified:"), std::string::npos) << res->message;
+}
+
+TEST(ReachabilityNode, PlanStandsVerifiedFlagReportsTargetsNoStandConfirms)
+{
+  Fixture f;
+  f.node->setVerifier(countingVerifier(-2.5));   // the two y = -3 targets are refused everywhere
+  auto req = wideWall();
+  req->verified = true;
+  const auto res = f.callPlan(req);
+  EXPECT_FALSE(res->success);
+  EXPECT_FALSE(res->unreachable.empty()) << res->message;
+  EXPECT_FALSE(res->stands.empty());
+}
+
+TEST(ReachabilityNode, PlanStandsVerifiedFlagWithoutAVerifierSaysSoInsteadOfFallingBack)
+{
+  Fixture f;
+  auto req = wideWall();
+  req->verified = true;
+  const auto res = f.callPlan(req);
+  EXPECT_FALSE(res->success);
+  EXPECT_TRUE(res->stands.empty());
+  EXPECT_NE(res->message.find("no stand verifier"), std::string::npos) << res->message;
+}
+
+TEST(ReachabilityNode, VerifyByDefaultParameterVerifiesRequestsThatDoNotSetTheFlag)
+{
+  Fixture f("", "greedy", true);
+  auto v = countingVerifier();
+  f.node->setVerifier(v);
+  const auto res = f.callPlan(wideWall());
+  EXPECT_GT(v->calls(), 0U);
+  EXPECT_TRUE(res->success) << res->message;
 }
