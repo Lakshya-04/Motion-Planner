@@ -766,6 +766,45 @@ What this shows:
   the three runs have no force above 40 N; the third has one moderate spike (46 to 73 N) at the handover of every column, so
   the end-of-column handover is much better and still not clean. The tool speed rarely settled below 1 mm/s, so the timeout does
   much of the waiting in practice. UR10e with the same build: 4 of 4, peak 20.0 N.
+#### The handover spike of one xArm 7 run: the retract starts toward the wall (analysis of three recorded runs)
+
+Runs `pd1`, `pd2`, `pd3` (same build; peaks 23.2, 73.3 and 19.2 N). In `pd2` the spike (50.6, 46.1, 56.2, 73.3 N, one
+sample pair of 10 ms each) sits at the first retract sample of each column, not at the contact end: the run.csv time of
+each spike matches the log's "releasing the admittance" line of the same column to within 0.1 s (spikes 83.63, 125.83,
+168.22, 209.82 s; gaps between them 42.2, 42.4, 41.6 s = the log's 42.3, 42.4, 41.6 s), the force before it is 0.0 N, and
+the admittance is still engaged (the release is after the retract). Wall plane x = 0.550 m, contact starts at tool x of
+about 0.549 m. After the unload the tool rests at x (mm) and the retract's first 0.1 to 0.2 s moves it toward the wall by a
+bump before it leaves along z (tool x, base frame):
+
+| run | column | rest x | bump | peak force |
+|---|---|---|---|---|
+| pd1 | 0-3 | 0.5430 / 0.5439 / 0.5437 / 0.5436 | 2.0 / 2.6 / 2.5 / 2.4 mm | 0 N |
+| pd3 | 0-3 | 0.5429 / 0.5434 / 0.5430 / 0.5433 | -0.1 / 2.4 / 2.2 / 2.4 mm | 0 N |
+| pd2 | 0-3 | 0.5462 / 0.5481 / 0.5491 / 0.5498 | 3.8 / 2.2 / 1.1 / 0.2 mm | 50.6 / 46.1 / 56.2 / 73.3 N |
+
+So every run has the 2 to 4 mm bump (the joint-space retract, planned from the live pose while the admittance still holds
+an offset); only `pd2` rests 3 to 7 mm closer to the wall (and creeping closer column by column), so the bump takes the pad
+to x = 0.5500 m, the wall plane, and the wall is stiff (0 N at x 0.5498, 73 N at 0.5500). `pd2` is also the run whose dock
+landed on a different arm branch (joint 2 of +0.46 rad against -1.75 rad in `pd1`, `docked_wall_column_0` in manager.log), which is
+the likely reason it rests closer: the tool rest depends on the arm configuration, the bump does not. Not shown by the
+data: why the tool rests 5 to 11 mm above the unload reference (0.5385 m) and not on it. The force at the release
+line is 0.0 N and the tool speed 1.5 to 10 mm/s in every run, so the speed criterion does not separate the runs.
+Change: `unload_m` default 0.01 to 0.02 m, so the rest position is about 10 mm further from the wall and the same bump
+leaves 6 mm of air.
+
+Verified in MuJoCo (single stand, scored with `--max-wall-gap 0.01 --max-tilt 10 --max-bad-pose 0`): xArm 7 x3 all 4/4 columns,
+coverage 1.0, tilt at most 1.04 deg, wall gap at most 0.8 mm. The retract handover spike is gone in 12/12 xArm columns (0.0 N from
+the end of the unload through the retract). UR10e x2: 4/4 columns, peaks 19.8 / 20.0 N, unchanged. Scored peaks of the xArm runs
+were 27.2 / 66.9 / 39.6 N, so xArm is NOT clean by a 40 N rule: run x2 (the other arm branch) has 25 to 67 N inside the contact
+stroke of columns 0 and 1 from the first contact sample, a different mechanism from the retract spike, and x3 has one 39.6 N
+spike at the end of a stroke.
+
+Tried and rejected: an opt-in joint-limit margin for the dock IK (`dock_ik_min_limit_margin_rad`, branches
+`fix/xarm-dock-limit-margin`, `feat/dock-ik-limit-margin`). Hypothesis: x2 docks with joint 2 on its lower stop. Peaks of
+3 single-stand xArm 7 runs each: no continuity 27.2 / 66.9 / 39.6 N; continuity only 24.5 / 20.1 / 51.2 N; continuity plus a
+0.1 rad margin 20.5 / 137.8 / 196.4 N. All columns still succeeded, but the margin variant had the two worst runs, so the margin
+does not help and may hurt (3 runs each, high run-to-run spread). It was not merged. The cause of the mid-stroke xArm spikes is still unexplained.
+
 - The tool pad in the planner (`generic_tool.xacro`): the planner's tool used to be a 0.1 m mount cylinder with a bare TCP frame
   at 0.165 m and no pad, while the simulator adds a 3 cm radius, 1 cm thick pad disc at the TCP, so MoveIt believed the tool
   ended 6.5 cm short of the TCP and a tilted pad edge reached the wall before it expected it (gaps of 23 to 29 mm at tilts of
