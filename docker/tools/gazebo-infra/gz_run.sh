@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # usage: [MULTI_STAND_*=... GZ_PASS_*=... STAND_MAP=...] gz_run.sh <name> <worktree>
 # Build in the sim-gazebo image (shared ccache via cctool, per-lane build volumes) then a VISIBLE (gui:=true) Gazebo two-stand pass
-# (src/simulation/sim_gazebo/scripts/run_multi_stand_pass.sh). Output: /home/hmm/mp-infra/cp/<name>_out, log cp/<name>.out.
-# Start only through gz_queue.sh / simq (one sim at a time, simgui.md). Needs `xhost +SI:localuser:root` and an unlocked screen.
-NAME=$1; W=$2; I=/home/hmm/mp-infra; H=/home/hmm/Motion-Planner/docker/tools/hostwatch; L=${SIM_LANE:-a}; IMG=${GZ_IMAGE:-motion-planner:sim-gazebo}
+# (src/simulation/sim_gazebo/scripts/run_multi_stand_pass.sh). Output: $MP_INFRA/cp/<name>_out, log cp/<name>.out.
+# Start only through gz_queue.sh / simq (one sim at a time). Needs `xhost +SI:localuser:root` and an unlocked screen.
+NAME=$1; W=$2; I=${MP_INFRA:-$HOME/mp-infra}; H=${MP_REPO:-$HOME/Motion-Planner}/docker/tools/hostwatch; L=${SIM_LANE:-a}; IMG=${GZ_IMAGE:-motion-planner:sim-gazebo}
 export DISPLAY=${DISPLAY:-:0}
 docker volume create gzl_${L}_b >/dev/null; docker volume create gzl_${L}_i >/dev/null
 while true; do o=$(bash $H/slots.sh); if echo "$o" | grep -q "^build  YES" && echo "$o" | grep -q "^sim    YES"; then break; fi; sleep 30; done
