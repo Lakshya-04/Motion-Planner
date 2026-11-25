@@ -41,6 +41,7 @@
 #include "coverage_task_msgs/srv/mission_command.hpp"
 #include "manipulation_manager/core/mission_verify.hpp"
 #include "stand_navigator_msgs/action/navigate_to_stand.hpp"
+#include "stand_navigator_msgs/action/wall_dock.hpp"
 #include "reachability_msgs/srv/plan_stands.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float64.hpp"
@@ -69,6 +70,7 @@
 #include "manipulation_manager/core/base_stance_check.hpp"
 #include "manipulation_manager/core/coverage_task.hpp"
 #include "manipulation_manager/core/column_ordering.hpp"
+#include "manipulation_manager/core/column_retry.hpp"
 #include "manipulation_manager/core/frame_transform.hpp"
 #include "manipulation_manager/core/manipulation_manager.hpp"
 #include "manipulation_manager/core/mission_fsm.hpp"
@@ -77,7 +79,10 @@
 #include "manipulation_manager/core/recovery_branch.hpp"
 #include "manipulation_manager/core/recovery_jog.hpp"
 #include "manipulation_manager/core/stand_check.hpp"
+#include "manipulation_manager/core/column_chain.hpp"
+#include "manipulation_manager/core/serpentine.hpp"
 #include "manipulation_manager/core/stand_gate.hpp"
+#include "manipulation_manager/core/wall_dock_gate.hpp"
 #include "manipulation_manager/core/tool_mode.hpp"
 #include "manipulation_manager/core/joint_names.hpp"
 #include "manipulation_manager/core/travel_pose.hpp"
@@ -275,6 +280,9 @@ public:
       // Reach preference of the continuity choice (needs dock_ik_continuity and the TF arm_base_frame
       // in frame_id): > 0 keeps the tool at or below this fraction of dock_ik_reach_m from the arm base by using the
       // lift joint (dock_ik_lift_joint, clamped into [dock_ik_lift_min_m, dock_ik_lift_max_m]). 0 = off (default).
+      // Cost multiplier of the lift's delta in the continuity cost: 2.0 = lift motion twice as costly as arm motion, so
+      // the choice prefers arm motion (and, with the reach preference, a lift that moves only as far as needed). 1.0 = off.
+      dock_ik_sel_.lift_cost_weight = this->declare_parameter<double>("dock_ik_lift_cost_weight", 2.0);
       dock_ik_sel_.reach_target_fraction = this->declare_parameter<double>("dock_ik_reach_fraction", 0.0);
       dock_ik_sel_.reach_m = this->declare_parameter<double>("dock_ik_reach_m", 0.0);
       dock_ik_sel_.lift_joint = static_cast<size_t>(std::max<int64_t>(0, this->declare_parameter<int>("dock_ik_lift_joint", 0)));
@@ -310,6 +318,22 @@ public:
     // gap (0 = plan straight to the dock pose). Planning to a pose a few cm from the wall fails or times out
     // when the tool mount clips the wall voxels on the way in; see docs/sim_mujoco.md.
     dock_approach_extra_m_ = this->declare_parameter<double>("dock_approach_extra_m", 0.0);
+    // Chained columns (default off): after a column's retract the tool stands at that column's dock pose. When the
+    // next column of the same stand starts within chain_max_shift_m of it, the approach is first tried as one
+    // straight Cartesian move (deterministic, short) instead of a randomized OMPL plan with a joint goal; a failed or
+    // short chain move falls back to the normal approach, planned from where the tool really is.
+    chain_columns_ = this->declare_parameter<bool>("chain_columns", false);
+    chain_max_shift_m_ = this->declare_parameter<double>("chain_max_shift_m", 0.4);
+    // Serpentine columns (default off): each column keeps the direction the coverage plan gave it (up, then down, ...)
+    // and the retract backs the tool off the wall at the END of the stroke, not at its start, so the next column starts
+    // where this one finished. Off: every column runs bottom to top and the retract returns to the column's start
+    // (a full-length trip back down the wall after every stroke).
+    serpentine_columns_ = this->declare_parameter<bool>("serpentine_columns", false);
+    if (serpentine_columns_ && !dock_at_stroke_start_) {
+      RCLCPP_WARN(
+        this->get_logger(), "serpentine_columns without dock_at_stroke_start: every column docks at its middle "
+        "height, so the stroke end the retract backs off at is not where the next column docks");
+    }
     contact_y_overshoot_ = this->declare_parameter<double>("contact_y_overshoot_m", 0.045);
     max_wall_penetration_ = this->declare_parameter<double>("max_wall_penetration_m", 0.12);
     target_force_n_ = this->declare_parameter<double>("target_force_n", 5.0);
@@ -387,6 +411,12 @@ public:
     // self-collision or how badly it is conditioned at the edge of its reach, so plan_stands is asked for stands
     // group by group. 0 = the whole plan at once.
     stand_max_span_ = this->declare_parameter<double>("stand_max_span_m", 0.0);
+    // Consecutive stands closer than this (m, plan view) are merged when plan_stands finds one stand for both of
+    // their target sets (grouped requests can return stands a few cm apart). 0 = off.
+    stand_merge_tol_ = this->declare_parameter<double>("stand_merge_tol_m", 0.0);
+    // Minimum chassis-to-wall clearance (m) asked of plan_stands in every request (its min_clearance field); 0 = the
+    // planner's own default (and its stand_min_clearance_m floor).
+    stand_min_clearance_ = this->declare_parameter<double>("stand_min_clearance_m", 0.0);
     // A shell command run after each arrival at a stand, before its columns (empty = none).
     arrival_command_ = this->declare_parameter<std::string>("stand_arrival_command", "");
     // A shell command that takes the wall out of the planning scene. With it (and the arrival command, which
@@ -396,6 +426,15 @@ public:
     // Failure handling. A column that failed (dock or contact stroke did nothing) is retried this many times, then
     // skipped and the run goes on; the result lists it under columns_failed.
     column_retries_ = std::max<int>(0, this->declare_parameter<int>("column_retries", 1));
+    // Second pass over the columns that are still failed or partial after the main pass (core/column_retry.hpp): each gets
+    // max_column_retries more attempts from a fresh stow + prime, docking with a dock IK solution other than the earlier
+    // ones; retry_replan_stand also re-plans a nearby stand for a navigation or dock failure (multi-stand runs).
+    // Off by default; the verify result gets a column_retries block.
+    retry_cfg_.enabled = this->declare_parameter<bool>("retry_failed_columns", false);
+    retry_cfg_.max_retries = std::max<int>(0, this->declare_parameter<int>("max_column_retries", 1));
+    retry_cfg_.replan_stand = this->declare_parameter<bool>("retry_replan_stand", false);
+    retry_cfg_.allow_branch_change = this->declare_parameter<bool>("retry_allow_branch_change", false);
+    retry_cfg_.stop_after_failed_columns = std::max<int>(0, this->declare_parameter<int>("retry_stop_after_failed", 3));
     // A start state the planners refuse (the arm in self-collision at the end of its reach, a joint on its limit)
     // is moved a few centimetres of joint space back toward the last configuration known to be good (a stand's
     // stow pose, a column's dock pose) before the retract or stow is tried again. recovery_jog_max_rad refuses a
@@ -437,6 +476,16 @@ public:
       sc.max_redocks = this->declare_parameter<int>("stand_check_max_redocks", sc.max_redocks);
       stand_check_ = StandCheck(sc);
     }
+    // Wall dock step (default off): after a successful navigate_to_stand, servo to the standoff and square to the wall
+    // with the WallDock action; the measured standoff/yaw error goes through the stand-check logic (go / dock again /
+    // give the stand up) and into the verify result.
+    wall_dock_enabled_ = this->declare_parameter<bool>("wall_dock_after_navigate", false);
+    wall_dock_action_ = this->declare_parameter<std::string>("wall_dock_action", "wall_dock");
+    wall_dock_standoff_m_ = this->declare_parameter<double>("wall_dock_standoff_m", 0.30);
+    wall_dock_timeout_s_ = this->declare_parameter<double>("wall_dock_timeout_s", 0.0);
+    wall_dock_cfg_.max_attempts = this->declare_parameter<int>("wall_dock_max_attempts", wall_dock_cfg_.max_attempts);
+    wall_dock_cfg_.standoff_tol_m = this->declare_parameter<double>("wall_dock_standoff_tol_m", wall_dock_cfg_.standoff_tol_m);
+    wall_dock_cfg_.yaw_tol_rad = this->declare_parameter<double>("wall_dock_yaw_tol_rad", wall_dock_cfg_.yaw_tol_rad);
     travel_joint_state_ = this->declare_parameter<std::vector<double>>(
       "travel_joint_state", std::vector<double>{});
     // The planning group's joints in the group's order as /joint_states names them (empty = the repo's UR10e and
@@ -545,6 +594,9 @@ public:
           r.accepted ? "accepted" : "rejected", r.state.c_str());
       });
     nav_client_ = rclcpp_action::create_client<NavigateToStand>(this, "navigate_to_stand");
+    if (wall_dock_enabled_) {
+      wall_dock_client_ = rclcpp_action::create_client<WallDock>(this, wall_dock_action_);
+    }
     action_server_ = rclcpp_action::create_server<ExecuteCoverage>(
       this, "execute_coverage",
       [this](const rclcpp_action::GoalUUID &, std::shared_ptr<const ExecuteCoverage::Goal>) {
@@ -688,6 +740,7 @@ private:
   using MissionCommandSrv = coverage_task_msgs::srv::MissionCommand;
   using GoalHandle = rclcpp_action::ServerGoalHandle<ExecuteCoverage>;
   using NavigateToStand = stand_navigator_msgs::action::NavigateToStand;
+  using WallDock = stand_navigator_msgs::action::WallDock;
 
   /// What a task is asked to do; the defaults are the parameters' (the old one-shot behaviour).
   struct TaskRequest
@@ -863,6 +916,9 @@ private:
   {
     column_peaks_.clear();
     verify_stand_columns_.clear();
+    verify_wall_dock_.clear();
+    retry_report_ = ColumnRetryReport{};
+    column_dock_q_.clear();
     trace_.reset();
     const TaskResult out = executeTaskImpl(req);
     if (!verify_result_path_.empty()) {
@@ -879,6 +935,8 @@ private:
       in.message = out.message;
       in.report_path = ledger_.path();
       in.stand_columns = verify_stand_columns_;
+      in.wall_dock = verify_wall_dock_;
+      in.column_retry = retry_report_;
       addTraceToVerify(in);
       const auto result = buildMissionVerify(in);
       if (writeMissionVerify(verify_result_path_, missionVerifyToJson(result, in))) {
@@ -924,6 +982,7 @@ private:
       CoverageOutputJsonSource source(
         path, world_frame_.empty() ? frame_id_ : world_frame_, z_offset_, coverage_z_step_,
         coverage_z_min_, coverage_z_max_, coverage_eef_speed_, wall_dir_);
+      source.setFollowPlanDirection(serpentine_columns_);
       intents = source.getCoveragePlan();
     } catch (const std::exception & e) {
       out.message = std::string("cannot load the coverage plan ") + path + ": " + e.what();
@@ -1033,6 +1092,7 @@ private:
         }
         tracker_.columnFinished(0, ids[i], runColumnWithRetry(sel[i], ids[i]));
       }
+      retryFailedColumns(sel, ids, nullptr);
       if (!stop()) {
         machine.singleFinished();
       }
@@ -1148,6 +1208,9 @@ private:
           if (ok && stand_check_enabled_) {
             ok = gateStand(visit[s], msg, gate_abort);
           }
+          if (ok && wall_dock_enabled_) {
+            ok = wallDockStand(s, msg, gate_abort);
+          }
         }
         if (stop()) {
           break;
@@ -1181,6 +1244,13 @@ private:
         primeContinuityFromLiveState();
         last_good_state_ = travel_state_;   // the stowed arm: where a jog goes back to
         arm_stuck_ = false;
+        chain_valid_ = false;
+        if (serpentine_columns_) {
+          // the arm was stowed for the drive and the base stands elsewhere: the docked branch of the last stand is no
+          // reference for the first dock here (it made every candidate 'wrong branch' and fell back to a raw IK solution a
+          // turn away from the stow pose)
+          dock_branch_seed_.clear();
+        }
         for (const size_t c : orderColumns(visit_columns[s], sel)) {
           if (stop()) {
             break;
@@ -1195,6 +1265,7 @@ private:
         break;
       }
     }
+    retryFailedColumns(sel, ids, &visit);
     return true;
   }
 
@@ -1289,6 +1360,52 @@ private:
     if (stands.empty()) {
       why = "plan_stands returned no stand";
       return false;
+    }
+    if (stand_merge_tol_ > 0.0 && stands.size() > 1) {
+      std::vector<core_types::Pose> all_poses;
+      for (const auto & c : sel) {
+        all_poses.insert(all_poses.end(), c.poses.begin(), c.poses.end());
+      }
+      std::vector<MergeableStand> ms;
+      for (size_t i = 0; i < stands.size(); ++i) {
+        ms.push_back({stands[i].x, stands[i].y, stands[i].yaw, targets_per_stand[i]});
+      }
+      const auto merger = [&](const std::vector<size_t> & idx) -> std::optional<MergeableStand> {
+          std::vector<CoverageSegmentIntent> one(1);
+          for (const size_t k : idx) {
+            if (k >= all_poses.size()) {
+              return std::nullopt;
+            }
+            one[0].poses.push_back(all_poses[k]);
+          }
+          auto req = makeStandRequest(stanceWall(one));
+          auto future = client->async_send_request(req);
+          if (rclcpp::spin_until_future_complete(
+              shared_from_this(), future, std::chrono::duration<double>(stand_service_timeout_s_)) !=
+            rclcpp::FutureReturnCode::SUCCESS)
+          {
+            return std::nullopt;
+          }
+          const auto res = future.get();
+          if (!res->success || res->stands.size() != 1 || !res->unreachable.empty() || !res->not_planned.empty() ||
+            res->stands[0].target_indices.size() != idx.size())
+          {
+            return std::nullopt;
+          }
+          return MergeableStand{res->stands[0].x, res->stands[0].y, res->stands[0].yaw, {}};
+        };
+      const size_t n = mergeNearDuplicateStands(ms, stand_merge_tol_, merger);
+      if (n > 0) {
+        stands.clear();
+        targets_per_stand.clear();
+        for (const auto & m : ms) {
+          stands.push_back({m.x, m.y, m.yaw});
+          targets_per_stand.push_back(m.targets);
+        }
+        RCLCPP_INFO(
+          this->get_logger(), "merged %zu near-duplicate stand(s) (within %.2f m): %zu stand(s) left", n,
+          stand_merge_tol_, stands.size());
+      }
     }
     return true;
   }
@@ -1399,6 +1516,104 @@ private:
     return o.ok;
   }
 
+  /// Wall dock step after an arrival (opt-in): sends WallDock goals, judges the measured wall gap and yaw error with
+  /// the stand-check logic (core/wall_dock_gate.hpp) and keeps the outcome for the verify result. False with `message`
+  /// when the arm must not move; `abort` = true when the stand is given up.
+  bool wallDockStand(size_t stand, std::string & message, bool & abort)
+  {
+    struct Port final : WallDockPort
+    {
+      explicit Port(ManipulationManagerNode & n) : node(n) {}
+      WallDockMeasured dock() override {return node.sendWallDock();}
+      bool stopRequested() const override {return node.stop();}
+      ManipulationManagerNode & node;
+    } port(*this);
+    const auto o = runWallDock(port, wall_dock_cfg_);
+    verify_wall_dock_[stand] = o;
+    if (o.ok) {
+      RCLCPP_INFO(
+        this->get_logger(), "wall dock: standoff error %.1f mm, yaw error %.3f rad (%d goal(s))",
+        o.standoff_error_m * 1000.0, o.yaw_error_rad, o.attempts);
+    } else {
+      RCLCPP_WARN(
+        this->get_logger(), "wall dock: %s (%d goal(s); standoff error %.1f mm, yaw error %.3f rad)",
+        o.message.c_str(), o.attempts, o.standoff_error_m * 1000.0, o.yaw_error_rad);
+      message = o.message;
+    }
+    abort = o.abort;
+    return o.ok;
+  }
+
+  /// One WallDock goal, waited for; `docked` only when the action succeeded.
+  WallDockMeasured sendWallDock()
+  {
+    WallDockMeasured m;
+    if (!wall_dock_client_->wait_for_action_server(std::chrono::seconds(5))) {
+      m.message = "wall dock action is not available";
+      return m;
+    }
+    WallDock::Goal goal;
+    goal.standoff_m = wall_dock_standoff_m_;
+    goal.timeout_s = wall_dock_timeout_s_;
+    auto outcome = std::make_shared<rclcpp_action::ClientGoalHandle<WallDock>::WrappedResult>();
+    auto done = std::make_shared<bool>(false);
+    rclcpp_action::Client<WallDock>::SendGoalOptions options;
+    options.result_callback = [outcome, done](const rclcpp_action::ClientGoalHandle<WallDock>::WrappedResult & w) {
+        *outcome = w;
+        *done = true;
+      };
+    auto sent = wall_dock_client_->async_send_goal(goal, options);
+    const auto t0 = std::chrono::steady_clock::now();
+    const double limit = (wall_dock_timeout_s_ > 0.0 ? wall_dock_timeout_s_ : 60.0) + 15.0;
+    const auto elapsed = [&]() {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+      };
+    while (rclcpp::ok() && sent.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+      rclcpp::spin_some(shared_from_this());
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      if (elapsed() > 10.0) {
+        m.message = "wall dock did not answer the goal";
+        return m;
+      }
+    }
+    auto handle = rclcpp::ok() ? sent.get() : nullptr;
+    if (!handle) {
+      m.message = "wall dock goal rejected";
+      return m;
+    }
+    bool cancel_sent = false;
+    while (rclcpp::ok() && !*done) {
+      rclcpp::spin_some(shared_from_this());
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      if (!cancel_sent && (cancel_requested_ || elapsed() > limit)) {
+        m.message = cancel_requested_ ? "canceled" : "wall dock timed out";
+        try {
+          wall_dock_client_->async_cancel_goal(handle);
+        } catch (const rclcpp_action::exceptions::UnknownGoalHandleError &) {
+        }
+        cancel_sent = true;
+      }
+      if (cancel_sent && elapsed() > limit + 10.0) {
+        break;
+      }
+    }
+    if (cancel_sent || !*done) {
+      if (m.message.empty()) {
+        m.message = "wall dock not finished";
+      }
+      return m;
+    }
+    const auto & r = outcome->result;
+    if (outcome->code != rclcpp_action::ResultCode::SUCCEEDED || !r || r->error_code != 0) {
+      m.message = r && !r->error_msg.empty() ? r->error_msg : "wall dock failed";
+      return m;
+    }
+    m.docked = true;
+    m.standoff_error_m = r->standoff_error_m;
+    m.yaw_error_rad = r->yaw_error_rad;
+    return m;
+  }
+
   void cancelNavigation()
   {
     if (nav_goal_) {
@@ -1461,6 +1676,25 @@ private:
     if (stop()) {
       return false;
     }
+    // A serpentine stand ends with the tool backed off at the top of the wall, where the planning model has the arm
+    // touching the lift (the start state is refused). Come back down the standoff plane in one straight move, to
+    // the height a column starts from in the bottom-up order, and stow from there.
+    const auto lowering = decideStowLower(
+      serpentine_columns_, chain_valid_, chain_last_standoff_, coverage_z_min_);
+    if (lowering.lower) {
+      MotionSegmentSpec down;
+      down.label = "stow_lower";
+      down.mode_hint = "cartesian";
+      down.waypoint_indices = {0};
+      down.min_path_fraction = 0.99;
+      down.target_eef_speed = coverage_eef_speed_;
+      if (manager_.executeMotionSegments(frame_id_, {down}, {lowering.target}, planning_group_).success) {
+        chain_valid_ = false;
+        if (stowAttempts()) {
+          return true;
+        }
+      }
+    }
     if (recoverArm("stow") && stowAttempts()) {
       return true;
     }
@@ -1493,6 +1727,9 @@ private:
     req->wall_normal.x = -wall_dir_.d[0];
     req->wall_normal.y = -wall_dir_.d[1];
     req->wall_normal.z = -wall_dir_.d[2];
+    if (stand_min_clearance_ > 0.0) {
+      req->min_clearance = stand_min_clearance_;
+    }
     req->lift_min = base_check_lift_min_;
     req->lift_max = base_check_lift_max_;
     req->arm_mount_offset_z = base_check_arm_mount_z_;
@@ -1737,16 +1974,17 @@ private:
       (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
     // with the continuity choice the live state is a seed of its own, so an empty remembered seed (the first dock of a
     // run) must not stop it
-    if (!ik || (seed.empty() && !dock_ik_continuity_)) {
+    const bool exclude = dock_ik_exclude_on_;   // a column retry: a solution other than the earlier ones
+    if (!ik || (seed.empty() && !dock_ik_continuity_ && !exclude)) {
       return {};
     }
     motion_planner::IkRequest req;
     req.frame_id = frame_id_;
     req.planning_group = planning_group_;
     req.target_pose = {pose.x, pose.y, pose.z, pose.qx, pose.qy, pose.qz, pose.qw};
-    if (dock_ik_continuity_) {
+    if (dock_ik_continuity_ || exclude) {
       const auto live = readCurrentJointState(shared_from_this(), joint_name_candidates_);
-      const std::vector<double> & ref = !dock_branch_seed_.empty() ? dock_branch_seed_ : live;
+      const std::vector<double> & ref = dockBranchReference(dock_branch_seed_, dock_seed_, live);
       // reach preference: where the tool goal lies relative to the arm base (TF frame_id <- arm_base_frame, the live lift
       // taken out of the arm base height)
       DockReachContext reach_ctx;
@@ -1763,6 +2001,10 @@ private:
           RCLCPP_WARN(this->get_logger(), "DOCKGOAL reach preference skipped: no TF %s <- %s", frame_id_.c_str(), arm_base_frame_.c_str());
         }
       }
+      if (jog_params_.lower.size() == live.size() && jog_params_.upper.size() == live.size()) {
+        dock_ik_sel_.joint_lower = jog_params_.lower;
+        dock_ik_sel_.joint_upper = jog_params_.upper;
+      }
       const auto choice = selectDockIk(
         [&](const std::vector<double> & sd) -> std::optional<std::vector<double>> {
           auto r = req;
@@ -1773,8 +2015,10 @@ private:
           }
           return res.joint_solution;
         },
-        {dock_branch_seed_, live, dock_seed_}, ref, dock_ik_sel_, reach_ptr);
+        {dock_branch_seed_, live, dock_seed_, last_good_state_}, ref, dock_ik_sel_, reach_ptr,
+        exclude ? &dock_ik_exclude_ : nullptr);
       if (choice.ok) {
+        column_dock_q_[static_cast<size_t>(std::max(0, column_))].push_back(choice.q);
         RCLCPP_INFO(
           this->get_logger(),
           "DOCKGOAL continuity: seed %zu of %zu candidates, max dq %.3f rad (dropped: branch %zu, wrist %zu, jump %zu)",
@@ -1785,12 +2029,17 @@ private:
             this->get_logger(), "DOCKGOAL reach fraction %.2f (target %.2f)%s", choice.reach_fraction,
             dock_ik_sel_.reach_target_fraction, choice.reach_over_target ? ", over the target" : "");
         }
-        return choice.q;
+        // the approach starts at the live state: of the 2*pi-equivalent representatives take the one nearest to IT, not
+        // to the remembered branch seed (which can be a turn away after a stow or a failed column)
+        return live.size() == choice.q.size() ? rebaseDockIkChecked(choice.q, live, dock_ik_sel_) : choice.q;
       }
       RCLCPP_WARN(
         this->get_logger(),
-        "DOCKGOAL continuity: no acceptable solution (%zu candidates; branch %zu, wrist %zu, jump %zu), seeded IK as before",
-        choice.candidates, choice.rejected_branch, choice.rejected_wrist, choice.rejected_cost);
+        "DOCKGOAL continuity: no acceptable solution (%zu candidates; branch %zu, wrist %zu, jump %zu, already used %zu), seeded IK as before",
+        choice.candidates, choice.rejected_branch, choice.rejected_wrist, choice.rejected_cost, choice.rejected_excluded);
+      if (exclude) {
+        return {};   // a retry must not dock with the solution that failed: the planner samples its own
+      }
     }
     req.joint_seed = seed;
     const auto res = ik->ik(req);
@@ -1805,7 +2054,14 @@ private:
       txt += buf;
     }
     RCLCPP_INFO(this->get_logger(), "DOCKGOAL seeded IK q=[%s]", txt.c_str());
-    return res.joint_solution;
+    // same pose, representative nearest the live state (the IK may return a joint 2*pi away)
+    {
+      const auto live_now = readCurrentJointState(shared_from_this(), joint_name_candidates_);
+      const auto q = rebaseDockIkChecked(
+        res.joint_solution, live_now.size() == res.joint_solution.size() ? live_now : seed, dock_ik_sel_);
+      column_dock_q_[static_cast<size_t>(std::max(0, column_))].push_back(q);
+      return q;
+    }
   }
 
   /// recovery_keeps_branch: the joint goal for `pose` chosen on the arm's live branch (selectRecoveryGoal, IK seeded
@@ -2203,6 +2459,146 @@ private:
     return outcome;
   }
 
+  /// Opt-in second pass (retry_failed_columns): every column still failed or partial gets up to max_column_retries more
+  /// attempts, each from a fresh stow + prime and with a dock IK solution other than the earlier ones; for a
+  /// navigation or dock failure retry_replan_stand re-plans the stand from the column's cells (multi-stand runs; `visit`
+  /// is the stand list of the run, null for a single stand). The policy is core/column_retry.hpp; this only moves.
+  void retryFailedColumns(
+    const std::vector<CoverageSegmentIntent> & sel, const std::vector<size_t> & ids,
+    const std::vector<StanceStand> * visit)
+  {
+    retry_report_.enabled = retry_cfg_.enabled;
+    retry_report_.max_retries = retry_cfg_.max_retries;
+    if (!retry_cfg_.enabled || stop()) {
+      return;
+    }
+    std::map<size_t, size_t> index_of;   // column id -> index in sel
+    for (size_t i = 0; i < ids.size(); ++i) {
+      index_of[ids[i]] = i;
+    }
+    std::vector<ColumnFailure> failures;
+    const auto add = [&](size_t col, ColumnOutcome o) {
+        const auto e = ledger_.get(col);
+        if (index_of.find(col) == index_of.end() || (e.state != LedgerState::kFailed && e.state != LedgerState::kSkipped)) {
+          return;   // never ran (no stand reaches it) or not tracked: not a retry candidate
+        }
+        ColumnFailure f;
+        f.column = col;
+        f.stand = visit ? e.stand : -1;
+        f.outcome = o;
+        f.kind = e.reason == SkipReason::kNavFailed ? RetryFailure::kNav :
+          e.reason == SkipReason::kDockFailed ? RetryFailure::kDock :
+          e.reason == SkipReason::kPlanFailed ? RetryFailure::kPlan :
+          e.reason == SkipReason::kContactOverload ? RetryFailure::kOverload : RetryFailure::kOther;
+        failures.push_back(f);
+      };
+    for (const size_t c : tracker_.failed()) {add(c, ColumnOutcome::kFailed);}
+    for (const size_t c : tracker_.partial()) {add(c, ColumnOutcome::kPartial);}
+    const auto plan = planColumnRetries(failures, retry_cfg_, &retry_report_.not_retried);
+    if (plan.empty()) {
+      return;
+    }
+    RCLCPP_INFO(
+      this->get_logger(), "column retry pass: %zu column(s), up to %d attempt(s) each", plan.size(), retry_cfg_.max_retries);
+    int at_stand = (visit && stand_index_ < tracker_.stands().size() && tracker_.stands()[stand_index_].reached) ?
+      static_cast<int>(stand_index_) : -1;
+    const auto attempt = [&](const ColumnRetryPlan & p, int n, const RetryVariant & v) {
+        RetryAttemptResult r;
+        const size_t i = index_of.at(p.column);
+        RCLCPP_WARN(
+          this->get_logger(), "column %zu retry %d (%s): %s", p.column, n, v.label().c_str(), p.first_outcome ==
+          ColumnOutcome::kPartial ? "was partial" : "failed before");
+        if (!travel_state_.empty() && arm_deployed_) {
+          setState("stowing", -1);
+          if (!stowArm()) {
+            r.fatal = true;
+            r.kind = RetryFailure::kOther;
+            r.note = stop() ? "canceled" : "could not stow the arm";
+            return r;
+          }
+          arm_deployed_ = false;
+        }
+        if (visit && p.stand >= 0 && static_cast<size_t>(p.stand) < visit->size()) {
+          StanceStand target = (*visit)[static_cast<size_t>(p.stand)];
+          bool need_drive = at_stand != p.stand;
+          if (v.restand) {
+            std::vector<StanceStand> ns;
+            std::vector<std::vector<size_t>> nt;
+            std::string why;
+            if (planStands({sel[i]}, ns, nt, why) && !ns.empty()) {
+              size_t best = 0;
+              for (size_t k = 1; k < ns.size(); ++k) {
+                if (nt[k].size() > nt[best].size()) {best = k;}
+              }
+              target = ns[best];
+              need_drive = true;
+              r.note = "new stand (" + std::to_string(target.x) + ", " + std::to_string(target.y) + ")";
+            } else {
+              r.note = "stand re-plan failed (" + why + "), kept the old stand";
+            }
+          }
+          if (need_drive) {
+            std::string msg;
+            setState("navigating", -1);
+            bool ok = navigateToStand(target, msg);
+            if (ok && stand_check_enabled_) {
+              bool gate_abort = false;
+              ok = gateStand(target, msg, gate_abort);
+            }
+            if (stop()) {
+              r.fatal = true;
+              r.note = "canceled";
+              return r;
+            }
+            if (!ok) {
+              at_stand = -1;
+              r.kind = RetryFailure::kNav;
+              r.note += (r.note.empty() ? "" : "; ") + std::string("navigation failed: ") + msg;
+              ledger_.markSkipped(p.column, p.stand, SkipReason::kNavFailed);
+              return r;
+            }
+            at_stand = p.stand;
+            if (!arrival_command_.empty()) {
+              if (std::system(arrival_command_.c_str()) != 0) {
+                RCLCPP_WARN(this->get_logger(), "stand_arrival_command failed");
+              }
+              waitFor(1.0);
+            }
+          }
+        }
+        setState("priming", -1);
+        primeContinuityFromLiveState();
+        if (!travel_state_.empty()) {
+          last_good_state_ = travel_state_;
+        }
+        dock_branch_seed_.clear();   // clean pose: the continuity reference is the live state again
+        arm_stuck_ = false;
+        dock_ik_exclude_.used = column_dock_q_[p.column];
+        dock_ik_exclude_.allow_branch_change = v.allow_branch_change;
+        dock_ik_exclude_on_ = v.vary_ik && !dock_ik_exclude_.used.empty();
+        arm_deployed_ = true;
+        const auto outcome = runColumnWithRetry(sel[i], p.column);
+        dock_ik_exclude_on_ = false;
+        r.outcome = outcome;
+        if (outcome != ColumnOutcome::kDone) {
+          const auto e = ledger_.get(p.column);
+          r.kind = e.reason == SkipReason::kNavFailed ? RetryFailure::kNav :
+            e.reason == SkipReason::kDockFailed ? RetryFailure::kDock :
+            e.reason == SkipReason::kPlanFailed ? RetryFailure::kPlan :
+            e.reason == SkipReason::kContactOverload ? RetryFailure::kOverload : RetryFailure::kOther;
+        }
+        r.fatal = stop();
+        tracker_.columnRetried(
+          p.stand >= 0 ? static_cast<size_t>(p.stand) : tracker_.stands().size(), p.column, outcome);
+        return r;
+      };
+    auto rep = runColumnRetries(plan, retry_cfg_, attempt, [this]() {return stop();});
+    rep.not_retried.insert(
+      rep.not_retried.begin(), retry_report_.not_retried.begin(), retry_report_.not_retried.end());
+    retry_report_ = rep;
+    RCLCPP_INFO(this->get_logger(), "column retry pass done: %s", tracker_.summary().c_str());
+  }
+
   /// Remembers where the arm is as the configuration to jog back to.
   void markGoodState()
   {
@@ -2303,6 +2699,8 @@ private:
       return ColumnOutcome::kFailed;
     }
     logArmState("before_dock_" + intent.label);
+    const bool chain_ok = chain_valid_;   // only a column that finished right before this one can be chained from
+    chain_valid_ = false;
     const auto & rep = intent.poses.front();
     // Docking in the middle of the column is the original behaviour; at the stroke's first pose the
     // contact path starts from the arm configuration it docked in (no IK branch jump at the start).
@@ -2344,7 +2742,32 @@ private:
     bool pin_q = false;   // recovery_keeps_branch: after a short approach every attempt uses the joint goal
     for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
       const bool use_q = !goal_q.empty() && (attempt % 2 == 0 || pin_q);
-      if (dock_approach_extra_m_ > 0.0) {
+      bool did_chain = false;
+      if (attempt == 0) {
+        const auto cd = decideChain(
+          chain_columns_, chain_ok, arm_stuck_, dock_approach_extra_m_ > 0.0,
+          {chain_last_standoff_.x, chain_last_standoff_.y, chain_last_standoff_.z},
+          {first_goal.x, first_goal.y, first_goal.z}, chain_max_shift_m_);
+        if (cd.chain) {
+          MotionSegmentSpec chain_seg = dock_seg;
+          chain_seg.label = intent.label + "_chain";
+          chain_seg.mode_hint = "cartesian";
+          const auto chain_exec = manager_.executeMotionSegments(
+            frame_id_, {chain_seg}, std::vector<core_types::Pose>{first_goal}, planning_group_);
+          double chain_err = 0.0;
+          if (chain_exec.success && (waitFor(0.5, false), tcpNear(first_goal, approach_tolerance_m_, chain_err))) {
+            RCLCPP_INFO(
+              this->get_logger(), "%s: chained from the previous column in one straight move (%.3f m)",
+              intent.label.c_str(), cd.shift_m);
+            did_chain = true;
+          } else {
+            RCLCPP_WARN(
+              this->get_logger(), "%s: chain move %s, using the normal approach", intent.label.c_str(),
+              chain_exec.success ? "ended short" : "failed");
+          }
+        }
+      }
+      if (dock_approach_extra_m_ > 0.0 && !did_chain) {
         MotionSegmentSpec approach_seg = dock_seg;
         approach_seg.label = intent.label + "_approach";
         if (use_q) {
@@ -2583,28 +3006,41 @@ private:
     // it off while the pad is pressed on the wall lets the arm jump to its reference (88 to 233 N spikes on the xArm 7
     // in about half the runs, even after the force had decayed and the reference had been backed off).
     setState("retracting");
+    // Back off at the end of the stroke for a serpentine plan (the next column starts there), else at its start.
+    core_types::Pose retract_pose = chooseRetractPose(serpentine_columns_, standoff_pose, intent.poses);
+    if (serpentine_columns_ && contact_exec.waypoints_completed < intent.poses.size()) {
+      // a stroke that stopped early: back off from where the tool really is, not from the planned end of the stroke
+      FrameTransform here;
+      if (lookup(frame_id_, "tcp_link", here)) {retract_pose.z = here.t[2];}
+    }
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
-    retract_seg.mode_hint = "fsp";
+    // a serpentine retract leaves the wall from the stroke's end (often the top of the reach): the straight move away
+    // from the wall is deterministic, where a randomized joint-space plan from there failed; fsp stays the fallback
+    retract_seg.mode_hint = retractModeHint(serpentine_columns_);
     retract_seg.waypoint_indices = {0};
     retract_seg.min_path_fraction = 0.99;  // see dock_seg's own comment above for why
     const auto retract_exec = manager_.executeMotionSegments(
-      frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
+      frame_id_, {retract_seg}, {retract_pose}, planning_group_);
     setAdmittanceEngaged(false);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
+      retract_seg.mode_hint = retractFallbackHint();
       const auto retract_again = [&]() {
           for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
             if (manager_.executeMotionSegments(
-                frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
+                frame_id_, {retract_seg}, {retract_pose}, planning_group_).success)
             {
               return true;
             }
           }
           return false;
         };
-      bool freed = false;
-      if (!stop() && recoverArm("retract")) {
+      // a failed straight retract is first tried as one plain free-space plan from where the arm is; the jog is the
+      // next resort
+      bool freed = serpentine_columns_ && !stop() && manager_.executeMotionSegments(
+        frame_id_, {retract_seg}, {retract_pose}, planning_group_).success;
+      if (!freed && !stop() && recoverArm("retract")) {
         freed = retract_again();
       }
       if (!freed && !stop() && canRecoverWithoutWall()) {
@@ -2620,6 +3056,8 @@ private:
       arm_stuck_ = false;
     }
 
+    chain_valid_ = contact_exec.success && contact_exec.waypoints_completed > 0 && !arm_stuck_;
+    chain_last_standoff_ = retract_pose;
     if (!contact_exec.success || contact_exec.waypoints_completed == 0) {
       return ColumnOutcome::kFailed;
     }
@@ -2673,19 +3111,31 @@ private:
     }
     setState("retracting");
 
+    // Back off at the end of the stroke for a serpentine plan (the next column starts there), else at its start.
+    core_types::Pose retract_pose = chooseRetractPose(serpentine_columns_, standoff_pose, intent.poses);
+    if (serpentine_columns_ && stroke_exec.waypoints_completed < intent.poses.size()) {
+      // a stroke that stopped early: back off from where the tool really is, not from the planned end of the stroke
+      FrameTransform here;
+      if (lookup(frame_id_, "tcp_link", here)) {retract_pose.z = here.t[2];}
+    }
     MotionSegmentSpec retract_seg;
     retract_seg.label = intent.label + "_retract";
-    retract_seg.mode_hint = "fsp";
+    // a serpentine retract leaves the wall from the stroke's end (often the top of the reach): the straight move away
+    // from the wall is deterministic, where a randomized joint-space plan from there failed; fsp stays the fallback
+    retract_seg.mode_hint = retractModeHint(serpentine_columns_);
     retract_seg.waypoint_indices = {0};
     retract_seg.min_path_fraction = 0.99;
     const auto retract_exec = manager_.executeMotionSegments(
-      frame_id_, {retract_seg}, {standoff_pose}, planning_group_);
+      frame_id_, {retract_seg}, {retract_pose}, planning_group_);
     if (!retract_exec.success) {
       RCLCPP_WARN(this->get_logger(), "%s: retract failed", intent.label.c_str());
+      retract_seg.mode_hint = retractFallbackHint();
       // a start state the planners refuse: jog it free, then try the retract again
-      if (!stop() && recoverArm("retract") &&
+      const bool plain_fsp_ok = serpentine_columns_ && !stop() && manager_.executeMotionSegments(
+        frame_id_, {retract_seg}, {retract_pose}, planning_group_).success;
+      if (plain_fsp_ok || (!stop() && recoverArm("retract") &&
         manager_.executeMotionSegments(
-          frame_id_, {retract_seg}, {standoff_pose}, planning_group_).success)
+          frame_id_, {retract_seg}, {retract_pose}, planning_group_).success))
       {
         arm_stuck_ = false;
       } else {
@@ -2695,6 +3145,8 @@ private:
       arm_stuck_ = false;
     }
 
+    chain_valid_ = stroke_exec.success && stroke_exec.waypoints_completed > 0 && !arm_stuck_;
+    chain_last_standoff_ = retract_pose;
     if (!stroke_exec.success || stroke_exec.waypoints_completed == 0) {
       return ColumnOutcome::kFailed;
     }
@@ -2713,9 +3165,18 @@ private:
   double last_arrival_pos_err_m_{0.0};
   double last_arrival_yaw_err_rad_{0.0};
   double stand_max_span_{0.0};
+  double stand_merge_tol_{0.15};
+  double stand_min_clearance_{0.0};
   std::string arrival_command_;
   std::string wall_clear_command_;
   double nav_timeout_s_{240.0};
+  bool wall_dock_enabled_{false};
+  std::string wall_dock_action_{"wall_dock"};
+  double wall_dock_standoff_m_{0.30};
+  double wall_dock_timeout_s_{0.0};
+  WallDockConfig wall_dock_cfg_;
+  std::map<size_t, WallDockOutcome> verify_wall_dock_;   // stand -> last wall dock outcome of the run
+  rclcpp_action::Client<WallDock>::SharedPtr wall_dock_client_;
   std::vector<double> travel_joint_state_;
   std::vector<std::string> group_joint_names_;
   std::vector<std::vector<std::string>> joint_name_candidates_;
@@ -2723,6 +3184,11 @@ private:
   std::vector<double> last_good_state_;   ///< the last arm configuration known to plan from (recovery target)
   bool arm_stuck_{false};                 ///< a retract or stow failed and no recovery got the arm out yet
   int column_retries_{1};
+  ColumnRetryConfig retry_cfg_;                    ///< retry_failed_columns & co (column_retry.hpp)
+  ColumnRetryReport retry_report_;                 ///< what the second pass did, for the verify result
+  DockIkExclusion dock_ik_exclude_;                ///< dock solutions a retry must differ from (empty used = off)
+  bool dock_ik_exclude_on_{false};
+  std::map<size_t, std::vector<std::vector<double>>> column_dock_q_;   ///< column -> the dock solutions chosen so far
   bool recovery_jog_{true};
   RecoveryJogParams jog_params_;
   std::string column_order_{"input"};
@@ -2829,6 +3295,11 @@ private:
   std::vector<double> dock_branch_seed_;   ///< the last docked configuration: the IK seed of the next dock
   double travel_lift_margin_{0.01};
   double dock_approach_extra_m_{0.0};
+  bool chain_columns_{false};
+  double chain_max_shift_m_{0.4};
+  bool serpentine_columns_{false};
+  bool chain_valid_{false};                 ///< the tool is at chain_last_standoff_ after a finished column of this stand
+  core_types::Pose chain_last_standoff_;
   std::string base_check_mode_{"off"};
   std::string base_check_service_;
   double base_check_lift_min_{0.0};

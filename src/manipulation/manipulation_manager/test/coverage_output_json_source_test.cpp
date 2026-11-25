@@ -103,4 +103,22 @@ TEST(CoverageOutputJsonSourceTest, SingleCellGapStrokeBecomesAShortStroke)
   EXPECT_NEAR(plan[1].poses.back().z, 1.3, 1e-6);
 }
 
+TEST(CoverageOutputJsonSourceTest, FollowPlanDirectionKeepsAlternatingStrips)
+{
+  // plan order: column x=-0.1 goes up, column x=0.3 goes down (a serpentine)
+  const auto path = writePlan("serp.json",
+    pt(-0.1, 1.0, 1.2) + "," + pt(-0.1, 1.0, 1.4) + "," + pt(0.3, 1.0, 1.4) + "," + pt(0.3, 1.0, 1.2));
+  CoverageOutputJsonSource plain(path, "base_footprint", 0.0, 0.1, 1.0, 2.0);
+  const auto up = plain.getCoveragePlan();
+  ASSERT_EQ(up.size(), 2U);
+  EXPECT_LT(up[1].poses.front().z, up[1].poses.back().z);   // default: bottom to top
+  CoverageOutputJsonSource serp(path, "base_footprint", 0.0, 0.1, 1.0, 2.0);
+  serp.setFollowPlanDirection(true);
+  const auto plan = serp.getCoveragePlan();
+  ASSERT_EQ(plan.size(), 2U);
+  EXPECT_LT(plan[0].poses.front().z, plan[0].poses.back().z);
+  EXPECT_GT(plan[1].poses.front().z, plan[1].poses.back().z);   // second strip starts where the first ended
+  EXPECT_NEAR(plan[1].poses.front().z, plan[0].poses.back().z, 1e-6);
+}
+
 }  // namespace manipulation_manager

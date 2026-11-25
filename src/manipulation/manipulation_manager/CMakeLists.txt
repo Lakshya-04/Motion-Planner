@@ -224,9 +224,27 @@ if(BUILD_TESTING)
     target_link_libraries(stand_check_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
+  ament_add_gtest(column_chain_test test/column_chain_test.cpp)
+  if(TARGET column_chain_test)
+    target_include_directories(column_chain_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_features(column_chain_test PRIVATE cxx_std_17)
+  endif()
+
+  ament_add_gtest(serpentine_test test/serpentine_test.cpp)
+  if(TARGET serpentine_test)
+    target_include_directories(serpentine_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(serpentine_test core_types::core_types)
+    target_compile_features(serpentine_test PRIVATE cxx_std_17)
+  endif()
+
   ament_add_gtest(stand_gate_test test/stand_gate_test.cpp)
   if(TARGET stand_gate_test)
     target_link_libraries(stand_gate_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(wall_dock_gate_test test/wall_dock_gate_test.cpp)
+  if(TARGET wall_dock_gate_test)
+    target_link_libraries(wall_dock_gate_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
   ament_add_gtest(coverage_output_json_source_test test/coverage_output_json_source_test.cpp)
@@ -285,6 +303,19 @@ if(BUILD_TESTING)
   ament_add_gtest(dock_ik_selector_test test/dock_ik_selector_test.cpp)
   if(TARGET dock_ik_selector_test)
     target_include_directories(dock_ik_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  # Property / fuzz tests of the ROS-free decision cores (seeded, 20000 cases, NaN / inf / size-mismatch inputs).
+  ament_add_gtest(core_fuzz_test test/core_fuzz_test.cpp)
+  if(TARGET core_fuzz_test)
+    target_link_libraries(core_fuzz_test ${PROJECT_NAME}_core core_types::core_types)
+    target_include_directories(core_fuzz_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
+
+  ament_add_gtest(column_retry_test test/column_retry_test.cpp)
+  if(TARGET column_retry_test)
+    target_include_directories(column_retry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(column_retry_test nlohmann_json::nlohmann_json)
   endif()
 
   ament_add_gtest(recovery_branch_test test/recovery_branch_test.cpp)

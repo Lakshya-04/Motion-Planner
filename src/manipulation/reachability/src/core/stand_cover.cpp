@@ -50,7 +50,7 @@ std::vector<Candidate> enumerate(const Map4D & map, const StationRequest & q, si
     c.stand.arm_xy = g.arm_xy;
     c.stand.yaw = g.yaw;
     c.clearance = g.clearance;
-    const auto plan = planLiftBands(map, q.targets_world, g.arm_xy.x(), g.arm_xy.y(), heights, q.arm_mount_offset_z);
+    const auto plan = planLiftBands(map, q.targets_world, g.arm_xy.x(), g.arm_xy.y(), heights, q.arm_mount_offset_z, q.reach);
     if (plan.reachable_count == 0) {continue;}
     c.covers.assign(words, 0);
     for (const auto & band : plan.bands) {for (const size_t k : band.pose_indices) {set(c.covers, k);}}
@@ -289,7 +289,7 @@ StandPlan planStandsSetCover(
     a.station.yaw = c.stand.yaw;
     a.station.footprint_clearance = c.clearance;
     a.station.evaluated = cands.size();
-    a.station.plan = planLiftBands(map, subset, a.station.x, a.station.y, heights, request.arm_mount_offset_z);
+    a.station.plan = planLiftBands(map, subset, a.station.x, a.station.y, heights, request.arm_mount_offset_z, request.reach);
     for (auto & band : a.station.plan.bands) {for (auto & k : band.pose_indices) {k = a.targets[k];}}
     for (auto & k : a.station.plan.unreachable) {k = a.targets[k];}
     a.stand = c.stand;

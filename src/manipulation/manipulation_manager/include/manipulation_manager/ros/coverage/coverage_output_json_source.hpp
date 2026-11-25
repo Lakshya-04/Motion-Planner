@@ -63,6 +63,10 @@ public:
     double target_eef_speed = 0.02,
     WallDirection wall_direction = WallDirection{});
 
+  /// true: every stroke keeps the direction the plan gave it (the plan alternates up and down, so the next
+  /// strip starts where the last one ended). false (default): every stroke runs bottom to top.
+  void setFollowPlanDirection(bool follow) {follow_plan_direction_ = follow;}
+
   std::vector<CoverageSegmentIntent> getCoveragePlan() override;
   std::string getFrameId() override;
 
@@ -75,6 +79,7 @@ private:
   double z_max_m_;
   double target_eef_speed_;
   WallDirection wall_dir_;
+  bool follow_plan_direction_{false};
 };
 
 }  // namespace manipulation_manager

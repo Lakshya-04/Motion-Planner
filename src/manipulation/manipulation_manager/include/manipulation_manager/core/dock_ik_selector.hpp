@@ -5,7 +5,9 @@
 // dock, the live state, folded seeds), every solution is measured against a reference configuration (the previous
 // dock, else the live state) and the cheapest acceptable one wins:
 //
-//   cost     max_i |dq_i| with the joints that are not `linear_joints` wrapped to [-pi, pi]
+//   cost     max_i w_i |dq_i| with the joints that are not `linear_joints` wrapped to [-pi, pi]; w_i is
+//            lift_cost_weight (default 2) for a linear joint, 1 otherwise. max_dq_rad and the exclusion tolerance
+//            use the raw (unweighted) max |dq|.
 //   rejected a branch change (the sign of a `branch_joints` entry flips, a value inside the deadband counts as
 //            either sign), a wrist joint outside [wrist_min_rad, wrist_max_rad] (winding), a cost over max_dq
 //
@@ -21,6 +23,11 @@
 // the fraction at or under the target (idealLift), and a candidate at or under the target beats any above it whatever
 // its cost; the cost orders candidates on the same side of the target. No candidate under the target: the cheapest
 // one as without the preference (reach_over_target is set). Off by default; nothing here changes then.
+//
+// Next-best distinct candidate (column retry): with a DockIkExclusion the solutions already used (the ones a failed
+// attempt docked with) are dropped when they lie within tol_rad (max wrapped |dq|) of a candidate, so the winner is
+// the cheapest candidate that differs from them; with allow_branch_change the branch test is skipped too, which lets
+// the other IK branch through (the wrist and cost limits still apply). No exclusion: nothing changes.
 #pragma once
 
 #include <algorithm>
@@ -41,13 +48,21 @@ struct DockIkSelectorParams
   int wrist_joint{-1};                      ///< joint index whose absolute value is limited; -1 = no check
   double wrist_min_rad{-3.2};
   double wrist_max_rad{3.2};
-  double max_dq_rad{3.2};                   ///< candidates with a larger cost are rejected
+  double max_dq_rad{3.2};                   ///< candidates with a larger raw max |dq| are rejected (unweighted)
+  /// Cost multiplier of a linear (lift) joint's delta in the candidate cost (param `dock_ik_lift_cost_weight`): 2.0
+  /// makes lift motion twice as costly as arm motion, so the choice prefers arm motion over lift motion. 1.0 = the
+  /// plain max |dq|.
+  double lift_cost_weight{2.0};
   // Reach preference (see the header comment); reach_target_fraction <= 0 or reach_m <= 0 = off.
   double reach_target_fraction{0.0};        ///< wanted upper bound of tool distance / reach_m
   double reach_m{0.0};                      ///< arm reach from the arm base frame origin (m)
   size_t lift_joint{0};                     ///< index of the lift joint in a solution
   double lift_min_m{0.0};                   ///< lift stroke limits the proposed lift is clamped into
   double lift_max_m{1.5};
+  // Joint limits used by rebaseDockIk (same order as a solution); used only when their size equals the solution's,
+  // otherwise a non-linear joint is kept inside [-2*pi, 2*pi].
+  std::vector<double> joint_lower;
+  std::vector<double> joint_upper;
 };
 
 /// Where the tool goal lies relative to the arm base, for the reach preference.
@@ -55,6 +70,14 @@ struct DockReachContext
 {
   double horizontal_m{0.0};   ///< horizontal distance arm base -> tool goal
   double z_rel_m{0.0};        ///< tool goal height minus the arm base height at zero lift
+};
+
+/// Solutions to stay away from (column retry): see the header comment.
+struct DockIkExclusion
+{
+  std::vector<std::vector<double>> used;   ///< earlier solutions; a candidate within tol_rad of one is dropped
+  double tol_rad{0.05};
+  bool allow_branch_change{false};
 };
 
 struct DockIkChoice
@@ -67,6 +90,7 @@ struct DockIkChoice
   size_t rejected_branch{0};
   size_t rejected_wrist{0};
   size_t rejected_cost{0};
+  size_t rejected_excluded{0};   ///< candidates equal (within tol) to an already used solution
   double reach_fraction{-1.0};   ///< tool distance / reach_m of the choice; -1 when the preference is off
   bool reach_over_target{false}; ///< preference on, but no acceptable candidate was at or under the target
 };
@@ -84,9 +108,16 @@ inline double wrapToPi(double a)
   return a - M_PI;
 }
 
-/// max_i |dq_i| between `q` and `ref`, wrapping every joint that is not linear. Infinity on a size mismatch.
+inline bool allFiniteJoints(const std::vector<double> & q)
+{
+  return std::all_of(q.begin(), q.end(), [](double x) {return std::isfinite(x);});
+}
+
+/// max_i w_i |dq_i| between `q` and `ref`, wrapping every joint that is not linear; w_i is p.lift_cost_weight for a
+/// linear joint when `weighted`, else 1. Infinity on a size mismatch or a non-finite joint.
 inline double dockIkCost(
-  const std::vector<double> & q, const std::vector<double> & ref, const DockIkSelectorParams & p)
+  const std::vector<double> & q, const std::vector<double> & ref, const DockIkSelectorParams & p,
+  bool weighted = true)
 {
   if (q.size() != ref.size()) {
     return INFINITY;
@@ -96,10 +127,50 @@ inline double dockIkCost(
     double d = q[i] - ref[i];
     if (std::find(p.linear_joints.begin(), p.linear_joints.end(), i) == p.linear_joints.end()) {
       d = wrapToPi(d);
+    } else if (weighted && std::isfinite(p.lift_cost_weight) && p.lift_cost_weight > 0.0) {
+      d *= p.lift_cost_weight;
+    }
+    if (std::isnan(d)) {
+      return INFINITY;   // std::max(worst, NaN) keeps `worst`, so a NaN joint would look free
     }
     worst = std::max(worst, std::fabs(d));
   }
   return worst;
+}
+
+/// Moves every joint of `q` that is not linear to the representative q_i + 2*pi*k nearest `ref` (the same pose: the
+/// IK may return the value 2*pi away), kept inside the joint limits when `p` has them for every joint, else inside
+/// [-2*pi, 2*pi]. A joint with no representative inside the limits keeps its value. Linear joints are untouched.
+inline std::vector<double> rebaseDockIk(
+  std::vector<double> q, const std::vector<double> & ref, const DockIkSelectorParams & p)
+{
+  if (q.size() != ref.size()) {
+    return q;
+  }
+  const double two_pi = 2.0 * M_PI;
+  const bool have_limits = p.joint_lower.size() == q.size() && p.joint_upper.size() == q.size();
+  for (size_t i = 0; i < q.size(); ++i) {
+    if (std::find(p.linear_joints.begin(), p.linear_joints.end(), i) != p.linear_joints.end()) {
+      continue;
+    }
+    const double lo = have_limits ? p.joint_lower[i] : -two_pi;
+    const double hi = have_limits ? p.joint_upper[i] : two_pi;
+    // NaN / inf / absurd magnitudes (a wrap of such a value is float noise): nothing sensible to rebase
+    if (!std::isfinite(q[i]) || !std::isfinite(ref[i]) || !std::isfinite(lo) || !std::isfinite(hi) ||
+      std::fabs(q[i]) > 1e3 || std::fabs(ref[i]) > 1e3) {
+      continue;
+    }
+    double v = q[i] + two_pi * std::round((ref[i] - q[i]) / two_pi);
+    if (v > hi + 1e-9) {
+      v -= two_pi * std::ceil((v - hi - 1e-9) / two_pi);
+    } else if (v < lo - 1e-9) {
+      v += two_pi * std::ceil((lo - 1e-9 - v) / two_pi);
+    }
+    if (v >= lo - 1e-9 && v <= hi + 1e-9) {
+      q[i] = v;
+    }
+  }
+  return q;
 }
 
 /// True when some branch joint is clearly on opposite sides of zero in `a` and `b`.
@@ -117,6 +188,34 @@ inline bool dockBranchChanged(
     }
   }
   return false;
+}
+
+/// True when `p` carries real joint limits for a solution of `n` joints (rebasing without them could leave the limits).
+inline bool dockRebaseHasLimits(const DockIkSelectorParams & p, size_t n)
+{
+  return p.joint_lower.size() == n && p.joint_upper.size() == n;
+}
+
+/// rebaseDockIk for a solution already accepted on its raw values: only with real joint limits (otherwise `raw` is
+/// returned unchanged), and a representative that would fail the wrist window or flip a branch joint keeps the raw
+/// value of that joint (the same pose, a turn away).
+inline std::vector<double> rebaseDockIkChecked(
+  const std::vector<double> & raw, const std::vector<double> & ref, const DockIkSelectorParams & p)
+{
+  if (!dockRebaseHasLimits(p, raw.size()) || raw.size() != ref.size()) {
+    return raw;
+  }
+  std::vector<double> q = rebaseDockIk(raw, ref, p);
+  if (p.wrist_joint >= 0 && static_cast<size_t>(p.wrist_joint) < q.size()) {
+    const size_t w = static_cast<size_t>(p.wrist_joint);
+    if (q[w] < p.wrist_min_rad || q[w] > p.wrist_max_rad) {q[w] = raw[w];}
+  }
+  if (dockBranchChanged(q, ref, p)) {
+    for (const size_t j : p.branch_joints) {
+      if (j < q.size()) {q[j] = raw[j];}
+    }
+  }
+  return q;
 }
 
 inline bool dockReachPreferenceOn(const DockIkSelectorParams & p)
@@ -151,15 +250,33 @@ inline double idealLift(double current, const DockReachContext & c, const DockIk
   return std::min(std::max(v, lo), hi);
 }
 
+/// The configuration the branch check and the cost of a dock are measured against: the previous dock when there is
+/// one; for the first dock of a stand the configured dock seed (the arm branch known to dock at the wall) when it
+/// has the joint count of the live state, else the live state. Measuring the first dock against the live state (the
+/// arm stowed, elbow folded one way) rejects the configured branch as a "branch change" and keeps the stow branch,
+/// which for a low target (tall wall, tool well below the arm base) puts the upper arm into the lift carriage.
+inline const std::vector<double> & dockBranchReference(
+  const std::vector<double> & previous_dock, const std::vector<double> & dock_seed, const std::vector<double> & live)
+{
+  if (!previous_dock.empty()) {
+    return previous_dock;
+  }
+  if (!dock_seed.empty() && dock_seed.size() == live.size()) {
+    return dock_seed;
+  }
+  return live;
+}
+
 /// Runs `ik` from every seed (empty seeds are skipped) and returns the cheapest acceptable solution relative to
 /// `reference`. Ties go to the earlier seed. With `reach` set and the preference on (see the header comment) the
 /// seeds are followed by one lift-adjusted copy of each, and candidates at or under the target reach fraction win.
 inline DockIkChoice selectDockIk(
   const DockIkFn & ik, const std::vector<std::vector<double>> & seeds_in, const std::vector<double> & reference,
-  const DockIkSelectorParams & p, const DockReachContext * reach = nullptr)
+  const DockIkSelectorParams & p, const DockReachContext * reach = nullptr,
+  const DockIkExclusion * exclusion = nullptr)
 {
   DockIkChoice best;
-  if (!ik || reference.empty()) {
+  if (!ik || reference.empty() || !allFiniteJoints(reference)) {
     return best;
   }
   const bool prefer = reach != nullptr && dockReachPreferenceOn(p) && p.lift_joint < reference.size();
@@ -169,15 +286,17 @@ inline DockIkChoice selectDockIk(
       if (sd.size() == reference.size()) {
         auto adj = sd;
         adj[p.lift_joint] = idealLift(sd[p.lift_joint], *reach, p);
-        seeds.push_back(std::move(adj));
+        if (std::isfinite(adj[p.lift_joint])) {
+          seeds.push_back(std::move(adj));
+        }
       }
     }
     best.reach_fraction = INFINITY;
   }
   bool best_under = false;
   for (size_t s = 0; s < seeds.size(); ++s) {
-    if (seeds[s].empty()) {
-      continue;
+    if (seeds[s].empty() || !allFiniteJoints(seeds[s])) {
+      continue;   // a NaN seed would send the IK nowhere
     }
     const auto sol = ik(seeds[s]);
     if (!sol || sol->size() != reference.size()) {
@@ -191,12 +310,25 @@ inline DockIkChoice selectDockIk(
         continue;
       }
     }
-    if (dockBranchChanged(*sol, reference, p)) {
+    if (exclusion != nullptr) {
+      bool seen = false;
+      for (const auto & u : exclusion->used) {
+        if (dockIkCost(*sol, u, p, false) <= exclusion->tol_rad) {
+          seen = true;
+          break;
+        }
+      }
+      if (seen) {
+        ++best.rejected_excluded;
+        continue;
+      }
+    }
+    if (!(exclusion != nullptr && exclusion->allow_branch_change) && dockBranchChanged(*sol, reference, p)) {
       ++best.rejected_branch;
       continue;
     }
     const double cost = dockIkCost(*sol, reference, p);
-    if (cost > p.max_dq_rad) {
+    if (!(dockIkCost(*sol, reference, p, false) <= p.max_dq_rad)) {   // also rejects a NaN cost or limit
       ++best.rejected_cost;
       continue;
     }
@@ -216,6 +348,9 @@ inline DockIkChoice selectDockIk(
       best.reach_fraction = prefer ? frac : -1.0;
       best_under = under;
     }
+  }
+  if (best.ok) {
+    best.q = rebaseDockIkChecked(best.q, reference, p);
   }
   best.reach_over_target = prefer && best.ok && !best_under;
   if (prefer && !best.ok) {

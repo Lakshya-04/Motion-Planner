@@ -181,16 +181,24 @@ struct Grid
   size_t idx(long i, long j) const {return static_cast<size_t>(j) * static_cast<size_t>(nx) + static_cast<size_t>(i);}
 };
 
+/// `v` as a grid index in [0, hi]; a far-away or non-finite value is clamped before the cast (the cast would be undefined).
+inline long clampIndex(double v, long hi)
+{
+  if (!(v > 0.0)) {return 0;}
+  if (v >= static_cast<double>(hi)) {return hi;}
+  return static_cast<long>(v);
+}
+
 /// Visit the cells whose centre is within r of segment s, calling f(index).
 template<typename F>
 inline void forCellsNear(const Grid & g, const Seg & s, double r, F && f)
 {
   const double amin = std::min(s.p.a, s.q.a) - r, amax = std::max(s.p.a, s.q.a) + r;
   const double bmin = std::min(s.p.b, s.q.b) - r, bmax = std::max(s.p.b, s.q.b) + r;
-  const long i0 = std::max(0L, static_cast<long>(std::floor((amin - g.a0) / g.cell - 0.5)));
-  const long i1 = std::min(g.nx - 1, static_cast<long>(std::ceil((amax - g.a0) / g.cell - 0.5)));
-  const long j0 = std::max(0L, static_cast<long>(std::floor((bmin - g.b0) / g.cell - 0.5)));
-  const long j1 = std::min(g.ny - 1, static_cast<long>(std::ceil((bmax - g.b0) / g.cell - 0.5)));
+  const long i0 = clampIndex(std::floor((amin - g.a0) / g.cell - 0.5), g.nx - 1);
+  const long i1 = clampIndex(std::ceil((amax - g.a0) / g.cell - 0.5), g.nx - 1);
+  const long j0 = clampIndex(std::floor((bmin - g.b0) / g.cell - 0.5), g.ny - 1);
+  const long j1 = clampIndex(std::ceil((bmax - g.b0) / g.cell - 0.5), g.ny - 1);
   for (long j = j0; j <= j1; ++j) {
     for (long i = i0; i <= i1; ++i) {
       const V2 c{g.a0 + (static_cast<double>(i) + 0.5) * g.cell, g.b0 + (static_cast<double>(j) + 0.5) * g.cell};
@@ -228,7 +236,10 @@ inline GeometricCoverageResult computeGeometricCoverage(
     auto & v = plan[st.column];
     std::vector<V2> pts;
     for (const auto & p : st.points) {
-      if (std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z)) {pts.push_back(project(B, p));}
+      if (std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z)) {
+        const V2 q = project(B, p);
+        if (std::isfinite(q.a) && std::isfinite(q.b)) {pts.push_back(q);}
+      }
     }
     if (pts.size() == 1) {v.push_back({pts[0], pts[0]});}
     for (size_t i = 1; i < pts.size(); ++i) {v.push_back({pts[i - 1], pts[i]});}
@@ -262,6 +273,10 @@ inline GeometricCoverageResult computeGeometricCoverage(
       }
       ++r.working_samples;
       const V2 q = project(B, s.p);
+      if (!std::isfinite(q.a) || !std::isfinite(q.b)) {   // a finite but absurd sample overflowed the projection
+        l.first = false;
+        continue;
+      }
       if (l.first) {
         const double d = std::hypot(q.a - l.second.a, q.b - l.second.b);
         if (d <= cfg.max_gap_m) {
@@ -288,14 +303,27 @@ inline GeometricCoverageResult computeGeometricCoverage(
       }
     }
   }
+  if (cfg.max_cells == 0) {
+    r.note = "max_cells must be positive";
+    return r;
+  }
   Grid g;
   g.cell = cfg.cell_m;
   for (;;) {
     g.a0 = amin - rad - g.cell;
     g.b0 = bmin - rad - g.cell;
-    g.nx = static_cast<long>(std::ceil((amax + rad + g.cell - g.a0) / g.cell)) + 1;
-    g.ny = static_cast<long>(std::ceil((bmax + rad + g.cell - g.b0) / g.cell)) + 1;
-    if (static_cast<double>(g.nx) * static_cast<double>(g.ny) <= static_cast<double>(cfg.max_cells)) {break;}
+    // sizes in double first: a huge patch must not overflow the long cast
+    const double nxd = std::ceil((amax + rad + g.cell - g.a0) / g.cell) + 1.0;
+    const double nyd = std::ceil((bmax + rad + g.cell - g.b0) / g.cell) + 1.0;
+    if (!std::isfinite(nxd) || !std::isfinite(nyd) || !std::isfinite(g.cell)) {
+      r.note = "the planned patch is too large for a grid";
+      return r;
+    }
+    if (nxd * nyd <= static_cast<double>(cfg.max_cells)) {
+      g.nx = static_cast<long>(nxd);
+      g.ny = static_cast<long>(nyd);
+      break;
+    }
     g.cell *= 2.0;
     r.note = "grid coarsened to stay within max_cells";
   }

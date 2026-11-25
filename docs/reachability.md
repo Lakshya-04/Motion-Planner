@@ -62,6 +62,117 @@ Measured on this machine (8 threads): 3 million samples in 0.5 s. UR10e, a 3 m w
 front of the base: **2 bands** (lift 0.95 m covers 25 of 30 targets, 1.45 m the other 5). The same
 wall 3 m away: all targets unreachable. Generic arm: 3 bands.
 
+## Reach report: what reach do we really get, top to bottom?
+
+`docker/tools/reach_report.py` (python3 + numpy, ROS-free; matplotlib only for `--png`) answers it from
+an RM4D map file. It places a vertical wall patch in front of the arm and, for every lift height,
+asks the map whether the tool can stand on each wall cell with its axis **normal to the wall**
+(approach axis horizontal, so polar angle pi/2 and azimuth +x: the cell key is `pz = wall z - arm
+base z`, `x* = arm-base-to-wall distance`, `y* = lateral offset`; no rotation needed).
+
+Inputs and geometry:
+
+- arm base to wall `D = --clearance + --arm-offset` (chassis edge to wall plus the arm base set back from the
+  chassis edge). Arm base height at lift q is `arm_base_z0 + q`, where `arm_base_z0` is the base's
+  `lift_mount_height_m` plus the profile's `lift.mount_height_m` (the `armBaseHeightAtLiftZero` of
+  the C++ `BaseModel`; 0.35 + 0.82 = 1.17 m for `ur10e_telescopic`). `--profile` reads it and the
+  stroke (`lift.stroke_m`) from the yaml; `--stroke` / `--arm-base-z0` override it.
+- `--reach R` is the reach the fractions refer to. Without it the tool uses the largest tool distance
+  stored in the map, which includes the tool offset past the arm flange (1.7 m for the UR10e map
+  with its tcp), so pass the datasheet reach (1.3 m) when you think in arm reach.
+- "Reachable at fraction f" = the map holds the cell AND the tool is within `f * R` of the arm base.
+  0.7 / 0.85 / 1.0 are the defaults (`--fractions`): the margin kept from the singular full stretch.
+- A warning is printed when the map's z window or xy half-width is narrower than the reach: cells
+  outside the window count as unreachable and the lowest/highest z would be clipped (build the map
+  with `--zmin -1.8 --zmax 2.0 --extent 2.0` as in "Try it").
+
+It reports, per reach fraction: the reachable fraction of the patch at every lift height; the lowest
+and highest reachable wall z at lift min and lift max (scanned over z 0..3 m on the patch's centre
+line, not clipped to the patch); the **minimum number of lift positions** that cover the patch bottom
+to top and which heights (exact search over the lift grid, ties broken by the least lift travel;
+`--lift-step`, default 0.05 m); a FLAG with the z runs when patch cells are never reachable at any
+lift; and a heat strip (ASCII; `--png` writes a matplotlib figure of reachable fraction over lift x
+wall height plus the strip). `--json` dumps the numbers. The older `rm4d_tool bands` answers the lift
+band question for arbitrary tool normals; this one adds the reach fractions, the extent at the ends of the
+stroke, the flags and the strip for the wall-normal case.
+
+### Worked example: UR10e tall wall
+
+Patch z 0.6..2.0 m, chassis clearance 0.42 m, arm base 0.3 m behind the chassis edge (D = 0.72 m),
+1.5 m stroke, datasheet reach 1.3 m, map built as in "Try it":
+
+```bash
+python3 docker/tools/reach_report.py --map ur10e.rm4d \
+  --profile src/description/mobile_manipulator_description/config/profiles/ur10e_telescopic.yaml \
+  --patch-z 0.6 2.0 --patch-y -0.5 0.5 --clearance 0.42 --arm-offset 0.3 --reach 1.3 --lift-step 0.1
+```
+
+Output (excerpt; the full per-lift table has 16 rows):
+
+```
+  arm base to wall 0.720 m (clearance 0.420 + arm offset 0.300), reach 1.300 m
+  arm base height at lift 0: 1.170 m, stroke 1.500 m, lift step 0.100 m
+At 70% of reach:
+  reachable wall z at lift min (0.00): 0.65 .. 1.70 m; at lift max (1.50): 2.15 .. 3.00 m
+  patch coverable by any lift: 90.3%; minimum lift positions: 4 at 0.00, 0.10, 0.40, 0.60 m
+  FLAG: 59 patch cells never reachable (z runs 0.60..0.90, y -0.50..0.50)
+At 85% of reach:
+  reachable wall z at lift min (0.00): 0.35 .. 2.00 m; at lift max (1.50): 1.85 .. 3.00 m
+  patch coverable by any lift: 100.0%; minimum lift positions: 2 at 0.00, 0.30 m
+At 100% of reach:
+  reachable wall z at lift min (0.00): 0.10 .. 2.25 m; at lift max (1.50): 1.60 .. 3.00 m
+  patch coverable by any lift: 100.0%; minimum lift positions: 2 at 0.30, 0.40 m
+```
+
+Check against the analytic sphere: with the arm base 0.72 m from the wall and reach 1.3 m, the tool can
+reach wall points up to `sqrt(1.3^2 - 0.72^2) = 1.08 m` above and below the arm base (on the line in front
+of it). At lift 0 the base is at 1.17 m, so the span is 0.09 .. 2.25 m; the report gives 0.10 .. 2.25 m
+(one 5 cm cell). At 0.7 of reach (0.91 m) the half-span is 0.556 m, span 0.61 .. 1.73 m; the report
+gives 0.65 .. 1.70 m. At lift max the span moves up by 1.5 m (1.6 .. 3.75 m, scan cut at 3.0 m). The
+same numbers come out of `test_reach_report.py` on an analytic sphere-shell map.
+
+What it says about the tall wall: the whole 0.6..2.0 m patch is reachable at 0.85 and 1.0 of reach
+from the lift range 0..0.3 m (a 1.4 m tall wall fits inside the 2.2 m span; the lift is needed for walls
+above about 2.25 m or below about 0.1 m, not for this one). Keeping 0.7 of reach is not possible at this
+stand: the bottom 0.6..0.9 m of a 1 m wide patch is never reachable at any lift (the lift cannot go
+below its zero, so the lowest reach is the arm base height minus the half-span). At 0.7 the arm base
+would have to be closer than 0.72 m or the patch narrower. Heat strip at 0.85 of reach (columns: lift
+min, mid, max, best lift):
+
+```
+Heat strip at 85% of reach: wall z vs patch width reachable (full bar = all, empty = none)
+  z[m]  lift 0.00               lift 0.80               lift 1.50               best lift             
+ 2.00    |#####               |  |##################  |  |################### |  |####################|
+ 1.95    |###########         |  |####################|  |################    |  |####################|
+ 1.90    |################    |  |####################|  |###########         |  |####################|
+ 1.85    |##################  |  |####################|  |#######             |  |####################|
+ 1.80    |################### |  |####################|  |                    |  |####################|
+ 1.75    |####################|  |####################|  |                    |  |####################|
+ 1.70    |####################|  |################### |  |                    |  |####################|
+ 1.65    |####################|  |#################   |  |                    |  |####################|
+ 1.60    |####################|  |####################|  |                    |  |####################|
+ 1.55    |##################  |  |####################|  |                    |  |####################|
+ 1.50    |####################|  |####################|  |                    |  |####################|
+ 1.45    |####################|  |####################|  |                    |  |####################|
+ 1.40    |####################|  |####################|  |                    |  |####################|
+ 1.35    |####################|  |################### |  |                    |  |####################|
+ 1.30    |################### |  |################### |  |                    |  |####################|
+ 1.25    |################### |  |################    |  |                    |  |####################|
+ 1.20    |##################  |  |###########         |  |                    |  |####################|
+ 1.15    |####################|  |#######             |  |                    |  |####################|
+ 1.10    |####################|  |                    |  |                    |  |####################|
+ 1.05    |####################|  |                    |  |                    |  |####################|
+ 1.00    |####################|  |                    |  |                    |  |####################|
+ 0.95    |####################|  |                    |  |                    |  |####################|
+ 0.90    |################### |  |                    |  |                    |  |####################|
+ 0.85    |#################   |  |                    |  |                    |  |####################|
+ 0.80    |####################|  |                    |  |                    |  |####################|
+ 0.75    |####################|  |                    |  |                    |  |####################|
+ 0.70    |####################|  |                    |  |                    |  |####################|
+ 0.65    |####################|  |                    |  |                    |  |####################|
+ 0.60    |####################|  |                    |  |                    |  |####################|
+```
+
 ## Redundant arms (7 or more joints)
 
 The builder, the chain model and the file format take any number of revolute joints; the joint count
@@ -711,7 +822,36 @@ built with `rm4d_tool` and serves it:
 | `~/plan_lift_bands` | wall targets, base station, lift range and step | bands + unreachable targets |
 | `~/plan_stands` | wall targets and plane, lift range, optional start stand | stands in visiting order (arm base x, y, base yaw, targets, lift bands, travel time) + unreachable targets |
 
-Parameters: `map_file` (required), `stand_strategy` (`greedy` default, or `set_cover`, see the section above), `stand_min_clearance_m` (default 0 = off; when positive, every `~/plan_stands` request's `min_clearance` is raised to at least this, so the chassis keeps this distance from the wall; the tall-wall MuJoCo run docked at the 0.30 m default, with the tool at up to 87% of reach), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored; a set `base_profile` that cannot be loaded leaves the node not ready, like a missing `map_file`).
+Parameters: `map_file` (required), `stand_strategy` (`greedy` default, or `set_cover`, see the section above), `stand_min_clearance_m` (default 0 = off; when positive, every `~/plan_stands` request's `min_clearance` is raised to at least this, so the chassis keeps this distance from the wall; the tall-wall MuJoCo run docked at the 0.30 m default, with the tool at up to 87% of reach), `stand_max_reach_fraction` (default 0 = off; recommended 0.85: a pose farther from the arm base than this fraction of the arm reach does not count as reachable from a stand, at any lift height, see "Reach margin of stands" below), `stand_balance_reach` (default false = off), `arm_reach_m` (default 0 = the largest tool distance in the map; the reach the two options above use), `robot_fingerprint` (rejects a map built for another robot), `base_profile` (optional robot profile YAML with a `base:` section; `~/plan_stands` then keeps the footprint clear of the wall and reports driving time for the drive type, otherwise the footprint is ignored; a set `base_profile` that cannot be loaded leaves the node not ready, like a missing `map_file`).
+
+### Reach margin of stands
+
+The stand planner maximises the number of reachable poses and, among stands that reach the same poses and need the same
+lift bands, prefers the one the base reaches soonest (the start pose). That keeps the first stand near where the robot
+already is, but not the tool away from the edge of the reach: in the tall-wall two-stand MuJoCo run (UR10e on the lift,
+wall patch z 0.6 to 2.0 m, columns at y 0.31 to 1.19 m, clearance floor 0.42 m) stand 0 stayed at the start pose, 0.3 to
+0.8 m along the wall from its columns and 0.92 m from the wall, so the tool was at 94 to 101 % of the 1.3 m reach on the
+far columns, the dock IK took contorted branches (shoulder -3.6 rad, elbow -3.5 rad), and the run saw force spikes of up
+to 241 N and one column that failed after 300 s of retries. The well centred stand 1 (tool at 71 to 78 % of the reach)
+had none of that.
+
+Two opt-in node parameters (both off by default, so plans are unchanged), reach = `arm_reach_m` or the map's estimate:
+
+- `stand_balance_reach` (bool): `chooseStation` (greedy) and the set-cover candidates rank stations by the worst reach
+  fraction (tool distance from the arm base over the reach, the lift placed to minimise it) of the group, rounded to
+  0.02, before the drive tie-break; the along-wall position and the standoff (from the clearance floor up) are both
+  searched. The start pose is only the tie-breaker among stations with the same margin: the planner does not trade
+  margin for a shorter drive.
+- `stand_max_reach_fraction` (0 to 1, recommended 0.85): a hard cap. A pose beyond the fraction is unreachable at that
+  lift height (the verified plan's height table too), so a stand must cover it within the cap or it is left to another
+  stand, and the unreachable list tells you when no stand can.
+
+`planStands` takes both through `StationRequest::reach` (`ReachLimit`); `LiftBandPlan::max_reach_fraction` reports the
+result. `global_stands` (the cover with a tour) is not changed. Host test:
+`test/core/stand_reach_margin_test.cpp` (analytic sphere-shell reach model, the tall-wall first column group: without the
+options the stand is 0.2 m from the start pose and 0.35 m along the wall from the middle of its columns, with
+`stand_balance_reach` it sits on the middle). The sim script exposes them as `MULTI_STAND_BALANCE_REACH`,
+`MULTI_STAND_MAX_REACH_FRACTION` and `MULTI_STAND_ARM_REACH`.
 
 `~/plan_stands` rejects `grid_step` below 0.02 m, `lift_step` below 0.01 m, `lift_max` (when set) below `lift_min`, and searches whose work (stations x lift heights x targets) exceeds 5e7 per stand, so one request cannot keep the node's callbacks busy for minutes. All positions (targets, wall point, returned stands) are in the same world frame the caller chose; the service does not transform.
 The map does not know which side of a wall is free, so base candidates come back on both sides of

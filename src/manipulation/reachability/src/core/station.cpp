@@ -111,6 +111,10 @@ std::string stationGridProblem(const StationRequest & q)
     return "min_clearance, max_standoff and lateral_margin must be finite";
   }
   if (!surfaceFrame(q.wall_normal).ok || q.targets_world.empty()) {return "";}   // reported elsewhere
+  for (const auto & t : q.targets_world) {
+    // a NaN along the wall normal passes the grid-size test below and then reads as "no free stand"
+    if (!t.translation().allFinite()) {return "a target position is not finite";}
+  }
   const double points = stationGridPointCount(q);
   if (!std::isfinite(points)) {return "a target position is not finite";}
   if (!(points <= static_cast<double>(kMaxGridPoints))) {
@@ -229,13 +233,15 @@ Station chooseStation(const Map4D & map, const StationRequest & q)
   const double v_mid = 0.5 * (v_lo + v_hi);
   const Vec3 centre = q.wall_point + ax.u * u_mid + ax.v * v_mid;
 
-  // Rank: fewer unreachable targets, then fewer bands, then a base near the middle of the work
-  // area, then the smaller standoff.
-  using Key = std::tuple<size_t, size_t, double, double>;
-  Key best_key{~size_t{0}, ~size_t{0}, 0.0, 0.0};
+  // Rank: fewer unreachable targets, then fewer bands, then (reach balance on) the smaller worst reach fraction in
+  // steps of kReachQuantum, then a base near the middle of the work area (or the cheapest drive), then the smaller
+  // standoff. The balance term is 0 for every station when the option is off, so the order is unchanged.
+  using Key = std::tuple<size_t, size_t, double, double, double>;
+  Key best_key{~size_t{0}, ~size_t{0}, 0.0, 0.0, 0.0};
+  const bool balance = q.reach.active() && q.reach.balance;
 
   for (const auto & g : grid) {
-    const auto plan = planLiftBands(map, q.targets_world, g.arm_xy.x(), g.arm_xy.y(), heights, q.arm_mount_offset_z);
+    const auto plan = planLiftBands(map, q.targets_world, g.arm_xy.x(), g.arm_xy.y(), heights, q.arm_mount_offset_z, q.reach);
     ++best.evaluated;
     if (plan.reachable_count == 0) {
       continue;
@@ -247,7 +253,8 @@ Station chooseStation(const Map4D & map, const StationRequest & q)
       const Stand to{g.arm_xy, g.yaw};
       tie = travelTime(*q.base, *q.from, to) + 1e-3 * (to.arm_xy - q.from->arm_xy).norm();
     }
-    const Key key{plan.unreachable.size(), plan.bands.size(), tie, g.standoff};
+    const double margin = balance ? std::floor(plan.max_reach_fraction / kReachQuantum + 1e-9) * kReachQuantum : 0.0;
+    const Key key{plan.unreachable.size(), plan.bands.size(), margin, tie, g.standoff};
     if (!best.found || key < best_key) {
       best_key = key;
       best.found = true;

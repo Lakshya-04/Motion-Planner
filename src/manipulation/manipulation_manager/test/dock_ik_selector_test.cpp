@@ -3,6 +3,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <limits>
 
 #include "manipulation_manager/core/dock_ik_selector.hpp"
 
@@ -69,7 +70,43 @@ TEST(DockIkSelectorTest, ContinuousJointsAreWrappedLinearOnesAreNot)
 {
   DockIkSelectorParams p;   // joint 0 linear
   EXPECT_NEAR(dockIkCost({0.0, 3.0}, {0.0, -3.0}, p), 2.0 * M_PI - 6.0, 1e-12);
-  EXPECT_NEAR(dockIkCost({2.0, 0.0}, {-1.0, 0.0}, p), 3.0, 1e-12);
+  EXPECT_NEAR(dockIkCost({2.0, 0.0}, {-1.0, 0.0}, p, false), 3.0, 1e-12);   // raw: the lift is not wrapped
+}
+
+TEST(DockIkSelectorTest, LiftDeltaIsWeightedInTheCost)
+{
+  DockIkSelectorParams p;   // joint 0 linear, default lift_cost_weight 2
+  EXPECT_NEAR(dockIkCost({1.0, 0.0}, {0.0, 0.0}, p), 2.0, 1e-12);
+  EXPECT_NEAR(dockIkCost({1.0, 0.0}, {0.0, 0.0}, p, false), 1.0, 1e-12);
+  p.lift_cost_weight = 1.0;   // old behaviour exactly
+  EXPECT_NEAR(dockIkCost({1.0, 0.5}, {0.0, 0.0}, p), 1.0, 1e-12);
+}
+
+TEST(DockIkSelectorTest, PrefersArmMotionOverLiftMotionAndWeightOneRestoresTheOldChoice)
+{
+  // seed 0: lift moves 0.8 m, arm 0.3 rad. seed 1: lift stays, arm moves 1.2 rad.
+  // weight 1: max |dq| 0.8 vs 1.2 -> seed 0. weight 2: 1.6 vs 1.2 -> seed 1 (arm motion preferred).
+  const V ref{0.0, 0.0};
+  const std::vector<V> seeds{V{0.8, 0.3}, V{0.0, 1.2}};
+  const DockIkFn ik = [](const V & sd) -> std::optional<V> {return sd;};
+  DockIkSelectorParams p;
+  p.branch_joints = {};
+  p.lift_cost_weight = 1.0;
+  EXPECT_EQ(selectDockIk(ik, seeds, ref, p).seed_index, 0u);
+  p.lift_cost_weight = 2.0;
+  const auto c = selectDockIk(ik, seeds, ref, p);
+  ASSERT_TRUE(c.ok);
+  EXPECT_EQ(c.seed_index, 1u);
+  EXPECT_NEAR(c.cost, 1.2, 1e-12);
+}
+
+TEST(DockIkSelectorTest, MaxDqLimitStaysRawForTheLift)
+{
+  DockIkSelectorParams p;
+  p.branch_joints = {};
+  p.max_dq_rad = 1.5;   // lift 1.0 m weighted 2.0 > 1.5, but the raw limit is what rejects
+  const DockIkFn ik = [](const V & sd) -> std::optional<V> {return sd;};
+  EXPECT_TRUE(selectDockIk(ik, {V{1.0, 0.0}}, V{0.0, 0.0}, p).ok);
 }
 
 TEST(DockIkSelectorTest, RejectsALargeJumpAndFallsBackWhenNothingIsLeft)
@@ -186,6 +223,128 @@ TEST(DockIkSelectorTest, AnOverTargetCandidateLosesEvenWhenCheaper)
   ASSERT_TRUE(ch.ok);
   EXPECT_NEAR(ch.q[0], 1.0, 1e-12);
   EXPECT_LE(ch.reach_fraction, 0.7 + 1e-9);
+}
+
+TEST(DockIkRebaseTest, MovesTwoPiEquivalentsNextToTheReference)
+{
+  const V ref{0.0, 0.0, 0.0, 0.0};
+  DockIkSelectorParams p;
+  const V q = rebaseDockIk({1.5, 5.35, -5.90, 1.13}, ref, p);
+  EXPECT_DOUBLE_EQ(q[0], 1.5);
+  EXPECT_NEAR(q[1], 5.35 - 2.0 * M_PI, 1e-12);
+  EXPECT_NEAR(q[1], -0.933, 1e-3);
+  EXPECT_NEAR(q[2], -5.90 + 2.0 * M_PI, 1e-12);
+  EXPECT_NEAR(q[2], 0.383, 1e-3);
+  EXPECT_DOUBLE_EQ(q[3], 1.13);
+}
+
+TEST(DockIkRebaseTest, LinearJointsUntouchedAndAlreadyNearestUnchanged)
+{
+  DockIkSelectorParams p;
+  const V ref{0.2, 0.1, -0.3};
+  const V near{7.0, 0.4, -0.5};  // joint 0 is linear: 7.0 stays
+  EXPECT_EQ(rebaseDockIk(near, ref, p), near);
+  EXPECT_EQ(rebaseDockIk({0.0}, {0.0, 1.0}, p), V{0.0});  // size mismatch
+}
+
+TEST(DockIkRebaseTest, RespectsLimits)
+{
+  DockIkSelectorParams p;
+  p.joint_lower = {0.0, -6.0, -1.0};
+  p.joint_upper = {1.5, 6.0, 6.0};
+  const V ref{0.0, 0.0, 0.0};
+  // joint 1: nearest is -0.93, inside; joint 2: ref-nearest of 5.0 is -1.28, below -1.0 so 5.0 stays
+  const V q = rebaseDockIk({0.5, 5.35, 5.0}, ref, p);
+  EXPECT_NEAR(q[1], 5.35 - 2.0 * M_PI, 1e-12);
+  EXPECT_DOUBLE_EQ(q[2], 5.0);
+  // no limits and a value beyond 2*pi is pulled back inside
+  DockIkSelectorParams n;
+  const V r = rebaseDockIk({0.0, 7.0}, {0.0, 6.5}, n);
+  EXPECT_LE(std::fabs(r[1]), 2.0 * M_PI + 1e-9);
+}
+
+TEST(DockIkRebaseTest, NonFiniteAndHugeValuesTerminate)
+{
+  DockIkSelectorParams p;
+  p.joint_lower = {-6.3, -6.3};
+  p.joint_upper = {6.3, 6.3};
+  const double inf = std::numeric_limits<double>::infinity();
+  const V a = rebaseDockIk({1e300, 0.5}, {0.0, inf}, p);
+  EXPECT_EQ(a.size(), 2u);
+  const V b = rebaseDockIk({0.0, 0.5}, {1e300, 0.0}, p);
+  EXPECT_EQ(b.size(), 2u);
+  const V c = rebaseDockIk({std::nan(""), 7.0}, {0.0, 0.0}, p);
+  EXPECT_NEAR(c[1], 7.0 - 2.0 * M_PI, 1e-12);
+}
+
+TEST(DockIkRebaseTest, SelectDockIkReturnsTheRebasedSolution)
+{
+  const V ref{0.0, 0.0, 0.0, 0.0};
+  const std::vector<V> seeds{ref};
+  DockIkSelectorParams p;
+  p.joint_lower = V(4, -6.3);
+  p.joint_upper = V(4, 6.3);
+  const auto c = selectDockIk(tableIk(seeds, {V{1.5, 5.35, -5.90, 1.13}}), seeds, ref, p);
+  ASSERT_TRUE(c.ok);
+  EXPECT_NEAR(c.q[1], -0.933, 1e-3);
+  EXPECT_NEAR(c.q[2], 0.383, 1e-3);
+  // without limits the raw solution is returned (a rebase could leave the real joint limits)
+  DockIkSelectorParams none;
+  const auto r = selectDockIk(tableIk(seeds, {V{1.5, 5.35, -5.90, 1.13}}), seeds, ref, none);
+  ASSERT_TRUE(r.ok);
+  EXPECT_NEAR(r.q[1], 5.35, 1e-9);
+}
+
+TEST(DockIkSelectorTest, FirstDockIsMeasuredAgainstTheDockSeedNotTheStow)
+{
+  DockIkSelectorParams p;
+  p.branch_joints = {1, 3};
+  const V stow{0.4, 0.0, -1.57, 1.57, -1.57, -1.57, 0.0};
+  const V seed{0.1, 2.79, -2.80, -1.30, -2.20, -0.36, -1.5708};
+  const V good{0.05, 2.80, -2.82, -1.27, -2.20, -0.36, -1.5708};   // the seed's branch
+  const V bad{0.04, -0.94, 0.60, 0.92, 1.70, -2.16, 1.57};         // the stow's branch (elbow up, pan flipped)
+  const auto ik = [&](const V & sd) -> std::optional<V> {return sd == seed ? good : bad;};
+  const auto & ref = dockBranchReference({}, seed, stow);
+  EXPECT_EQ(ref, seed);
+  const auto ch = selectDockIk(ik, {V{}, stow, seed}, ref, p);
+  ASSERT_TRUE(ch.ok);
+  EXPECT_NEAR(ch.q[1], 2.80, 1e-12);
+  EXPECT_EQ(ch.rejected_branch, 1u);
+  // against the stow the seed's branch is the one dropped (the failure this guards)
+  const auto old = selectDockIk(ik, {V{}, stow, seed}, stow, p);
+  ASSERT_TRUE(old.ok);
+  EXPECT_NEAR(old.q[1], -0.94, 1e-12);
+}
+
+TEST(DockIkSelectorTest, BranchReferencePrefersPreviousDockThenSeedThenLive)
+{
+  const V prev{1, 1, 1}, seed{2, 2, 2}, live{3, 3, 3}, short_seed{2, 2};
+  EXPECT_EQ(dockBranchReference(prev, seed, live), prev);
+  EXPECT_EQ(dockBranchReference({}, seed, live), seed);
+  EXPECT_EQ(dockBranchReference({}, {}, live), live);
+  EXPECT_EQ(dockBranchReference({}, short_seed, live), live);
+}
+
+TEST(DockIkRebaseCheckedTest, NoLimitsLeavesTheSolutionUntouched)
+{
+  DockIkSelectorParams p;  // no joint limits: nothing may be rebased (could leave the real limits)
+  const V raw{0.0, 2.0};
+  EXPECT_EQ(rebaseDockIkChecked(raw, {0.0, -1.5}, p), raw);
+}
+
+TEST(DockIkRebaseCheckedTest, KeepsBranchAndWristOfTheAcceptedSolution)
+{
+  DockIkSelectorParams p;
+  p.joint_lower = {-6.3, -6.3};
+  p.joint_upper = {6.3, 6.3};
+  p.branch_joints = {0};
+  p.wrist_joint = 1;
+  p.wrist_min_rad = -3.2;
+  p.wrist_max_rad = 3.2;
+  // branch joint 2.5 vs live -2.0 would rebase to -3.78 (sign flip): keeps 2.5; wrist 3.0 vs -3.0 -> -3.28 (outside): keeps 3.0
+  const V q = rebaseDockIkChecked({2.5, 3.0}, {-2.0, -3.0}, p);
+  EXPECT_DOUBLE_EQ(q[0], 2.5);
+  EXPECT_DOUBLE_EQ(q[1], 3.0);
 }
 
 }  // namespace manipulation_manager

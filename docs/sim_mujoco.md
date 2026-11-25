@@ -1183,6 +1183,27 @@ added: the planner reads only the plane, extents and `plane_rms_mm` / `spread_p9
 comes from `walls.pcd`. Single runs, not repeated.
 
 
+#### Perception in the two-stand pass (`MULTI_STAND_PERCEPTION=1`)
+
+Until now `run_multi_stand_pass.sh` never ran perception: the coverage planner read the baked `wall_pass_coverage_scene.json` and the planning
+scene a baked `walls_sim.pcd`; `wall_detector` was only used by the single-stand sensed pass. With `MULTI_STAND_PERCEPTION=1` (default off)
+the pass first publishes `walls_sim.pcd` as `PointCloud2` on `/perception/points` (frame `odom`, `wall_detector/scripts/pcd_to_cloud.py`),
+runs `wall_detector` on it (`target_frame:=odom`), waits for `wall_scene.json`, freezes it (stops both), crops it with `crop_wall_scene.py`
+to the contact patch (wall y range x `MP_Z_LO..MP_Z_HI`) and plans on that. It then prints `compare_wall_scene.py` (detected crop against the
+baked scene: normal angle, plane offset, edge errors and IoU, obstacle recall; files in `$OUT/perception/`);
+`MULTI_STAND_PERCEPTION_STRICT=1` aborts when they are out of tolerance (2 deg, 20 mm, 50 mm).
+
+```bash
+MULTI_STAND_PERCEPTION=1 MULTI_STAND_SCENARIO=two_panels_plain MULTI_STAND_OUT=/tmp/ms_perception \
+  src/simulation/sim_mujoco/scripts/run_multi_stand_pass.sh      # installed: lib/sim_mujoco/run_multi_stand_pass.sh
+```
+
+Limits: the cloud is the sim wall's exact point grid (no sensor noise, occlusion or holes; the sim's ray-cast depth sensor only sees
+0.76 x 0.70 m from the start pose, too little for a 0.9 m+ wall, so it is not used); the MoveIt octomap and the scorer's wall still come from the files;
+`wall_detector` finds one plane and no obstacles, so a scenario with obstacles (`two_panels`) is planned without them and the pass warns. On the
+host (python mirror of the detector, no sim) the chain on `two_panels_plain` gives 0.000 deg, 0.00 mm, edge errors 0.0 mm. The C++ node in this
+pass has not been run yet.
+
 ## Two-stand pass with the MoveIt planners, 2026-11-22
 
 `run_multi_stand_pass.sh`, scenario `two_panels_plain`, default `planning.yaml`, on main at `347ded0`, filmed with `MULTI_STAND_FILM=1`; frames rendered

@@ -26,6 +26,7 @@ class BaseProfile:
     max_lin_acc: float = 0.5            # m/s^2
     max_ang_acc: float = 1.0            # rad/s^2
     arm_mount: tuple = (0.0, 0.0)       # arm base in base_footprint
+    footprint: tuple = ()               # ((x, y), ...) rectangle corners in base_footprint; () = unknown
 
     @property
     def holonomic(self):
@@ -44,7 +45,8 @@ def load_profile(path):
         max_ang=float(b.get('max_angular_velocity_radps', d.max_ang)),
         max_lin_acc=float(b.get('max_linear_acceleration_mps2', d.max_lin_acc)),
         max_ang_acc=float(b.get('max_angular_acceleration_radps2', d.max_ang_acc)),
-        arm_mount=(float(mount[0]), float(mount[1])))
+        arm_mount=(float(mount[0]), float(mount[1])),
+        footprint=tuple((float(p[0]), float(p[1])) for p in (b.get('footprint') or ())))
 
 
 def arm_to_footprint(arm_x, arm_y, yaw, mount):

@@ -33,8 +33,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include "manipulation_manager/core/column_retry.hpp"
 #include "manipulation_manager/core/geometric_coverage.hpp"
 #include "manipulation_manager/core/path_quality_port.hpp"
+#include "manipulation_manager/core/wall_dock_gate.hpp"
 
 namespace manipulation_manager
 {
@@ -58,7 +60,10 @@ struct MissionVerifyInput
   /// carry a `stands` block: per stand the columns done/partial/failed and, when computed, its geometric coverage.
   std::map<size_t, std::vector<size_t>> stand_columns;
   PathQualitySummary path_quality;   ///< report only (`available` false = not computed)
+  /// Stand index -> the last wall-dock outcome (opt-in `wall_dock_after_navigate`); empty = step off. Report only.
+  std::map<size_t, WallDockOutcome> wall_dock;
   bool path_quality_requested{false};
+  ColumnRetryReport column_retry;    ///< opt-in second pass over failed columns; `enabled` false = no block in the result
 };
 
 struct MissionVerifyResult
@@ -147,6 +152,9 @@ inline nlohmann::json missionVerifyToJson(const MissionVerifyResult & r, const M
     {"failures", r.failures},
     {"warnings", r.warnings},
     {"peak_force_n", in.peak_force_n}};
+  if (in.column_retry.enabled) {
+    j["column_retries"] = columnRetryToJson(in.column_retry);
+  }
   if (in.geometric.available) {
     nlohmann::json per_column = nlohmann::json::object();
     for (const auto & [col, pct] : in.geometric.column_percent) {per_column[std::to_string(col)] = pct;}
@@ -194,6 +202,17 @@ inline nlohmann::json missionVerifyToJson(const MissionVerifyResult & r, const M
       stands.push_back(e);
     }
     j["stands"] = stands;
+  }
+  if (!in.wall_dock.empty()) {
+    nlohmann::json wd = nlohmann::json::array();
+    for (const auto & [stand, o] : in.wall_dock) {
+      nlohmann::json e = {{"stand", stand}, {"ok", o.ok}, {"abort", o.abort}, {"attempts", o.attempts}};
+      e["wall_gap_error_m"] = o.measured ? nlohmann::json(o.standoff_error_m) : nlohmann::json(nullptr);
+      e["wall_yaw_error_rad"] = o.measured ? nlohmann::json(o.yaw_error_rad) : nlohmann::json(nullptr);
+      e["message"] = o.message;
+      wd.push_back(e);
+    }
+    j["wall_dock"] = wd;
   }
   if (in.path_quality_requested) {
     nlohmann::json cols = nlohmann::json::array();

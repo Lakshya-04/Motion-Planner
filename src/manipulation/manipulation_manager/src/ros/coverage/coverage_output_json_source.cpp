@@ -21,6 +21,7 @@ struct RawPoint
 {
   double x, y, z, qx, qy, qz, qw;
   int segment{-1};   // index into the plan's `segments`, -1 if the plan has none
+  size_t order{0};   // position in the plan's path
 };
 
 }  // namespace
@@ -82,6 +83,7 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
   size_t pose_index = 0;
   for (const auto & p : poses) {
     RawPoint pt;
+    pt.order = pose_index;
     pt.segment = segment_of_pose[pose_index++];
     pt.x = p.at("position").at("x").get<double>();
     pt.y = p.at("position").at("y").get<double>();
@@ -103,37 +105,50 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
       });
     // z span of every stroke in the column (passes over the same stretch share one span); without segment
     // information the whole column is one span
-    std::vector<std::pair<double, double>> spans;
+    struct Span {double lo, hi; bool descending;};
+    std::vector<Span> spans;
     if (column.front().segment < 0) {
-      spans.push_back({column.front().z, column.back().z});
+      // no segment information: the whole column, direction of the first and last pose in plan order
+      const auto first = std::min_element(column.begin(), column.end(), [](const RawPoint & a, const RawPoint & b) {
+          return a.order < b.order;});
+      const auto last = std::max_element(column.begin(), column.end(), [](const RawPoint & a, const RawPoint & b) {
+          return a.order < b.order;});
+      spans.push_back({column.front().z, column.back().z, first->z > last->z});
     } else {
-      std::map<int, std::pair<double, double>> by_segment;
+      struct Acc {double lo, hi; size_t first_order, last_order; double first_z, last_z;};
+      std::map<int, Acc> by_segment;
       for (const auto & pt : column) {
         auto it = by_segment.find(pt.segment);
-        if (it == by_segment.end()) {by_segment[pt.segment] = {pt.z, pt.z};} else {
-          it->second.first = std::min(it->second.first, pt.z);
-          it->second.second = std::max(it->second.second, pt.z);
+        if (it == by_segment.end()) {
+          by_segment[pt.segment] = {pt.z, pt.z, pt.order, pt.order, pt.z, pt.z};
+        } else {
+          auto & a = it->second;
+          a.lo = std::min(a.lo, pt.z);
+          a.hi = std::max(a.hi, pt.z);
+          if (pt.order < a.first_order) {a.first_order = pt.order; a.first_z = pt.z;}
+          if (pt.order > a.last_order) {a.last_order = pt.order; a.last_z = pt.z;}
         }
       }
-      for (const auto & [seg, span] : by_segment) {
+      for (const auto & [seg, a] : by_segment) {
         bool seen = false;
         for (const auto & e : spans) {
-          if (std::fabs(e.first - span.first) < 1e-3 && std::fabs(e.second - span.second) < 1e-3) {seen = true;}
+          if (std::fabs(e.lo - a.lo) < 1e-3 && std::fabs(e.hi - a.hi) < 1e-3) {seen = true;}
         }
-        if (!seen) {spans.push_back(span);}
+        if (!seen) {spans.push_back({a.lo, a.hi, a.first_z > a.last_z});}
       }
-      std::sort(spans.begin(), spans.end());
+      std::sort(spans.begin(), spans.end(), [](const Span & a, const Span & b) {
+          return a.lo < b.lo || (a.lo == b.lo && a.hi < b.hi);});
     }
     const auto & rep = column.front();
     for (const auto & span : spans) {
-      double z_min = std::max(z_min_m_, span.first);
-      double z_max = std::min(z_max_m_, span.second);
+      double z_min = std::max(z_min_m_, span.lo);
+      double z_max = std::min(z_max_m_, span.hi);
       // The planner's gap strokes beside a small obstacle can be a single grid cell (first == last): a stroke of
       // zero length would be dropped and the strip next to the obstacle never wiped. Give it a short stroke
       // around the point instead, kept inside the free cell (see kPointStrokeHalfM).
-      if (span.second - span.first < 1e-6 && z_max >= z_min) {
-        z_min = std::max(z_min_m_, span.first - kPointStrokeHalfM);
-        z_max = std::min(z_max_m_, span.first + kPointStrokeHalfM);
+      if (span.hi - span.lo < 1e-6 && z_max >= z_min) {
+        z_min = std::max(z_min_m_, span.lo - kPointStrokeHalfM);
+        z_max = std::min(z_max_m_, span.lo + kPointStrokeHalfM);
       }
 
       CoverageSegmentIntent intent;
@@ -157,6 +172,9 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
         }
       }
 
+      if (follow_plan_direction_ && span.descending) {
+        std::reverse(intent.poses.begin(), intent.poses.end());
+      }
       if (!intent.poses.empty()) {
         segments.push_back(std::move(intent));
       }

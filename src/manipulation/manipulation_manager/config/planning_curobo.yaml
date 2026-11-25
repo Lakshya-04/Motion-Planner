@@ -44,6 +44,7 @@ planning:
       # can read as `unavailable`. A failing plan runs max_attempts (20) + fallback_attempts (6) before it answers
       # (37 to 40 s measured); start the node with `run_curobo_node.sh start --max-attempts 6` to shorten that
       # (unmeasured), and keep timeout_sec above the longest plan the node may run.
+      # With the node's free_space_optimize on, keep this above free_space_time_budget_s (20 s) plus one candidate.
       timeout_sec: 60              # per call. The node warms up (kernel compile, 40-60 s) before it
                                    # offers its services, so a plan call is not the one that pays for it.
       # cuRobo times its trajectories with the limits of its robot yml, not with MoveIt's. In the
