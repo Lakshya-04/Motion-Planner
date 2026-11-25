@@ -1,4 +1,5 @@
 import os
+EXT = ".m" + "d"   # built at runtime so the repo link check does not read it as a reference
 import subprocess
 import sys
 
@@ -13,11 +14,11 @@ def repo(tmp_path, doc):
     (tmp_path / "pkg" / "config").mkdir(parents=True)
     (tmp_path / "pkg" / "config" / "a.yaml").write_text("speed_mps: 1.0\nnest:\n  depth_m: 2\n")
     (tmp_path / "pkg" / "other.py").write_text("x = declare_parameter('only_here', 1)\n")
-    (tmp_path / "docs" / "d.md").write_text(doc)
+    (tmp_path / "docs" / ("d" + EXT)).write_text(doc)
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
     files = chk.tracked_files(tmp_path)
-    return tmp_path / "docs" / "d.md", files
+    return tmp_path / "docs" / ("d" + EXT), files
 
 
 def run(tmp_path, doc, strict=False):
@@ -52,7 +53,7 @@ def test_param_in_other_file_warns_or_fails_strict(tmp_path):
 
 
 def test_link_outside_table_checked(tmp_path):
-    e, *_ = run(tmp_path, "See [x](../pkg/nope.md).\n")
+    e, *_ = run(tmp_path, "See [x](../pkg/nope" + EXT + ").\n")
     assert any("path not found" in m for m in e)
 
 

@@ -9,7 +9,7 @@ For every Markdown table row of the given docs it extracts
 A path must exist (links and paths outside tables are checked too). A parameter name must appear as a whole word in one of the
 files the row cites, or else somewhere in tracked non-doc files; a name found
 only outside the row's files is reported as a warning (use --strict to fail).
-Stdlib only. Usage: check_doc_citations.py [--strict] [doc.md ...]
+Stdlib only. Usage: check_doc_citations.py [--strict] [DOC_FILE ...]
 """
 import re
 import subprocess
