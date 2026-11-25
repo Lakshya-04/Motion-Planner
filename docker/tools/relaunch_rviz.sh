@@ -28,7 +28,7 @@ else
 fi
 docker exec -e DISPLAY="${DISPLAY:-:0}" -e ROS_DOMAIN_ID="$DOM" "$C" bash -c "
 source /opt/ros/jazzy/setup.bash; source /ws/install/setup.bash
-pkill -f rviz2 || true; pkill -f mp_viz_markers.py || true; pkill -f mp_viz_scene.py || true; sleep 1
+pkill -f '[r]viz2' || true; pkill -f '[m]p_viz_markers.py' || true; pkill -f '[m]p_viz_scene.py' || true; sleep 1
 $PREP
 cd $DST
 setsid nohup python3 scripts/mp_viz_markers.py --ros-args -r __node:=mp_viz_markers -p use_sim_time:=$USE_SIM_TIME -p fixed_frame:=odom >/tmp/mp_viz_markers.log 2>&1 &
