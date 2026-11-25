@@ -69,6 +69,16 @@ def test_ignore_hops():
     assert frozenset(('base_link', 'link1')) in pairs2
 
 
+def test_mimic_stage_adds_no_hop():
+    """Telescope stages move together: a mimic joint is zero hops, so a stage is as close as its driver."""
+    robot = UrdfRobot(URDF.read_text())
+    assert robot.tree_distance('stage_link', 'lift_link') == 1
+    assert robot.tree_distance('stage_link', 'base_link') == 0
+    pairs = {frozenset(p) for p in robot.ignored_pairs(['base_link', 'lift_link', 'stage_link', 'link1'], 1)}
+    assert frozenset(('stage_link', 'lift_link')) in pairs
+    assert frozenset(('stage_link', 'link1')) not in pairs
+
+
 def test_generated_structure(mjcf):
     root = ET.parse(mjcf).getroot()
     assert [j.get('name') for j in root.iter('joint') if j.get('type') in ('hinge', 'slide')] == \

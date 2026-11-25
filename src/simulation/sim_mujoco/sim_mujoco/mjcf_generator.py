@@ -149,14 +149,20 @@ class UrdfRobot:
         return None if j is None else self.group_of(j.parent)
 
     def tree_distance(self, a, b):
+        """Joints between two groups. A mimic joint is slaved to another joint and moves with it, so it
+        adds no hop: the stages of a telescopic lift all travel together and their geometry touches or
+        overlaps by design (carriage vs the second stage was 3 hops apart and kept a permanent
+        self-contact whose stick-slip jerked the lift)."""
         def chain(g):
-            out = [g]
+            out, cost = [g], [0]
             while self.group_parent(out[-1]) is not None:
+                j = self.joint_by_child[out[-1]]
+                cost.append(cost[-1] + (0 if j.mimic else 1))
                 out.append(self.group_parent(out[-1]))
-            return out
-        ca, cb = chain(a), chain(b)
+            return out, cost
+        (ca, wa), (cb, wb) = chain(a), chain(b)
         common = next(x for x in ca if x in cb)
-        return ca.index(common) + cb.index(common)
+        return wa[ca.index(common)] + wb[cb.index(common)]
 
     def ignored_pairs(self, links, hops):
         """Pairs among `links` that may not collide: same rigid group or <= hops joints apart."""
