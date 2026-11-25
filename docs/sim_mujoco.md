@@ -787,10 +787,10 @@ stroke of columns 0 and 1 from the first contact sample, a different mechanism f
 spike at the end of a stroke.
 
 Tried and rejected: an opt-in joint-limit margin for the dock IK (`dock_ik_min_limit_margin_rad`, branches
-`fix/xarm-dock-limit-margin`, `feat/dock-ik-limit-margin`). Hypothesis: x2 docks with joint 2 on its lower stop. With
-`dock_ik_continuity` on and a 0.1 rad margin (3 xArm 7 runs) all columns still succeed but the stroke spikes stay (40 to 200 N
-mid-stroke); continuity alone (margin off, 3 runs) gave peaks of 24.5 / 20.1 N and more. The margin did not remove the spikes and
-made the worst run worse, so it was not merged. The cause of the mid-stroke xArm spikes is still unexplained.
+`fix/xarm-dock-limit-margin`, `feat/dock-ik-limit-margin`). Hypothesis: x2 docks with joint 2 on its lower stop. Peaks of
+3 single-stand xArm 7 runs each: no continuity 27.2 / 66.9 / 39.6 N; continuity only 24.5 / 20.1 / 51.2 N; continuity plus a
+0.1 rad margin 20.5 / 137.8 / 196.4 N. All columns still succeeded, but the margin variant had the two worst runs, so the margin
+does not help and may hurt (3 runs each, high run-to-run spread). It was not merged. The cause of the mid-stroke xArm spikes is still unexplained.
 
 - The tool pad in the planner (`generic_tool.xacro`): the planner's tool used to be a 0.1 m mount cylinder with a bare TCP frame
   at 0.165 m and no pad, while the simulator adds a 3 cm radius, 1 cm thick pad disc at the TCP, so MoveIt believed the tool
