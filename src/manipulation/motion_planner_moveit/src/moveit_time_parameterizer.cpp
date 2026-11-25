@@ -129,12 +129,20 @@ bool MoveItTimeParameterizer::retime(
     if (role == SegmentRole::kTransition) {
       trajectory_processing::TimeOptimalTrajectoryGeneration totg(0.1, 0.05);
       ok = totg.computeTimeStamps(rt, vel, acc, 1.0, 1.0);
+      // TOTG is bang-bang in acceleration (infinite jerk): the arm and lift jolt at every accel flip.
+      // With a jerk limit on every joint, re-time the TOTG result with Ruckig (rest at both ends).
+      const bool has_jerk = std::all_of(
+        limits.begin(), limits.end(), [](const JointLimit & l) {return l.jerk > 0.0;});
+      if (ok && has_jerk) {
+        ok = trajectory_processing::RuckigSmoothing::applySmoothing(
+          rt, vel, acc, jerk, 1.0, 1.0, true, 0.01);
+      }
     } else {
       ok = trajectory_processing::RuckigSmoothing::applySmoothing(
         rt, vel, acc, jerk, 1.0, 1.0, true, 0.01);
     }
     if (!ok) {
-      message = role == SegmentRole::kTransition ? "TOTG failed" : "Ruckig smoothing failed";
+      message = role == SegmentRole::kTransition ? "TOTG/Ruckig failed" : "Ruckig smoothing failed";
       return false;
     }
 

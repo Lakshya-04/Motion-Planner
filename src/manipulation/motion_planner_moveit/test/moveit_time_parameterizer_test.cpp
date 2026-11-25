@@ -89,6 +89,30 @@ TEST(MoveItTimeParameterizerTest, TransitionIsTimeOptimalWithinLimits)
   }
 }
 
+TEST(MoveItTimeParameterizerTest, TransitionWithJerkLimitHasBoundedJerkAndRestsAtEnds)
+{
+  MoveItTimeParameterizer retimer(makeModel(), "g");
+  TimingRequest req;
+  req.role = SegmentRole::kTransition;
+  req.limits = retimer.modelLimits(2.0, 8.0);
+  const auto r = parameterizeSegment(retimer, line(8, -1.0, 1.0), req);
+  ASSERT_TRUE(r.success) << r.message;
+  const auto & pts = r.pieces[0].points;
+  EXPECT_NEAR(pts.back().velocities[1], 0.0, 1e-3);
+  EXPECT_NEAR(pts.front().accelerations[1], 0.0, 1e-3);
+  double peak = 0.0;
+  for (size_t i = 1; i < pts.size(); ++i) {
+    const double dt = pts[i].time_from_start_sec - pts[i - 1].time_from_start_sec;
+    peak = std::max(peak, std::fabs(pts[i].accelerations[1] - pts[i - 1].accelerations[1]) / dt);
+  }
+  EXPECT_LT(peak, 8.0 * 1.3);
+  // slower than pure TOTG (jerk 0) but bounded
+  const auto totg = parameterizeSegment(
+    retimer, line(8, -1.0, 1.0), request(SegmentRole::kTransition, retimer, 0.0));
+  ASSERT_TRUE(totg.success);
+  EXPECT_GE(r.total_duration_sec, totg.total_duration_sec - 1e-6);
+}
+
 TEST(MoveItTimeParameterizerTest, SeamRunsAtTheStrokeSpeedWithinJerk)
 {
   MoveItTimeParameterizer retimer(makeModel(), "g");
