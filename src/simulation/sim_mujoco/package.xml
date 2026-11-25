@@ -50,6 +50,7 @@
   <exec_depend>reachability</exec_depend>
   <exec_depend>reachability_msgs</exec_depend>
   <exec_depend>stand_navigator</exec_depend>
+  <exec_depend>sim_overlay</exec_depend>
   <exec_depend>stand_navigator_msgs</exec_depend>
   <exec_depend>coverage_task_msgs</exec_depend>
 
