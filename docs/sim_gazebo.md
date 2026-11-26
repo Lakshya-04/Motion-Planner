@@ -558,8 +558,8 @@ Same-session runs of `run_multi_stand_pass.sh` (two stands, ten columns, no cuRo
 
   The usable window is narrow: at 3 /s and up the stiff joints bounce on the wall (the earlier 8 kN note under `jtac_position_only`), at 1 /s the
   roll is still off at the dock. 2 /s is a measured sweet spot, not a derived one. At 2 /s the peak is 45 to 59 N against about 20 N in MuJoCo and the
-  in-band fraction is 0.48 to 0.53, so the force quality is still behind MuJoCo (the soft tip's 5 N/mm and a 200 Hz controller are physics limits of
-  this setup, not tuned here). The single-stand `run_manager_pass.sh` (4 columns, 930 cells) shows the same thing: at 0.1 /s on main, run 1 docked
+  in-band fraction is 0.45 to 0.53, so the force quality is still behind MuJoCo (why is not isolated; the soft tip and the 200 Hz controller are
+  suspects, not tuned here). The single-stand `run_manager_pass.sh` (4 columns, 930 cells) shows the same thing: at 0.1 /s on main, run 1 docked
   nothing useful (coverage 0, peak 1131 N, 4 columns `not pressing` or `dock failed`), run 2 got coverage 1.0 with a 1100 N peak; at 2 /s 4 of 4 runs
   have coverage 1.0, peaks 31 to 59 N, RMS error about 3 N, but only 24 to 34 % of the contact samples in the force band (the older 0.85 was at 0.1 /s). It
   defaults to 2.0 now too (`GZ_POSITION_GAIN`). Not verified: other profiles, the spray pass (it keeps the plugin default, its 27 s seed move was
