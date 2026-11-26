@@ -1,0 +1,316 @@
+# Performance: Frame Rate 15, 1100x720 window, TF axes off, RobotModel visual only, tool trace off, mp_viz_markers publishes
+# the executed TCP line at 1 Hz (1 cm steps, <= 6000 points). Exactly ONE display draws the robot (RobotModel); the three
+# moveit_rviz_plugin displays each draw another copy and stay off unless view.launch.py moveit_displays:=true.
+# sim_overview: the one window for the Gazebo and MuJoCo sims (default rviz_profile of both launches). Fixed frame odom.
+# Wall, coverage plan columns, stands and the coverage paint come from mp_viz_scene.py (scene:=true, plan_file,
+# wall_scene_json, frame odom) and coverage_paint; the motion plan from move_group (/display_planned_path, free-space
+# segments) and from the manager (/mp_viz/planned_trajectory, every segment incl. Cartesian); the tool trace from
+# mp_viz_markers.py (markers:=true). The thick GREEN line (/mp_viz/tcp_executed) is the TCP motion actually executed
+# (TF odom->tcp_link, whole pass). The moveit_rviz_plugin displays (PlanningScene, the two Trajectory) are OFF here:
+# they load the robot model synchronously and can keep RViz at its splash screen until robot_description and
+# robot_description_semantic exist; view.launch.py moveit_displays:=true switches them on (when RViz has MoveIt
+# parameters). Needs use_sim_time to match the sim clock (Gazebo: true).
+Panels:
+- Class: rviz_common/Displays
+  Name: Displays
+  Property Tree Widget:
+    Expanded:
+    - /Global Options1
+    Splitter Ratio: 0.55
+  Tree Height: 500
+- Class: rviz_common/Views
+  Name: Views
+  Expanded:
+  - /Current View1
+  Splitter Ratio: 0.5
+- Class: rviz_common/Time
+  Name: Time
+  SyncMode: 0
+  SyncSource: ''
+Visualization Manager:
+  Class: ''
+  Displays:
+  - Class: rviz_default_plugins/Grid
+    Name: Grid
+    Enabled: true
+    Plane Cell Count: 20
+    Cell Size: 1
+    Reference Frame: <Fixed Frame>
+  - Class: rviz_default_plugins/RobotModel
+    Name: RobotModel
+    Enabled: true
+    Alpha: 1
+    Collision Enabled: false
+    Visual Enabled: true
+    Update Interval: 0
+    Mass Properties:
+      Inertia: false
+      Mass: false
+    TF Prefix: ''
+    Description Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /robot_description
+  - Class: rviz_default_plugins/TF
+    Name: TF (odom, base, tool)
+    Enabled: true
+    Show Names: false
+    Show Axes: false
+    Show Arrows: false
+    Marker Scale: 0.3
+    Frame Timeout: 15
+    Frames:
+      All Enabled: false
+      odom:
+        Value: true
+      base_footprint:
+        Value: true
+      tcp_link:
+        Value: true
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Wall (/mp_viz/wall)
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/wall
+  - Class: moveit_rviz_plugin/PlanningScene
+    Name: Planning scene (collision objects, octomap)
+    Enabled: false
+    Value: false
+    Move Group Namespace: ''
+    Planning Scene Topic: /monitored_planning_scene
+    Robot Description: robot_description
+    Scene Geometry:
+      Scene Alpha: 0.6
+      Scene Color: 50; 230; 50
+      Show Scene Geometry: true
+      Voxel Coloring: Z-Axis
+      Voxel Rendering: Occupied Voxels
+    Scene Robot:
+      Robot Alpha: 1
+      Show Robot Collision: false
+      Show Robot Visual: false
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Coverage plan columns
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/plan_columns
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Plan transitions
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/transitions
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Stands
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/stands
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Coverage paint (done / not done)
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/coverage_paint
+  - Class: moveit_rviz_plugin/Trajectory
+    Name: Motion plan (move_group, /display_planned_path)
+    Enabled: false
+    Value: false
+    Robot Description: robot_description
+    Trajectory Topic: /display_planned_path
+    Robot Alpha: 0.4
+    Loop Animation: true
+    Show Robot Visual: true
+    Show Robot Collision: false
+    Show Trail: true
+    State Display Time: 0.05 s
+    Interrupt Display: false
+  - Class: moveit_rviz_plugin/Trajectory
+    Name: Motion plan (manager, executed segment, /mp_viz/planned_trajectory)
+    Enabled: false
+    Value: false
+    Robot Description: robot_description
+    Trajectory Topic: /mp_viz/planned_trajectory
+    Robot Alpha: 0.6
+    Loop Animation: true
+    Show Robot Visual: true
+    Show Robot Collision: false
+    Show Trail: true
+    State Display Time: 0.05 s
+    Interrupt Display: false
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Stand reachable columns (per stand)
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/stand_columns
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Reachable poses (green/red, refresh)
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/reachable
+  - Class: rviz_default_plugins/Marker
+    Name: TCP executed (GREEN line, odom)
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/tcp_executed
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Tool trace (coloured by force)
+    Enabled: false
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/tool_trace
+  - Class: rviz_default_plugins/Marker
+    Name: Mission text
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /mp_viz/mission_text
+  - Class: rviz_default_plugins/Odometry
+    Name: Odometry (/odom)
+    Enabled: false
+    Keep: 1
+    Shape:
+      Value: Arrow
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /odom
+  - Class: rviz_default_plugins/Path
+    Name: Final coverage path (demo, base_link frame)
+    Enabled: false
+    Color: 0; 255; 0
+    Line Style: Lines
+    Line Width: 0.03
+    Pose Style: None
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /wall_coverage_demo/final_coverage_path
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Final markers (demo, base_link frame)
+    Enabled: false
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /wall_coverage_demo/final_coverage_markers
+  - Class: rviz_default_plugins/Path
+    Name: Coverage path (coverage_planner_node, map frame)
+    Enabled: false
+    Color: 0; 255; 0
+    Line Style: Lines
+    Line Width: 0.03
+    Pose Style: None
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /coverage_planner_node/coverage_path
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Coverage markers (coverage_planner_node, map frame)
+    Enabled: false
+    Namespaces: {}
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /coverage_planner_node/coverage_markers
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: odom
+    Frame Rate: 15
+  Name: root
+  Tools:
+  - Class: rviz_default_plugins/MoveCamera
+  - Class: rviz_default_plugins/Select
+  - Class: rviz_default_plugins/FocusCamera
+  - Class: rviz_default_plugins/Measure
+    Line color: 128; 128; 0
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 7
+      Focal Point:
+        X: 1.0
+        Y: 0
+        Z: 1.0
+      Near Clip Distance: 0.01
+      Pitch: 0.5
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz)
+      Yaw: 0.75
+    Saved: null
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 720
+  Width: 1100
+  X: 40
+  Y: 30
+  Hide Left Dock: false
+  Hide Right Dock: true
+  Time:
+    collapsed: false
+  Views:
+    collapsed: false
