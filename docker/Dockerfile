@@ -20,6 +20,13 @@ ARG ROS_DISTRO=jazzy
 ############################ base ############################
 FROM ros:${ROS_DISTRO}-ros-base AS base
 ARG ROS_DISTRO
+# Optional apt mirror, empty by default. CI passes the Azure one: Canonical's own hosts have served package indexes that
+# disagree with their pool (404 and size mismatch), and archive.ubuntu.com and security.ubuntu.com are the same servers.
+ARG UBUNTU_MIRROR=
+RUN if [ -n "$UBUNTU_MIRROR" ]; then \
+      sed -i "s|http://archive.ubuntu.com/ubuntu|$UBUNTU_MIRROR|g; s|http://security.ubuntu.com/ubuntu|$UBUNTU_MIRROR|g" \
+        /etc/apt/sources.list.d/ubuntu.sources; \
+    fi
 ENV ROS_DISTRO=${ROS_DISTRO} \
     DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
