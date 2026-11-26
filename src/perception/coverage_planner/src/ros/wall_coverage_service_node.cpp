@@ -43,7 +43,10 @@ WallCoverageServiceNode::WallCoverageServiceNode(const rclcpp::NodeOptions & opt
   // Tool profile: tool_profiles_file + tool_name select it, optional params override fields.
   tool_profile_ = loadToolCoverageProfileFromParams(*this);
 
-  plan_pub_ = this->create_publisher<msg::CoveragePlan>("~/coverage_plan", rclcpp::QoS(1));
+  // Latched (transient_local), so a consumer that starts after the plan was published (manipulation_manager with
+  // coverage_source:=ros) still gets it.
+  plan_pub_ = this->create_publisher<msg::CoveragePlan>(
+    "~/coverage_plan", rclcpp::QoS(1).reliable().transient_local());
 
   start_service_ = this->create_service<std_srvs::srv::Trigger>(
     "~/start",
