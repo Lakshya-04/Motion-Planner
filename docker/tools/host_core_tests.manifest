@@ -122,6 +122,7 @@ test | golden_waypoints_test | coverage_planner_core | src/perception/coverage_p
 exclude | src/manipulation/manipulation_manager/test/backend_routing_test.cpp | includes rclcpp
 test | base_stance_check_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/base_stance_check_test.cpp | 
 test | column_ik_gate_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/column_ik_gate_test.cpp | 
+test | controller_names_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/controller_names_test.cpp | 
 test | column_ordering_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/column_ordering_test.cpp | 
 test | coverage_feasibility_analyzer_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/coverage_feasibility_analyzer_test.cpp | 
 test | coverage_plan_intents_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/coverage_plan_intents_test.cpp | 

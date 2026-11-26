@@ -1,0 +1,118 @@
+<?xml version="1.0"?>
+<!-- empty.sdf plus a closed 8 x 8 m room (walls at x, y = +-4) with three asymmetric obstacles outside the 2 m square
+     around the origin, so a lidar scan matcher has structure in every direction (localisation checks). -->
+<sdf version="1.9">
+  <world name="room_world">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-forcetorque-system" name="gz::sim::systems::ForceTorque"/>
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>
+    <gravity>0 0 -9.81</gravity>
+    <light type="directional" name="sun">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <direction>-0.5 0.1 -0.9</direction>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+    </light>
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>40 40</size></plane></geometry>
+          <surface>
+            <friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+            <bounce><restitution_coefficient>0</restitution_coefficient></bounce>
+            <!-- SDF defaults, explicit; dartsim (the gz-sim default engine) is believed to ignore them, see docs/sim_gazebo.md -->
+            <contact><ode><kp>1e12</kp><kd>1</kd><max_vel>0.01</max_vel><min_depth>0</min_depth></ode></contact>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>40 40</size></plane></geometry>
+          <material><ambient>0.5 0.5 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_n">
+      <static>true</static>
+      <pose>0 4.05 0.75 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>8.2 0.1 1.5</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>8.2 0.1 1.5</size></box></geometry>
+          <material><ambient>0.7 0.7 0.75 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_s">
+      <static>true</static>
+      <pose>0 -4.05 0.75 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>8.2 0.1 1.5</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>8.2 0.1 1.5</size></box></geometry>
+          <material><ambient>0.7 0.7 0.75 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_e">
+      <static>true</static>
+      <pose>4.05 0 0.75 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.1 8.2 1.5</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.1 8.2 1.5</size></box></geometry>
+          <material><ambient>0.7 0.7 0.75 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_w">
+      <static>true</static>
+      <pose>-4.05 0 0.75 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.1 8.2 1.5</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.1 8.2 1.5</size></box></geometry>
+          <material><ambient>0.7 0.7 0.75 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+    <model name="block_a">
+      <static>true</static>
+      <pose>3.0 -2.2 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.8 0.8 1.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.8 0.8 1.0</size></box></geometry>
+          <material><ambient>0.7 0.7 0.75 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+    <model name="block_b">
+      <static>true</static>
+      <pose>-2.5 2.6 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.6 0.6 1.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.6 0.6 1.0</size></box></geometry>
+          <material><ambient>0.7 0.7 0.75 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+    <model name="slab_c">
+      <static>true</static>
+      <pose>-3.4 -0.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.4 1.5 1.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.4 1.5 1.0</size></box></geometry>
+          <material><ambient>0.7 0.7 0.75 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>
