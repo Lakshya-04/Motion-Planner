@@ -506,6 +506,8 @@ optimisation, RRT seed only), warmup and first call, VRAM (RRT modes 3.3 GB of t
 (3 to 6 ms per call) are in [planner_benchmark.md](planner_benchmark.md). `CuroboPlanner(graph_planner_algorithm='rrt', enable_trajopt=..., enable_graph_attempt=...)`
 selects the route; the node uses cuRobo's defaults plus the fallback below.
 
+The `plan_joint` response carries `attempts`, `graph_calls`, `graph_solve_s` and `wall_s` (the node logs the same per plan). Read `wall_s`, not `planning_time_s`: cuRobo's own figure can say 0.12 s on a 2.9 s plan. The C++ client logs them at INFO for plans over 1 s or failed ones.
+
 ### Dock poses, trajectory optimisation and the graph-seed fallback (2026-11-19)
 
 With the matrix `generate_curobo_robot.py` produced by default (cuRobo's sampled collision matrix), the default `plan_cspace` failed every
