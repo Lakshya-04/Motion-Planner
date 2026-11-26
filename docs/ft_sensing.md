@@ -168,6 +168,8 @@ to build and does not replace the tool's abort threshold or an e-stop.
 
 ### Force limiter on JTAC (opt-in)
 
+The controller parameter `max_integration_period_s` (default 0 = off; `config/jtac_controller.yaml` sets 0.015) caps the step that the admittance integrator and this limiter use in one cycle. The admittance rule is explicit Euler, so a cycle that overruns the 100 Hz budget would otherwise integrate with a long dt and can leave the stable range, which shows up as the "Cartesian offset diverged" reset. Joint rate limits still use the real period.
+
 `force_limiter.enabled` (default false, needs `ft_sensor.name`) runs `force_core::NormalAxisLimiter` in
 `JtacController::update()` after the Cartesian offset clamp, along the tool +Z (into the wall). Parameters
 `force_limiter.{f_max_n, alpha_per_s, k_min_n_per_m, k_max_n_per_m, contact_force_n, free_space_speed_mps,
