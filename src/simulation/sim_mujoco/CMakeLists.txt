@@ -29,7 +29,7 @@ install(PROGRAMS scripts/generate_mjcf scripts/smoke_test.py scripts/contact_tes
   DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/run_spray_pass.sh DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/depth_wall_test.py scripts/run_depth_wall.sh scripts/live_octomap_test.py scripts/run_live_octomap.sh
-  scripts/wall_docking_test.py scripts/run_wall_docking.sh scripts/lidar_stop_test.py scripts/run_lidar_stop.sh DESTINATION lib/${PROJECT_NAME})
+  scripts/wall_docking_test.py scripts/run_wall_docking.sh scripts/lidar_stop_test.py scripts/run_lidar_stop.sh scripts/run_sensor_suite.sh DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch test/data DESTINATION share/${PROJECT_NAME})
 
 if(MUJOCO_INCLUDE_DIR AND MUJOCO_LIBRARY)

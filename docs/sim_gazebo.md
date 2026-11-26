@@ -157,6 +157,10 @@ Default `false`: nothing is added. With `true` the description gets `lidar_link`
 sensor on the front face of the base returns `inf` on every ray, so the robot does not hit itself at that mount. No dropout option
 here, and gz prints a harmless warning that `gz_frame_id` is not in the SDF schema (the same as for the depth camera).
 
+`platform:=<profile or base name>` fills the lidar and depth arguments and the two link / frame names (`gz_lidar_frame`,
+`gz_depth_frame` in the xacro) from that platform's `sensors:` suite; arguments you pass still win. See
+[base_catalog.md](base_catalog.md#feeding-a-suite-to-the-simulators).
+
 `scripts/run_lidar_stop.sh` is the obstacle-stop check: empty world, a 0.3 x 0.6 x 0.6 m box with its face at x = 1.45 m, the base sent 3 m
 ahead through `navigate_to_stand` with `obstacle_scan_topic:=/scan` (`LIDAR_STOP_LIDAR=0` leaves the lidar and the topic off).
 Results are in the changelog. Without the lidar the base hits the box, gz pushes it back and the navigator ends with `NAVIGATION_STUCK`.

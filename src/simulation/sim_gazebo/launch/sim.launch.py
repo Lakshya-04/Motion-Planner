@@ -9,6 +9,7 @@
   ros2 launch sim_gazebo sim.launch.py rgb_camera:=true                  # gz colour camera -> /rgb_camera/image
   ros2 launch sim_gazebo sim.launch.py depth_sensor:=true                # gz depth camera -> /depth_sensor/points
   ros2 launch sim_gazebo sim.launch.py lidar:=true                       # gz gpu_lidar -> /scan (LaserScan)
+  ros2 launch sim_gazebo sim.launch.py platform:=ranger_mini lidar:=true # lidar and depth values from the platform's sensors: suite
 
 What starts: gz sim (server only unless gui:=true), robot_state_publisher, the robot spawned from
 the description rendered with hardware:=gazebo from the profile's xacro args, ros_gz_bridge for
@@ -35,6 +36,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
+from mobile_manipulator_description.sensor_suite import DEPTH_ARGS, LIDAR_ARGS, resolve_sensor_args
 from sim_gazebo import profile as prof
 from sim_gazebo import wall_world
 
@@ -126,6 +128,8 @@ def _launch(context):
     desc_pkg = get_package_share_directory('mobile_manipulator_description')
     base_motion = lc('base_motion') == 'true'
     depth = lc('depth_sensor') == 'true'
+    lidar = lc('lidar') == 'true'
+    sv = resolve_sensor_args({k: lc(k) for k in LIDAR_ARGS + DEPTH_ARGS}, lc('platform'), lidar, depth)
     mappings = prof.xacro_mappings(profile, 'gazebo')
     if lc('position_gain'):
         # the plugin's own ROS node is called gz_ros_control
@@ -135,24 +139,24 @@ def _launch(context):
     if base_motion:
         mappings['gz_base_motion'] = 'true'
     if depth:
-        pose = [float(v) for v in lc('depth_sensor_pose').split()]
+        pose = [float(v) for v in sv['depth_sensor_pose'].split()]
         if len(pose) != 6:
             raise ValueError('depth_sensor_pose needs "x y z roll pitch yaw"')
         mappings.update(gz_depth_sensor='true', gz_depth_xyz=' '.join(map(str, pose[:3])),
-                        gz_depth_rpy=' '.join(map(str, pose[3:])), gz_depth_noise=lc('depth_sensor_noise_m'),
-                        gz_depth_rate=lc('depth_sensor_rate_hz'))
-    lidar = lc('lidar') == 'true'
+                        gz_depth_rpy=' '.join(map(str, pose[3:])), gz_depth_noise=sv['depth_sensor_noise_m'],
+                        gz_depth_rate=sv['depth_sensor_rate_hz'], gz_depth_frame=sv['depth_sensor_frame'])
     if lidar:
-        pose = [float(v) for v in lc('lidar_pose').split()]
+        pose = [float(v) for v in sv['lidar_pose'].split()]
         if len(pose) != 6:
             raise ValueError('lidar_pose needs "x y z roll pitch yaw"')
-        lo, hi = math.radians(float(lc('lidar_angle_min_deg'))), math.radians(float(lc('lidar_angle_max_deg')))
-        step = math.radians(float(lc('lidar_angle_increment_deg')))
+        lo, hi = math.radians(float(sv['lidar_angle_min_deg'])), math.radians(float(sv['lidar_angle_max_deg']))
+        step = math.radians(float(sv['lidar_angle_increment_deg']))
         mappings.update(gz_lidar='true', gz_lidar_xyz=' '.join(map(str, pose[:3])),
                         gz_lidar_rpy=' '.join(map(str, pose[3:])), gz_lidar_min_angle=repr(lo),
                         gz_lidar_max_angle=repr(hi), gz_lidar_samples=str(int((hi - lo) / step + 1e-3) + 1),
-                        gz_lidar_min=lc('lidar_range_min_m'), gz_lidar_max=lc('lidar_range_max_m'),
-                        gz_lidar_rate=lc('lidar_rate_hz'), gz_lidar_noise=lc('lidar_noise_m'))
+                        gz_lidar_min=sv['lidar_range_min_m'], gz_lidar_max=sv['lidar_range_max_m'],
+                        gz_lidar_rate=sv['lidar_rate_hz'], gz_lidar_noise=sv['lidar_noise_m'],
+                        gz_lidar_frame=sv['lidar_frame'])
     rgb = lc('rgb_camera') == 'true'
     world_camera = ''
     if rgb:
@@ -352,25 +356,29 @@ def generate_launch_description():
                                           'VelocityControl, omni; the profile drive_type is not applied), nav_msgs/'
                                           'Odometry on /odom and TF odom -> base_footprint (OdometryPublisher); false '
                                           'pins the base to the world'),
+        DeclareLaunchArgument('platform', default_value='',
+                              description='profile or base name whose sensors: suite sets the lidar_* and depth_sensor_* '
+                                          'values and frames (explicit arguments still win); empty keeps the defaults. '
+                                          'lidar:= and depth_sensor:= still switch the sensors on'),
         DeclareLaunchArgument('depth_sensor', default_value='false',
                               description='true: gz depth_camera on base_footprint, PointCloud2 on /depth_sensor/points '
                                           'in frame depth_sensor_link (needs gz rendering, ogre2); false adds nothing'),
-        DeclareLaunchArgument('depth_sensor_pose', default_value='0.1 0 1.15 0 0 0',
-                              description='"x y z roll pitch yaw" of depth_sensor_link in base_footprint (x forward)'),
-        DeclareLaunchArgument('depth_sensor_noise_m', default_value='0.0', description='Gaussian range noise std, m'),
-        DeclareLaunchArgument('depth_sensor_rate_hz', default_value='5.0', description='depth sensor rate, Hz'),
+        DeclareLaunchArgument('depth_sensor_pose', default_value='',
+                              description='default 0.1 0 1.15 0 0 0, or from platform: "x y z roll pitch yaw" of depth_sensor_link in base_footprint (x forward)'),
+        DeclareLaunchArgument('depth_sensor_noise_m', default_value='', description='default 0.0, or from platform: Gaussian range noise std, m'),
+        DeclareLaunchArgument('depth_sensor_rate_hz', default_value='', description='default 5.0, or from platform: depth sensor rate, Hz'),
         DeclareLaunchArgument('lidar', default_value='false',
                               description='true: gz gpu_lidar on base_footprint, LaserScan on /scan in frame lidar_link '
                                           '(needs gz rendering, ogre2); false adds nothing'),
-        DeclareLaunchArgument('lidar_pose', default_value='0.45 0 0.2 0 0 0',
-                              description='"x y z roll pitch yaw" of lidar_link in base_footprint (x forward)'),
-        DeclareLaunchArgument('lidar_angle_min_deg', default_value='-135.0', description='first ray, degrees'),
-        DeclareLaunchArgument('lidar_angle_max_deg', default_value='135.0', description='last ray, degrees'),
-        DeclareLaunchArgument('lidar_angle_increment_deg', default_value='0.5', description='ray spacing, degrees'),
-        DeclareLaunchArgument('lidar_range_min_m', default_value='0.05', description='lidar minimum range, m'),
-        DeclareLaunchArgument('lidar_range_max_m', default_value='10.0', description='lidar maximum range, m'),
-        DeclareLaunchArgument('lidar_rate_hz', default_value='10.0', description='lidar rate, Hz'),
-        DeclareLaunchArgument('lidar_noise_m', default_value='0.0', description='Gaussian range noise std of the lidar, m'),
+        DeclareLaunchArgument('lidar_pose', default_value='',
+                              description='default 0.45 0 0.2 0 0 0, or from platform: "x y z roll pitch yaw" of lidar_link in base_footprint (x forward)'),
+        DeclareLaunchArgument('lidar_angle_min_deg', default_value='', description='default -135.0, or from platform: first ray, degrees'),
+        DeclareLaunchArgument('lidar_angle_max_deg', default_value='', description='default 135.0, or from platform: last ray, degrees'),
+        DeclareLaunchArgument('lidar_angle_increment_deg', default_value='', description='default 0.5, or from platform: ray spacing, degrees'),
+        DeclareLaunchArgument('lidar_range_min_m', default_value='', description='default 0.05, or from platform: lidar minimum range, m'),
+        DeclareLaunchArgument('lidar_range_max_m', default_value='', description='default 10.0, or from platform: lidar maximum range, m'),
+        DeclareLaunchArgument('lidar_rate_hz', default_value='', description='default 10.0, or from platform: lidar rate, Hz'),
+        DeclareLaunchArgument('lidar_noise_m', default_value='', description='default 0.0, or from platform: Gaussian range noise std of the lidar, m'),
         DeclareLaunchArgument('odom_realism', default_value='off',
                               description='off|good|typical|poor: wheel-odometry noise from sim_realism (needs base_motion:=true); '
                                           'gz odometry becomes /odom_truth, the node publishes /odom and TF (docs/sim_realism.md)'),

@@ -196,7 +196,7 @@ a one-carriage column (`telescopic`, `stages: 0`, stroke 0.35 / 0.386 m), the ex
 small arms chosen; check the platform rating.
 
 What each platform ships with (lidars, cameras) and which numbers have a source is in
-[base_catalog.md](base_catalog.md); the profile's optional `sensors:` list holds the sensors (nothing reads it yet).
+[base_catalog.md](base_catalog.md); the profile's optional `sensors:` list holds the sensors; `platform:=` on the sim launches feeds a suite to the lidar and depth arguments.
 
 Swap steps: `xacro urdf/mobile_manipulator.urdf.xacro arm:=ur10e base:=ranger_mini`, or pick the
 matching profile. The lift mounts at `lift_mount_link`; shift it with the `lift_mount_xyz` xacro

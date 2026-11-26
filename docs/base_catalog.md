@@ -3,7 +3,8 @@
 The mobile bases the repo models, with what each one ships with for perception and what is usually bolted
 on, and which numbers have a source. Same idea as the [lift catalog](lift_catalog.md): the profile `base:` block
 is the model, this page says how far to trust it. The sensors of a platform live in the profile's optional
-`sensors:` list (schema below); no simulator reads it yet.
+`sensors:` list (schema below). Both simulators can take a suite with `platform:=<profile or base name>`, see
+[Feeding a suite to the simulators](#feeding-a-suite-to-the-simulators).
 
 Date checked: 2026-11-26. Every figure below was read on the cited page or PDF that day, or the row says
 `unverified`. Vendors change specs without notice: check against your unit.
@@ -43,6 +44,28 @@ sensor whose model or scan rate I could not source is described in the section b
 **The mounts are not the vendors'**: every add-on is placed where it plausibly fits on that chassis (lidar on the
 front of the top deck, camera just above it), and the factory TurtleBot3 lidar sits near the centre of the top plate.
 Treat them as an integrator's choice and measure your own.
+
+### Feeding a suite to the simulators
+
+`platform:=<name>` on `sim_mujoco.launch.py` and `sim.launch.py` (Gazebo) reads the suite and fills the `lidar_*` and
+`depth_sensor_*` arguments from it. The name is a profile (`ur10e_ranger_mini_telescopic`), a path to a profile YAML, or a
+base name (`ranger_mini`) when exactly one profile with sensors uses that base. It does not switch anything on: `lidar:=true`
+and `depth_sensor:=true` still do, and asking for a sensor the platform does not list is an error. Order, last wins: built-in
+defaults, the suite, arguments you pass (`lidar_rate_hz:=20` beats the suite's 40). Without `platform` nothing changes.
+
+| From the suite | Goes to |
+|---|---|
+| lidar `mount`, `frame` | `lidar_pose` (moved from `base_link` to `base_footprint`: up by half of ground clearance plus lift mount height), scan frame and TF child name |
+| lidar `angle_*`, `range_*`, `rate_hz`, `range_noise_std_m` | `lidar_angle_*_deg`, `lidar_range_*_m`, `lidar_rate_hz`, `lidar_noise_m` (numbers rounded to 6 digits) |
+| rgbd `mount`, `frame`, `rate_hz` | `depth_sensor_pose`, point cloud frame and TF child name, `depth_sensor_rate_hz` |
+
+Not applied: the camera's width, height, field of view and range. Both sims render a fixed 96 x 64, 60 degree, 0.1 to 5 m depth
+sensor, so the suite's D455 figures only show up in the pose, rate and frame. Only the first `lidar2d` and the first `rgbd`
+of a suite are used. A 360 degree suite gets one extra ray at the seam (0 and 360 are both rays). The suite's noise is a vendor
+repeatability bound; pass `lidar_noise_m:=0` for a clean scan.
+
+`scripts/sensor_suite_check.py` (description package) compares a running sim with the suite; `run_sensor_suite.sh` in
+`sim_mujoco` and `sim_gazebo` starts the sim and runs it.
 
 ### Sensor models used
 
