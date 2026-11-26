@@ -34,8 +34,9 @@
 #   MULTI_STAND_DOCK_IK_SEEDED=true  seed the dock IK with MULTI_STAND_DOCK_SEED (manager `dock_ik_seeded`, default false here)
 #   MULTI_STAND_SETTLE_TIMEOUT=90  wait_arm_settled.py timeout in s at every stand arrival; MULTI_STAND_TCP_SETTLE=4.0 the manager's
 #                                  `tcp_settle_timeout_s` (s); MULTI_STAND_TCP_SETTLE_TOL=0.002 its `tcp_settle_tolerance_m` (m moved in 0.4 s).
-#                                  Under jtac_position_only the joint loop has a 10 s time constant, so a tool 5 cm off its goal moves only 2 mm
-#                                  in 0.4 s and counts as settled at the default tolerance: use TOL=0.0005 with SETTLE=60 to wait for it to arrive
+#                                  With the plugin's own joint gain (0.1 /s, a 10 s time constant) a tool 5 cm off its goal moves only 2 mm
+#                                  in 0.4 s and counts as settled at the default tolerance; GZ_POSITION_GAIN (default 2.0 here) avoids that
+#   GZ_POSITION_GAIN=2.0           gz_ros2_control position_proportional_gain in 1/s; 0.1 (the plugin default) fails this pass, see docs/sim_gazebo.md
 #   MULTI_STAND_OBSTACLES=1        keep the stock wall's obstacle in the sim (moved out of the patch; the planner never knows it)
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
 #   MULTI_STAND_DOCK_IK_CONTINUITY=true  choose the dock joint goal among IK solutions by continuity (manager `dock_ik_continuity`, default false)
@@ -63,6 +64,7 @@ CANCEL_AFTER=${MULTI_STAND_CANCEL_AFTER_S:-0}
 MP_Z_LO=1.0; MP_Z_HI=1.3   # the contact patch's height; MULTI_STAND_PATCH_Z replaces it
 GZ_PROFILE=${STAND_PROFILE:-ur10e_telescopic}
 
+export GZ_POSITION_GAIN=${GZ_POSITION_GAIN-2.0}
 gz_init "${MULTI_STAND_OUT:-/tmp/multi_stand_pass}"
 trap gz_stop_all EXIT
 
@@ -79,7 +81,7 @@ summary_line() {
     "double_pass=${MULTI_STAND_DOUBLE_PASS:-false} reach_fraction=${MULTI_STAND_REACH_FRACTION:-0.0} arm_reach=${MULTI_STAND_ARM_REACH:-1.3}" \
     "lift_stroke=${MULTI_STAND_LIFT_STROKE:-1.5} min_clearance=${MULTI_STAND_MIN_CLEARANCE:-0.0} dock_ik_continuity=${MULTI_STAND_DOCK_IK_CONTINUITY:-false}" \
     "max_span=${MULTI_STAND_MAX_SPAN:-0.5} speed=${MULTI_STAND_SPEED:-0.01} swath=${MULTI_STAND_SWATH:-0.14} overlap=${MULTI_STAND_OVERLAP:-15.0}" \
-    "tcp_settle=${MULTI_STAND_TCP_SETTLE:-4.0}/${MULTI_STAND_TCP_SETTLE_TOL:-0.002} wall=0.0/${DY}/${WIDTH} paint=${MULTI_STAND_PAINT:-0} out=$OUT"
+    "tcp_settle=${MULTI_STAND_TCP_SETTLE:-4.0}/${MULTI_STAND_TCP_SETTLE_TOL:-0.002} position_gain=${GZ_POSITION_GAIN:-0.1} wall=0.0/${DY}/${WIDTH} paint=${MULTI_STAND_PAINT:-0} out=$OUT"
 }
 # the sim wall: the stock scene without its obstacle (MULTI_STAND_OBSTACLES=1 keeps it, moved out of the patch; the planner's scene never has it,
 # so with it the arm drives into an obstacle the planner does not know about)
@@ -111,7 +113,7 @@ fi
 
 # shellcheck disable=SC2046
 eval gz_start sim_launch ros2 launch sim_gazebo sim.launch.py $(gz_sim_args) base_motion:=true \
-  wall_scene:=$OUT/data/smoke_wall_scene.json standoff:=0.915 ${MULTI_STAND_LAUNCH_ARGS:-}
+  wall_scene:=$OUT/data/smoke_wall_scene.json standoff:=0.915 rviz_plan_file:=$OUT/coverage_output.json ${MULTI_STAND_LAUNCH_ARGS:-}
 gz_start coverage_planner ros2 run coverage_planner coverage_planner_node
 gz_start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
   -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0} \
