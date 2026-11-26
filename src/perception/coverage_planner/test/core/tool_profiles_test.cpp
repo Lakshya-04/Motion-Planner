@@ -68,7 +68,7 @@ TEST(ShippedToolProfiles, ContactWiperIsAContactTool)
   EXPECT_DOUBLE_EQ(t.task.standoff_m, 0.0);
   EXPECT_DOUBLE_EQ(t.coverage.swath_m, 0.20);
   EXPECT_DOUBLE_EQ(t.coverage.overlap_pct, 20.0);
-  EXPECT_EQ(t.coverage.passes.size(), 2U);
+  EXPECT_EQ(t.coverage.passes.size(), 1U);   // one pass per strip; double_pass:=true adds the reverse pass
   EXPECT_DOUBLE_EQ(t.coverage.spray_half_angle_deg, 0.0);
   EXPECT_NEAR(toolSwath(t), 0.20, 1e-12);
   EXPECT_NEAR(toolLineSpacing(t), 0.16, 1e-12);
@@ -105,7 +105,7 @@ TEST(ToolOverridesTest, ExplicitValuesWinOverTheProfile)
   EXPECT_DOUBLE_EQ(t.coverage.overlap_pct, 0.0);
   EXPECT_EQ(t.coverage.sweep_direction, "vertical");
   EXPECT_NEAR(toolLineSpacing(t), 0.3, 1e-12);
-  EXPECT_EQ(t.coverage.passes.size(), 2U);  // untouched fields keep the profile value
+  EXPECT_EQ(t.coverage.passes.size(), 1U);  // untouched fields keep the profile value
 }
 
 TEST(ToolOverridesTest, ExplicitSwathReplacesTheSprayCone)
@@ -135,16 +135,18 @@ TEST(ToolOverridesTest, DoublePassForcesTwoPassesAndInflationFallsBackToHalfSwat
   EXPECT_NEAR(t.coverage.obstacle_inflation_radius_m, toolSwath(t) / 2.0, 1e-12);
 }
 
-TEST(ToolOverridesTest, ExplicitSinglePassOverridesAProfileThatShipsTwoPasses)
+TEST(ToolOverridesTest, ContactWiperShipsOnePassAndDoublePassAddsTheReverse)
 {
-  EXPECT_EQ(shipped("contact_wiper").coverage.passes.size(), 2U);
+  EXPECT_EQ(shipped("contact_wiper").coverage.passes.size(), 1U);
   ToolOverrides o;
-  o.double_pass = false;
+  o.double_pass = true;
   const auto t = shipped("contact_wiper", o);
-  EXPECT_EQ(t.coverage.passes.size(), 1U);
-  EXPECT_FALSE(t.coverage.passes[0].reverse_direction);
-  // Not setting it keeps the profile's own passes.
-  EXPECT_EQ(shipped("contact_wiper", ToolOverrides{}).coverage.passes.size(), 2U);
+  EXPECT_EQ(t.coverage.passes.size(), 2U);
+  EXPECT_TRUE(t.coverage.passes[1].reverse_direction);
+  // Not setting it keeps the profile's own passes; an explicit false is still one pass.
+  EXPECT_EQ(shipped("contact_wiper", ToolOverrides{}).coverage.passes.size(), 1U);
+  o.double_pass = false;
+  EXPECT_EQ(shipped("contact_wiper", o).coverage.passes.size(), 1U);
 }
 
 TEST(ToolOverridesTest, EdgeSpacingFromTheProfileAndFromOverrides)
