@@ -1,0 +1,71 @@
+# Vendor platform packages, pinned by commit. Fetched on demand, never into this repository:
+#   mkdir -p ~/platforms_ws/src && vcs import --shallow ~/platforms_ws/src < docker/platforms.repos
+# Commit hashes and dates resolved with the GitHub API on 2026-11-26. Why these and not others:
+# docs/platform_integration.md. Where apt ships the package (Clearpath, TurtleBot3) apt is the default.
+repositories:
+
+  # AgileX. No apt release. Licence conflict: LICENSE file Apache-2.0, package.xml says BSD.
+  agilex/ugv_sdk:
+    type: git
+    url: https://github.com/agilexrobotics/ugv_sdk.git
+    version: f2704eacdc90357078cd93ec60aae08bb4baab35   # main, 2026-08-11, Apache-2.0 (LICENSE file)
+  agilex/ranger_ros2:
+    type: git
+    url: https://github.com/agilexrobotics/ranger_ros2.git
+    version: a1bc20675ae3655d4048b8e4b1139914de159b52   # jazzy, 2024-10-21, BSD-3-Clause
+  agilex/scout_ros2:
+    type: git
+    url: https://github.com/agilexrobotics/scout_ros2.git
+    version: 48f70cbefa74b94d4442ed1a4ac9237a088abbb7   # branch named origin/jazzy, 2024-10-21, Apache-2.0 (LICENSE file; package.xml says BSD)
+
+  # Clearpath (Husky A200, Jackal J100, Dingo-O DO100). All BSD-3-Clause. Jazzy releases exist in rosdistro.
+  clearpath/clearpath_common:
+    type: git
+    url: https://github.com/clearpathrobotics/clearpath_common.git
+    version: 67927098fbb366c82f9b0289618e53df27f3a3a3   # jazzy, 2026-11-23, BSD-3-Clause
+  clearpath/clearpath_config:
+    type: git
+    url: https://github.com/clearpathrobotics/clearpath_config.git
+    version: 5b861f8e5b8d9f12ffcc795f79a7e74f348b9e97   # jazzy, 2026-11-09, BSD-3-Clause
+  clearpath/clearpath_msgs:
+    type: git
+    url: https://github.com/clearpathrobotics/clearpath_msgs.git
+    version: 0014d0afafea2715d1336ff58f2562450b6debda   # jazzy, 2026-11-04, BSD-3-Clause
+  clearpath/clearpath_robot:
+    type: git
+    url: https://github.com/clearpathrobotics/clearpath_robot.git
+    version: 03fe735af1501b6f42aad5661601a621bb64c85f   # jazzy, 2026-11-20, BSD-3-Clause (not in the Jazzy rosdistro)
+  clearpath/clearpath_ros2_socketcan_interface:
+    type: git
+    url: https://github.com/clearpathrobotics/clearpath_ros2_socketcan_interface.git
+    version: 98e81a3bc8351c63c1d29b1683ac1ed25897df32   # jazzy, 2025-06-12, BSD-3-Clause
+  clearpath/clearpath_simulator:
+    type: git
+    url: https://github.com/clearpathrobotics/clearpath_simulator.git
+    version: 7a3e5d38dcc37b83dab1de0d986501234d669f78   # jazzy, 2026-11-08, BSD-3-Clause
+
+  # ROBOTIS TurtleBot3. All Apache-2.0. Jazzy releases exist in rosdistro.
+  robotis/turtlebot3:
+    type: git
+    url: https://github.com/ROBOTIS-GIT/turtlebot3.git
+    version: 0c0be84e3f5c3194fb2adea8426a58a96060eab5   # jazzy, 2026-06-15, Apache-2.0
+  robotis/turtlebot3_msgs:
+    type: git
+    url: https://github.com/ROBOTIS-GIT/turtlebot3_msgs.git
+    version: 9209e01b4708cf3ca5610b01dfc9586d3c7889d8   # jazzy, 2025-04-30, Apache-2.0
+  robotis/turtlebot3_simulations:
+    type: git
+    url: https://github.com/ROBOTIS-GIT/turtlebot3_simulations.git
+    version: 45633014a14e8f438495b532a723e4ad45cbbd31   # jazzy, 2025-06-27, Apache-2.0
+
+  # Not fetched: licence unclear (no LICENSE file; package.xml says BSD). Do not enable before Neobotix confirms.
+  # neobotix/neo_mpo_500-2:
+  #   type: git
+  #   url: https://github.com/neobotix/neo_mpo_500-2.git
+  #   version: c87c58254786fa2cd8c06823432fb9643e5a6516   # jazzy, 2026-03-04
+  #
+  # Not fetched: Humble-only third-party ROS 2 port, no Jazzy branch, untested here.
+  # mir/mir_robot:
+  #   type: git
+  #   url: https://github.com/niemsoen/mir_robot.git
+  #   version: c302eaec1c3862aaf413d95342522096348e58e0   # humble-devel, 2024-03-26, BSD-3-Clause
