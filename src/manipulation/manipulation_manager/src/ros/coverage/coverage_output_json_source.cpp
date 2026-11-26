@@ -10,21 +10,10 @@
 #include <nlohmann/json.hpp>
 
 #include "core_types/pose.hpp"
+#include "manipulation_manager/core/coverage_plan_intents.hpp"
 
 namespace manipulation_manager
 {
-
-namespace
-{
-
-struct RawPoint
-{
-  double x, y, z, qx, qy, qz, qw;
-  int segment{-1};   // index into the plan's `segments`, -1 if the plan has none
-  size_t order{0};   // position in the plan's path
-};
-
-}  // namespace
 
 CoverageOutputJsonSource::CoverageOutputJsonSource(
   std::string json_path, std::string frame_id, double z_offset, double z_step_m,
@@ -53,135 +42,33 @@ std::vector<CoverageSegmentIntent> CoverageOutputJsonSource::getCoveragePlan()
   }
   nlohmann::json doc;
   file >> doc;
-  const auto & poses = doc.at("final_lifted_and_expanded").at("path").at("poses");
-
-  // Group raw points by their position along the wall's horizontal tangent (direction x up; x for
-  // the +y wall)
-  const auto & wd = wall_dir_.d;
-  const double tx = wd[1], ty = -wd[0];
-  // Group raw points by x (rounded to kill float noise between two points on the same
-  // column) -- the boustrophedon path visits each column as a top/bottom pair, sorted here
-  // left-to-right (ascending x) so a caller sweeping the wall naturally starts at the left.
-  // The plan's segments say which points belong to one stroke: an obstacle splits a column into several strokes
-  // whose ends are far apart, and the manager must stroke each of them, not the whole column through the obstacle.
-  std::vector<int> segment_of_pose(poses.size(), -1);
   const auto & plan_node = doc.at("final_lifted_and_expanded");
+  RawCoveragePlan plan;
+  for (const auto & p : plan_node.at("path").at("poses")) {
+    core_types::Pose pose;
+    pose.x = p.at("position").at("x").get<double>();
+    pose.y = p.at("position").at("y").get<double>();
+    pose.z = p.at("position").at("z").get<double>();
+    pose.qx = p.at("orientation").at("x").get<double>();
+    pose.qy = p.at("orientation").at("y").get<double>();
+    pose.qz = p.at("orientation").at("z").get<double>();
+    pose.qw = p.at("orientation").at("w").get<double>();
+    plan.poses.push_back(pose);
+  }
   if (plan_node.contains("segments")) {
-    int seg = 0;
     for (const auto & sj : plan_node.at("segments")) {
-      const size_t a = sj.value("start_index", 0U), b = sj.value("end_index", 0U);
-      for (size_t i = a; i <= b && i < segment_of_pose.size(); ++i) {segment_of_pose[i] = seg;}
-      ++seg;
+      plan.segments.push_back({sj.value("start_index", 0U), sj.value("end_index", 0U)});
     }
   }
-  std::map<long, std::vector<RawPoint>> columns_by_x_key;
-  constexpr double kXQuantum = 1e-3;
-  // Half the length of the short stroke given to a one-cell gap. A free cell lies wholly outside the inflated
-  // obstacle, so a stroke within half a cell of the cell centre cannot enter the keep-out clearance. 0.01 m is
-  // half the 0.02 m grid resolution of the demo scenes; a coarser grid is safe, a finer one needs this lowered.
-  constexpr double kPointStrokeHalfM = 0.01;
-  size_t pose_index = 0;
-  for (const auto & p : poses) {
-    RawPoint pt;
-    pt.order = pose_index;
-    pt.segment = segment_of_pose[pose_index++];
-    pt.x = p.at("position").at("x").get<double>();
-    pt.y = p.at("position").at("y").get<double>();
-    pt.z = p.at("position").at("z").get<double>() + z_offset_;
-    pt.qx = p.at("orientation").at("x").get<double>();
-    pt.qy = p.at("orientation").at("y").get<double>();
-    pt.qz = p.at("orientation").at("z").get<double>();
-    pt.qw = p.at("orientation").at("w").get<double>();
-    const long key = static_cast<long>(std::round((pt.x * tx + pt.y * ty) / kXQuantum));
-    columns_by_x_key[key].push_back(pt);
-  }
-
-  std::vector<CoverageSegmentIntent> segments;
-  segments.reserve(columns_by_x_key.size());
-  size_t column_index = 0;
-  for (auto & [key, column] : columns_by_x_key) {
-    std::sort(column.begin(), column.end(), [](const RawPoint & a, const RawPoint & b) {
-        return a.z < b.z;
-      });
-    // z span of every stroke in the column (passes over the same stretch share one span); without segment
-    // information the whole column is one span
-    struct Span {double lo, hi; bool descending;};
-    std::vector<Span> spans;
-    if (column.front().segment < 0) {
-      // no segment information: the whole column, direction of the first and last pose in plan order
-      const auto first = std::min_element(column.begin(), column.end(), [](const RawPoint & a, const RawPoint & b) {
-          return a.order < b.order;});
-      const auto last = std::max_element(column.begin(), column.end(), [](const RawPoint & a, const RawPoint & b) {
-          return a.order < b.order;});
-      spans.push_back({column.front().z, column.back().z, first->z > last->z});
-    } else {
-      struct Acc {double lo, hi; size_t first_order, last_order; double first_z, last_z;};
-      std::map<int, Acc> by_segment;
-      for (const auto & pt : column) {
-        auto it = by_segment.find(pt.segment);
-        if (it == by_segment.end()) {
-          by_segment[pt.segment] = {pt.z, pt.z, pt.order, pt.order, pt.z, pt.z};
-        } else {
-          auto & a = it->second;
-          a.lo = std::min(a.lo, pt.z);
-          a.hi = std::max(a.hi, pt.z);
-          if (pt.order < a.first_order) {a.first_order = pt.order; a.first_z = pt.z;}
-          if (pt.order > a.last_order) {a.last_order = pt.order; a.last_z = pt.z;}
-        }
-      }
-      for (const auto & [seg, a] : by_segment) {
-        bool seen = false;
-        for (const auto & e : spans) {
-          if (std::fabs(e.lo - a.lo) < 1e-3 && std::fabs(e.hi - a.hi) < 1e-3) {seen = true;}
-        }
-        if (!seen) {spans.push_back({a.lo, a.hi, a.first_z > a.last_z});}
-      }
-      std::sort(spans.begin(), spans.end(), [](const Span & a, const Span & b) {
-          return a.lo < b.lo || (a.lo == b.lo && a.hi < b.hi);});
-    }
-    const auto & rep = column.front();
-    for (const auto & span : spans) {
-      double z_min = std::max(z_min_m_, span.lo);
-      double z_max = std::min(z_max_m_, span.hi);
-      // The planner's gap strokes beside a small obstacle can be a single grid cell (first == last): a stroke of
-      // zero length would be dropped and the strip next to the obstacle never wiped. Give it a short stroke
-      // around the point instead, kept inside the free cell (see kPointStrokeHalfM).
-      if (span.hi - span.lo < 1e-6 && z_max >= z_min) {
-        z_min = std::max(z_min_m_, span.lo - kPointStrokeHalfM);
-        z_max = std::min(z_max_m_, span.lo + kPointStrokeHalfM);
-      }
-
-      CoverageSegmentIntent intent;
-      intent.label = "wall_column_" + std::to_string(column_index);
-      intent.mode_hint = "cartesian";
-      intent.requires_contact = true;
-      intent.requires_retraction = true;
-      intent.target_eef_speed = target_eef_speed_;
-
-      if (z_max > z_min) {
-        for (double z = z_min; z <= z_max + 1e-9; z += z_step_m_) {
-          core_types::Pose pose;
-          pose.x = rep.x;
-          pose.y = rep.y;
-          pose.z = z;
-          pose.qx = rep.qx;
-          pose.qy = rep.qy;
-          pose.qz = rep.qz;
-          pose.qw = rep.qw;
-          intent.poses.push_back(pose);
-        }
-      }
-
-      if (follow_plan_direction_ && span.descending) {
-        std::reverse(intent.poses.begin(), intent.poses.end());
-      }
-      if (!intent.poses.empty()) {
-        segments.push_back(std::move(intent));
-      }
-      ++column_index;
-    }
-  }
-  return segments;
+  CoverageIntentOptions opt;
+  opt.z_offset = z_offset_;
+  opt.z_step_m = z_step_m_;
+  opt.z_min_m = z_min_m_;
+  opt.z_max_m = z_max_m_;
+  opt.target_eef_speed = target_eef_speed_;
+  opt.wall_dir = wall_dir_;
+  opt.follow_plan_direction = follow_plan_direction_;
+  return buildCoverageIntents(plan, opt);
 }
 
 }  // namespace manipulation_manager

@@ -89,6 +89,7 @@
 #include "manipulation_manager/core/travel_pose.hpp"
 #include "manipulation_manager/core/wall_direction.hpp"
 #include "manipulation_manager/ros/coverage/coverage_output_json_source.hpp"
+#include "manipulation_manager/ros/coverage/ros_coverage_source.hpp"
 #include "manipulation_manager/ros/execution/jtac_execution_adapter.hpp"
 
 namespace manipulation_manager
@@ -233,6 +234,19 @@ public:
     arm_base_frame_ = this->declare_parameter<std::string>("arm_base_frame", "arm_base_link");
     coverage_json_path_ = this->declare_parameter<std::string>(
       "coverage_json_path", "/tmp/wall_export/coverage_output.json");
+    // Where the plan comes from: "json" (default, the file above) or "ros" (the latest CoveragePlan on
+    // coverage_plan_topic, published latched by wall_coverage_service_node; docs/coverage_planner.md).
+    coverage_source_ = this->declare_parameter<std::string>("coverage_source", "json");
+    if (coverage_source_ != "json" && coverage_source_ != "ros") {
+      throw std::invalid_argument("coverage_source must be json or ros");
+    }
+    coverage_plan_topic_ = this->declare_parameter<std::string>(
+      "coverage_plan_topic", "/wall_coverage_service_node/coverage_plan");
+    coverage_plan_timeout_s_ = this->declare_parameter<double>("coverage_plan_timeout_s", 10.0);
+    if (coverage_source_ == "ros") {
+      plan_inbox_ = std::make_shared<CoveragePlanInbox>();
+      plan_sub_ = subscribeCoveragePlan(*this, coverage_plan_topic_, plan_inbox_);
+    }
     // base_link -> base_footprint fixed offset (see coverage_pass_demo_node.cpp's own frame_id
     // comment) -- coverage_output.json is authored in base_link.
     z_offset_ = this->declare_parameter<double>("z_offset_m", 0.31);
@@ -1006,15 +1020,36 @@ private:
     }
     const auto restore = [&]() {contact_ = saved_contact;};
 
-    const std::string path = req.json_path.empty() ? coverage_json_path_ : req.json_path;
+    const bool from_ros = coverage_source_ == "ros";
+    const std::string path = from_ros ? coverage_plan_topic_ :
+      (req.json_path.empty() ? coverage_json_path_ : req.json_path);
+    std::string plan_identity_bytes;   // what the mission ledger hashes as the plan's identity
     std::vector<CoverageSegmentIntent> intents;
     try {
       // In a world frame the poses are loaded as they are and moved into frame_id column by column.
-      CoverageOutputJsonSource source(
-        path, world_frame_.empty() ? frame_id_ : world_frame_, z_offset_, coverage_z_step_,
-        coverage_z_min_, coverage_z_max_, coverage_eef_speed_, wall_dir_);
-      source.setFollowPlanDirection(serpentine_columns_);
-      intents = source.getCoveragePlan();
+      CoverageIntentOptions opt;
+      opt.z_offset = z_offset_;
+      opt.z_step_m = coverage_z_step_;
+      opt.z_min_m = coverage_z_min_;
+      opt.z_max_m = coverage_z_max_;
+      opt.target_eef_speed = coverage_eef_speed_;
+      opt.wall_dir = wall_dir_;
+      opt.follow_plan_direction = serpentine_columns_;
+      const std::string out_frame = world_frame_.empty() ? frame_id_ : world_frame_;
+      if (from_ros) {
+        // The node is only spun in bursts (no executor thread), so the wait spins it itself.
+        RosCoverageSource source(
+          plan_inbox_, [this]() {rclcpp::spin_some(shared_from_this());},
+          coverage_plan_timeout_s_, out_frame, opt);
+        intents = source.getCoveragePlan();
+        plan_identity_bytes = coveragePlanFingerprint(source.lastPlan());
+      } else {
+        CoverageOutputJsonSource source(
+          path, out_frame, z_offset_, coverage_z_step_, coverage_z_min_, coverage_z_max_,
+          coverage_eef_speed_, wall_dir_);
+        source.setFollowPlanDirection(serpentine_columns_);
+        intents = source.getCoveragePlan();
+      }
     } catch (const std::exception & e) {
       out.message = std::string("cannot load the coverage plan ") + path + ": " + e.what();
       restore();
@@ -1048,9 +1083,13 @@ private:
     mission_fsm_.reset();
     mission_fsm_.start();
     if (ledger_.persistent()) {
-      std::ifstream plan_in(path);
       std::stringstream plan_bytes;
-      plan_bytes << plan_in.rdbuf();
+      if (from_ros) {
+        plan_bytes << plan_identity_bytes;
+      } else {
+        std::ifstream plan_in(path);
+        plan_bytes << plan_in.rdbuf();
+      }
       if (!ledger_.load()) {
         RCLCPP_WARN(
           this->get_logger(), "mission ledger %s was corrupted, moved aside, starting empty",
@@ -3418,6 +3457,11 @@ private:
   std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
   std::string planning_group_;
   std::string coverage_json_path_;
+  std::string coverage_source_{"json"};
+  std::string coverage_plan_topic_;
+  double coverage_plan_timeout_s_{10.0};
+  std::shared_ptr<CoveragePlanInbox> plan_inbox_;
+  rclcpp::Subscription<coverage_planner_msgs::msg::CoveragePlan>::SharedPtr plan_sub_;
   double z_offset_{0.0};
   WallDirection wall_dir_;
   bool dock_at_stroke_start_{false};

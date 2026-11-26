@@ -21,6 +21,13 @@ ARG ROS_DISTRO=jazzy
 ############################ base ############################
 FROM ros:${ROS_DISTRO}-ros-base AS base
 ARG ROS_DISTRO
+# Optional apt mirror, empty by default. CI passes the Azure one: Canonical's own hosts have served package indexes that
+# disagree with their pool (404 and size mismatch), and archive.ubuntu.com and security.ubuntu.com are the same servers.
+ARG UBUNTU_MIRROR=
+RUN if [ -n "$UBUNTU_MIRROR" ]; then \
+      sed -i "s|http://archive.ubuntu.com/ubuntu|$UBUNTU_MIRROR|g; s|http://security.ubuntu.com/ubuntu|$UBUNTU_MIRROR|g" \
+        /etc/apt/sources.list.d/ubuntu.sources; \
+    fi
 ENV ROS_DISTRO=${ROS_DISTRO} \
     DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -28,10 +35,11 @@ ENV ROS_DISTRO=${ROS_DISTRO} \
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    (for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake ninja-build git curl ca-certificates \
       python3-colcon-common-extensions python3-rosdep python3-vcstool \
       python3-pip python3-venv ccache mold \
+      && exit 0; echo "apt failed (try $i), retrying"; sleep 15; done; exit 1) \
     && rm -rf /var/lib/apt/lists/*
 
 # Compiler cache and fast linker, the default for every build in every stage below.
@@ -66,17 +74,18 @@ COPY docker/apt-extra.txt /tmp/apt-extra.txt
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update \
+    (for i in 1 2 3; do apt-get update && exit 0; echo "apt-get update failed (try $i), retrying"; sleep 15; done; exit 1) \
     && (rosdep init 2>/dev/null || true) \
     && (for i in 1 2 3 4 5; do rosdep update --rosdistro ${ROS_DISTRO} && exit 0; echo "rosdep update failed (try $i), retrying"; sleep 10; done; exit 1) \
-    && rosdep install --from-paths /tmp/src-manifest --ignore-src -y --rosdistro ${ROS_DISTRO} \
-         --skip-keys "ament_cmake_clang_format" \
+    && (for i in 1 2 3; do rosdep install --from-paths /tmp/src-manifest --ignore-src -y --rosdistro ${ROS_DISTRO} \
+         --skip-keys "ament_cmake_clang_format" && exit 0; echo "rosdep install failed (try $i), refreshing the index"; apt-get update; sleep 15; done; exit 1) \
     && rm -rf /var/lib/apt/lists/* /tmp/src-manifest
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update \
-    && grep -v '^\s*#' /tmp/apt-extra.txt | grep -v '^\s*$' | sed "s/@ROS@/${ROS_DISTRO}/g" | xargs apt-get install -y --no-install-recommends \
+    (for i in 1 2 3; do apt-get update \
+      && grep -v '^\s*#' /tmp/apt-extra.txt | grep -v '^\s*$' | sed "s/@ROS@/${ROS_DISTRO}/g" | xargs apt-get install -y --no-install-recommends \
+      && exit 0; echo "apt failed (try $i), retrying"; sleep 15; done; exit 1) \
     && rm -rf /var/lib/apt/lists/*
 
 ############################ dev ##############################
@@ -87,9 +96,10 @@ ARG GID=1000
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    (for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends \
       gdb valgrind clang-format clang-tidy sudo nano less \
       ros-${ROS_DISTRO}-rviz2 ros-${ROS_DISTRO}-rqt-graph \
+      && exit 0; echo "apt failed (try $i), retrying"; sleep 15; done; exit 1) \
     && rm -rf /var/lib/apt/lists/* \
     && (getent passwd ${UID} && userdel -r $(getent passwd ${UID} | cut -d: -f1) || true) \
     && (getent group ${GID} || groupadd -g ${GID} ${USERNAME}) \
@@ -160,9 +170,10 @@ FROM deps AS sim-gazebo
 ARG ROS_DISTRO
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    (for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-ros-gz-sim ros-${ROS_DISTRO}-ros-gz-bridge \
       ros-${ROS_DISTRO}-gz-ros2-control \
+      && exit 0; echo "apt failed (try $i), retrying"; sleep 15; done; exit 1) \
     && rm -rf /var/lib/apt/lists/*
 
 ############################ nav2 #############################
