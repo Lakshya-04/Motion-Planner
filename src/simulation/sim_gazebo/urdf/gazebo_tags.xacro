@@ -24,6 +24,11 @@
      Gaussian range noise) that publishes gz PointCloud2 on /depth_sensor/points; the launch file adds the Sensors
      system to the world. Off by default.
 
+     gz_lidar:=true (launch arg lidar:=true) adds the link lidar_link on base_footprint (gz_lidar_xyz / gz_lidar_rpy,
+     x forward) with a gz-sim gpu_lidar (gz_lidar_samples rays from gz_lidar_min_angle to gz_lidar_max_angle, range
+     gz_lidar_min to gz_lidar_max, gz_lidar_rate Hz, optional Gaussian range noise) that publishes gz LaserScan on /scan;
+     the launch file adds the Sensors system to the world and bridges it to sensor_msgs/LaserScan. Off by default.
+
      gz_rgb_camera:=true (launch arg rgb_camera:=true) adds the link rgb_camera_link on base_footprint (gz_rgb_xyz /
      gz_rgb_rpy, x forward) with a gz-sim colour camera (gz_rgb_width x gz_rgb_height, 60 degrees, 0.05 to 20 m,
      gz_rgb_rate Hz) that publishes gz Image on /rgb_camera/image; the launch file adds the Sensors system to the
@@ -36,6 +41,16 @@
   <xacro:arg name="gz_depth_rpy" default="0 0 0"/>
   <xacro:arg name="gz_depth_noise" default="0.0"/>
   <xacro:arg name="gz_depth_rate" default="5.0"/>
+  <xacro:arg name="gz_lidar" default="false"/>
+  <xacro:arg name="gz_lidar_xyz" default="0.45 0 0.2"/>
+  <xacro:arg name="gz_lidar_rpy" default="0 0 0"/>
+  <xacro:arg name="gz_lidar_samples" default="541"/>
+  <xacro:arg name="gz_lidar_min_angle" default="-2.35619449"/>
+  <xacro:arg name="gz_lidar_max_angle" default="2.35619449"/>
+  <xacro:arg name="gz_lidar_min" default="0.05"/>
+  <xacro:arg name="gz_lidar_max" default="10.0"/>
+  <xacro:arg name="gz_lidar_rate" default="10.0"/>
+  <xacro:arg name="gz_lidar_noise" default="0.0"/>
   <xacro:arg name="gz_rgb_camera" default="false"/>
   <xacro:arg name="gz_rgb_xyz" default="0.0 -2.4 1.6"/>
   <xacro:arg name="gz_rgb_rpy" default="0 0.11 1.38"/>
@@ -120,6 +135,44 @@
               <stddev>$(arg gz_depth_noise)</stddev>
             </noise>
           </camera>
+        </sensor>
+      </gazebo>
+    </xacro:if>
+
+    <xacro:if value="${'$(arg gz_lidar)' == 'true'}">
+      <link name="lidar_link"/>
+      <joint name="lidar_joint" type="fixed">
+        <parent link="base_footprint"/>
+        <child link="lidar_link"/>
+        <origin xyz="$(arg gz_lidar_xyz)" rpy="$(arg gz_lidar_rpy)"/>
+      </joint>
+      <gazebo reference="lidar_link">
+        <sensor name="lidar" type="gpu_lidar">
+          <always_on>true</always_on>
+          <update_rate>$(arg gz_lidar_rate)</update_rate>
+          <visualize>false</visualize>
+          <topic>/scan</topic>
+          <gz_frame_id>lidar_link</gz_frame_id>
+          <lidar>
+            <scan>
+              <horizontal>
+                <samples>$(arg gz_lidar_samples)</samples>
+                <resolution>1</resolution>
+                <min_angle>$(arg gz_lidar_min_angle)</min_angle>
+                <max_angle>$(arg gz_lidar_max_angle)</max_angle>
+              </horizontal>
+            </scan>
+            <range>
+              <min>$(arg gz_lidar_min)</min>
+              <max>$(arg gz_lidar_max)</max>
+              <resolution>0.01</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0.0</mean>
+              <stddev>$(arg gz_lidar_noise)</stddev>
+            </noise>
+          </lidar>
         </sensor>
       </gazebo>
     </xacro:if>

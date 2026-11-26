@@ -32,7 +32,7 @@ names, frames and home pose drive everything), `world`, `wall_scene`/`wall_id`/`
 the sensor `ft_sensor_tcp`), `payload_mass_kg` (initial payload for the conditioner, 0: calibrate),
 `ft_filter` (JTAC `ft_sensor.filter_coefficient`), `move_group` (also start MoveIt for planning, hardware `jtac_mock`),
 `jtac_position_only` (JTAC claims only the position command interface, see the manager pass),
-`base_motion`, `rgb_camera` (+ `rgb_camera_pose`, `rgb_camera_size`, `rgb_camera_rate_hz`), `rgb_camera_frame` (`base` | `world`), `arm_meshes` (default `true`) and `depth_sensor` (+ `depth_sensor_pose`, `depth_sensor_noise_m`, `depth_sensor_rate_hz`; the sensors are off by default, see
+`base_motion`, `rgb_camera` (+ `rgb_camera_pose`, `rgb_camera_size`, `rgb_camera_rate_hz`), `rgb_camera_frame` (`base` | `world`), `arm_meshes` (default `true`) and `lidar` (+ `lidar_pose` and the `lidar_*` arguments), `depth_sensor` (+ `depth_sensor_pose`, `depth_sensor_noise_m`, `depth_sensor_rate_hz`; the sensors are off by default, see
 below). Several containers on one Docker bridge share DDS
 multicast: give each simulation its own `ROS_DOMAIN_ID` (or `ROS_LOCALHOST_ONLY=1`), otherwise
 another stack's `/robot_description` can reach the gz controller manager.
@@ -137,6 +137,21 @@ in frame `depth_sensor_link` (TF from `robot_state_publisher`). The cloud is org
 This is a rendered depth image: it sees every visual in the world (wall, obstacles and the robot's own links), unlike the MuJoCo
 ray cast against scene geoms. Headless rendering works in the `sim-gazebo` image with no display and no GPU: gz prints "Unable to open
 display ... Trying to run in headless mode" and renders in software (about 6144 points per scan at 5 Hz, no problem seen).
+
+## Lidar (`lidar:=true`)
+
+Default `false`: nothing is added. With `true` the description gets `lidar_link` (on `base_footprint` at `lidar_pose`, default
+`0.45 0 0.2 0 0 0`) with a gz-sim `gpu_lidar` (`lidar_angle_min_deg` -135, `lidar_angle_max_deg` 135, `lidar_angle_increment_deg` 0.5, so
+541 samples, `lidar_range_min_m` 0.05, `lidar_range_max_m` 10, `lidar_rate_hz` 10, optional Gaussian `lidar_noise_m`), the launch file adds the
+`Sensors` system to the world and `ros_gz_bridge` publishes `sensor_msgs/LaserScan` on `/scan` in frame `lidar_link` (TF from
+`robot_state_publisher`). Like the depth camera it is rendered, so it sees every visual in the world. Headless works in the
+`sim-gazebo` image with no display and no GPU (ogre2 in software): about 9.9 Hz, 541 rays, nothing else needed. In the empty world the
+sensor on the front face of the base returns `inf` on every ray, so the robot does not hit itself at that mount. No dropout option
+here, and gz prints a harmless warning that `gz_frame_id` is not in the SDF schema (the same as for the depth camera).
+
+`scripts/run_lidar_stop.sh` is the obstacle-stop check: empty world, a 0.3 x 0.6 x 0.6 m box with its face at x = 1.45 m, the base sent 3 m
+ahead through `navigate_to_stand` with `obstacle_scan_topic:=/scan` (`LIDAR_STOP_LIDAR=0` leaves the lidar and the topic off).
+Results are in the changelog. Without the lidar the base hits the box, gz pushes it back and the navigator ends with `NAVIGATION_STUCK`.
 
 ```bash
 bash $(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_depth_wall.sh      # needs wall_detector and coverage_planner too

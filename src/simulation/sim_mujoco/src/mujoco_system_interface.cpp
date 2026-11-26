@@ -133,6 +133,14 @@ CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::Hardware
       sim_->depthConfig().width, sim_->depthConfig().height, sim_->depthConfig().hfov * 57.29578,
       sim_->depthConfig().vfov * 57.29578, sim_->depthConfig().rate_hz, depth_frame_id_.c_str());
   }
+  if (sim_->hasLidar()) {
+    lidar_frame_id_ = param(info_, "lidar_frame_id", "lidar_link");
+    lidar_pub_ = node_->create_publisher<sensor_msgs::msg::LaserScan>("scan", rclcpp::SensorDataQoS());
+    const auto & lc = sim_->lidarConfig();
+    RCLCPP_INFO(kLogger, "Lidar %zu rays, %.0f to %.0f deg, %.2f to %.1f m, %.1f Hz -> scan (frame %s)",
+      sim_->lidarRayCount(), lc.angle_min * 57.29578, lc.angle_max * 57.29578, lc.range_min, lc.range_max,
+      lc.rate_hz, lidar_frame_id_.c_str());
+  }
   if (sim_->hasBase()) {
     odom_frame_id_ = param(info_, "odom_frame_id", "odom");
     cmd_vel_timeout_ = std::stod(param(info_, "cmd_vel_timeout", "0.5"));
@@ -258,6 +266,10 @@ hardware_interface::return_type MujocoSystemInterface::read(
     next_depth_time_ = sim_->time() + 1.0 / sim_->depthConfig().rate_hz;
     publishDepth(stamp);
   }
+  if (sim_->hasLidar() && sim_->time() >= next_lidar_time_) {
+    next_lidar_time_ = sim_->time() + 1.0 / sim_->lidarConfig().rate_hz;
+    publishLidar(stamp);
+  }
   raw_pub_->publish(fill(ft_frame_id_, ft_));
   const Wrench truth = sim_->groundTruthWrench();
   truth_pub_->publish(fill(tcp_frame_id_, truth));
@@ -302,6 +314,23 @@ void MujocoSystemInterface::publishDepth(const rclcpp::Time & stamp)
     std::memcpy(cloud.data.data(), points.data(), points.size() * 12);
   }
   depth_pub_->publish(cloud);
+}
+
+void MujocoSystemInterface::publishLidar(const rclcpp::Time & stamp)
+{
+  const auto & lc = sim_->lidarConfig();
+  sensor_msgs::msg::LaserScan scan;
+  scan.header.stamp = stamp;
+  scan.header.frame_id = lidar_frame_id_;
+  scan.ranges = sim_->lidarScan();
+  scan.angle_min = static_cast<float>(lc.angle_min);
+  scan.angle_increment = static_cast<float>(lc.angle_increment);
+  scan.angle_max = static_cast<float>(lc.angle_min + (scan.ranges.size() - 1) * lc.angle_increment);
+  scan.scan_time = static_cast<float>(1.0 / lc.rate_hz);
+  scan.time_increment = 0.0f;  // all rays are cast at one instant
+  scan.range_min = static_cast<float>(lc.range_min);
+  scan.range_max = static_cast<float>(lc.range_max);
+  lidar_pub_->publish(scan);
 }
 
 void MujocoSystemInterface::publishBase(const rclcpp::Time & stamp)
