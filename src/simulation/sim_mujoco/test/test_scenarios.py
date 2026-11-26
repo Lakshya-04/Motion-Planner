@@ -185,6 +185,15 @@ def test_rviz_knob_exists():
     root = HERE.parent
     launch = (root / 'launch' / 'sim_mujoco.launch.py').read_text()
     assert "DeclareLaunchArgument('rviz', default_value='true'" in launch
-    assert "default_value='mission_overview'" in launch and 'view.launch.py' in launch
+    assert "default_value='sim_overview'" in launch and 'view.launch.py' in launch
     sh = (root / 'scripts' / 'run_multi_stand_pass.sh').read_text()
     assert 'MULTI_STAND_RVIZ' in sh and 'rviz:=false' in sh
+
+
+def test_wall_dock_switch_engages_the_manager_step():
+    sh = (HERE.parent / 'scripts' / 'run_multi_stand_pass.sh').read_text()
+    assert 'wall_dock_after_navigate: true' in sh and 'wall_dock_planned_standoff: true' in sh
+    # the manager yaml gets them only behind the switch, and the node is told which axis faces the wall
+    assert sh.index('WALL_DOCK_YAML=') < sh.index('wall_dock_after_navigate: true') < sh.index('cat > "$OUT/manager.yaml"')
+    assert 'MULTI_STAND_WALL_DOCK:-0}" = 1 ] && WALL_DOCK_YAML=' in sh
+    assert 'facing_rad:=${MULTI_STAND_WALL_DOCK_FACING' in sh

@@ -8,6 +8,7 @@
   ros2 launch sim_gazebo sim.launch.py base_motion:=true                 # planar base on /cmd_vel, /odom, TF odom -> base_footprint
   ros2 launch sim_gazebo sim.launch.py rgb_camera:=true                  # gz colour camera -> /rgb_camera/image
   ros2 launch sim_gazebo sim.launch.py depth_sensor:=true                # gz depth camera -> /depth_sensor/points
+  ros2 launch sim_gazebo sim.launch.py lidar:=true                       # gz gpu_lidar -> /scan (LaserScan)
 
 What starts: gz sim (server only unless gui:=true), robot_state_publisher, the robot spawned from
 the description rendered with hardware:=gazebo from the profile's xacro args, ros_gz_bridge for
@@ -18,6 +19,8 @@ Sensors system, ogre2 renders headless in software),
 plus the broadcaster topic /force_torque_sensor_broadcaster/wrench (frame ft_sensor_link), and the controller spawners. The controller_manager
 lives inside the gz server (gz_ros2_control), not in a separate node.
 """
+import json
+import math
 import os
 import tempfile
 
@@ -124,6 +127,11 @@ def _launch(context):
     base_motion = lc('base_motion') == 'true'
     depth = lc('depth_sensor') == 'true'
     mappings = prof.xacro_mappings(profile, 'gazebo')
+    if lc('position_gain'):
+        # the plugin's own ROS node is called gz_ros_control
+        mappings['gz_extra_params'] = _write_yaml(
+            {'gz_ros_control': {'ros__parameters': {'position_proportional_gain': float(lc('position_gain'))}}},
+            'sim_gz_gain_')
     if base_motion:
         mappings['gz_base_motion'] = 'true'
     if depth:
@@ -133,6 +141,18 @@ def _launch(context):
         mappings.update(gz_depth_sensor='true', gz_depth_xyz=' '.join(map(str, pose[:3])),
                         gz_depth_rpy=' '.join(map(str, pose[3:])), gz_depth_noise=lc('depth_sensor_noise_m'),
                         gz_depth_rate=lc('depth_sensor_rate_hz'))
+    lidar = lc('lidar') == 'true'
+    if lidar:
+        pose = [float(v) for v in lc('lidar_pose').split()]
+        if len(pose) != 6:
+            raise ValueError('lidar_pose needs "x y z roll pitch yaw"')
+        lo, hi = math.radians(float(lc('lidar_angle_min_deg'))), math.radians(float(lc('lidar_angle_max_deg')))
+        step = math.radians(float(lc('lidar_angle_increment_deg')))
+        mappings.update(gz_lidar='true', gz_lidar_xyz=' '.join(map(str, pose[:3])),
+                        gz_lidar_rpy=' '.join(map(str, pose[3:])), gz_lidar_min_angle=repr(lo),
+                        gz_lidar_max_angle=repr(hi), gz_lidar_samples=str(int((hi - lo) / step + 1e-3) + 1),
+                        gz_lidar_min=lc('lidar_range_min_m'), gz_lidar_max=lc('lidar_range_max_m'),
+                        gz_lidar_rate=lc('lidar_rate_hz'), gz_lidar_noise=lc('lidar_noise_m'))
     rgb = lc('rgb_camera') == 'true'
     world_camera = ''
     if rgb:
@@ -154,11 +174,18 @@ def _launch(context):
         os.path.join(desc_pkg, 'urdf', 'mobile_manipulator.urdf.xacro'), mappings=mappings).toxml()
 
     world = lc('world') or os.path.join(pkg, 'worlds', 'empty.sdf')
+    rviz_world_wall = ''
     if lc('wall_scene'):
         world = os.path.join(tempfile.mkdtemp(prefix='sim_gazebo_world_'), 'wall.sdf')
-        wall_world.generate_world(lc('wall_scene'), world, wall_id=int(lc('wall_id')),
-                                  standoff=float(lc('standoff')))
-    if depth or rgb:
+        shapes = wall_world.generate_world(lc('wall_scene'), world, wall_id=int(lc('wall_id')),
+                                           standoff=float(lc('standoff')))
+        if os.path.splitext(lc('wall_scene'))[1].lower() == '.json':
+            # RViz must draw the wall where the world put it (the scene file is in the as-mapped frame: plane x = 2 for the
+            # smoke wall, the world's is `standoff` in front of the base), so write the placed wall for mp_viz_scene
+            rviz_world_wall = os.path.join(os.path.dirname(world), 'rviz_world_wall.json')
+            with open(rviz_world_wall, 'w') as f:
+                json.dump(wall_world.world_wall_scene(shapes, int(lc('wall_id'))), f, indent=2)
+    if depth or rgb or lidar:
         # the render sensors need the Sensors system in the world (ogre2; no display: gz falls back to headless)
         with open(world) as f:
             sdf = f.read()
@@ -197,6 +224,8 @@ def _launch(context):
         remaps.append(('/rgb_camera', '/rgb_camera/image'))
     if depth:
         bridged.append('/depth_sensor/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked')
+    if lidar:
+        bridged.append('/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan')
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge', output='screen',
                   arguments=bridged, remappings=remaps,
                   parameters=[{'use_sim_time': True}])
@@ -207,6 +236,24 @@ def _launch(context):
                               'world_frame': 'odom' if base_motion else 'world'}])
 
     actions = [gz, rsp, bridge, truth, spawn]
+    # the same RViz window as the MuJoCo sim (mp_rviz view.launch.py); on by default, skipped without a display or when
+    # mp_rviz is not installed, rviz:=false opts out
+    if lc('rviz').lower() in ('1', 'true', 'yes') and (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+        try:
+            rviz_launch = os.path.join(get_package_share_directory('mp_rviz'), 'launch', 'view.launch.py')
+        except Exception as e:
+            print(f'sim_gazebo: RViz skipped, mp_rviz not found ({e})')
+            rviz_launch = None
+        if rviz_launch:
+            actions.append(IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(rviz_launch),
+                # this sim runs on /clock (robot_state_publisher, bridge and odom use sim time), so RViz must too, or
+                # every TF lookup against wall time fails and nothing shows
+                launch_arguments={'profile': lc('rviz_profile'), 'use_sim_time': 'true',
+                                  'markers': 'true', 'scene': lc('rviz_scene'), 'fixed_frame': 'odom',
+                                  'scene_frame': 'odom', 'plan_file': lc('rviz_plan_file'),
+                                  'wall_scene_json': lc('rviz_wall_scene') or rviz_world_wall or lc('wall_scene'),
+                                  'moveit_profile': lc('profile')}.items()))
     if lc('arm_meshes') == 'true':
         # gz resolves the description's model://ur_description/... URIs through GZ_SIM_RESOURCE_PATH; without it the UR links
         # have no visual and no collision geometry in gz (only the primitives of the lift, tool and sensor link exist)
@@ -264,6 +311,11 @@ def generate_launch_description():
                               description='wall_scene.json / SceneModel YAML; generates the world'),
         DeclareLaunchArgument('wall_id', default_value='0'),
         DeclareLaunchArgument('standoff', default_value='0.9', description='wall distance in front of the base (m)'),
+        DeclareLaunchArgument('rviz', default_value='true', description='open the same RViz window as the MuJoCo sim (mp_rviz); skipped without a display, rviz:=false opts out'),
+        DeclareLaunchArgument('rviz_profile', default_value='sim_overview', description='mp_rviz profiles/<name>.rviz'),
+        DeclareLaunchArgument('rviz_scene', default_value='true', description='also start mp_viz_scene.py (wall, plan columns, stands)'),
+        DeclareLaunchArgument('rviz_plan_file', default_value='', description='coverage_output.json the manager executes (plan columns)'),
+        DeclareLaunchArgument('rviz_wall_scene', default_value='', description='wall_scene.json for the wall display (default: wall_scene)'),
         DeclareLaunchArgument('gui', default_value='false', description='true opens the gz GUI (server only otherwise)'),
         DeclareLaunchArgument('controller', default_value='jtc', description='jtc | jtac | none'),
         DeclareLaunchArgument('ft_conditioner', default_value='false',
@@ -277,6 +329,9 @@ def generate_launch_description():
                               description='true: JTAC claims only the position command interface (closed gz position '
                                           'loop, slow and soft) instead of position + velocity (open loop on the '
                                           'velocity); the manager pass uses true'),
+        DeclareLaunchArgument('position_gain', default_value='',
+                              description='gz_ros2_control position_proportional_gain in 1/s (empty: the plugin default '
+                                          '0.1, a 10 s time constant; see docs/sim_gazebo.md)'),
         DeclareLaunchArgument('move_group', default_value='false',
                               description='also start move_group (planning only) for the manipulation manager'),
         DeclareLaunchArgument('base_motion', default_value='false',
@@ -291,6 +346,18 @@ def generate_launch_description():
                               description='"x y z roll pitch yaw" of depth_sensor_link in base_footprint (x forward)'),
         DeclareLaunchArgument('depth_sensor_noise_m', default_value='0.0', description='Gaussian range noise std, m'),
         DeclareLaunchArgument('depth_sensor_rate_hz', default_value='5.0', description='depth sensor rate, Hz'),
+        DeclareLaunchArgument('lidar', default_value='false',
+                              description='true: gz gpu_lidar on base_footprint, LaserScan on /scan in frame lidar_link '
+                                          '(needs gz rendering, ogre2); false adds nothing'),
+        DeclareLaunchArgument('lidar_pose', default_value='0.45 0 0.2 0 0 0',
+                              description='"x y z roll pitch yaw" of lidar_link in base_footprint (x forward)'),
+        DeclareLaunchArgument('lidar_angle_min_deg', default_value='-135.0', description='first ray, degrees'),
+        DeclareLaunchArgument('lidar_angle_max_deg', default_value='135.0', description='last ray, degrees'),
+        DeclareLaunchArgument('lidar_angle_increment_deg', default_value='0.5', description='ray spacing, degrees'),
+        DeclareLaunchArgument('lidar_range_min_m', default_value='0.05', description='lidar minimum range, m'),
+        DeclareLaunchArgument('lidar_range_max_m', default_value='10.0', description='lidar maximum range, m'),
+        DeclareLaunchArgument('lidar_rate_hz', default_value='10.0', description='lidar rate, Hz'),
+        DeclareLaunchArgument('lidar_noise_m', default_value='0.0', description='Gaussian range noise std of the lidar, m'),
         DeclareLaunchArgument('arm_meshes', default_value='true',
                               description='true (default): make the UR meshes resolvable in gz (visual AND collision); false: the '
                                           'UR links are invisible and have no collision in gz (the old behaviour)'),

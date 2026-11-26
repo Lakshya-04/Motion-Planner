@@ -6,8 +6,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 
+#include "gravity_core/urdf_loader.hpp"
 #include "pluginlib/class_list_macros.hpp"
 
 namespace sim_mujoco
@@ -114,6 +116,29 @@ CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::Hardware
     RCLCPP_FATAL(kLogger, "%s", e.what());
     return CallbackReturn::ERROR;
   }
+  if (param(info_, "gravity_feedforward", "false") == "true") {
+    try {
+      gravity_ = std::make_unique<gravity_core::GravityModel>(
+        gravity_core::loadUrdf(info_.original_xml, joints));
+      const std::string link = param(info_, "gravity_payload_link", "");
+      if (!link.empty()) {
+        std::istringstream cog(param(info_, "gravity_payload_cog", "0 0 0"));
+        Eigen::Vector3d c = Eigen::Vector3d::Zero();
+        cog >> c[0] >> c[1] >> c[2];
+        gravity_->setPayload(link, std::stod(param(info_, "gravity_payload_mass", "0")), c);
+      }
+    } catch (const std::exception & e) {
+      RCLCPP_FATAL(kLogger, "gravity_feedforward: %s", e.what());
+      return CallbackReturn::ERROR;
+    }
+    gravity_q_.setZero(joints.size());
+    gravity_tau_.setZero(joints.size());
+    if (sim_->hasGravcomp()) {
+      RCLCPP_WARN(kLogger, "gravity_feedforward is on but the MJCF still has gravcomp bodies: "
+        "gravity is compensated twice. Generate with gravcomp=False (launch gravity_comp:=core).");
+    }
+    RCLCPP_INFO(kLogger, "Gravity feed-forward from gravity_core on %zu joints", joints.size());
+  }
   const size_t n = joints.size();
   state_position_.assign(n, 0.0);
   state_velocity_.assign(n, 0.0);
@@ -132,6 +157,14 @@ CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::Hardware
     RCLCPP_INFO(kLogger, "Depth sensor %dx%d, %.0f x %.0f deg, %.1f Hz -> depth_sensor/points (frame %s)",
       sim_->depthConfig().width, sim_->depthConfig().height, sim_->depthConfig().hfov * 57.29578,
       sim_->depthConfig().vfov * 57.29578, sim_->depthConfig().rate_hz, depth_frame_id_.c_str());
+  }
+  if (sim_->hasLidar()) {
+    lidar_frame_id_ = param(info_, "lidar_frame_id", "lidar_link");
+    lidar_pub_ = node_->create_publisher<sensor_msgs::msg::LaserScan>("scan", rclcpp::SensorDataQoS());
+    const auto & lc = sim_->lidarConfig();
+    RCLCPP_INFO(kLogger, "Lidar %zu rays, %.0f to %.0f deg, %.2f to %.1f m, %.1f Hz -> scan (frame %s)",
+      sim_->lidarRayCount(), lc.angle_min * 57.29578, lc.angle_max * 57.29578, lc.range_min, lc.range_max,
+      lc.rate_hz, lidar_frame_id_.c_str());
   }
   if (sim_->hasBase()) {
     odom_frame_id_ = param(info_, "odom_frame_id", "odom");
@@ -258,6 +291,10 @@ hardware_interface::return_type MujocoSystemInterface::read(
     next_depth_time_ = sim_->time() + 1.0 / sim_->depthConfig().rate_hz;
     publishDepth(stamp);
   }
+  if (sim_->hasLidar() && sim_->time() >= next_lidar_time_) {
+    next_lidar_time_ = sim_->time() + 1.0 / sim_->lidarConfig().rate_hz;
+    publishLidar(stamp);
+  }
   raw_pub_->publish(fill(ft_frame_id_, ft_));
   const Wrench truth = sim_->groundTruthWrench();
   truth_pub_->publish(fill(tcp_frame_id_, truth));
@@ -304,6 +341,23 @@ void MujocoSystemInterface::publishDepth(const rclcpp::Time & stamp)
   depth_pub_->publish(cloud);
 }
 
+void MujocoSystemInterface::publishLidar(const rclcpp::Time & stamp)
+{
+  const auto & lc = sim_->lidarConfig();
+  sensor_msgs::msg::LaserScan scan;
+  scan.header.stamp = stamp;
+  scan.header.frame_id = lidar_frame_id_;
+  scan.ranges = sim_->lidarScan();
+  scan.angle_min = static_cast<float>(lc.angle_min);
+  scan.angle_increment = static_cast<float>(lc.angle_increment);
+  scan.angle_max = static_cast<float>(lc.angle_min + (scan.ranges.size() - 1) * lc.angle_increment);
+  scan.scan_time = static_cast<float>(1.0 / lc.rate_hz);
+  scan.time_increment = 0.0f;  // all rays are cast at one instant
+  scan.range_min = static_cast<float>(lc.range_min);
+  scan.range_max = static_cast<float>(lc.range_max);
+  lidar_pub_->publish(scan);
+}
+
 void MujocoSystemInterface::publishBase(const rclcpp::Time & stamp)
 {
   const auto p = sim_->basePose();
@@ -332,6 +386,20 @@ hardware_interface::return_type MujocoSystemInterface::write(
         noise_.cmd_vel_m[i].step(command_velocity_[i]));
     } else {
       sim_->setCommand(i, command_position_[i], command_velocity_[i]);
+    }
+  }
+  if (gravity_) {
+    // Measured positions, like a real arm's feed-forward; skipped until the first read() filled them.
+    bool finite = true;
+    for (size_t i = 0; i < state_position_.size(); ++i) {
+      gravity_q_[i] = state_position_[i];
+      finite = finite && std::isfinite(gravity_q_[i]);
+    }
+    if (finite) {
+      gravity_->compute(gravity_q_, gravity_tau_);
+      for (size_t i = 0; i < state_position_.size(); ++i) {
+        sim_->setFeedforward(i, gravity_tau_[i]);
+      }
     }
   }
   if (sim_->hasBase()) {

@@ -29,7 +29,7 @@ install(PROGRAMS scripts/generate_mjcf scripts/smoke_test.py scripts/contact_tes
   DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/run_spray_pass.sh DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/depth_wall_test.py scripts/run_depth_wall.sh scripts/live_octomap_test.py scripts/run_live_octomap.sh
-  scripts/wall_docking_test.py scripts/run_wall_docking.sh DESTINATION lib/${PROJECT_NAME})
+  scripts/wall_docking_test.py scripts/run_wall_docking.sh scripts/lidar_stop_test.py scripts/run_lidar_stop.sh DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch test/data DESTINATION share/${PROJECT_NAME})
 
 if(MUJOCO_INCLUDE_DIR AND MUJOCO_LIBRARY)
@@ -40,6 +40,7 @@ if(MUJOCO_INCLUDE_DIR AND MUJOCO_LIBRARY)
   find_package(rclcpp_lifecycle REQUIRED)
   find_package(geometry_msgs REQUIRED)
   find_package(sensor_msgs REQUIRED)
+  find_package(gravity_core REQUIRED)
 
   # Ship the MuJoCo shared library next to the plugin so the install tree is self-contained.
   get_filename_component(MUJOCO_LIBRARY_REAL "${MUJOCO_LIBRARY}" REALPATH)
@@ -64,6 +65,7 @@ if(MUJOCO_INCLUDE_DIR AND MUJOCO_LIBRARY)
   target_link_libraries(sim_mujoco_hardware PUBLIC sim_mujoco_core)
   ament_target_dependencies(sim_mujoco_hardware PUBLIC
     hardware_interface pluginlib rclcpp rclcpp_lifecycle geometry_msgs sensor_msgs)
+  target_link_libraries(sim_mujoco_hardware PUBLIC gravity_core::gravity_core)
   set_target_properties(sim_mujoco_hardware PROPERTIES INSTALL_RPATH "$ORIGIN")
 
   pluginlib_export_plugin_description_file(hardware_interface sim_mujoco.xml)

@@ -493,6 +493,7 @@ public:
     wall_dock_action_ = this->declare_parameter<std::string>("wall_dock_action", "wall_dock");
     wall_dock_standoff_m_ = this->declare_parameter<double>("wall_dock_standoff_m", 0.30);
     wall_dock_timeout_s_ = this->declare_parameter<double>("wall_dock_timeout_s", 0.0);
+    wall_dock_planned_standoff_ = this->declare_parameter<bool>("wall_dock_planned_standoff", false);
     wall_dock_cfg_.max_attempts = this->declare_parameter<int>("wall_dock_max_attempts", wall_dock_cfg_.max_attempts);
     wall_dock_cfg_.standoff_tol_m = this->declare_parameter<double>("wall_dock_standoff_tol_m", wall_dock_cfg_.standoff_tol_m);
     wall_dock_cfg_.yaw_tol_rad = this->declare_parameter<double>("wall_dock_yaw_tol_rad", wall_dock_cfg_.yaw_tol_rad);
@@ -1163,6 +1164,7 @@ private:
     for (const auto & c : sel) {
       sizes.push_back(c.poses.size());
     }
+    const StanceWall plan_wall = stanceWall(sel);
     const auto assignment = assignColumnsToStands(sizes, stand_targets);
     // Stands that run no column are not visited.
     std::vector<StanceStand> visit;
@@ -1219,7 +1221,7 @@ private:
             ok = gateStand(visit[s], msg, gate_abort);
           }
           if (ok && wall_dock_enabled_) {
-            ok = wallDockStand(s, msg, gate_abort);
+            ok = wallDockStand(s, plannedWallDockStandoff(visit[s], plan_wall), msg, gate_abort);
           }
         }
         if (stop()) {
@@ -1529,15 +1531,16 @@ private:
   /// Wall dock step after an arrival (opt-in): sends WallDock goals, judges the measured wall gap and yaw error with
   /// the stand-check logic (core/wall_dock_gate.hpp) and keeps the outcome for the verify result. False with `message`
   /// when the arm must not move; `abort` = true when the stand is given up.
-  bool wallDockStand(size_t stand, std::string & message, bool & abort)
+  bool wallDockStand(size_t stand, double standoff_m, std::string & message, bool & abort)
   {
     struct Port final : WallDockPort
     {
-      explicit Port(ManipulationManagerNode & n) : node(n) {}
-      WallDockMeasured dock() override {return node.sendWallDock();}
+      Port(ManipulationManagerNode & n, double s) : node(n), standoff_m(s) {}
+      WallDockMeasured dock() override {return node.sendWallDock(standoff_m);}
       bool stopRequested() const override {return node.stop();}
       ManipulationManagerNode & node;
-    } port(*this);
+      double standoff_m;
+    } port{*this, standoff_m};
     const auto o = runWallDock(port, wall_dock_cfg_);
     verify_wall_dock_[stand] = o;
     if (o.ok) {
@@ -1554,8 +1557,17 @@ private:
     return o.ok;
   }
 
+  /// The standoff of the WallDock goal: the stand's planned one (arm base to the plan's wall) or the fixed parameter.
+  double plannedWallDockStandoff(const StanceStand & stand, const StanceWall & wall) const
+  {
+    if (!wall_dock_planned_standoff_) {
+      return wall_dock_standoff_m_;
+    }
+    return plannedStandoff(wall.wall_x, wall.wall_y, stand.x, stand.y, wall_dir_.d[0], wall_dir_.d[1]);
+  }
+
   /// One WallDock goal, waited for; `docked` only when the action succeeded.
-  WallDockMeasured sendWallDock()
+  WallDockMeasured sendWallDock(double standoff_m)
   {
     WallDockMeasured m;
     if (!wall_dock_client_->wait_for_action_server(std::chrono::seconds(5))) {
@@ -1563,7 +1575,7 @@ private:
       return m;
     }
     WallDock::Goal goal;
-    goal.standoff_m = wall_dock_standoff_m_;
+    goal.standoff_m = standoff_m;
     goal.timeout_s = wall_dock_timeout_s_;
     auto outcome = std::make_shared<rclcpp_action::ClientGoalHandle<WallDock>::WrappedResult>();
     auto done = std::make_shared<bool>(false);
@@ -3193,6 +3205,7 @@ private:
   std::string wall_dock_action_{"wall_dock"};
   double wall_dock_standoff_m_{0.30};
   double wall_dock_timeout_s_{0.0};
+  bool wall_dock_planned_standoff_{false};
   WallDockConfig wall_dock_cfg_;
   std::map<size_t, WallDockOutcome> verify_wall_dock_;   // stand -> last wall dock outcome of the run
   rclcpp_action::Client<WallDock>::SharedPtr wall_dock_client_;

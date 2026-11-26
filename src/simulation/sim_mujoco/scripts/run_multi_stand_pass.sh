@@ -31,16 +31,17 @@
 #   MULTI_STAND_PAINT=1            live done / not done wall paint (RViz topic /mp_viz/coverage_paint; _PAINT_FEED defaults to mujoco, none = RViz only; default off;
 #                                  the MuJoCo viewer draws it when the sim is launched with viewer:=true in MULTI_STAND_LAUNCH_ARGS)
 #   MULTI_STAND_RVIZ=0             opt out of RViz; the sim launch opens the same mp_rviz window as the Gazebo sim by default (rviz:=true; skipped
-#                                  without DISPLAY). MULTI_STAND_RVIZ_PROFILE (default mission_overview); wall time, use_sim_time false
+#                                  without DISPLAY). MULTI_STAND_RVIZ_PROFILE (default sim_overview); wall time, use_sim_time false
 #   MULTI_STAND_FILM=1             also store the joint states for render_run.py (launch with out_dir:=... in MULTI_STAND_LAUNCH_ARGS)
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
 #                                  configuration docked at the wall, [] chains the seeds from the previous dock
 #   MULTI_STAND_DOCK_WRAP_JOINTS='[2]'  dock goal joints wrapped to the stow winding (manager `dock_wrap_joints_to_travel`; unset = off)
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
-#   MULTI_STAND_WALL_DOCK=1        also start wall_docking_node (action `wall_dock`) and latch the pass's wall scene, with its frame set to
-#                                  odom, on /wall_detector/wall_scene (no wall_detector runs in this pass). Default 0 = off. Only the
-#                                  server is added: the manager does not send WallDock goals yet, so send one by hand
-#                                  (`ros2 action send_goal /wall_dock stand_navigator_msgs/action/WallDock "{standoff_m: 0.55}"`)
+#   MULTI_STAND_WALL_DOCK=1        also start wall_docking_node (action `wall_dock`), latch the pass's wall scene (frame set to odom) on
+#                                  /wall_detector/wall_scene (no wall_detector runs in this pass) and turn on the manager's
+#                                  wall_dock_after_navigate with the stand's planned standoff, so every arrival is followed by a WallDock
+#                                  goal. Default 0 = off. MULTI_STAND_WALL_DOCK_FACING = the base axis that faces the wall in rad
+#                                  (default -1.5708, UR10e: the stand yaw is 1.571 and the wall is on +x)
 #   MULTI_STAND_PATH_PLANNER=1     give stand_navigator the pass's wall scene (wall_scene_json) and use_path_planner:=true; default 0 = the
 #                                  straight line unless it is blocked (docs/stand_navigation.md "Path planning")
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
@@ -149,7 +150,7 @@ trap stop_all EXIT
 
 RVIZ_ARGS=()
 [ "${MULTI_STAND_RVIZ:-1}" = 0 ] && RVIZ_ARGS=(rviz:=false)
-[ "${MULTI_STAND_RVIZ:-1}" != 0 ] && RVIZ_ARGS=(rviz_profile:=${MULTI_STAND_RVIZ_PROFILE:-mission_overview})
+[ "${MULTI_STAND_RVIZ:-1}" != 0 ] && RVIZ_ARGS=(rviz_profile:=${MULTI_STAND_RVIZ_PROFILE:-sim_overview} rviz_plan_file:=$OUT/coverage_output.json)
 start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$STAND_PROFILE controller:=jtac \
   conditioner:=true payload_mass_kg:=0.5 move_group:=true base_motion:=true scene:=$OUT/data/smoke_wall_scene.json \
   ${RVIZ_ARGS[@]+"${RVIZ_ARGS[@]}"} ${MULTI_STAND_LAUNCH_ARGS:-}
@@ -165,7 +166,8 @@ if [ "${MULTI_STAND_PATH_PLANNER:-0}" = 1 ]; then
 fi
 start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE ${NAV_ARGS[@]+"${NAV_ARGS[@]}"}
 if [ "${MULTI_STAND_WALL_DOCK:-0}" = 1 ]; then
-  start wall_docking ros2 run stand_navigator wall_docking_node --ros-args -p base_profile:=$PROFILE
+  start wall_docking ros2 run stand_navigator wall_docking_node --ros-args -p base_profile:=$PROFILE \
+    -p facing_rad:=${MULTI_STAND_WALL_DOCK_FACING:--1.5708}
   python3 - "$OUT/data/wall_pass_coverage_scene.json" "$OUT/wall_scene_odom.yaml" <<'PYEOF'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -225,6 +227,11 @@ if [ -n "${MANAGER_PASS_CUROBO_WORLD:-}" ]; then
   CUROBO_ARRIVAL="; ros2 run curobo_planner curobo_world_loader --ros-args -p point_cloud_path:=$OUT/data/walls_sim.pcd -p frame_id:=base_link -p source_frame:=odom >> $OUT/curobo_world.log 2>&1"
 fi
 
+WALL_DOCK_YAML=
+[ "${MULTI_STAND_WALL_DOCK:-0}" = 1 ] && WALL_DOCK_YAML="    wall_dock_after_navigate: true
+    wall_dock_planned_standoff: true
+    verify_result_path: $OUT/verify_result.json
+"
 cat > "$OUT/manager.yaml" <<YAML
 manipulation_manager:
   ros__parameters:
@@ -256,7 +263,7 @@ ${MULTI_STAND_DOCK_WRAP_JOINTS:+    dock_wrap_joints_to_travel: $MULTI_STAND_DOC
     dock_standoff_m: ${MULTI_STAND_STANDOFF:-0.04}
     contact_y_overshoot_m: ${MULTI_STAND_PRESS:-0.0015}
     target_force_n: ${MULTI_STAND_TARGET:-10.0}
-    base_check: "off"
+${WALL_DOCK_YAML}    base_check: "off"
     base_check_service: /reachability_node/plan_stands
     base_check_lift_max_m: $MP_LIFT_STROKE
     base_check_arm_mount_z_m: $MP_ARM_MOUNT_Z

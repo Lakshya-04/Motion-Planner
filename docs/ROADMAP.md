@@ -179,7 +179,7 @@ without code, when we can implement it.
 - [ ] MuJoCo Warp (Apache-2.0, active) for parallel gain sweeps (released with MuJoCo 3.5; small batches on a 4 GB GPU, not verified with MuJoCo 4); avoid Isaac Lab / Genesis on this machine
 - [ ] Contact and smoke scripts run by `colcon test` or one documented command (today: scripts the author ran)
 - [x] Sim-vs-real differences document (`docs/sim_vs_real.md`; a table, not a measurement against hardware)
-- [ ] `sim_isaac`: stub only; deferred (Isaac Sim does not run on this machine)
+- [ ] `sim_isaac`: optional add-on, first slice only. Isaac Sim 5.1.0 runs headless on the RTX 5080 in a sibling container; the UR10e-on-lift USD, a ROS 2 bridge runner and a smoke test (clock, joint states, one-joint command) pass (`docs/sim_isaac.md`). Not done: ros2_control `hardware:=isaac`, wall world, F/T, cameras, base motion, manager pass, CI
 
 ## 11. The end-to-end gap (the main remaining work)
 
@@ -307,7 +307,7 @@ here were dropped. Placement is the milestone that should carry it.
 - [~] One verify-result contract: `VerifyResult` (passed, coverage percent, failed segment ids, report path, source) from execution telemetry (`verifyFromTelemetry`, `score_run --result-out`), gtests; segments are time windows, coverage is not attributed to segments. The manager writes it at the end of a task when `verify_result_path` is set (`core/mission_verify.hpp`, gtests): `source: manager`, `coverage_percent` is columns done / asked, not area (the manager has no tool-position telemetry or wall model), failed segments = partial or failed columns plus columns over `verify_max_peak_n`; not run in a sim. Not done: v2 from perception, geometric coverage from the manager (it would need the recording `score_run` reads)
 - [ ] Post-work verification from perception: severity raster on the wall plane, 0-100 score, initial vs final pair, targeted re-work from the score map (ship end to end or not at all)
 - [ ] Observability bundle: per-goal trajectory CSV, force trace, BT log, per-mission rosbag; test-only wrench-inject topic
-- [ ] Golden exact-waypoint tests for the coverage planner before any algorithm change; table of mode-derived coverage parameters (the content of the shipped tool profiles); tool-profile loader invariants as hard errors
+- [~] Golden exact-waypoint tests for the coverage planner before any algorithm change (golden half done, host-tested only: `golden_waypoints_test`); still open: table of mode-derived coverage parameters (the content of the shipped tool profiles); tool-profile loader invariants as hard errors
 
 **Stationing (M3)**
 - [ ] Re-perceive at the station and use the achieved pose (never the commanded one) as the work frame; log arrival error; reject degenerate planes (mean residual above 0.35 m); reach-derived station pitch and a tolerance-budget doc

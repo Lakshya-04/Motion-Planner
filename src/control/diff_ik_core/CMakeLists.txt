@@ -16,6 +16,7 @@ add_library(${PROJECT_NAME}
   src/null_space_costs.cpp
   src/diff_ik.cpp
   src/pose_error.cpp
+  src/tool_correction.cpp
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -54,6 +55,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(pose_error_test test/pose_error_test.cpp)
   target_link_libraries(pose_error_test ${PROJECT_NAME})
+
+  ament_add_gtest(tool_correction_test test/tool_correction_test.cpp)
+  target_link_libraries(tool_correction_test ${PROJECT_NAME})
 
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)

@@ -120,13 +120,14 @@ fails (no fresh plane, timeout) is retried inside the same budget and then count
 retry applies). The log line is "wall dock: standoff error .. mm, yaw error .. rad", and with `verify_result_path` the result carries a
 `wall_dock` list (per stand: `ok`, `abort`, `attempts`, `wall_gap_error_m`, `wall_yaw_error_rad`, `message`). The action has no tolerance
 fields of its own (the dock node's `tolerance_standoff_m` and `tolerance_yaw_rad` decide when it reports success); the two tolerances below are the manager's.
-Host gtest: `wall_dock_gate_test`; not built in the ROS image and not run in a sim.
+Host gtest: `wall_dock_gate_test`. The node's `facing_rad` has to be the base axis that faces the wall.
 
 | Parameter | Default | Meaning |
 |---|---|---|
 | `wall_dock_after_navigate` | false | Enables the step. |
 | `wall_dock_action` | "wall_dock" | Name of the WallDock action. |
 | `wall_dock_standoff_m` | 0.30 | Goal standoff from the reference point to the plane. |
+| `wall_dock_planned_standoff` | false | Use each stand's planned standoff (arm base to the plan's wall) instead of `wall_dock_standoff_m`, so the dock does not pull the base off the stand. |
 | `wall_dock_timeout_s` | 0.0 | Goal timeout; 0 uses the dock node's default. |
 | `wall_dock_max_attempts` | 2 | WallDock goals sent per stand arrival at most (minimum 1). |
 | `wall_dock_standoff_tol_m` | 0.02 | Largest accepted absolute standoff error. |
