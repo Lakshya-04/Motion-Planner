@@ -8,6 +8,7 @@ Reads:   coverage_topic (coverage_planner_msgs/CoveragePlan; default /wall_cover
          the top-level path/segments) read at start and on ~/refresh; with it no CoveragePlan topic is needed. Set
          frame_id to the frame the file's poses are meant in (the manager's world_frame, e.g. odom), the file's own
          frame_id (e.g. base_link) is only right while the base is at that frame's origin.
+         plan_file and wall_scene_json are re-read when their modification time changes (checked every 2 s).
 Writes:  /mp_viz/plan_columns (MarkerArray, one LINE_STRIP per segment; connectors grey),
          /mp_viz/stands (MarkerArray, per stand an ARROW, a footprint LINE_STRIP and a TEXT_VIEW_FACING),
          /mp_viz/reach_slice (MarkerArray; reserved: reachability_msgs has no map/slice service, nothing is published).
@@ -17,6 +18,8 @@ Writes:  /mp_viz/plan_columns (MarkerArray, one LINE_STRIP per segment; connecto
          pose, plus a text with the count). Computed on ~/refresh with reachability_msgs/IsReachable, one async request
          per pose (at most max_reach_targets, evenly sampled), for a base at base_x/base_y/base_yaw (frame_id frame) and
          the arm base at height arm_base_z (+ arm_dx/arm_dy in the base frame). ONE lift height only.
+         /mp_viz/stand_columns (MarkerArray: per stand a POINTS marker in that stand's colour at the plan poses
+         PlanStands assigned to it = the columns reachable from that stand, plus a text 'stand i: n poses').
          /mp_viz/transitions (MarkerArray: grey arrows from the end of each stroke to the start of the next, in execution
          order, plus the visiting number at the start of each stroke group; drawn from start_index/end_index).
 All topics are transient_local so a late RViz gets the last state.
@@ -26,6 +29,7 @@ from the first target: its point, and the opposite of its tool z axis); max_targ
 import json
 import os
 import sys
+import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -70,6 +74,8 @@ class MpVizScene(Node):
         self.plan_file = p('plan_file', '').value
         self.wall_scene_json = p('wall_scene_json', '').value
         self.wall_id = int(p('wall_id', 0).value)
+        self.wall_mjcf = p('wall_mjcf', '').value   # MuJoCo MJCF whose geom wall_geom is the wall (wins over wall_scene_json)
+        self.wall_geom = p('wall_geom', 'wall_0').value
         self.strip_width = float(p('strip_width', 0.1).value)
         is_reach_srv = p('is_reachable_service', '/reachability/is_reachable').value
         self.max_reach = int(p('max_reach_targets', 150).value)
@@ -86,6 +92,7 @@ class MpVizScene(Node):
         self.reach_pub.publish(MarkerArray(markers=[Marker(action=Marker.DELETEALL)]))
         self.trans_pub = self.create_publisher(MarkerArray, '/mp_viz/transitions', qos)
         self.wall_pub = self.create_publisher(MarkerArray, '/mp_viz/wall', qos)
+        self.stand_cols_pub = self.create_publisher(MarkerArray, '/mp_viz/stand_columns', qos)
         self.reachable_pub = self.create_publisher(MarkerArray, '/mp_viz/reachable', qos)
         self.reach_client = self.create_client(IsReachable, is_reach_srv) if IsReachable is not None else None
         self._reach_gen = 0
@@ -102,17 +109,36 @@ class MpVizScene(Node):
         self._publish_wall()
         if self.plan_file:
             self._load_file()
+        # the plan / wall files are often written after this node started (the coverage run): reload on change
+        self._mtimes = {}
+        self.create_timer(2.0, self._watch_files)
+
+    def _watch_files(self):
+        for path, fn in ((self.plan_file, self._load_file), (self.wall_scene_json, self._publish_wall)):
+            if not path:
+                continue
+            try:
+                m = os.stat(path).st_mtime
+            except OSError:
+                continue
+            if self._mtimes.get(path) != m:
+                self._mtimes[path] = m
+                fn()
 
     # wall
     def _publish_wall(self):
-        if not self.wall_scene_json:
+        if not (self.wall_scene_json or self.wall_mjcf):
             return False
         try:
-            with open(self.wall_scene_json) as f:
-                scene = json.load(f)
-            wall = logic.wall_from_scene(scene, self.wall_id)
-        except (OSError, ValueError, KeyError) as e:
-            self.get_logger().error('wall_scene_json %s: %s' % (self.wall_scene_json, e))
+            if self.wall_mjcf:
+                scene = {}
+                wall = logic.wall_from_mjcf(self.wall_mjcf, self.wall_geom)
+            else:
+                with open(self.wall_scene_json) as f:
+                    scene = json.load(f)
+                wall = logic.wall_from_scene(scene, self.wall_id)
+        except (OSError, ValueError, KeyError, ET.ParseError) as e:
+            self.get_logger().error('wall %s: %s' % (self.wall_mjcf or self.wall_scene_json, e))
             return False
         self._wall = wall
         frame = self.frame or scene.get('frame_id') or 'map'
@@ -132,15 +158,27 @@ class MpVizScene(Node):
         t = Marker(type=Marker.TEXT_VIEW_FACING, action=Marker.ADD, ns='wall_text', id=0)
         t.header.frame_id = frame
         c = logic.wall_corners(wall)
+        # above the wall's top-left corner (smallest y), clear of the robot and the plan
         t.pose.position.x, t.pose.position.y, t.pose.position.z = (
-            sum(p[k] for p in c) / 4.0 for k in range(3))
+            min(p[0] for p in c), min(p[1] for p in c), max(p[2] for p in c) + 0.12)
         t.pose.orientation.w = 1.0
-        t.scale.z = 0.15
+        t.scale.z = 0.08
         t.color = _color((1.0, 1.0, 1.0))
-        t.text = 'wall %.1f x %.1f m = %.1f m2' % (
+        t.text = 'wall %.1f x %.1f m = %.1f m2, face %.3f m' % (
             abs(wall['u_range_m'][1] - wall['u_range_m'][0]), abs(wall['v_range_m'][1] - wall['v_range_m'][0]),
-            logic.wall_area_m2(wall))
+            logic.wall_area_m2(wall), logic.wall_plane_distance(wall))
         arr.markers += [q, o, t]
+        back = logic.wall_back_outline(wall)
+        if back:   # the world wall's thickness: back face outline plus the four edges
+            b = Marker(type=Marker.LINE_LIST, action=Marker.ADD, ns='wall_back', id=0)
+            b.header.frame_id = frame
+            b.pose.orientation.w = 1.0
+            b.scale.x = 0.01
+            b.color = _color((0.3, 0.55, 0.95), 0.6)
+            front = logic.wall_outline(wall)
+            segs = list(zip(back, back[1:])) + list(zip(front[:4], back[:4]))
+            b.points = [Point(x=x, y=y, z=z) for a, c in segs for x, y, z in (a, c)]
+            arr.markers.append(b)
         self.wall_pub.publish(arr)
         self.get_logger().info('wall layer: %s' % t.text)
         return True
@@ -211,7 +249,7 @@ class MpVizScene(Node):
         t.pose.position.x, t.pose.position.y, t.pose.position.z = (
             self.base[0], self.base[1], self.arm_base_z + 1.2)
         t.pose.orientation.w = 1.0
-        t.scale.z = 0.15
+        t.scale.z = 0.09
         t.color = _color((1.0, 1.0, 1.0))
         t.text = 'base (%.2f, %.2f, yaw %.2f): %s' % (*self.base, logic.reach_summary(flags))
         arr.markers.append(t)
@@ -263,7 +301,7 @@ class MpVizScene(Node):
             m = Marker(type=Marker.LINE_STRIP, action=Marker.ADD, ns='plan_columns', id=i)
             m.header.frame_id = frame
             m.pose.orientation.w = 1.0
-            m.scale.x = 0.01 if ln['connector'] else 0.025
+            m.scale.x = 0.01 if ln['connector'] else 0.03
             m.color = _color(ln['rgb'], 0.5 if ln['connector'] else 1.0)
             m.points = [Point(x=x, y=y, z=z) for x, y, z in ln['points']]
             arr.markers.append(m)
@@ -292,7 +330,7 @@ class MpVizScene(Node):
             t.pose.position.x, t.pose.position.y, t.pose.position.z = (
                 float(nn['at'][0]), float(nn['at'][1]), float(nn['at'][2]) + 0.06)
             t.pose.orientation.w = 1.0
-            t.scale.z = 0.07
+            t.scale.z = 0.06
             t.color = _color((1.0, 1.0, 0.4))
             t.text = str(nn['n'])
             arr.markers.append(t)
@@ -320,6 +358,7 @@ class MpVizScene(Node):
         wn = self.wall_normal if len(self.wall_normal) == 3 else list(logic.wall_normal_from_tool(q))
         req.wall_point = Point(x=float(wp[0]), y=float(wp[1]), z=float(wp[2]))
         req.wall_normal.x, req.wall_normal.y, req.wall_normal.z = (float(c) for c in wn)
+        self._stand_poses = poses
         fut = self.client.call_async(req)
         fut.add_done_callback(self._on_stands)
         res.success, res.message = True, 'PlanStands requested with %d targets; %s' % (len(poses), reach_msg)
@@ -355,12 +394,38 @@ class MpVizScene(Node):
             t = hdr(Marker(type=Marker.TEXT_VIEW_FACING, ns='stand_text', **base))
             t.pose.position.x, t.pose.position.y, t.pose.position.z = s.x, s.y, 0.4
             t.pose.orientation.w = 1.0
-            t.scale.z = 0.15
+            t.scale.z = 0.09
             t.color = _color((1.0, 1.0, 1.0))
             t.text = sp['label']
             arr.markers += [a, f, t]
         self.stands_pub.publish(arr)
+        self._publish_stand_columns(r.stands, frame)
         self.get_logger().info('stands: %d' % len(r.stands))
+
+    def _publish_stand_columns(self, stands, frame):
+        poses = getattr(self, '_stand_poses', None) or []
+        arr = MarkerArray(markers=[Marker(action=Marker.DELETEALL)])
+        for i, s in enumerate(stands):
+            idx = [k for k in s.target_indices if 0 <= k < len(poses)]
+            rgb = logic.palette(i)
+            m = Marker(type=Marker.POINTS, action=Marker.ADD, ns='stand_columns', id=i)
+            m.header.frame_id = frame
+            m.pose.orientation.w = 1.0
+            m.scale.x = m.scale.y = 0.04
+            m.color = _color(rgb, 1.0)
+            m.points = [Point(x=poses[k].position.x, y=poses[k].position.y, z=poses[k].position.z) for k in idx]
+            arr.markers.append(m)
+            if idx:
+                t = Marker(type=Marker.TEXT_VIEW_FACING, action=Marker.ADD, ns='stand_columns_text', id=i)
+                t.header.frame_id = frame
+                t.pose.position.x, t.pose.position.y = s.x, s.y
+                t.pose.position.z = 0.7
+                t.pose.orientation.w = 1.0
+                t.scale.z = 0.09
+                t.color = _color(rgb)
+                t.text = 'stand %d reaches %d poses' % (i, len(idx))
+                arr.markers.append(t)
+        self.stand_cols_pub.publish(arr)
 
 
 def main():

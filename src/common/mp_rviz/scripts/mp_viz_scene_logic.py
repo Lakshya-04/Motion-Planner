@@ -137,6 +137,62 @@ def wall_outline(wall):
     return c + [c[0]]
 
 
+def wall_back_outline(wall):
+    """Outline of the wall's back face (front face moved back by thickness_m along the outward normal), [] without
+    thickness_m. The front face is the wall's surface; with it the drawn wall has the world wall's thickness."""
+    t = float(wall.get('thickness_m') or 0.0)
+    if t <= 0.0:
+        return []
+    n = wall['normal_outward']
+    return [tuple(c[k] - n[k] * t for k in range(3)) for c in wall_outline(wall)]
+
+
+def wall_plane_distance(wall):
+    """Distance of the wall's front plane from the frame origin, positive when the wall's outward normal points back at
+    the origin (a wall at x = 0.915 facing -x gives 0.915)."""
+    n, o = wall['normal_outward'], wall['origin_xyz']
+    return -sum(n[k] * o[k] for k in range(3))
+
+
+def wall_from_box(pos, quat_wxyz, half, wall_id=0, toward=(0.0, 0.0, 0.0)):
+    """A wall_scene dict wall for a box (MuJoCo geom: pos, quat w x y z, half sizes). The thinnest axis is the thickness,
+    the front face is the one facing `toward` (the robot); u is the horizontal in-plane axis, v = n x u."""
+    w, x, y, z = quat_wxyz
+    n2 = math.sqrt(w * w + x * x + y * y + z * z)
+    w, x, y, z = w / n2, x / n2, y / n2, z / n2
+    cols = [(1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w)),
+            (2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w)),
+            (2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y))]
+    t_ax = min(range(3), key=lambda i: half[i])
+    n = cols[t_ax]
+    if sum(n[k] * (toward[k] - pos[k]) for k in range(3)) < 0:
+        n = tuple(-c for c in n)
+    ins = [i for i in range(3) if i != t_ax]
+    ui = min(ins, key=lambda i: abs(cols[i][2]))   # the in-plane axis closest to horizontal
+    vi = [i for i in ins if i != ui][0]
+    u = cols[ui]
+    v = (n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0])
+    if v[2] > 0:   # v points down like the scene files (basis_v = -z for an upright wall)
+        v = tuple(-c for c in v)
+        u = (v[1] * n[2] - v[2] * n[1], v[2] * n[0] - v[0] * n[2], v[0] * n[1] - v[1] * n[0])
+    t = half[t_ax]
+    o = tuple(pos[k] + n[k] * t for k in range(3))
+    return {'id': wall_id, 'origin_xyz': list(o), 'basis_u': list(u), 'basis_v': list(v), 'normal_outward': list(n),
+            'u_range_m': [-half[ui], half[ui]], 'v_range_m': [-half[vi], half[vi]], 'thickness_m': 2.0 * t}
+
+
+def wall_from_mjcf(path, geom='wall_0', toward=(0.0, 0.0, 0.0)):
+    """The wall geom `geom` of a MuJoCo MJCF (type box, pos/quat/size; a top-level worldbody geom) as a scene wall."""
+    import xml.etree.ElementTree as ET
+    for g in ET.parse(path).getroot().iter('geom'):
+        if g.get('name') == geom:
+            pos = [float(c) for c in g.get('pos', '0 0 0').split()]
+            quat = [float(c) for c in g.get('quat', '1 0 0 0').split()]
+            half = [float(c) for c in g.get('size').split()][:3]
+            return wall_from_box(pos, quat, half, toward=toward)
+    raise KeyError('geom %s not in %s' % (geom, path))
+
+
 def wall_area_m2(wall):
     (u0, u1), (v0, v1) = wall['u_range_m'], wall['v_range_m']
     return abs(u1 - u0) * abs(v1 - v0)
