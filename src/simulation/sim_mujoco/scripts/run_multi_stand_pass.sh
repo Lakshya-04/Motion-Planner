@@ -31,7 +31,7 @@
 #   MULTI_STAND_PAINT=1            live done / not done wall paint (RViz topic /mp_viz/coverage_paint; _PAINT_FEED defaults to mujoco, none = RViz only; default off;
 #                                  the MuJoCo viewer draws it when the sim is launched with viewer:=true in MULTI_STAND_LAUNCH_ARGS)
 #   MULTI_STAND_RVIZ=0             opt out of RViz; the sim launch opens the same mp_rviz window as the Gazebo sim by default (rviz:=true; skipped
-#                                  without DISPLAY). MULTI_STAND_RVIZ_PROFILE (default mission_overview); wall time, use_sim_time false
+#                                  without DISPLAY). MULTI_STAND_RVIZ_PROFILE (default sim_overview); wall time, use_sim_time false
 #   MULTI_STAND_FILM=1             also store the joint states for render_run.py (launch with out_dir:=... in MULTI_STAND_LAUNCH_ARGS)
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
 #                                  configuration docked at the wall, [] chains the seeds from the previous dock
@@ -148,7 +148,7 @@ trap stop_all EXIT
 
 RVIZ_ARGS=()
 [ "${MULTI_STAND_RVIZ:-1}" = 0 ] && RVIZ_ARGS=(rviz:=false)
-[ "${MULTI_STAND_RVIZ:-1}" != 0 ] && RVIZ_ARGS=(rviz_profile:=${MULTI_STAND_RVIZ_PROFILE:-mission_overview})
+[ "${MULTI_STAND_RVIZ:-1}" != 0 ] && RVIZ_ARGS=(rviz_profile:=${MULTI_STAND_RVIZ_PROFILE:-sim_overview} rviz_plan_file:=$OUT/coverage_output.json)
 start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$STAND_PROFILE controller:=jtac \
   conditioner:=true payload_mass_kg:=0.5 move_group:=true base_motion:=true scene:=$OUT/data/smoke_wall_scene.json \
   ${RVIZ_ARGS[@]+"${RVIZ_ARGS[@]}"} ${MULTI_STAND_LAUNCH_ARGS:-}

@@ -185,6 +185,6 @@ def test_rviz_knob_exists():
     root = HERE.parent
     launch = (root / 'launch' / 'sim_mujoco.launch.py').read_text()
     assert "DeclareLaunchArgument('rviz', default_value='true'" in launch
-    assert "default_value='mission_overview'" in launch and 'view.launch.py' in launch
+    assert "default_value='sim_overview'" in launch and 'view.launch.py' in launch
     sh = (root / 'scripts' / 'run_multi_stand_pass.sh').read_text()
     assert 'MULTI_STAND_RVIZ' in sh and 'rviz:=false' in sh
