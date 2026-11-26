@@ -195,6 +195,6 @@ Columns still failing: the last waypoints of a strip at z 1.9 and the outer colu
 ## The green TCP line
 
 `/mp_viz/tcp_executed` (the bright green line in `sim_overview.rviz`) draws the wall strokes only: the tool position while the
-conditioned force is above `path_contact_force_n` (default 2 N), with a break between strokes. Approach, retract, stow and base
+conditioned force is above `path_contact_force_n` (default 2 N), with a break between strokes (the line keeps drawing for `path_contact_hold_s`, default 1 s, after the last sample above the threshold, because the contact force flickers below it several times a second even on a good stroke). Approach, retract, stow and base
 moves are free-space motion and are not drawn; `path_contact_only:=false` on `mp_viz_markers` draws everything again. Before this
 the line included every arm move and looped across the scene. It is a polyline of 1 cm steps (`path_min_step_m`).
