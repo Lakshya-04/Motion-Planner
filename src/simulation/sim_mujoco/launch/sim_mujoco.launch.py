@@ -110,9 +110,15 @@ def _setup(context, *args, **kwargs):
             raise ValueError('depth_sensor_pose needs "x y z roll pitch yaw"')
         depth = dict(pos=pose[:3], rpy=pose[3:], noise_std=float(arg('depth_sensor_noise_m')),
                      rate_hz=float(arg('depth_sensor_rate_hz')))
+    gravity_comp = arg('gravity_comp')
+    if gravity_comp not in ('mujoco', 'core', 'none'):
+        raise ValueError("gravity_comp must be mujoco, core or none")
+    # mujoco: free per-body gravcomp (default). core: gravity_core feed-forward. none: PD only.
+    os.environ['SIM_MUJOCO_GRAVITY_FF'] = 'true' if gravity_comp == 'core' else 'false'
     mjcf, skipped = generate(profile, render_urdf(profile), out_dir, scene=scene,
                              scene_offset=tuple(offset),
-                             base_motion=arg('base_motion') == 'true', depth_sensor=depth)
+                             base_motion=arg('base_motion') == 'true', depth_sensor=depth,
+                             gravcomp=gravity_comp == 'mujoco')
     for s in skipped:
         print(f'[sim_mujoco] skipped scene object {s}')
     print(f'[sim_mujoco] MJCF: {mjcf}')
@@ -229,6 +235,10 @@ def generate_launch_description():
                                           'capture_pose / identify services'),
         DeclareLaunchArgument('payload_cog', default_value='0 0 0',
                               description='conditioner payload centre of gravity in the sensor frame'),
+        DeclareLaunchArgument('gravity_comp', default_value='mujoco',
+                              description='how the arm and lift are held against gravity: mujoco = free per-body '
+                                          'gravcomp (default), core = gravity_core torque feed-forward in the '
+                                          'plugin with gravcomp off, none = no compensation (PD sag, for tests)'),
         DeclareLaunchArgument('sim_noise', default_value='',
                               description='opt-in sensor non-idealities of the plugin, "key=value ..." with keys '
                                           'ft_noise_density (N/sqrt(Hz)), ft_bias_walk (N/sqrt(s)), ft_lowpass_hz, '
