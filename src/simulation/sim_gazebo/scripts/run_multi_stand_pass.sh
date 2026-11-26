@@ -11,6 +11,9 @@
 # where the tcp touches it, x = 0.98 (MULTI_STAND_WALL_DX is not supported: the world wall stays put).
 # Run, record in odom and score like run_manager_pass.sh.
 #   MULTI_STAND_WALL_DY / _WALL_WIDTH  the patch's start y (0.3) and width (0.9) in m; _WALL_DX must stay 0 (the world wall does not move)
+#   MULTI_STAND_FULL_WALL_SCENE=1  (default) MoveIt's planning scene gets the WHOLE sim wall (walls_scene.pcd, the world wall's face at x 0.98, 0.01 m grid,
+#                                  made by shift_wall_scene.py) instead of the contact patch walls.pcd, so free-space approaches plan around the
+#                                  rest of the wall; 0 = the patch only (old behaviour). Coverage, reachability, scoring and cuRobo keep walls.pcd.
 #   MULTI_STAND_PATCH_Z="lo,hi"    contact patch height in m (default 1.0,1.3; the tall wall is 0.6,2.0); moves the coverage scene, walls.pcd,
 #                                  the manager's coverage z range and the recorder's wall band; the sim wall grows to hi + 0.3 m when that is
 #                                  above the stock 2 m (shift_wall_scene.py; the tall wall is unverified in Gazebo). MULTI_STAND_SCENARIO
@@ -78,6 +81,9 @@ if [ -n "${MULTI_STAND_PATCH_Z:-}" ]; then
   MP_Z_LO=${MULTI_STAND_PATCH_Z%%,*}; MP_Z_HI=${MULTI_STAND_PATCH_Z##*,}
 fi
 python3 "$PKG/lib/sim_gazebo/shift_wall_scene.py" "$DATA" "$OUT/data" 0.0 "$DY" "$WIDTH" ${MULTI_STAND_PATCH_Z:-} || exit 2
+# MoveIt's planning scene: the whole sim wall (walls_scene.pcd), or the patch (MULTI_STAND_FULL_WALL_SCENE=0)
+SCENE_PCD=$OUT/data/walls.pcd
+[ "${MULTI_STAND_FULL_WALL_SCENE:-1}" != 0 ] && SCENE_PCD=$OUT/data/walls_scene.pcd
 
 # one line with the knobs this run used, so its output is self-describing (the same line in the MuJoCo script)
 summary_line() {
@@ -165,7 +171,7 @@ manipulation_manager:
     coverage_eef_speed_mps: ${MULTI_STAND_SPEED:-0.01}
     dock_at_stroke_start: true
     stand_max_span_m: ${MULTI_STAND_MAX_SPAN:-0.5}
-    stand_arrival_command: 'python3 -u $PKG/lib/sim_gazebo/wait_arm_settled.py --timeout ${MULTI_STAND_SETTLE_TIMEOUT:-90} >> $OUT/settle.log 2>&1; ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$OUT/data/walls.pcd -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1${CUROBO_ARRIVAL}'
+    stand_arrival_command: 'python3 -u $PKG/lib/sim_gazebo/wait_arm_settled.py --timeout ${MULTI_STAND_SETTLE_TIMEOUT:-90} >> $OUT/settle.log 2>&1; ros2 run motion_planner_moveit world_model_loader_node --ros-args -p point_cloud_path:=$SCENE_PCD -p frame_id:=odom -p octomap_resolution:=0.01 >> $OUT/world_model.log 2>&1${CUROBO_ARRIVAL}'
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
     tcp_settle_timeout_s: ${MULTI_STAND_TCP_SETTLE:-4.0}
@@ -200,7 +206,7 @@ sleep 40   # gz, controllers and move_group up
 gz_stills
 
 # 3. the wall into MoveIt's scene (world frame; TF places it relative to base_footprint)
-gz_world_model "$OUT/data/walls.pcd" odom
+gz_world_model "$SCENE_PCD" odom "$OUT/data/walls.pcd"
 wait $WM
 
 # MULTI_STAND_PAINT=1: live done / not done paint of the wall (docs/sim_overlay.md "Coverage paint"). Always on /mp_viz/coverage_paint
