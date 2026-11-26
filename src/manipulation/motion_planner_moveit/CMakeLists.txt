@@ -133,6 +133,9 @@ if(BUILD_TESTING)
   ament_add_gtest(planners_test test/planners_test.cpp)
   target_link_libraries(planners_test motion_planner_moveit_lib)
 
+  ament_add_gtest(start_state_source_test test/start_state_source_test.cpp)
+  target_include_directories(start_state_source_test PRIVATE include)
+
   ament_add_gtest(moveit_plugins_test test/moveit_plugins_test.cpp)
   target_link_libraries(moveit_plugins_test motion_planner::motion_planner_ros)
 
