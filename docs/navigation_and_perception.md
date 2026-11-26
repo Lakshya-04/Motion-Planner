@@ -11,7 +11,7 @@ Details live in [perception_live.md](perception_live.md), [stand_navigation.md](
 - The arm side is real: coverage planning, stand planning, MoveIt / cuRobo planning, JTAC force control run the same code in the
   simulators as they would on a robot.
 - The base side is a stand-in. `stand_navigator` drives a straight line from the current odometry to the stand. It has no map,
-  no costmap and no obstacle avoidance, and it does not localise: it trusts `/odom`.
+  no costmap and no obstacle avoidance, and it does not localise: it trusts `/odom` (the opt-in `base_localisation` EKF publishes `/odometry/filtered`, which it can read with `odom_topic`, [localisation.md](localisation.md)).
 - In both simulators `/odom` is by default the simulated base pose itself (no noise, no drift, no slip), and `/cmd_vel` is applied as a
   planar velocity. Navigation error in the sim passes is therefore much smaller than any real base will give. Opt-in
   `odom_realism:=good|typical|poor` (package `sim_realism`, [sim_realism.md](sim_realism.md)) adds wheel-odometry scale error, a drifting
@@ -78,7 +78,7 @@ margin. There is no wall-dock step in between, no replan of the path, and no cho
    scripts, call `WallDock` after `NavigateToStand`, and feed the measured standoff and yaw error into the stand check. The
    lateral term and typed outcomes exist in the core only ([stand_navigation.md](stand_navigation.md)).
 4. **Localisation.** Odometry plus a wall or map reference (`robot_localization` first). The odom noise and drift for the
-   simulators now exist as an opt-in (`sim_realism`), so the controllers can meet it before hardware does; the localisation is still missing.
+   simulators now exist as an opt-in (`sim_realism`), so the controllers can meet it before hardware does. An opt-in odometry + IMU + scan-matching EKF now exists (`base_localisation`, [localisation.md](localisation.md)); the consumers are not switched to it, and there is still no map or wall reference.
 5. **Nav2 adapter.** `NavigateToStand` is shaped like `NavigateToPose`; install Nav2 in an image, write a bridge, and use
    `opennav_docking` with a wall-plane dock plugin if it beats `wall_docking_node`. This comes after 1 to 4 because Nav2
    needs the map and localisation anyway.
