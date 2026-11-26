@@ -22,8 +22,8 @@ short form of this table); the overview of the backends is [simulation.md](simul
 | Calibration | Frames, signs and the tool inertial are exact by construction | Same | Sensor sign and orientation, tool TCP, payload, wall plane, base-to-wall: [calibration.md](calibration.md). Each one is an error the sims do not contain. |
 | Thermal drift | Not modelled | Not modelled | Sensor offset, link expansion and motor derating over a shift. Plan a periodic re-tare and a cool-down check. |
 | Payload inertia | Static payload compensation only; inertial forces are in the raw wrench | Same | Fast motions with a heavy tool leak inertial force into the contact reading. |
-| Perception | Exact wall pose in the contact tests; ray-cast depth with optional range noise | gz `depth_camera` with optional noise | Real depth has multipath, holes and a bias; the wall plane error enters the contact reference. |
-| Safety layer | None | None | The vendor controller's limits and the e-stop are the last line; the software layer is not one. |
+| Perception | Exact wall pose in the contact tests; ray-cast depth with optional range noise; opt-in ray-cast 2D lidar (`lidar:=true`, optional range noise and dropout) | gz `depth_camera` with optional noise; opt-in `gpu_lidar` (`lidar:=true`, optional noise) | Real depth has multipath, holes and a bias; the wall plane error enters the contact reference. |
+| Safety layer | Software obstacle stop in `stand_navigator` when it is given `/scan` (sim lidar, `run_lidar_stop.sh`); no e-stop | Same, `run_lidar_stop.sh` |  The vendor controller's limits and the e-stop are the last line; the software layer is not one. |
 
 ## Opt-in sensor non-idealities in the MuJoCo plugin
 

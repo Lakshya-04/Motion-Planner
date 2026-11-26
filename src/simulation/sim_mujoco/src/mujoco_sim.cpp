@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <limits>
 #include <string>
 #include <stdexcept>
 
@@ -100,6 +101,7 @@ MujocoSim::MujocoSim(
     }
     initBase();
     initDepth();
+    initLidar();
   } catch (...) {
     mj_deleteData(data_);
     mj_deleteModel(model_);
@@ -231,6 +233,91 @@ std::vector<std::array<float, 3>> MujocoSim::depthScan()
         static_cast<float>(range * depth_.dirs[3 * i + 2])});
   }
   return points;
+}
+
+void MujocoSim::initLidar()
+{
+  lidar_.site = mj_name2id(model_, mjOBJ_SITE, "lidar");
+  const int id = mj_name2id(model_, mjOBJ_NUMERIC, "sim_mujoco_lidar");
+  if (lidar_.site < 0 && id < 0) {
+    return;
+  }
+  if (lidar_.site < 0 || id < 0 || model_->numeric_size[id] < 9) {
+    throw std::runtime_error(
+      "lidar needs the site 'lidar' and the 9-value numeric 'sim_mujoco_lidar'");
+  }
+  const mjtNum * d = model_->numeric_data + model_->numeric_adr[id];
+  LidarConfig & c = lidar_.cfg;
+  c.angle_min = d[0];
+  c.angle_max = d[1];
+  c.angle_increment = d[2];
+  c.range_min = d[3];
+  c.range_max = d[4];
+  c.rate_hz = d[5];
+  c.noise_std = d[6];
+  c.dropout = d[7];
+  c.seed = static_cast<unsigned>(d[8]);
+  if (!(c.angle_increment > 0.0) || !(c.angle_max >= c.angle_min) || !(c.range_min >= 0.0) ||
+    !(c.range_max > c.range_min) || !(c.rate_hz > 0.0) || !(c.noise_std >= 0.0) ||
+    !(c.dropout >= 0.0 && c.dropout <= 1.0))
+  {
+    throw std::runtime_error("sim_mujoco_lidar: invalid configuration");
+  }
+  // same count rule as sim_mujoco.lidar.ray_count (a thousandth of a step absorbs rounding in the angles)
+  const double span = (c.angle_max - c.angle_min) / c.angle_increment;
+  if (span > 1.0e5) {
+    throw std::runtime_error("sim_mujoco_lidar: more than 100000 rays");
+  }
+  const size_t n = static_cast<size_t>(std::floor(span + 1e-3)) + 1;
+  lidar_.dirs.resize(3 * n);
+  for (size_t i = 0; i < n; ++i) {
+    const double a = c.angle_min + static_cast<double>(i) * c.angle_increment;
+    lidar_.dirs[3 * i] = std::cos(a);
+    lidar_.dirs[3 * i + 1] = std::sin(a);
+    lidar_.dirs[3 * i + 2] = 0.0;
+  }
+  lidar_.world_dirs.resize(3 * n);
+  lidar_.dist.resize(n);
+  lidar_.geomid.resize(n);
+  lidar_.rng.seed(c.seed);
+  lidar_.present = true;
+}
+
+std::vector<float> MujocoSim::lidarScan()
+{
+  if (!lidar_.present) {
+    return {};
+  }
+  const size_t n = lidar_.dist.size();
+  const mjtNum * origin = data_->site_xpos + 3 * lidar_.site;
+  const mjtNum * rot = data_->site_xmat + 9 * lidar_.site;
+  for (size_t i = 0; i < n; ++i) {
+    mju_mulMatVec(&lidar_.world_dirs[3 * i], rot, &lidar_.dirs[3 * i], 3, 3);
+  }
+  // the scene's geoms only (the generator puts them in group 1); the robot is not scanned
+  const mjtByte groups[mjNGROUP] = {0, 1, 0, 0, 0, 0};
+  mj_multiRay(model_, data_, origin, lidar_.world_dirs.data(), groups, 1, -1, lidar_.geomid.data(),
+    lidar_.dist.data(), nullptr, static_cast<int>(n), lidar_.cfg.range_max);
+  const LidarConfig & c = lidar_.cfg;
+  std::normal_distribution<double> noise(0.0, std::max(c.noise_std, 1e-12));
+  std::uniform_real_distribution<double> uniform(0.0, 1.0);
+  const float inf = std::numeric_limits<float>::infinity();
+  std::vector<float> ranges(n, inf);
+  for (size_t i = 0; i < n; ++i) {
+    double range = lidar_.dist[i];
+    if (range < 0.0) {
+      continue;
+    }
+    if (c.dropout > 0.0 && uniform(lidar_.rng) < c.dropout) {
+      ranges[i] = std::numeric_limits<float>::quiet_NaN();
+      continue;
+    }
+    if (c.noise_std > 0.0) {
+      range += noise(lidar_.rng);
+    }
+    ranges[i] = range < c.range_min ? -inf : (range > c.range_max ? inf : static_cast<float>(range));
+  }
+  return ranges;
 }
 
 void MujocoSim::setBaseVelocity(double vx, double vy, double wz)
