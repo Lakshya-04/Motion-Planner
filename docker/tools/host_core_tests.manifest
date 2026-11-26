@@ -113,6 +113,7 @@ test | tool_tilt_test | coverage_planner_core | src/perception/coverage_planner/
 test | verify_result_test | coverage_planner_core | src/perception/coverage_planner/test/core/verify_result_test.cpp | 
 test | wall_pose_lift_test | coverage_planner_core | src/perception/coverage_planner/test/core/wall_pose_lift_test.cpp | 
 test | wall_scene_test | coverage_planner_core | src/perception/coverage_planner/test/core/wall_scene_test.cpp | -DWALL_SCENE_SAMPLE_PATH='"src/perception/coverage_planner/test/data/wall_scene.json"'
+test | golden_waypoints_test | coverage_planner_core | src/perception/coverage_planner/test/core/golden_waypoints_test.cpp | -DCOVERAGE_GOLDEN_DIR='"src/perception/coverage_planner/test/data/golden"'
 exclude | src/manipulation/manipulation_manager/test/backend_routing_test.cpp | includes rclcpp
 test | base_stance_check_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/base_stance_check_test.cpp | 
 test | column_ik_gate_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/column_ik_gate_test.cpp | 
