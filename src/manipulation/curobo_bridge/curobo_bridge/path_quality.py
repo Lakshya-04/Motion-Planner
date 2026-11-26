@@ -40,6 +40,28 @@ def apply_lift_cost_weight(weights: Sequence[float], joint_names: Sequence[str],
     return [w * float(lift_cost_weight) if name in lift else w for w, name in zip(out, joint_names)]
 
 
+def resolve_joint_costs(joint_names: Sequence[str], joint_costs: Optional[Sequence[float]]) -> Optional[List[float]]:
+    """`joint_costs` (one per joint, lift first: the profile's `joint_costs`) checked against the robot's joints;
+    None or empty means none given. Raises ValueError on a wrong size or an entry that is not finite and above 0."""
+    if joint_costs is None or len(joint_costs) == 0:
+        return None
+    if len(joint_costs) != len(joint_names):
+        raise ValueError(f'joint_costs has {len(joint_costs)} entries, the robot has {len(joint_names)} joints '
+                         f'{list(joint_names)}')
+    out = [float(c) for c in joint_costs]
+    if not all(np.isfinite(c) and c > 0.0 for c in out):
+        raise ValueError(f'joint_costs entries must be finite and above 0, got {out}')
+    return out
+
+
+def apply_joint_costs(weights: Sequence[float], joint_costs: Sequence[float]) -> List[float]:
+    """`weights` with joint j multiplied by `joint_costs[j]` (the per-joint movement cost). Same rule as the lift
+    weight with the lift costing 2: apply_joint_costs(w, [2, 1, 1, ...])."""
+    if len(weights) != len(joint_costs):
+        raise ValueError(f'{len(joint_costs)} joint costs for {len(weights)} weights')
+    return [float(w) * float(c) for w, c in zip(weights, joint_costs)]
+
+
 def path_length(positions: Sequence[Sequence[float]], weights: Optional[Sequence[float]] = None) -> float:
     """Weighted joint-space path length; 0 for fewer than two waypoints."""
     q = np.asarray(positions, dtype=float)
