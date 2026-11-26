@@ -285,6 +285,16 @@ public:
     // on another branch (sign of a dock_ik_branch_joints joint flips) or with the dock_ik_wrist_joint outside
     // [dock_ik_wrist_min_rad, dock_ik_wrist_max_rad] is dropped. None left: the seeded IK above as before. Off by default.
     dock_ik_continuity_ = this->declare_parameter<bool>("dock_ik_continuity", false);
+    // Joints (indices in the planning group, lift first) of the dock goal moved by whole turns to the winding of the
+    // travel (stow) pose, e.g. [2] for the shoulder lift. cuRobo's graph planner fails between two windings.
+    {
+      dock_wrap_joints_.clear();
+      for (const auto i : this->declare_parameter<std::vector<int64_t>>("dock_wrap_joints_to_travel", std::vector<int64_t>{})) {
+        if (i >= 0) {
+          dock_wrap_joints_.push_back(static_cast<size_t>(i));
+        }
+      }
+    }
     {
       const auto to_idx = [](const std::vector<int64_t> & v) {
           std::vector<size_t> out;
@@ -2076,6 +2086,15 @@ private:
   /// last good one otherwise. Empty when the IK has no solution or is not available.
   std::vector<double> seededDockIk(const core_types::Pose & pose)
   {
+    auto q = seededDockIkRaw(pose);
+    if (!q.empty() && !dock_wrap_joints_.empty() && q.size() == travel_state_.size()) {
+      q = wrapJointsToReference(q, travel_state_, dock_wrap_joints_, jog_params_.lower, jog_params_.upper);
+    }
+    return q;
+  }
+
+  std::vector<double> seededDockIkRaw(const core_types::Pose & pose)
+  {
     const auto ik = pipeline_.ik();
     const auto & seed = !dock_seed_.empty() ? dock_seed_ :
       (dock_branch_seed_.empty() ? last_good_state_ : dock_branch_seed_);
@@ -3472,6 +3491,7 @@ private:
   double dock_tolerance_rad_{0.17};
   double approach_tolerance_m_{0.05};
   std::vector<double> dock_seed_;
+  std::vector<size_t> dock_wrap_joints_;   ///< dock goal joints wrapped to the travel pose's winding
   std::vector<double> dock_branch_seed_;   ///< the last docked configuration: the IK seed of the next dock
   double travel_lift_margin_{0.01};
   double dock_approach_extra_m_{0.0};

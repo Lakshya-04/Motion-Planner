@@ -35,6 +35,7 @@
 #   MULTI_STAND_FILM=1             also store the joint states for render_run.py (launch with out_dir:=... in MULTI_STAND_LAUNCH_ARGS)
 #   MULTI_STAND_DOCK_SEED='[...]'  seed of the dock IK (manager `dock_seed_joint_state`, lift first); the default is a UR10e-on-lift
 #                                  configuration docked at the wall, [] chains the seeds from the previous dock
+#   MULTI_STAND_DOCK_WRAP_JOINTS='[2]'  dock goal joints wrapped to the stow winding (manager `dock_wrap_joints_to_travel`; unset = off)
 #   MULTI_STAND_MAX_SPAN=0.5       widest stretch of wall one stand is trusted with (manager `stand_max_span_m`)
 #   MULTI_STAND_WALL_DOCK=1        also start wall_docking_node (action `wall_dock`), latch the pass's wall scene (frame set to odom) on
 #                                  /wall_detector/wall_scene (no wall_detector runs in this pass) and turn on the manager's
@@ -264,7 +265,8 @@ manipulation_manager:
     wall_clear_command: 'ros2 run motion_planner_moveit world_model_loader_node --ros-args -p clear:=true >> $OUT/world_model.log 2>&1'
     dock_attempts: ${MULTI_STAND_DOCK_ATTEMPTS:-6}
     dock_seed_joint_state: ${MULTI_STAND_DOCK_SEED:-$DOCK_SEED}
-    dock_ik_continuity: ${MULTI_STAND_DOCK_IK_CONTINUITY:-false}
+${MULTI_STAND_DOCK_WRAP_JOINTS:+    dock_wrap_joints_to_travel: $MULTI_STAND_DOCK_WRAP_JOINTS
+}    dock_ik_continuity: ${MULTI_STAND_DOCK_IK_CONTINUITY:-false}
     dock_ik_reach_fraction: ${MULTI_STAND_REACH_FRACTION:-0.0}
     dock_ik_reach_m: ${MULTI_STAND_ARM_REACH:-1.3}
     dock_ik_lift_joint: 0

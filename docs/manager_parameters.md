@@ -19,6 +19,14 @@ on its feature's page.
 
 (`coverage_z_min_m` is described in [sim_mujoco.md](sim_mujoco.md); it is the lower limit paired with `coverage_z_max_m`.)
 
+## Dock goal winding (opt-in)
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `dock_wrap_joints_to_travel` | unset | Indices (planning group, lift first) of dock goal joints moved by whole turns to the value nearest the travel (stow) pose, so the dock goal is on the stow winding. `[2]` is the shoulder lift of the UR10e on a lift. Same pose, only the joint value changes; a joint stays as it is when the turn would leave `recovery_joint_lower`/`upper` (when set for every joint). Applies to the seeded IK goal, with or without `dock_ik_continuity`. Leave it unset to turn it off (an empty list in a params file is rejected). Do not list a joint whose limit is under a full turn (the elbow). |
+
+Why: cuRobo's graph planner can fail (or hit the 300 s call timeout) between two joint configs a turn apart, and a dock goal on another winding than stow does that. With the shipped `dock_seed_joint_state` the dock goals already sit on the stow winding (shoulder lift about -2.8 against stow -1.57), so there this is a no-op. It matters for a seed on the other winding. Two-stand MuJoCo pass with cuRobo, seed `[0.0685, -3.4229, 2.7224, -1.4273, -1.2951, 6.0004, -1.5708]` (shoulder lift +3.3 at the first dock): off, five approach calls time out at 300 s and no column docks in 40 min; `[1, 2, 3, 4, 5, 6]`, all columns dock, no timeouts, 10 of 10 done, coverage 1.0, 10 min; `[2]` alone, the first stand docks 5 columns and the second does not (not understood). One run each.
+
 ## Dock IK selection (`dock_ik_continuity:=true`)
 
 These shape the candidate filter of `core/dock_ik_selector.hpp`. They have no effect while `dock_ik_continuity` is false (its default).
