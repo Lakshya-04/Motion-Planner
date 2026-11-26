@@ -19,6 +19,7 @@
  *            ft_frame_id   frame_id of the raw topic (default "tool_mount_link")
  *            tcp_frame_id  frame_id of the ground-truth topic (default "tcp_link")
  *            depth_frame_id frame_id of the point cloud (default "depth_sensor_link")
+ *            lidar_frame_id frame_id of the laser scan (default "lidar_link")
  *            ft_tare       "true": subtract the reading at activation (default "false")
  *
  *          Planar base: when the MJCF has the base joints (launch base_motion:=true), a
@@ -33,6 +34,9 @@
  *          Depth sensor: when the MJCF has one (launch depth_sensor:=true) the plugin publishes the
  *          ray-cast scan as sensor_msgs/PointCloud2 (xyz float32, dense, sensor frame x forward) on
  *          `depth_sensor/points`; the TF to the sensor frame is the launch file's static transform.
+ *
+ *          Lidar: when the MJCF has one (launch lidar:=true) the plugin publishes the 2D ray-cast scan as
+ *          sensor_msgs/LaserScan on `scan` (frame `lidar_frame_id`); the TF is the launch file's static transform.
  *
  *          Non-idealities (default off, nothing changes unless set): environment variables
  *          SIM_MUJOCO_FT_{NOISE_DENSITY,BIAS_WALK,LOWPASS_HZ,DELAY_MS,QUANTUM} (the raw F/T, force and
@@ -57,6 +61,7 @@
 #include <geometry_msgs/msg/wrench_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <hardware_interface/handle.hpp>
 #include <hardware_interface/hardware_info.hpp>
@@ -118,6 +123,13 @@ private:
   std::string depth_frame_id_;
   double next_depth_time_{0.0};
   void publishDepth(const rclcpp::Time & stamp);
+
+  // Lidar (launch lidar:=true): sensor_msgs/LaserScan `scan` in `lidar_frame_id` (hardware parameter,
+  // default "lidar_link"), at the MJCF's rate.
+  rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr lidar_pub_;
+  std::string lidar_frame_id_;
+  double next_lidar_time_{0.0};
+  void publishLidar(const rclcpp::Time & stamp);
 
   // Opt-in non-idealities (signal_model.hpp), built on the first read() when the period is known.
   struct Noise
