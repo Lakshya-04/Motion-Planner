@@ -30,6 +30,7 @@ add_library(motion_planner_core
   src/core/time_parameterization.cpp
   src/core/planners/reachability_tilt.cpp
   src/core/planners/seed_preferring_ik.cpp
+  src/core/planners/ik_then_plan_planner.cpp
 )
 target_include_directories(motion_planner_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -83,6 +84,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(seed_preferring_ik_test test/core/seed_preferring_ik_test.cpp)
   target_link_libraries(seed_preferring_ik_test motion_planner_core)
+
+  ament_add_gtest(ik_then_plan_planner_test test/core/ik_then_plan_planner_test.cpp)
+  target_link_libraries(ik_then_plan_planner_test motion_planner_core)
 
   ament_add_gtest(wall_penetration_check_test test/core/wall_penetration_check_test.cpp)
   target_link_libraries(wall_penetration_check_test motion_planner_core)
