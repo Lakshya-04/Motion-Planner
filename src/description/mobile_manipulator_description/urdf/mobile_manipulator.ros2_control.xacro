@@ -190,6 +190,8 @@
           <xacro:if value="${'$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_LINK)' != ''}"><param name="gravity_payload_link">$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_LINK)</param></xacro:if>
           <xacro:if value="${'$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_MASS)' != ''}"><param name="gravity_payload_mass">$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_MASS)</param></xacro:if>
           <xacro:if value="${'$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_COG)' != ''}"><param name="gravity_payload_cog">$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_COG)</param></xacro:if>
+          <param name="lidar_frame_id">$(optenv SIM_MUJOCO_LIDAR_FRAME lidar_link)</param>
+          <param name="depth_frame_id">$(optenv SIM_MUJOCO_DEPTH_FRAME depth_sensor_link)</param>
         </xacro:if>
         <xacro:if value="${hardware == 'gazebo'}"><plugin>gz_ros2_control/GazeboSimSystem</plugin></xacro:if>
       </hardware>

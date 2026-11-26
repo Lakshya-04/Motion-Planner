@@ -287,12 +287,17 @@ hardware_interface::return_type MujocoSystemInterface::read(
     executor_->spin_some(std::chrono::nanoseconds(0));
     publishBase(stamp);
   }
-  if (sim_->hasDepth() && sim_->time() >= next_depth_time_) {
-    next_depth_time_ = sim_->time() + 1.0 / sim_->depthConfig().rate_hz;
+  // Next due time steps from the last one, not from now, so a rate that is not a multiple of the control
+  // period still averages out (a plain now + period gave 33 Hz for 40 at a 100 Hz control rate).
+  const auto step_due = [](double due, double now, double rate_hz) {
+    return std::max(due + 1.0 / rate_hz, now);
+  };
+  if (sim_->hasDepth() && sim_->time() + 1e-9 >= next_depth_time_) {
+    next_depth_time_ = step_due(next_depth_time_, sim_->time(), sim_->depthConfig().rate_hz);
     publishDepth(stamp);
   }
-  if (sim_->hasLidar() && sim_->time() >= next_lidar_time_) {
-    next_lidar_time_ = sim_->time() + 1.0 / sim_->lidarConfig().rate_hz;
+  if (sim_->hasLidar() && sim_->time() + 1e-9 >= next_lidar_time_) {
+    next_lidar_time_ = step_due(next_lidar_time_, sim_->time(), sim_->lidarConfig().rate_hz);
     publishLidar(stamp);
   }
   raw_pub_->publish(fill(ft_frame_id_, ft_));
