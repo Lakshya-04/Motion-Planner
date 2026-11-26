@@ -59,6 +59,10 @@
 #                                  aborts when they are out of tolerance). The planning-scene octomap and the scorer's wall
 #                                  still use the files. wall_detector reports no obstacles: a scenario with obstacles is planned
 #                                  without them (warned). Needs wall_detector installed. The cloud is noise-free.
+#   MULTI_STAND_SELF_FILTER=1      depth sensor on (depth_sensor:=true), robot_self_filter on its cloud (/depth_sensor/points ->
+#                                  /depth_sensor/points_filtered) and a second wall_detector (node wall_detector_sf, target_frame odom,
+#                                  output in $OUT/self_filter) on the filtered cloud. Observer only: the plan does not use it. Default 0 = off.
+#                                  With realism: MULTI_STAND_LAUNCH_ARGS="odom_realism:=typical depth_realism:=typical" (docs/sim_realism.md)
 #   MANAGER_PASS_SCORE_ARGS / MULTI_STAND_SCORE_ARGS  extra score_run arguments
 # Needs a sourced ROS environment with sim_mujoco, reachability, stand_navigator, ft_conditioner,
 # compliant_trajectory_controller, coverage_planner, manipulation_manager, coverage_task_msgs and
@@ -151,9 +155,11 @@ trap stop_all EXIT
 RVIZ_ARGS=()
 [ "${MULTI_STAND_RVIZ:-1}" = 0 ] && RVIZ_ARGS=(rviz:=false)
 [ "${MULTI_STAND_RVIZ:-1}" != 0 ] && RVIZ_ARGS=(rviz_profile:=${MULTI_STAND_RVIZ_PROFILE:-sim_overview} rviz_plan_file:=$OUT/coverage_output.json)
+SELF_FILTER_ARGS=()
+[ "${MULTI_STAND_SELF_FILTER:-0}" = 1 ] && SELF_FILTER_ARGS=(depth_sensor:=true)
 start sim_launch ros2 launch sim_mujoco sim_mujoco.launch.py profile:=$STAND_PROFILE controller:=jtac \
   conditioner:=true payload_mass_kg:=0.5 move_group:=true base_motion:=true scene:=$OUT/data/smoke_wall_scene.json \
-  ${RVIZ_ARGS[@]+"${RVIZ_ARGS[@]}"} ${MULTI_STAND_LAUNCH_ARGS:-}
+  ${RVIZ_ARGS[@]+"${RVIZ_ARGS[@]}"} ${SELF_FILTER_ARGS[@]+"${SELF_FILTER_ARGS[@]}"} ${MULTI_STAND_LAUNCH_ARGS:-}
 # the demo rasterizes the obstacle clearance into the grid itself; the service node would add its own 0.3 m default
 start coverage_planner ros2 run coverage_planner coverage_planner_node --ros-args -p obstacle_inflation_radius:=0.0
 start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
@@ -165,6 +171,14 @@ if [ "${MULTI_STAND_PATH_PLANNER:-0}" = 1 ]; then
   NAV_ARGS=(-p wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json -p use_path_planner:=true)
 fi
 start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE ${NAV_ARGS[@]+"${NAV_ARGS[@]}"}
+if [ "${MULTI_STAND_SELF_FILTER:-0}" = 1 ]; then
+  mkdir -p "$OUT/self_filter"
+  start self_filter ros2 launch robot_self_filter self_filter.launch.py cloud_in:=/depth_sensor/points \
+    cloud_out:=/depth_sensor/points_filtered
+  start wall_detector_sf ros2 run wall_detector wall_detector_node --ros-args -r __node:=wall_detector_sf \
+    -p cloud_topic:=/depth_sensor/points_filtered -p target_frame:=odom -p output_dir:=$OUT/self_filter \
+    -p max_range_m:=4.0 -p accumulate_frames:=5
+fi
 if [ "${MULTI_STAND_WALL_DOCK:-0}" = 1 ]; then
   start wall_docking ros2 run stand_navigator wall_docking_node --ros-args -p base_profile:=$PROFILE \
     -p facing_rad:=${MULTI_STAND_WALL_DOCK_FACING:--1.5708}

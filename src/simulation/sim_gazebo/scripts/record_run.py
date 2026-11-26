@@ -24,7 +24,7 @@ import rclpy
 from geometry_msgs.msg import WrenchStamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from std_msgs.msg import Bool, Float64MultiArray
+from std_msgs.msg import Bool, Float64MultiArray, String
 from tf2_ros import Buffer, TransformListener
 
 
@@ -35,13 +35,18 @@ class Recorder(Node):
         self.valve = 0     # last /tool/valve state, the `active` column
         self.rows = []     # (sim t_s, x, y, z, |Fz|, valve), tool point in `frame`
         self.info = [0.0] * 6   # last /ft_sensor/ground_truth_info
-        self.detail = []        # (sim t_s, |F|, pairs, points, sum_point_norm, max_point_norm, dup_points)
+        self.others = ''        # last /ft_sensor/ground_truth_others: what the tool touches
+        self.detail = []        # (sim t_s, |F|, pairs, points, sum_point_norm, max_point_norm, dup_points, others)
         self.lock = threading.Lock()
         self.tf = Buffer()
         self.tf_listener = TransformListener(self.tf, self)
         self.create_subscription(WrenchStamped, '/ft_sensor/ground_truth_wrench', self._truth, qos_profile_sensor_data)
         self.create_subscription(Bool, '/tool/valve', self._valve, 10)
         self.create_subscription(Float64MultiArray, '/ft_sensor/ground_truth_info', self._info, qos_profile_sensor_data)
+        self.create_subscription(String, '/ft_sensor/ground_truth_others', self._others, qos_profile_sensor_data)
+
+    def _others(self, m):
+        self.others = m.data
 
     def _info(self, m):
         if len(m.data) >= 6:
@@ -60,7 +65,7 @@ class Recorder(Node):
         i = self.info
         with self.lock:
             self.rows.append((stamp, t.x, t.y, t.z, abs(f.z), self.valve))
-            self.detail.append((stamp, (f.x * f.x + f.y * f.y + f.z * f.z) ** 0.5, i[0], i[1], i[3], i[4], i[5]))
+            self.detail.append((stamp, (f.x * f.x + f.y * f.y + f.z * f.z) ** 0.5, i[0], i[1], i[3], i[4], i[5], self.others))
 
     def write(self, path, wall_x, wall_y, wall_z):
         with self.lock:
@@ -72,9 +77,9 @@ class Recorder(Node):
             for t, x, y, z, fz, valve in rows:
                 f.write(f'{t - t0:.4f},{x:.5f},{y:.5f},{z:.5f},{fz:.4f},{valve}\n')
         with open(path + '.contacts.csv', 'w') as f:
-            f.write('t,force_norm,pairs,points,sum_point_norm,max_point_norm,dup_points\n')
-            for t, fn, pairs, pts, sn, mx, dup in detail:
-                f.write(f'{t - t0:.4f},{fn:.4f},{pairs:.0f},{pts:.0f},{sn:.4f},{mx:.4f},{dup:.0f}\n')
+            f.write('t,force_norm,pairs,points,sum_point_norm,max_point_norm,dup_points,others\n')
+            for t, fn, pairs, pts, sn, mx, dup, others in detail:
+                f.write(f'{t - t0:.4f},{fn:.4f},{pairs:.0f},{pts:.0f},{sn:.4f},{mx:.4f},{dup:.0f},{others.replace(",", "|")}\n')
         with open(path + '.wall.json', 'w') as f:
             json.dump({'origin': [wall_x, 0.0, 0.0], 'u': [0, 1, 0], 'v': [0, 0, 1],
                        'u_range': list(wall_y), 'v_range': list(wall_z)}, f)
