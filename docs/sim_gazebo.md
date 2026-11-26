@@ -127,6 +127,14 @@ Differences from MuJoCo: `VelocityControl` has no command timeout (a stale `/cmd
 acceleration limits (use `stand_navigator`'s), omni only (the profile `drive_type` is not applied, `vy` is not dropped for
 `diff`), and no odom noise. The manager pass with a free base is the multi-stand pass below.
 
+## Gravity check
+
+`ros2 run sim_gazebo gravity_check.py` starts the sim, drives home and a few poses through the joint trajectory
+controller, and compares the effort Gazebo reports for each joint at rest with the torque from
+[`gravity_core`](../src/control/gravity_core/README.md) for the same URDF. Exit code 0 when every joint is within
+`--tol` (default 2 N m or N). The telescopic stages are compared as outputs of their own, because Gazebo reports the
+lift joint alone. Result and numbers: [gravity_compensation.md](gravity_compensation.md).
+
 ## Depth sensor (`depth_sensor:=true`)
 
 Default `false`: nothing is added. With `true` the description gets `depth_sensor_link` (on `base_footprint` at

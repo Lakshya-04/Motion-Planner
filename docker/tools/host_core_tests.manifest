@@ -15,6 +15,7 @@ lib | ros_adapters | src/common/ros_adapters/include |  | core_types | -lyaml-cp
 lib | force_core | src/common/force_core/include | src/common/force_core/src/bias_tracker.cpp src/common/force_core/src/contact_free_gate.cpp src/common/force_core/src/force_limiter.cpp src/common/force_core/src/force_stage_fsm.cpp src/common/force_core/src/force_stage_sequencer.cpp src/common/force_core/src/payload_excitation.cpp src/common/force_core/src/wrench_conditioning.cpp | core_types | -pthread
 lib | teleop_core | src/common/teleop_core/include | src/common/teleop_core/src/jog_limiter.cpp src/common/teleop_core/src/jog_shaper.cpp src/common/teleop_core/src/teleop_mode_manager.cpp |  | 
 lib | diff_ik_core | src/control/diff_ik_core/include | src/control/diff_ik_core/src/diff_ik.cpp src/control/diff_ik_core/src/jacobian_quality.cpp src/control/diff_ik_core/src/null_space_costs.cpp src/control/diff_ik_core/src/pose_error.cpp |  | 
+lib | gravity_core | src/control/gravity_core/include | src/control/gravity_core/src/gravity_model.cpp src/control/gravity_core/src/urdf_loader.cpp |  | -ltinyxml2
 lib | safety_monitor | src/control/safety_monitor/include | src/control/safety_monitor/src/curobo_yaml.cpp src/control/safety_monitor/src/distance_source.cpp src/control/safety_monitor/src/safety_monitor.cpp src/control/safety_monitor/src/sphere_model.cpp |  | -lyaml-cpp
 lib | lift_hardware_core | src/control/lift_hardware/include | src/control/lift_hardware/src/core/device_transport.cpp src/control/lift_hardware/src/core/fault.cpp src/control/lift_hardware/src/core/lift_config.cpp src/control/lift_hardware/src/core/lift_supervisor.cpp src/control/lift_hardware/src/core/mock_transport.cpp src/control/lift_hardware/src/core/profile.cpp src/control/lift_hardware/src/core/scripted_transport.cpp src/control/lift_hardware/src/core/transport_factory.cpp |  | 
 lib | scene_model_core | src/perception/scene_model/include | src/perception/scene_model/src/core/export.cpp src/perception/scene_model/src/core/io_mesh.cpp src/perception/scene_model/src/core/io_pointcloud.cpp src/perception/scene_model/src/core/io_scene.cpp src/perception/scene_model/src/core/plane_fit.cpp src/perception/scene_model/src/core/scene_model.cpp src/perception/scene_model/src/core/voxel.cpp |  | -lyaml-cpp
@@ -47,6 +48,7 @@ test | test_calibration_record | tool_calibration | src/common/tool_calibration/
 test | tool_profile_yaml_loader_test | ros_adapters | src/common/ros_adapters/test/tool_profile_yaml_loader_test.cpp | 
 test | diff_ik_alloc_test | diff_ik_core | src/control/diff_ik_core/test/diff_ik_alloc_test.cpp | 
 test | diff_ik_test | diff_ik_core | src/control/diff_ik_core/test/diff_ik_test.cpp | 
+test | gravity_model_test | gravity_core | src/control/gravity_core/test/gravity_model_test.cpp | 
 test | jacobian_quality_test | diff_ik_core | src/control/diff_ik_core/test/jacobian_quality_test.cpp | 
 test | pose_error_test | diff_ik_core | src/control/diff_ik_core/test/pose_error_test.cpp | 
 test | curobo_yaml_test | safety_monitor | src/control/safety_monitor/test/curobo_yaml_test.cpp | 
