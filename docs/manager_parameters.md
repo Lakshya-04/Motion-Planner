@@ -153,3 +153,20 @@ Between two columns of one stand the manager retracts and then plans an approach
 A strip normally ends with unload, retract, dock and approach, so the tool leaves the wall between two neighbouring strips. With `contact_connectors` the manager keeps the tool on the wall instead: after the last pose of a stroke it checks `decideContactConnector` (`core/contact_connector.hpp`): the next column is of the same stand, the stroke reached its end, the arm is not stuck, the step to the next stroke's start is at most `contact_connector_max_step_m`, it stays within `contact_connector_plane_tol_m` of one wall plane and the tool orientation is about the same. It then runs the column IK check on the next strip and one short Cartesian segment (all of it or none) to the next start, with the admittance and force target left engaged (no unload, no force ramp to zero, no retract). The next column skips its dock, approach and press and strokes straight on (serpentine: up, step over, down).
 
 Any refusal (not adjacent, other plane, IK chain broken), failed or short connector move falls back to the normal unload, retract and approach of that column; the run message ends with `contact connectors: N used, M fell back to retract/approach (last: reason)`. The last column of a stand always retracts. The check that nothing is between the strips is the Cartesian planner's own collision check of the connector move (the wall itself is excluded as for any contact segment); there is no separate obstacle test. Not run in a simulator yet, see the pull request.
+
+## Controller and frame names (what is parameterised, what is not)
+
+Naming follows the ros2_control convention: every controller is a node, and its `follow_joint_trajectory` action and its topics sit under the controller's name (the helper is `controller_names.hpp` in the manager core, gtested on the host).
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `controller_name` | `combined_arm_lift_controller` | Node name of the JTAC controller; its action, its parameter service and the force topic hang off it. |
+| `follow_action_name` | `` (empty) | Full name of the `FollowJointTrajectory` action the manager sends to. Empty = `/<controller_name>/follow_joint_trajectory` (the previous behaviour). |
+| `target_force_topic` | `` (empty) | Full name of the force-setpoint topic (`std_msgs/Float64`). Empty = `/<controller_name>/target_force_n` (the previous behaviour). |
+| `z_offset_m` | 0.31 | Fixed z offset (m) between the frame the coverage JSON is authored in (`base_link`) and `base_footprint`. A property of the base, so another base needs its own value; no robot-profile field carries it yet. |
+| `planning_group` | `` (profile) | Empty = the profile's `groups.whole_body` (`lift_arm` for the shipped profiles). |
+| `group_joint_names` | `[]` | Joint names of the planning group; empty = derived from the profile. The built-in fallback lists in `manipulation_manager_node.cpp` (`lift_joint, arm_shoulder_pan_joint, ...` and `lift_prismatic_joint, joint1..6`) are used only when the group is neither the whole-body nor the arm group. |
+
+Still literal (each a default that only matters when the caller passes nothing): `kDefaultPlanningGroup = "lift_arm"` in `manipulation_manager.hpp` and `moveit_planning_backend.cpp` (the node always passes the profile's group), `coverage_pass_demo` `controller_name` default `lift_arm_controller` (a launch argument), `reachability_verified_node` `collision_group` `lift_arm`, `ik_group` `arm`, `ik_link` `tcp_link` and its 6-joint seeds, and the three legacy diagnostic nodes in `compliant_trajectory_controller` with a `joint1..6` chain. Sim scripts: `sim_gazebo/scripts/ready_pose.py` now takes `--profile` and `--group` (the group defaults to the profile's whole-body group; the `FREE` home pose list is still the UR10e one), and `contact_control_test.py` reads `JTAC_CONTROLLER_NAME`.
+
+Not compiled (the host has Humble headers, the stack builds on Jazzy): the node edit is three mechanical lines in `manipulation_manager_node.cpp`; the helper and its test were built and run on the host.

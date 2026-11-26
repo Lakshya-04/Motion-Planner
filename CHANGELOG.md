@@ -6,6 +6,7 @@ with evidence, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## [Unreleased]
 
+- `manipulation_manager`: `follow_action_name` and `target_force_topic` parameters (empty = relative to `controller_name`, so unchanged by default; `core/controller_names.hpp`, 3 host gtests). `sim_gazebo/scripts/ready_pose.py` takes `--profile` and `--group` instead of a literal `lift_arm`; `contact_control_test.py` reads `JTAC_CONTROLLER_NAME`. Node edit not compiled on the host. Remaining literals are listed in `docs/manager_parameters.md`.
 - `compliant_trajectory_controller`: `max_integration_period_s` (default 0 = off in code, 0.015 in `config/jtac_controller.yaml`) caps the step the admittance integrator and the force limiter take in one cycle (`integration_period.hpp`, 4 host gtests). Reason: the admittance rule is explicit Euler, stable only while damping * dt / mass < 2, and an overrunning 100 Hz cycle (14 to 22 ms on a busy host) gave it a long step; the MuJoCo two-stand runs at 3 and 5 cm/s showed 6 to 23 "Cartesian offset diverged" resets per run and 200 to 400 N force spikes, against 0 resets and 21 N in the 1 cm/s serpentine-off baseline. The joint rate limits still use the real period. Not yet measured in a simulation.
 
 The stack as it stands, covering the merged pull requests #5 to #61, summarised by area (the first block is
