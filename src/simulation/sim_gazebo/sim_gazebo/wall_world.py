@@ -281,3 +281,25 @@ def generate_world(scene_path, out_path, **kwargs):
     with open(out_path, 'w') as f:
         f.write(build_world_sdf(shapes, friction=friction))
     return shapes
+
+
+def world_wall_scene(shapes, wall_id=0):
+    """The wall as the generated world builds it, as a wall_scene.json dict in the WORLD frame (what mp_rviz draws).
+
+    `shapes` is load_shapes() output: the wall box's local x / y / z are the wall's u / v / outward normal, its centre sits
+    `thickness` behind the front face, so origin = centre + n * thickness / 2 is on the front (surface) plane. Obstacles are
+    not included. Raises ValueError without a wall shape."""
+    wall = next((s for s in shapes if s.role == 'wall'), None)
+    if wall is None:
+        raise ValueError('no wall shape in the world')
+    w, h, thick = (float(d) for d in wall.dims)
+    u, v, n = wall.rotation[:, 0], wall.rotation[:, 1], wall.rotation[:, 2]
+    o = wall.position + n * thick / 2.0
+    return {'frame_id': 'odom', 'note': 'the wall the Gazebo world was generated with (wall_world.world_wall_scene)',
+            'obstacles': [],
+            'walls': [{'id': int(wall_id), 'origin_xyz': [float(x) for x in o],
+                       'basis_u': [float(x) for x in u], 'basis_v': [float(x) for x in v],
+                       'normal_outward': [float(x) for x in n],
+                       'plane_abcd': [float(n[0]), float(n[1]), float(n[2]), float(-n @ o)],
+                       'u_range_m': [-w / 2.0, w / 2.0], 'v_range_m': [-h / 2.0, h / 2.0],
+                       'thickness_m': thick}]}

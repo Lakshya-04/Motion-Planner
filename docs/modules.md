@@ -12,6 +12,7 @@ Column meanings. **ROS-free**: the library at the core of the package has no `rc
 |---|---|---|---|---|---|---|
 | [`core_types`](../src/common/core_types/README.md) | common | ROS-free core library | yes | no | no | none |
 | [`force_core`](../src/common/force_core/README.md) | common | ROS-free core library | yes | no | no | `core_types` |
+| [`gravity_core`](../src/control/gravity_core/README.md) | control | ROS-free core library | yes | no | no | none |
 | [`ros_adapters`](../src/common/ros_adapters/README.md) | common | ROS node or plugin (adapters) | no | no | no | `core_types` |
 | [`mobile_manipulator_description`](../src/description/mobile_manipulator_description/README.md) | description | Description (xacro, profiles, launch) | partly | no | no | none |
 | [`mobile_manipulator_moveit_config`](../src/description/mobile_manipulator_moveit_config/README.md) | description | ROS node or plugin (MoveIt config) | no | no | no | `compliant_trajectory_controller`, `ft_bridge_hardware`, `mobile_manipulator_description` |

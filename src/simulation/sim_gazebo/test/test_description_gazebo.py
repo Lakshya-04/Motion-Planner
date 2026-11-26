@@ -109,6 +109,13 @@ def test_base_motion_and_depth_off_by_default():
     assert all(s.get('type') != 'depth_camera' for s in robot.iter('sensor'))
 
 
+def test_extra_plugin_params_only_when_asked():
+    plugin = _render_with({}).find('gazebo/plugin')
+    assert len(plugin.findall('parameters')) == 1
+    plugin = _render_with({'gz_extra_params': '/tmp/gain.yaml'}).find('gazebo/plugin')
+    assert [p.text for p in plugin.findall('parameters')][1:] == ['/tmp/gain.yaml']
+
+
 def test_base_motion_frees_the_base():
     robot = _render_with({'gz_base_motion': 'true'})
     assert robot.find("joint[@name='sim_world_joint']") is None
