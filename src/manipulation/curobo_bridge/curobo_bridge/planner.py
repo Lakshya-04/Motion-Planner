@@ -8,6 +8,7 @@ Frames: everything is in the robot base frame, the same convention as the VAMP a
 [x, y, z] + quaternion [w, x, y, z] (cuRobo's order).
 """
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
@@ -39,6 +40,12 @@ class PlanResult:
     # 'graph_seed' (trajectory optimisation failed; the graph path, fitted, retimed and validated in
     # cuRobo's model, was returned as is: see CuroboPlanner seed_fallback), '' when nothing was planned
     route: str = ''
+    # where the time went, for a plan_joint call (0 when not measured): cuRobo attempts used on the main call,
+    # graph-planner calls and their solve time, wall time of the whole call including a graph-seed fallback
+    attempts: int = 0
+    graph_calls: int = 0
+    graph_solve_s: float = 0.0
+    wall_s: float = 0.0
 
     @property
     def duration(self) -> float:
@@ -437,7 +444,29 @@ class CuroboPlanner:
 
     # ---- planning ---------------------------------------------------------------------------
     def plan_joint(self, start: Sequence[float], goal: Sequence[float]) -> PlanResult:
-        """Collision-free joint-space move start -> goal."""
+        """Collision-free joint-space move start -> goal. Logs one line per call: result, route, attempts, time."""
+        t0 = time.monotonic()
+        out = self._plan_joint(start, goal)
+        out.wall_s = time.monotonic() - t0
+        self._log_plan(out)
+        return out
+
+    def _add_telemetry(self, out: PlanResult) -> None:
+        """Attempts and graph-call numbers of the last cuRobo call, read from its counters (absent: left at 0)."""
+        inner = self._planner
+        out.attempts = int(getattr(inner, '_last_planning_attempts', 0) or 0)
+        calls = list(getattr(inner, '_last_graph_call_telemetry', None) or [])
+        out.graph_calls = len(calls)
+        out.graph_solve_s = float(sum(float(getattr(c, 'solve_time', 0.0) or 0.0) for c in calls))
+
+    @staticmethod
+    def _log_plan(out: PlanResult) -> None:
+        what = f'route={out.route or "-"}' if out.success else f'failed={out.failure_reason_code}'
+        logging.getLogger(__name__).info(
+            'plan_joint: %s attempts=%d graph_calls=%d graph_solve=%.3f s planning=%.3f s wall=%.3f s',
+            what, out.attempts, out.graph_calls, out.graph_solve_s, out.planning_time_s, out.wall_s)
+
+    def _plan_joint(self, start: Sequence[float], goal: Sequence[float]) -> PlanResult:
         bad = self._check_state(start, 'start') or self._check_state(goal, 'goal')
         if bad:
             return bad
@@ -450,12 +479,14 @@ class CuroboPlanner:
         result = self._planner.plan_cspace(tgt, cur, max_attempts=self._max_attempts,
                                            enable_graph_attempt=self._enable_graph_attempt)
         out = self._wrap(result, last=goal)
+        self._add_telemetry(out)
         if out.success or not self._seed_fallback:
             return out
         fallback = self._plan_graph_seed(tgt, cur)
         if fallback is None:
             return out
         fallback.planning_time_s += out.planning_time_s
+        fallback.attempts, fallback.graph_calls, fallback.graph_solve_s = out.attempts, out.graph_calls, out.graph_solve_s
         return fallback
 
     def _va_limits(self):

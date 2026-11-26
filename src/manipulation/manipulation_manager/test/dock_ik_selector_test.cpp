@@ -416,6 +416,28 @@ TEST(DockIkSelectorJointCosts, WithoutLimitsTheLiftStrokeAndTwoPiAreTheRanges)
   p.lift_max_m = 1.5;
   EXPECT_NEAR(dockIkCost({0.3, 0.0, 0.0}, ref, p), 0.3 / 1.5, 1e-12);
   EXPECT_NEAR(dockIkCost({0.0, 1.0, 0.0}, ref, p), 1.0 / (2.0 * M_PI), 1e-12);
+
+// Lift is metres, arm is radians. The cost is a max, never a sum, so 0.06 m of lift next to a 0.2 rad arm step
+// reads as 0.2; the reference here is the start state.
+TEST(DockIkSelectorTest, LiftMetresAreNotAnArmJumpAgainstTheStartState)
+{
+  const V start{0.5, 0.3, -0.4};
+  DockIkSelectorParams p;
+  p.branch_joints = {};
+  p.lift_cost_weight = 1.0;
+  p.max_dq_rad = 0.1;
+  const auto only = [&](const V & q) {
+      return selectDockIk([q](const V &) -> std::optional<V> {return q;}, {start}, start, p);
+    };
+  const auto lift = only(V{0.56, 0.3, -0.4});   // 0.06 m of lift only
+  ASSERT_TRUE(lift.ok);
+  EXPECT_NEAR(lift.cost, 0.06, 1e-12);
+  EXPECT_FALSE(only(V{0.5, 0.5, -0.4}).ok);     // 0.2 rad of arm is still caught
+  EXPECT_FALSE(only(V{0.56, 0.5, -0.4}).ok);    // and the lift does not hide it
+  p.max_dq_rad = 0.25;
+  const auto both = only(V{0.56, 0.5, -0.4});
+  ASSERT_TRUE(both.ok);
+  EXPECT_NEAR(both.cost, 0.2, 1e-12);           // max(0.06, 0.2), not 0.26
 }
 
 }  // namespace manipulation_manager

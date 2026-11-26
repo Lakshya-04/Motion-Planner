@@ -89,6 +89,10 @@ def fill(response, result: PlanResult):
     response.route = result.route
     response.trajectory = to_trajectory(result)
     response.planning_time_s = result.planning_time_s
+    response.attempts = result.attempts
+    response.graph_calls = result.graph_calls
+    response.graph_solve_s = result.graph_solve_s
+    response.wall_s = result.wall_s
     return response
 
 

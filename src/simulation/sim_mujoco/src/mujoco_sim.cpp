@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <limits>
 #include <string>
 #include <stdexcept>
@@ -529,6 +530,7 @@ void MujocoSim::scanUnexpectedContacts(std::vector<std::string> & new_pairs)
       const char * bn = mj_id2name(model_, mjOBJ_BODY, b);
       return std::string(bn ? bn : "?");
     };
+  std::set<std::string> counted;
   for (int i = 0; i < data_->ncon; ++i) {
     const mjContact & c = data_->contact[i];
     if (c.exclude != 0 || c.dist >= 0.0) {
@@ -563,7 +565,9 @@ void MujocoSim::scanUnexpectedContacts(std::vector<std::string> & new_pairs)
       std::snprintf(buf, sizeof buf, " [%s] depth=%.4f", kind.c_str(), -c.dist);
       new_pairs.push_back(key + buf);
     }
-    ++stat.steps;
+    if (counted.insert(key).second) {  // box-box gives several contacts per pair, count the pair once per scan
+      ++stat.steps;
+    }
     stat.depth = std::max(stat.depth, -static_cast<double>(c.dist));
   }
 }
