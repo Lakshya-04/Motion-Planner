@@ -568,7 +568,34 @@ The stow pose is valid in all three.
 2. **True at lift 0.01, false at lift exactly 0.0.** `--ignore-hops 2` makes 18 of 19 poses valid at 0.01 (the lift-stage links fall inside the hop rule); docked to stow then plans in 0.09 to 0.15 s, `route=trajopt` (poses 4 to 8, empty world). It does not help at lift 0.0: `base_link`/`lift_stage_2_link` overlaps 5 mm, all 19 poses invalid. The manager's logged docks are often at lift 0.0000, so with `--ignore-hops 2` alone those starts stay `start_in_collision`. Adding `--ignore-pair base_link:lift_stage_2_link` makes lift 0.0 valid for 18 of 19 (same planning times at 0.01 for poses 4 to 8). What that pair ignore hides: any real contact between the base body spheres and the second lift stage. Those parts are a rigidly mounted column over the base, they do not move relative to each other except along the lift axis, and the overlap is 5 mm at the retracted end only, so it is an artefact of the sphere fit, not a measured clearance; this was not checked against the mesh. Not made the default.
    - Caveat, any config: `docked_wall_column_3` is invalid at every lift (`arm_forearm_link`/`arm_wrist_3_link` 0.3 mm with hops, `arm_forearm_link`/`arm_wrist_2_link` 0.7 mm without). It is a wrist pose, not a lift problem; an ignore for it could hide a real wrist self-collision and was not tested.
 3. **A retract-to-0.4 step does not rescue an invalid start and is not needed when the start is valid.** Sampled matrix: lift-only motion docked to 0.4 fails `check_motion` (the start is invalid), folding the arm at lift 0.01 is invalid, and only mid (lift 0.4, arm swung) to stow plans (0.33 s). With `--ignore-hops 2` (0.01) or the pair ignore (0.0) the direct docked-to-stow plan already succeeds, and the retract (`check_motion` true, mid to stow 0.1 to 0.25 s) and fold-first variants succeed too. Not implemented in the manager.
-4. Still not measured: the 11 to 16 s plan time under sim load (these runs were unshared and fast).
+4. The 11 to 16 s plan time under sim load: reproduced on a stand-in for the load, see "Plan time, idle and shared" below.
+
+### Plan time, idle and shared (measured 2026-11-26)
+
+`docker/tools/curobo_plan_timing.py`: the 7-joint `ur10e_telescopic` config (694 spheres, `--ignore-hops 2`), empty world, warm Warp
+cache, the 19 logged docked poses at lift 0.05, docked to stow and stow to docked, 2 repeats, so 76 plans per row. Run on an
+RTX 5080 (16 GB), not the 4 GB laptop. "Shared" is a stand-in for the simulator: another process looping 4096 x 4096 matmuls on the
+GPU and 8 busy CPU processes on the 8 cores the planner may use. "About 3 GB free" is another process holding 12 GB of the card.
+
+| condition | warmup | solved | median | p95 | worst | failed plans (median / worst) | graph-seed plans (median / worst) |
+|---|---|---|---|---|---|---|---|
+| idle | 98 s | 72/76 | 25 ms | 1.32 s | 5.9 s | 5.5 / 7.7 s | 1.4 / 5.9 s |
+| about 3 GB free | 69 s | 72/76 | 26 ms | 1.33 s | 7.3 s | 5.3 / 5.6 s | 1.4 / 7.3 s |
+| shared | 179 s | 72/76 | 87 ms | 6.32 s | 26.7 s | 16.8 / 17.7 s | 6.4 / 26.7 s |
+| shared and about 3 GB free | 174 s | 72/76 | 87 ms | 4.31 s | 26.7 s | 16.6 / 17.6 s | 5.4 / 26.7 s |
+| idle, `max_attempts` 6 | 68 s | 72/76 | 25 ms | 0.45 s | 5.3 s | 2.4 / 2.5 s | 0.5 / 5.3 s |
+| shared, `max_attempts` 6 | 191 s | 72/76 | 66 ms | 1.21 s | 13.9 s | 6.0 / 6.7 s | 1.2 / 13.9 s |
+
+- A plan on cuRobo's normal route takes 25 ms idle (all 64 of them 30 ms or less) and about 90 ms shared. The slow plans are the ones
+  that fail (`no_path`, 20 attempts) or end on the graph-seed fallback, and they sit on a few poses (docked columns 9, 10 and 18).
+  Shared, a failed plan takes about 17 s: the 11 to 16 s seen in the sim passes fits this path, not the normal one.
+- VRAM is not the limit: the planner took 1.2 GB, and 3 GB free changed nothing.
+- `max_attempts` 6 solved the same 72 of 76 in every condition it was run in. Idle it cut failed plans from 5.5 s to 2.4 s and p95 from
+  1.3 s to 0.45 s. Shared it cut failed plans from 16.8 s to 6.0 s, p95 from 6.3 s to 1.2 s and the worst plan from 26.7 s to 13.9 s.
+  The graph-seed fallback is not bounded by it (worst 13.9 s shared): it comes after the attempts, from the separate `fallback_attempts`.
+- Not measured: a wall in the world, the laptop's own
+  GPU and CPU, the simulator itself instead of the stand-in, one run per row. The unsolved four are the same two problems in every
+  row (`docked_wall_column_10`, both directions, 2 repeats); why cuRobo cannot plan them is not investigated here.
 
 Not verified: planning with the wall in the world (empty world only); a full docked to stow from lift exactly 0.0 under the manager; the physical clearance of the retracted lift stages against the base (mesh check); the `--ignore-pair` variant on poses other than the 19 logged (columns 0 to 18 of one wall); behaviour on a second robot. Generator side effect found by the run: `--ignore-pair` together with `--ignore-hops` was rejected ("links without collision spheres": the check saw the hop table's frame names); fixed (`generate_curobo_robot.py`, test added). Recommendation only: keep `--ignore-hops 2` as the default; if docks at lift 0.0 are needed, add the base_link:lift_stage_2_link ignore to `CUROBO_SPHERE_ARGS` after a mesh clearance check, or keep the dock lift at 0.01 or above.
 
