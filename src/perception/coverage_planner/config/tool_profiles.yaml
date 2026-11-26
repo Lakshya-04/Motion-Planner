@@ -52,9 +52,8 @@ tools:
     coverage:
       swath_m: 0.20                    # m, width of the wiped strip
       overlap_pct: 20.0                # percent; strip spacing = swath * (1 - overlap/100) = 0.16 m
-      passes:                          # one entry per pass over each strip
-        - {standoff_delta_m: 0.0, reverse_direction: false}
-        - {standoff_delta_m: 0.0, reverse_direction: true}   # second pass, opposite direction
+      passes:                          # one entry per pass over each strip: one pass by default;
+        - {standoff_delta_m: 0.0, reverse_direction: false}  # double_pass:=true adds the reverse pass
       sweep_direction: vertical        # vertical | horizontal
       enable_boundary_pass: false      # extra pass along the region boundary
       boundary_offset_m: 0.0           # m, boundary pass offset
