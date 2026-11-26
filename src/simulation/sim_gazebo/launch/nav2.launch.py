@@ -16,7 +16,11 @@ PACKAGES = {'controller_server': 'nav2_controller', 'planner_server': 'nav2_plan
 
 
 def generate_launch_description():
-    default = os.path.join(get_package_share_directory('sim_gazebo'), 'config', 'nav2', 'nav2_omni_params.yaml')
+    try:
+        share = get_package_share_directory('sim_gazebo')
+    except Exception:   # not installed (a source-tree check): fall back to the checkout
+        share = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    default = os.path.join(share, 'config', 'nav2', 'nav2_omni_params.yaml')
     nodes = [Node(package=PACKAGES[n], executable=n, name=n, output='screen',
                   parameters=[LaunchConfiguration('params_file')]) for n in SERVERS]
     nodes.append(Node(package='nav2_lifecycle_manager', executable='lifecycle_manager', name='lifecycle_manager_navigation',
