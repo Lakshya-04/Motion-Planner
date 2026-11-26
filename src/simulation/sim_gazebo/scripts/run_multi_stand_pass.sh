@@ -43,6 +43,10 @@
 #   MULTI_STAND_PAINT=1            live done / not done wall paint (RViz topic /mp_viz/coverage_paint; _PAINT_FEED=gazebo; default off)
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented)
+#   MULTI_STAND_SELF_FILTER=1      depth sensor on (depth_sensor:=true), robot_self_filter on its cloud (/depth_sensor/points ->
+#                                  /depth_sensor/points_filtered) and a second wall_detector (node wall_detector_sf, target_frame odom,
+#                                  output in $OUT/self_filter) on the filtered cloud. Observer only: the plan does not use it. Default 0 = off.
+#                                  With realism: MULTI_STAND_LAUNCH_ARGS="odom_realism:=typical depth_realism:=typical" (docs/sim_realism.md)
 #   STAND_MAP                      a built reachability map (skips the build, which takes a few minutes)
 #   GZ_PASS_STILLS=N               colour camera on, N PNG stills into OUT/stills, one every GZ_PASS_STILLS_EVERY s
 # Needs a sourced ROS environment with sim_gazebo, reachability, stand_navigator, ft_conditioner,
@@ -111,13 +115,23 @@ fi
 
 # shellcheck disable=SC2046
 eval gz_start sim_launch ros2 launch sim_gazebo sim.launch.py $(gz_sim_args) base_motion:=true \
-  wall_scene:=$OUT/data/smoke_wall_scene.json standoff:=0.915 ${MULTI_STAND_LAUNCH_ARGS:-}
+  wall_scene:=$OUT/data/smoke_wall_scene.json standoff:=0.915 $([ "${MULTI_STAND_SELF_FILTER:-0}" = 1 ] && echo depth_sensor:=true) ${MULTI_STAND_LAUNCH_ARGS:-}
 gz_start coverage_planner ros2 run coverage_planner coverage_planner_node
 gz_start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
   -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0} \
   -p stand_max_reach_fraction:=${MULTI_STAND_MAX_REACH_FRACTION:-0.0} -p stand_balance_reach:=${MULTI_STAND_BALANCE_REACH:-false} \
   -p arm_reach_m:=${MULTI_STAND_ARM_REACH:-0.0}
 gz_start stand_navigator ros2 run stand_navigator stand_navigator_node --ros-args -p base_profile:=$PROFILE
+if [ "${MULTI_STAND_SELF_FILTER:-0}" = 1 ]; then
+  mkdir -p "$OUT/self_filter"
+  # tool_tip_link (the tool's collision) sits on a joint nobody publishes in TF, so it is left out of the filter's links
+  gz_start self_filter ros2 run robot_self_filter self_filter_node --ros-args -r __node:=self_filter \
+    --params-file $(ros2 pkg prefix robot_self_filter)/share/robot_self_filter/config/self_filter.yaml -p links:="[base_link, lift_base_link, lift_carriage_link, lift_stage_1_link, lift_stage_2_link, arm_base_link_inertia, arm_shoulder_link, arm_upper_arm_link, arm_forearm_link, arm_wrist_1_link, arm_wrist_2_link, arm_wrist_3_link]" \
+    -r cloud_in:=/depth_sensor/points -r cloud_out:=/depth_sensor/points_filtered
+  gz_start wall_detector_sf ros2 run wall_detector wall_detector_node --ros-args -r __node:=wall_detector_sf \
+    -p cloud_topic:=/depth_sensor/points_filtered -p target_frame:=odom -p output_dir:=$OUT/self_filter \
+    -p max_range_m:=4.0 -p accumulate_frames:=5
+fi
 
 # 1. coverage plan for the wall's contact region, in the world frame
 sleep 3

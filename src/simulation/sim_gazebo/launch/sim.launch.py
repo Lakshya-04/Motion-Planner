@@ -205,7 +205,10 @@ def _launch(context):
         bridged += ['/base/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
                     '/base/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
                     '/base/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V']
-        remaps += [('/base/cmd_vel', '/cmd_vel'), ('/base/odom', '/odom'), ('/base/tf', '/tf')]
+        # odom_realism on: the gz odometry becomes /odom_truth and its TF stays off /tf (sim_realism publishes both)
+        odom_real = lc('odom_realism') != 'off'
+        remaps += [('/base/cmd_vel', '/cmd_vel'), ('/base/odom', '/odom_truth' if odom_real else '/odom'),
+                   ('/base/tf', '/base/tf_truth' if odom_real else '/tf')]
     if rgb:
         bridged.append('/rgb_camera@sensor_msgs/msg/Image[gz.msgs.Image')
         remaps.append(('/rgb_camera', '/rgb_camera/image'))
@@ -213,6 +216,8 @@ def _launch(context):
         bridged.append('/depth_sensor/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked')
     if lidar:
         bridged.append('/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan')
+        if lc('depth_realism') != 'off':
+            remaps.append(('/depth_sensor/points', '/depth_sensor/points_truth'))
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge', output='screen',
                   arguments=bridged, remappings=remaps,
                   parameters=[{'use_sim_time': True}])
@@ -223,6 +228,14 @@ def _launch(context):
                               'world_frame': 'odom' if base_motion else 'world'}])
 
     actions = [gz, rsp, bridge, truth, spawn]
+    if (base_motion and lc('odom_realism') != 'off') or (depth and lc('depth_realism') != 'off'):
+        actions.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(get_package_share_directory('sim_realism'), 'launch',
+                                                       'realism.launch.py')),
+            launch_arguments={'odom_realism': lc('odom_realism') if base_motion else 'off',
+                              'depth_realism': lc('depth_realism') if depth else 'off',
+                              'seed': lc('realism_seed'), 'overrides': lc('realism_overrides'),
+                              'use_sim_time': 'true'}.items()))
     if lc('arm_meshes') == 'true':
         # gz resolves the description's model://ur_description/... URIs through GZ_SIM_RESOURCE_PATH; without it the UR links
         # have no visual and no collision geometry in gz (only the primitives of the lift, tool and sensor link exist)
@@ -319,6 +332,15 @@ def generate_launch_description():
         DeclareLaunchArgument('lidar_range_max_m', default_value='10.0', description='lidar maximum range, m'),
         DeclareLaunchArgument('lidar_rate_hz', default_value='10.0', description='lidar rate, Hz'),
         DeclareLaunchArgument('lidar_noise_m', default_value='0.0', description='Gaussian range noise std of the lidar, m'),
+        DeclareLaunchArgument('odom_realism', default_value='off',
+                              description='off|good|typical|poor: wheel-odometry noise from sim_realism (needs base_motion:=true); '
+                                          'gz odometry becomes /odom_truth, the node publishes /odom and TF (docs/sim_realism.md)'),
+        DeclareLaunchArgument('depth_realism', default_value='off',
+                              description='off|good|typical|poor: depth noise from sim_realism (needs depth_sensor:=true); '
+                                          '/depth_sensor/points is the noisy cloud, the clean one is /depth_sensor/points_truth'),
+        DeclareLaunchArgument('realism_seed', default_value='-1', description='sim_realism seed, -1 = random'),
+        DeclareLaunchArgument('realism_overrides', default_value='',
+                              description='"odom.<field>=<v> depth.<field>=<v>" on top of the sim_realism presets'),
         DeclareLaunchArgument('arm_meshes', default_value='true',
                               description='true (default): make the UR meshes resolvable in gz (visual AND collision); false: the '
                                           'UR links are invisible and have no collision in gz (the old behaviour)'),

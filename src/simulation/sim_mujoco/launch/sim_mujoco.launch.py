@@ -157,8 +157,10 @@ def _setup(context, *args, **kwargs):
     # robot_description must also be a parameter of the JTAC node itself, see jtac_controller.yaml
     controller_args = ['--param-file', params_file] if jtac else []
 
+    depth_real = arg('depth_realism') != 'off' and depth is not None
     control_node = Node(package='controller_manager', executable='ros2_control_node',
-                        parameters=[robot_description, params_file], output='screen')
+                        parameters=[robot_description, params_file], output='screen',
+                        remappings=[('/depth_sensor/points', '/depth_sensor/points_truth')] if depth_real else [])
     rsp = Node(package='robot_state_publisher', executable='robot_state_publisher',
                parameters=[robot_description], output='screen')
     jsb = Node(package='controller_manager', executable='spawner',
@@ -188,9 +190,12 @@ def _setup(context, *args, **kwargs):
                                   'markers': arg('rviz_markers'), 'scene': arg('rviz_scene')}.items()))
     if arg('base_motion') == 'true':
         # the plugin publishes the base pose as geometry_msgs only; this turns it into /odom and TF
+        odom_real = arg('odom_realism') != 'off'   # truth goes to /odom_truth without TF; sim_realism publishes /odom and TF
         nodes.append(Node(package='sim_mujoco', executable='base_odom.py', name='base_odom', output='screen',
                           parameters=[{'base_frame': (profile.get('frames', {}).get('world_base')
-                                                      or 'base_footprint')}]))
+                                                      or 'base_footprint'),
+                                       'odom_topic': 'odom_truth' if odom_real else 'odom',
+                                       'publish_tf': not odom_real}]))
     if depth is not None:
         root_frame = profile.get('frames', {}).get('world_base') or 'base_footprint'
         p, r = depth['pos'], depth['rpy']
@@ -205,6 +210,13 @@ def _setup(context, *args, **kwargs):
                           arguments=['--x', str(p[0]), '--y', str(p[1]), '--z', str(p[2]),
                                      '--roll', str(r[0]), '--pitch', str(r[1]), '--yaw', str(r[2]),
                                      '--frame-id', root_frame, '--child-frame-id', 'lidar_link']))
+    if arg('odom_realism') != 'off' or depth_real:
+        nodes.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(get_package_share_directory('sim_realism'), 'launch',
+                                                       'realism.launch.py')),
+            launch_arguments={'odom_realism': arg('odom_realism') if arg('base_motion') == 'true' else 'off',
+                              'depth_realism': arg('depth_realism') if depth is not None else 'off',
+                              'seed': arg('realism_seed'), 'overrides': arg('realism_overrides')}.items()))
     if conditioner:
         # raw wrench is in tool_mount_link (the sensor frame) and includes the payload weight; sign
         # +1 (the plugin reports the load the tool puts on the sensor); the sensor-to-tcp offset and
@@ -288,6 +300,15 @@ def generate_launch_description():
         DeclareLaunchArgument('lidar_dropout', default_value='0.0',
                               description='probability that a lidar return is lost (NaN), 0..1'),
         DeclareLaunchArgument('lidar_seed', default_value='12345', description='seed of the lidar noise and dropout'),
+        DeclareLaunchArgument('odom_realism', default_value='off',
+                              description='off|good|typical|poor: wheel-odometry noise from sim_realism (needs base_motion:=true); '
+                                          'the sim then publishes /odom_truth and the node /odom + TF (docs/sim_realism.md)'),
+        DeclareLaunchArgument('depth_realism', default_value='off',
+                              description='off|good|typical|poor: depth noise from sim_realism (needs depth_sensor:=true); '
+                                          '/depth_sensor/points is the noisy cloud, the clean one is /depth_sensor/points_truth'),
+        DeclareLaunchArgument('realism_seed', default_value='-1', description='sim_realism seed, -1 = random'),
+        DeclareLaunchArgument('realism_overrides', default_value='',
+                              description='"odom.<field>=<v> depth.<field>=<v>" on top of the sim_realism presets'),
         DeclareLaunchArgument('update_rate', default_value='100', description='control rate, Hz'),
         DeclareLaunchArgument('out_dir', default_value='', description='where to write the MJCF'),
         DeclareLaunchArgument('viewer', default_value='false',
