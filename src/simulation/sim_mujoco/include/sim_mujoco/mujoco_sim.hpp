@@ -133,6 +133,28 @@ public:
   /// One scan: the hit points (misses and ranges outside [min_range, max_range] are dropped).
   std::vector<std::array<float, 3>> depthScan();
 
+  /// Simulated 2D lidar (present when the MJCF has the site `lidar` and the numeric `sim_mujoco_lidar`, see the
+  /// generator's `lidar` option). A fan of mj_multiRay in the site's x-y plane (angle 0 = +x, counter-clockwise
+  /// about +z) against the scene geoms (group 1) only; the robot is not scanned.
+  struct LidarConfig
+  {
+    double angle_min{0.0};        ///< rad
+    double angle_max{0.0};        ///< rad
+    double angle_increment{0.0};  ///< rad
+    double range_min{0.0};        ///< m
+    double range_max{0.0};        ///< m
+    double rate_hz{0.0};
+    double noise_std{0.0};        ///< Gaussian noise on the range, m
+    double dropout{0.0};          ///< probability that a hit is lost (NaN)
+    unsigned seed{12345};         ///< seeds the noise and dropout draws
+  };
+  bool hasLidar() const {return lidar_.present;}
+  const LidarConfig & lidarConfig() const {return lidar_.cfg;}
+  size_t lidarRayCount() const {return lidar_.dist.size();}
+  /// One scan, a range per ray in the LaserScan convention: +inf for no return or beyond range_max, -inf below
+  /// range_min, NaN for a dropped return.
+  std::vector<float> lidarScan();
+
   double time() const {return data_->time;}
   int contactCount() const {return data_->ncon;}
   const mjModel * model() const {return model_;}
@@ -164,6 +186,7 @@ private:
   };
   void initBase();
   void initDepth();
+  void initLidar();
   Wrench rawWrench() const;
   void applyMimic();
 
@@ -191,6 +214,18 @@ private:
     std::mt19937 rng{12345};
   };
   Depth depth_;
+  struct Lidar
+  {
+    bool present{false};
+    int site{-1};
+    LidarConfig cfg;
+    std::vector<mjtNum> dirs;       ///< unit ray directions in the site frame, 3 per ray
+    std::vector<mjtNum> world_dirs;
+    std::vector<mjtNum> dist;
+    std::vector<int> geomid;
+    std::mt19937 rng;
+  };
+  Lidar lidar_;
   double carry_{0.0};
 };
 
