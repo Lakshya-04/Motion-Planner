@@ -34,6 +34,16 @@ namespace motion_planner
 namespace
 {
 
+// Deepest penetration among one link pair's contact points (0 when there are none), for the truncation diagnostic.
+double deepestContactDepth(const std::vector<collision_detection::Contact> & contacts)
+{
+  double deepest = 0.0;
+  for (const auto & contact : contacts) {
+    deepest = std::max(deepest, contact.depth);
+  }
+  return deepest;
+}
+
 constexpr double kDefaultEefStep = 0.01;
 constexpr double kRelaxationFactor = 2.0;
 constexpr double kMinTimeStepSeconds = 1e-3;
@@ -773,8 +783,14 @@ PlanningResult CartesianPlanner::plan(const PlanningRequest & request)
                   for (const auto & contact_entry : contact_result.contacts) {
                     RCLCPP_WARN(
                       node_->get_logger(),
-                      "CartesianPlanner: collision truncation at link pair '%s' <-> '%s'",
-                      contact_entry.first.first.c_str(), contact_entry.first.second.c_str());
+                      "CartesianPlanner: collision truncation at link pair '%s' <-> '%s' "
+                      "(%zu contact points, deepest %.4f m, first at x=%.3f y=%.3f z=%.3f)",
+                      contact_entry.first.first.c_str(), contact_entry.first.second.c_str(),
+                      contact_entry.second.size(),
+                      deepestContactDepth(contact_entry.second),
+                      contact_entry.second.empty() ? 0.0 : contact_entry.second.front().pos.x(),
+                      contact_entry.second.empty() ? 0.0 : contact_entry.second.front().pos.y(),
+                      contact_entry.second.empty() ? 0.0 : contact_entry.second.front().pos.z());
                   }
                 }
               }
