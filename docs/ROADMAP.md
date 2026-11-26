@@ -144,7 +144,7 @@ without code, when we can implement it.
 - [ ] Production gains per tool and robot; a stability analysis for moving references (today an empirical 4x mass factor)
 - [ ] Evaluate FZI `cartesian_controllers` (BSD-3: force, compliance controllers; CI covers Humble, Iron and Jazzy, last `ros2` commit 2024-10, so low activity) as an alternative to wrapping the admittance rule
 - [ ] Inertial compensation, filtering; sign and frame of a real sensor checked on hardware
-- [ ] End-to-end safety layer (abort thresholds exist per tool; nothing ties them to an e-stop path)
+- [~] End-to-end safety layer (abort thresholds exist per tool; nothing ties them to an e-stop path): ROS-free `safety_monitor::SafetyChain` combines them with the stale-data, base-obstacle, operator e-stop and controller-fault inputs into one latched OK/HOLD/ESTOP state with defined outputs and reset rules (29 host gtests, `docs/safety_chain.md`). Not done: the ROS node, consumers in JTAC, the base and the tool, any simulation or hardware run, a hardware e-stop circuit (not a certified safety function)
 - [ ] Learned skills / residual policy (ACP-style outputs: pose, force target, stiffness, under the classical safety layer); deferred, design only
 
 ## 9. Mobile base execution

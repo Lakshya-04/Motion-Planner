@@ -29,6 +29,7 @@ from rclpy.parameter import Parameter
 from sensor_msgs_py import point_cloud2
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
+from curobo_bridge import profile_costs
 from curobo_bridge.planner import PRISMATIC_IK_FACTOR, Box, CuroboPlanner, EsdfSpec, PlanResult
 
 
@@ -112,13 +113,21 @@ class CuroboPlannerNode(Node):
         seed_fallback = bool(self.declare_parameter('seed_fallback', True).value)
         fallback_attempts = int(self.declare_parameter('fallback_attempts', 6).value)
         max_attempts = int(self.declare_parameter('max_attempts', 20).value)
+        # Per-joint movement cost of the optimal mode (lift first), the profile's `joint_costs`. Either given here or
+        # read from the profile named in `profile`; none = keep lift_cost_weight.
+        raw_costs = self.declare_parameter('joint_costs', Parameter.Type.DOUBLE_ARRAY).value
+        joint_costs = list(raw_costs) if raw_costs is not None and len(raw_costs) else None
+        profile = str(self.declare_parameter('profile', '').value)
+        if joint_costs is None and profile:
+            joint_costs = profile_costs.load_joint_costs(profile)
         precheck_endpoints = bool(self.declare_parameter('precheck_endpoints', True).value)
         optimal = dict(
             free_space_optimize=bool(self.declare_parameter('free_space_optimize', False).value),
             free_space_time_budget_s=float(self.declare_parameter('free_space_time_budget_s', 20.0).value),
             free_space_num_candidates=int(self.declare_parameter('free_space_num_candidates', 6).value),
             free_space_objective=str(self.declare_parameter('free_space_objective', 'length').value),
-            lift_cost_weight=float(self.declare_parameter('lift_cost_weight', 2.0).value))
+            lift_cost_weight=float(self.declare_parameter('lift_cost_weight', 2.0).value),
+            joint_costs=joint_costs)
         self._planner = planner
         if self._planner is None:
             try:

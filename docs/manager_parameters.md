@@ -35,7 +35,7 @@ With the lift free the IK tends to dock with the lift near its start and the too
 | Parameter | Default | Meaning |
 |---|---|---|
 | `dock_ik_reach_fraction` | 0.0 | Wanted upper bound of tool distance from the `arm_base_frame` origin over `dock_ik_reach_m`. 0 = off. |
-| `dock_ik_lift_cost_weight` | 2.0 | Multiplier of the lift (linear joint) delta in the dock IK candidate cost, so arm motion is preferred over lift motion. 1.0 restores the unweighted ordering. The `dock_ik_max_dq_rad` rejection stays on the raw delta. |
+| `dock_ik_lift_cost_weight` | 2.0 | Multiplier of the lift (linear joint) delta in the dock IK candidate cost, so arm motion is preferred over lift motion. 1.0 restores the unweighted ordering. The `dock_ik_max_dq_rad` rejection stays on the raw delta. Ignored when the profile has `joint_costs`: the choice then ranks by `cost_i * |dq_i| / range_i` per joint, like the planners. |
 | `dock_ik_reach_m` | 0.0 | Arm reach (m) from the `arm_base_frame` origin. Must be > 0 for the preference to act. |
 | `dock_ik_lift_joint` | 0 | Index of the lift joint in the planning group. |
 | `dock_ik_lift_min_m`, `dock_ik_lift_max_m` | 0.0, 1.5 | Stroke the proposed lift is clamped into. |
