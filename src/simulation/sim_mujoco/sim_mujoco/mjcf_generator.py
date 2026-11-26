@@ -31,6 +31,8 @@ import pathlib
 import shutil
 import xml.etree.ElementTree as ET
 
+from sim_mujoco.lidar import lidar_numeric
+
 ACTUATED = ('revolute', 'continuous', 'prismatic')
 
 
@@ -221,6 +223,9 @@ DEFAULTS = dict(
     # None, or dict(pos=(x, y, z), rpy=(r, p, y) in the root link frame; optional width, height, hfov_deg,
     # vfov_deg, min_range, max_range, rate_hz, noise_std): a ray-cast depth sensor the plugin publishes
     depth_sensor=None,
+    # None, or dict(pos=, rpy= in the root link frame; optional angle_min, angle_max, angle_increment (rad), range_min,
+    # range_max, rate_hz, noise_std, dropout, seed, see lidar.py): a 2D ray-cast lidar the plugin publishes as a scan
+    lidar=None,
 )
 
 DEPTH_DEFAULTS = dict(width=96, height=64, hfov_deg=60.0, vfov_deg=45.0, min_range=0.1, max_range=5.0,
@@ -341,6 +346,11 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
             ET.SubElement(body, 'site', name='depth_sensor', size='0.01', group='4',
                           pos=_fmt(ds.get('pos', (0, 0, 0))),
                           quat=_fmt(quat_from_rpy(*ds.get('rpy', (0, 0, 0)))))
+        if joint is None and opt['lidar'] is not None:
+            ld = opt['lidar']
+            ET.SubElement(body, 'site', name='lidar', size='0.01', group='4',
+                          pos=_fmt(ld.get('pos', (0, 0, 0))),
+                          quat=_fmt(quat_from_rpy(*ld.get('rpy', (0, 0, 0)))))
         if joint is None and opt['base_motion'] is not None:
             for name, kind, axis in zip(BASE_JOINTS, ('slide', 'slide', 'hinge'),
                                         ('1 0 0', '0 1 0', '0 0 1')):
@@ -385,8 +395,8 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
 
     add_body(world, robot.root, None)
     for g in world_geoms:
-        if opt['depth_sensor'] is not None:
-            g.set('group', '1')  # the depth sensor scans group 1 only: the scene, not the robot
+        if opt['depth_sensor'] is not None or opt['lidar'] is not None:
+            g.set('group', '1')  # the depth sensor and the lidar scan group 1 only: the scene, not the robot
         world.append(g)
 
     # contacts between nearby links are meaningless for meshes that overlap at joints
@@ -436,6 +446,12 @@ def urdf_to_mjcf(urdf_text, out_dir, urdf_dir='.', home=None, ft_link='tool_moun
         ET.SubElement(custom, 'numeric', name='sim_mujoco_depth', data=_fmt([
             d['width'], d['height'], math.radians(d['hfov_deg']), math.radians(d['vfov_deg']),
             d['min_range'], d['max_range'], d['rate_hz'], d['noise_std']]))
+
+    if opt['lidar'] is not None:
+        custom = mj.find('custom')
+        if custom is None:
+            custom = ET.SubElement(mj, 'custom')
+        ET.SubElement(custom, 'numeric', name='sim_mujoco_lidar', data=_fmt(lidar_numeric(opt['lidar'])))
 
     sensors = ET.SubElement(mj, 'sensor')
     ET.SubElement(sensors, 'force', name='ft_force', site='ft_sensor')
