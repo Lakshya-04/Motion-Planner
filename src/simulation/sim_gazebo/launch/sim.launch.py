@@ -127,6 +127,8 @@ def _launch(context):
     mappings = prof.xacro_mappings(profile, 'gazebo')
     if base_motion:
         mappings['gz_base_motion'] = 'true'
+    if lc('position_gain').strip():
+        mappings['gz_position_gain'] = lc('position_gain').strip()
     if depth:
         pose = [float(v) for v in lc('depth_sensor_pose').split()]
         if len(pose) != 6:
@@ -308,6 +310,10 @@ def generate_launch_description():
                               description='true: JTAC claims only the position command interface (closed gz position '
                                           'loop, slow and soft) instead of position + velocity (open loop on the '
                                           'velocity); the manager pass uses true'),
+        DeclareLaunchArgument('position_gain', default_value='',
+                              description="gz_ros2_control position_proportional_gain in 1/s (position interface). Empty "
+                                          "keeps the plugin default 0.1 (10 s time constant, soft); 10 was stiff "
+                                          "(8 kN contact bounces, docs/sim_gazebo.md); try 1 to 3"),
         DeclareLaunchArgument('move_group', default_value='false',
                               description='also start move_group (planning only) for the manipulation manager'),
         DeclareLaunchArgument('base_motion', default_value='false',

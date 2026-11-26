@@ -44,6 +44,7 @@
 #   MULTI_STAND_CANCEL_AFTER_S=N   cancel the goal N s after it was accepted instead (checks the arm stopped)
 #   MULTI_STAND_MANAGER_EXTRA      extra manager.yaml lines (4-space indented)
 #   STAND_MAP                      a built reachability map (skips the build, which takes a few minutes)
+#   GZ_PASS_JOINT_LOG=1            joint positions (/joint_states, ~10 Hz) to OUT/joint_track.csv
 #   GZ_PASS_STILLS=N               colour camera on, N PNG stills into OUT/stills, one every GZ_PASS_STILLS_EVERY s
 # Needs a sourced ROS environment with sim_gazebo, reachability, stand_navigator, ft_conditioner,
 # compliant_trajectory_controller, ft_bridge_hardware, coverage_planner, manipulation_manager, coverage_task_msgs and
@@ -198,6 +199,11 @@ if [ "${MULTI_STAND_PAINT:-0}" = 1 ]; then
 fi
 
 # 4. the manager as an action server, one goal
+# GZ_PASS_JOINT_LOG=1: joint positions to $OUT/joint_track.csv (diagnoses an arm that
+# stops short of a commanded pose, e.g. the lift-0 low poses)
+if [ "${GZ_PASS_JOINT_LOG:-0}" = 1 ]; then
+  gz_start joint_track_log python3 "$PKG/lib/sim_gazebo/joint_track_log.py" --out "$OUT/joint_track.csv" --timeout 3600
+fi
 gz_start manager ros2 launch manipulation_manager manipulation_manager.launch.py hardware:=jtac_mock profile:=ur10e_telescopic \
   use_sim_time:=true params_file:=$OUT/manager.yaml "$@"
 # the manager's TF listener needs a few seconds of /tf before the goal (a goal at once aborts: "no TF odom -> arm_base_link")

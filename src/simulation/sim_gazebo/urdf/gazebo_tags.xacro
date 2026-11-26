@@ -19,6 +19,9 @@
      systems, and a thin low-friction skid under the base (the wheels are visual only) holds it on the floor.
      Off by default: the output is then identical to before.
 
+     gz_position_gain:=G (launch arg position_gain:=G) sets gz_ros2_control's position_proportional_gain (1/s) for the
+     position command interface; empty (default) keeps the plugin's own 0.1 /s (10 s time constant). Off by default.
+
      gz_depth_sensor:=true (launch arg depth_sensor:=true) adds the link depth_sensor_link on base_footprint
      (gz_depth_xyz / gz_depth_rpy, x forward) with a gz-sim depth_camera (96 x 64, 60 degrees, 0.1 to 5 m, optional
      Gaussian range noise) that publishes gz PointCloud2 on /depth_sensor/points; the launch file adds the Sensors
@@ -31,6 +34,7 @@
      Off by default. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:arg name="gz_base_motion" default="false"/>
+  <xacro:arg name="gz_position_gain" default=""/>
   <xacro:arg name="gz_depth_sensor" default="false"/>
   <xacro:arg name="gz_depth_xyz" default="0.1 0 1.15"/>
   <xacro:arg name="gz_depth_rpy" default="0 0 0"/>
@@ -92,6 +96,9 @@
     <gazebo>
       <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
         <parameters>$(find sim_gazebo)/config/controllers.yaml</parameters>
+        <xacro:unless value="${'$(arg gz_position_gain)' == ''}">
+          <position_proportional_gain>$(arg gz_position_gain)</position_proportional_gain>
+        </xacro:unless>
       </plugin>
     </gazebo>
 

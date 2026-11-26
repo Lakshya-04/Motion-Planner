@@ -170,3 +170,16 @@ def test_stage_mimic_params_only_in_gazebo(hardware):
 def test_gazebo_pinned_lift_declares_no_stage_joints():
     robot = _render_with_hw({'lift_fixed_height': '0.3'}, 'gazebo', 'generic_6dof_telescopic')
     assert robot.find(".//ros2_control//param[@name='mimic']") is None
+
+
+def test_position_gain_is_opt_in():
+    profile = prof.load_profile('generic_6dof_telescopic')
+    base = prof.xacro_mappings(profile, 'gazebo')
+
+    def plugin(mappings):
+        doc = xacro.process_file(os.path.join(DESC, 'urdf', 'mobile_manipulator.urdf.xacro'), mappings=mappings)
+        return ET.fromstring(doc.toxml()).find('gazebo/plugin')
+
+    assert plugin(base).find('position_proportional_gain') is None   # default: the plugin's own gain
+    gain = plugin({**base, 'gz_position_gain': '1.5'}).find('position_proportional_gain')
+    assert gain is not None and float(gain.text) == 1.5

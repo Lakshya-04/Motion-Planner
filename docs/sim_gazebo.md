@@ -158,6 +158,8 @@ software rendering, no display) and bridges `/rgb_camera/image` (`sensor_msgs/Im
 after a base move it moves with it (a multi-stand run with stills showed this: the base drives toward the wall and the camera ends up against it, every later frame is a blank wall) (`rgb_camera_frame:=world` below fixes this). `scripts/capture_still.py OUT_DIR --every S --count N` writes PNGs (no imaging library).
 `GZ_PASS_STILLS=N` in the pass scripts turns the camera on and runs it.
 
+`GZ_PASS_JOINT_LOG=1` in `run_multi_stand_pass.sh` records the joint positions (`/joint_states`, about 10 Hz) to `joint_track.csv` (`scripts/joint_track_log.py`). Use it when the arm stops short of a commanded pose: compare it with the plan offline. (The plain joint trajectory controller's `controller_state` topic does not exist under JTAC, so reference and error are not recorded.)
+
 `rgb_camera_frame:=world` (also `GZ_PASS_CAMERA_FRAME=world` in the pass scripts) makes the camera a static model in the world at
 `rgb_camera_pose` (now a world pose), so it stays put while the base drives: the multi-stand pass can be filmed (the default `base`
 keeps the old behaviour). The default pose `0 -2.4 1.6 0 0.11 1.38` is 2.4 m to the right of the spawn point; for a 0.9 m patch
@@ -276,6 +278,12 @@ coverage file, zero force target before disengage):
   `contact_control_test.py` do not settle in its 5 s moves and fail, so it keeps the default). A gain of 10
   (`position_proportional_gain`) makes the joints stiff and the contact bounces (8 kN peaks); the soft loop is part of
   why the contact holds. Not fixed: a properly tuned joint model.
+  Tried with the opt-in `position_gain` (tall wall, same knobs as the 2/10 baseline, runs `w1-gz-tall-gain1` and `gain3`, both stopped
+  before the end, so no column totals): gain 1 removed the "docked 0.04 to 0.06 m off the standoff pose" rejections (about 16 at
+  the default gain, 0 at gain 1, 2 at gain 3), but contact failed later (column 4 press: collision truncation octomap against
+  `tool_mount_link`; at the stop gain 1 had 0 columns done and 1 failed at column 5, scored peak 71.9 N) and gain 3 jittered
+  with peaks of 272.8 N. So a gain above 0.1 moves the failure from the dock gate to the contact stage and raises the force;
+  it does not fix the 4 to 6 cm dock error by itself.
 - JTAC's Cartesian offset clamp (3 mm instead of the default 0.1 m) made no difference to this pass and is not used.
 - The tool roll is -90 degrees because the UR10e ready pose has the same roll as in MuJoCo; the generic 6-DOF profile
   (smoke test pose, wrist roll -46.4 degrees) also ran end to end but its ACM only has adjacent pairs, and
