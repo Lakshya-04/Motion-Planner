@@ -120,7 +120,7 @@ Plan passes over a wall from a scene file or an occupancy grid, with no robot.
 ### 5. Reachability maps for your own arm
 
 - Packages: `reachability` (core and tool), `reachability_msgs` and the ROS node if you want services. Optional: `reachability_moveit` to confirm stands with IK and collision checks.
-- Selected by: your arm as a chain YAML (`reachability/scripts/urdf_to_chain.py` from a URDF), the `rm4d_tool build` options, and for base-aware stands a profile with a `base:` section (`base_profile`).
+- Selected by: your arm as a chain YAML (`reachability/scripts/urdf_to_chain.py` from a URDF), the `rm4d_tool build` options, and for base-aware stands a profile with a `base:` section (`base_profile`). Which real platforms those bases are, with their sensor suites and sources: [base_catalog.md](base_catalog.md).
 - Try: `rm4d_tool build chain.yaml arm.rm4d`, then `rm4d_tool bands arm.rm4d --wall-x 0.8 --z-min 0.1 --z-max 3.0 --lift-max 1.5`, then `ros2 launch reachability reachability.launch.py map_file:=arm.rm4d`.
 - See [reachability.md](reachability.md).
 
