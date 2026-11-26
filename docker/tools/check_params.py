@@ -37,6 +37,7 @@ PACKAGES = {
     "stand_navigator": "src/manipulation/stand_navigator",
     "coverage_planner": "src/perception/coverage_planner",
     "wall_detector": "src/perception/wall_detector",
+    "safety_monitor": "src/control/safety_monitor",
 }
 CODE_DIRS = ("src", "include", "apps")
 CODE_EXT = (".cpp", ".hpp", ".h", ".cc")

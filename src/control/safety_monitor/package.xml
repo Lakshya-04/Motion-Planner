@@ -8,7 +8,7 @@
     static primitives, a voxel ESDF and moving capsules (a person proxy), self-distance between
     non-allowed sphere pairs, and a speed-and-separation speed scale with a latched protective stop
     that fails safe on stale or invalid input. NOT A CERTIFIED SAFETY FUNCTION: it only slows the
-    robot earlier; see the README. Eigen and yaml-cpp (sphere loader) only, no ROS, no clock.
+    robot earlier; see the README. The core is Eigen and yaml-cpp only (no ROS, no clock); the opt-in safety_chain_node is the only ROS part.
   </description>
   <maintainer email="100lakshyaagarwal@gmail.com">Lakshya Agarwal</maintainer>
   <license>Apache-2.0</license>
@@ -17,6 +17,14 @@
 
   <depend>eigen</depend>
   <depend>yaml-cpp</depend>
+  <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>core_types</depend>
+  <depend>ros_adapters</depend>
+  <exec_depend>launch_ros</exec_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>

@@ -16,7 +16,7 @@ status: experimental
 > hardware limits trip rarely; it never replaces them and nothing may rely on it to prevent harm.
 
 ROS-free core (Eigen and yaml-cpp only, no clock, no I/O) of the whole-robot collision monitor planned in
-`docs/development_plan.md` section 9. The ROS node, the controller and manager consumers are later steps.
+`docs/development_plan.md` section 9. The opt-in `safety_chain_node` (not compiled or run) is documented in docs/safety_chain.md; the controller and manager consumers are later steps.
 
 ## What's here
 

@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: Safety chain
-description: ROS-free core that ties the per-tool abort thresholds and the other independent safety inputs to one latched OK / HOLD / ESTOP state with defined stop outputs; what it is based on and what it does not provide.
+description: ROS-free core, and its opt-in ROS node (not compiled or run), that ties the per-tool abort thresholds and the other independent safety inputs to one latched OK / HOLD / ESTOP state with defined stop outputs; what it is based on and what it does not provide.
 tags: [safety, e-stop, protective-stop, safety_monitor]
 status: experimental
 ---
@@ -71,13 +71,63 @@ Rules, all covered by gtests (`safety_chain_test.cpp`):
   risk assessment for the body regions concerned; the shipped `60 N` and `8 Nm` are not such a derivation and must be lowered at commissioning.
 - Speed-and-separation monitoring is the neighbouring `SafetyMonitor` in the same package (not an input here yet).
 
+## ROS node (`safety_chain_node`, opt-in)
+
+> **Not compiled and not run.** The node was written and reviewed by hand on a host that cannot build this
+> workspace (Humble headers, Jazzy target) with the simulators busy. Only its ROS-free helpers
+> (`safety_chain_node_core.hpp`, 8 host gtests) were tested. **Nothing consumes the stop topic yet**: JTAC, the
+> manager and the base do not subscribe to it. The node is not started by any existing launch file;
+> run it with `ros2 launch safety_monitor safety_chain.launch.py` (see the launch file's docstring). Not a certified safety function.
+
+What it does, every `1 / rate_hz` seconds: steps the `SafetyChain` and publishes.
+
+| Direction | Topic (default) | Type | Notes |
+|---|---|---|---|
+| in | `wrench_topic` `/ft_conditioner/wrench_conditioned` | `geometry_msgs/WrenchStamped` | `abs(F)` and `abs(tau)` go to the chain; a non-finite component is a trip. Receive time is used, not the header stamp |
+| in | `joint_states_topic` `/joint_states` | `sensor_msgs/JointState` | only its arrival (freshness) is used |
+| in | `estop_topic` `/safety_chain/estop` | `std_msgs/Bool` | level; a rising edge between two steps is not lost |
+| in | `controller_fault_topic` `/safety_chain/controller_fault` | `std_msgs/Bool` | level, same rule |
+| out | `state_topic` `/safety_chain/state` | `std_msgs/String`, transient_local | `OK`, or `HOLD force_overload,stale_ft` / `ESTOP ...` (the causes asserted since the chain was last OK), on change |
+| out | `arm_stop_topic` `/safety_chain/arm_stop` | `std_msgs/Bool`, transient_local | `true` in HOLD and ESTOP, `false` in OK; on change |
+| out | `cmd_vel_topic` `/cmd_vel` | `geometry_msgs/Twist` | an all-zero Twist every step while the chain says `base_stop`; nothing in OK. Put it behind a `twist_mux` priority, a competing publisher on the same topic is not overridden |
+| service | `~/reset` | `std_srvs/Trigger` | `SafetyChain::reset()`; on refusal `success` is false and `message` names the active cause, e.g. `reset refused: still active: operator_estop` |
+
+Why a latched `Bool` for the arm stop: it is the least invasive interface. No existing node has to change or link to
+this package, a later consumer (JTAC, the manager) adds one subscription, and a transient_local topic is seen by a
+consumer that starts after the stop. A service would need a client in every consumer and loses the "stay stopped"
+level. The base gets a zero `cmd_vel` because that is the interface it already has. `tool_off` and `power_removal_request` are computed
+by the chain but not published (no tool or power interface exists); `base_obstacle_*` has no input yet.
+
+Behaviour to know: with `require_ft` and `require_joint_state` true (default), the chain goes to HOLD or ESTOP at the first step if no wrench or joint
+state has arrived yet; start the sensors first or set `require_ft:=false` for a non-contact tool. The node refuses to start
+without known thresholds (a bad profile path, an unknown tool, a bad severity string all end the process with a fatal log).
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `tool_profiles_file` | `""` | `tool_profiles.yaml` to read the tool's `overload_abort_n` and `tangential_torque_abort_nm` from (loaded with `ros_adapters::loadToolProfile`, as the coverage planner does) |
+| `tool_name` | `""` | tool key in that file; with a file or a name set, both must be valid |
+| `force_abort_n` | `-1.0` | override of the force threshold in N; negative = take it from the profile; `0` disables the check |
+| `torque_abort_nm` | `-1.0` | the same for the torque in Nm. Without a profile both overrides must be `>= 0` |
+| `ft_stale_s` | `0.1` | no wrench within this many seconds is `stale_ft` |
+| `joint_stale_s` | `0.1` | the same for joint states, `stale_joint_state` |
+| `require_ft` | `true` | a never-received wrench counts as stale |
+| `require_joint_state` | `true` | the same for joint states |
+| `hold_auto_clear` | `false` | HOLD may clear by itself; ESTOP never does |
+| `hold_clear_time_s` | `1.0` | with `hold_auto_clear`, seconds with no cause before HOLD clears |
+| `severity.<cause>` | per the cause table above | `none`, `hold` or `estop` for each of `force_overload`, `torque_overload`, `stale_ft`, `stale_joint_state`, `base_obstacle_hold`, `base_obstacle_abort`, `operator_estop`, `controller_fault` (launch argument `severity_<cause>`) |
+| `rate_hz` | `50.0` | step and publish rate; must be above 0 |
+| `wrench_topic`, `joint_states_topic`, `estop_topic`, `controller_fault_topic`, `cmd_vel_topic`, `arm_stop_topic`, `state_topic` | see the table above | topic names |
+
+Industry reuse: the pattern follows what ROS 2 offers rather than a new mechanism: a latched `std_msgs/Bool` e-stop topic and a `std_srvs/Trigger`
+reset as in the common e-stop relays and `twist_mux` lock topics, a zero `cmd_vel` as the base stop, and `transient_local` QoS for
+state that late joiners must see. A node like this is still ordinary software and cannot be a safety function.
+
 ## What it does NOT provide
 
 - Any ISO 13849 performance level or IEC 62061 SIL: no redundancy, no diagnostics, no certified runtime.
 - A hardware e-stop, safe torque off, safe brakes, or power removal; `power_removal_request` is only a signal.
 - Detection of its own death: nothing watches the chain. A deployment needs the controller's own watchdog (the `HeartbeatWatchdog` in this package
   is one half) and hardware that stops when the chain stops talking.
-- Wiring: the ROS node (`/estop` topic and reset service, subscriptions to the existing F/T, joint state and base obstacle
-  signals, publishing stop commands to JTAC, the base and the tool) is **not written yet**, and nothing in the stack
-  consumes `ChainOutputs`. The default behaviour of every existing node is unchanged. Host tests only; no simulation, no hardware.
+- Consumers: the opt-in `safety_chain_node` (section above) is written but not compiled or run, has no base obstacle input, and nothing in the stack
+  consumes its stop topic (JTAC, the base driver and the tool do not subscribe). The default behaviour of every existing node is unchanged. Host tests of the helpers only; no simulation, no hardware.
 - Mapping of "stop the arm" to a concrete controller reaction (hold position, brake, protective stop of the vendor controller).
