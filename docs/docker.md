@@ -111,6 +111,18 @@ nvcc is cached where CMake drives it (`CMAKE_CUDA_COMPILER_LAUNCHER`). `/ccache`
 | Python / GPU stack (torch, cuRobo, trimesh, ...) with pins | `docker/requirements-gpu.txt` |
 | Pinned third-party commits | `Dockerfile` args (`VAMP_REF`), `requirements-gpu.txt` (cuRobo), `docker/tools/build_robot_tools.sh` (FOAM, Cricket) |
 
+## Developer entry points
+
+`make help` lists every common task with a one-line description; each target prints the command it runs.
+`make doctor` (`docker/tools/doctor.sh`) checks the machine in a few seconds and says what to fix: free disk on
+the Docker root and the repo (warn under 40 GB, fail under 15 GB), Docker and buildx, which images are built,
+the NVIDIA runtime, whether the Ubuntu mirrors, GitHub, PyPI, PyTorch and conda are reachable (and whether a
+TLS inspection proxy sits in between), the ROS variables, the MuJoCo SDK and the profiles. It exits non-zero
+only on a failure, not a warning. Options: `--quiet`, `--json`, `--gpu` (a real `docker run --gpus all` smoke,
+needs the `gpu` image), `--repo` (also the public-readiness scan), `--no-network`; pass them to make as
+`make doctor ARGS=--repo`. Other targets: `check`, `host-tests`, `py-tests`, `lint`, `images` and one
+`image-<target>` per Dockerfile target, `robot-tools`, `robot-assets PROFILE=...`. Nothing in the Makefile deletes anything.
+
 ## Run all checks
 
 CI ([`ci.yml`](../.github/workflows/ci.yml)) runs the build, the colcon tests and the readiness scan on free runners; simulators and GPU stay local ([CONTRIBUTING.md](../CONTRIBUTING.md)). One script runs lines 1 to 3 below:
