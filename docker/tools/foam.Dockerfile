@@ -6,9 +6,10 @@
 FROM ubuntu:24.04
 ARG FOAM_REF=116928f71aaa
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN (for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake ninja-build git ca-certificates python3 python3-pip python3-venv python3-dev \
       libprotobuf-dev libeigen3-dev \
+      && exit 0; echo "apt failed (try $i), retrying"; sleep 15; done; exit 1) \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone https://github.com/CoMMALab/foam.git /foam \
     && git -C /foam checkout ${FOAM_REF} \

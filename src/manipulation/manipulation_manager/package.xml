@@ -27,6 +27,7 @@
   <depend>reachability_msgs</depend>
   <depend>stand_navigator_msgs</depend>
   <depend>coverage_task_msgs</depend>
+  <depend>coverage_planner_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>tf2</depend>
