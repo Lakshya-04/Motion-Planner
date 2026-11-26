@@ -701,7 +701,7 @@ What this change adds (all opt-in or evaluation-only; the default sum is unchang
 - `contact_ground_truth.py` publishes `/ft_sensor/ground_truth_info` (`[pairs, points, filtered_pairs, sum_point_norm, max_point_norm, duplicate_points]`) and takes
   `include_other` / `exclude_other` (substrings of the other collision's name; empty = every pair). Example: `ros2 run sim_gazebo contact_ground_truth.py --ros-args -p include_other:="['wall']"`
   (the launch starts the node itself: pass the parameter in `sim.launch.py` to change it for a pass).
-- `record_run.py` writes `PATH.contacts.csv` beside `PATH` (`t,force_norm,pairs,points,sum_point_norm,max_point_norm,dup_points`), same time base as `run.csv`.
+- `record_run.py` writes `PATH.contacts.csv` beside `PATH` (`t,force_norm,pairs,points,sum_point_norm,max_point_norm,dup_points,others`), same time base as `run.csv`. `others` is the name of the collision the tool touches (several joined with `|`), from `/ft_sensor/ground_truth_others` (String); it says what was hit when a spike shows up.
 - The ground and the generated wall carry an explicit `<surface>` (friction, restitution 0, contact ode with the SDF defaults), commented as believed ignored by dartsim; a test
   (`test_wall_world.py`) checks every collision of both worlds has positive friction and contact parameters, a step of at most 1 ms and the Contact system.
 
@@ -799,3 +799,8 @@ The sim container runs as `--user 1000:1000` with `--gpus all`, `NVIDIA_DRIVER_C
 `__NV_PRIME_RENDER_OFFLOAD=1`, so the Gazebo GUI renders on the NVIDIA GPU of a hybrid-graphics laptop. `MULTI_STAND_TCP_SETTLE_TOL` (default 0.002 m) is the arm-arrival tolerance next to
 `MULTI_STAND_TCP_SETTLE`: with the position loop's 10 s time constant a larger settle time and a tighter tolerance make the dock check
 wait for the arm instead of rejecting a pose it is still approaching.
+
+### Which phase the Gazebo force spikes are in (gain 2, one wall, 2026-11-26)
+
+`w1-gz-onewall-gain2` (plain wall, position gain 2, 10/10 columns): 36 samples above 500 N, peak 4175 N. The contact points confirm a real impact (at the peak: 1 pair, 4 points, largest point 3320 N, sum 6529 N), and the tool did not move during the burst. Sim time was aligned to the manager's segment log through the `docked_wall_column_4` pose (tcp 0.998 0.748 1.009 at run.csv t=79.5). Samples above 300 N by phase: `dock` of column 4 (32 samples, the 4175 N peak: the dock move brings the tool to the wall at about 0.2 m/s and the tip arrives at x 0.993 against a wall at 0.98), `approach` of column 4 (105 samples, peak 1007 N at z 2.1) and `approach` of column 0 (475 samples, peak 756 N). Forces during an approach are a contact in free space, so something other than the wall is touched there; the new `others` column names it in the next run. Not yet explained: why the approach of column 0 touches anything.
+
