@@ -10,6 +10,7 @@
 # the contact region y 0..0.3, z 1.0..1.3.
 # MANAGER_PASS_PLANNING_CONFIG=/path/planning_curobo.yaml: the manager builds its planners from that file (planning_config
 # parameter, written into manager.yaml; unset = the packaged planning.yaml). Needs the cuRobo node: docs/sim_*.md.
+# GZ_POSITION_GAIN: gz_ros2_control joint loop gain in 1/s (default 2.0; the plugin's 0.1 leaves the arm behind the plan, docs/sim_gazebo.md).
 set -u
 PKG=$(ros2 pkg prefix sim_gazebo)
 SHARE=$PKG/share/sim_gazebo
@@ -21,7 +22,7 @@ COV=$OUT/coverage_output.json
 DATA=$SHARE/test/data
 
 setsid ros2 launch sim_gazebo sim.launch.py profile:=ur10e_telescopic controller:=jtac jtac_position_only:=true ft_conditioner:=true payload_mass_kg:=0.8 \
-  move_group:=true wall_scene:=$DATA/smoke_wall_scene.json standoff:=0.915 gui:=false ${MANAGER_PASS_LAUNCH_ARGS:-} \
+  move_group:=true wall_scene:=$DATA/smoke_wall_scene.json standoff:=0.915 gui:=false position_gain:=${GZ_POSITION_GAIN-2.0} ${MANAGER_PASS_LAUNCH_ARGS:-} \
   > "$LOG" 2>&1 &
 SIM=$!
 setsid ros2 run coverage_planner coverage_planner_node > "$OUT/coverage_planner.log" 2>&1 &

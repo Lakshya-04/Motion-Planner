@@ -38,6 +38,20 @@ TEST(MujocoSim, TracksPositionTargetInFreeSpace)
   EXPECT_NEAR(sim.wrench()[2], 0.0, 0.5);
 }
 
+TEST(MujocoSim, GravityFeedForwardRemovesTheSag)
+{
+  MujocoSim sim(kModel, {"slide"});
+  sim.setJointPositions({0.0});
+  sim.setCommand(0, 0.1, 0.0);
+  sim.setFeedforward(0, 2.001 * 9.81);  // weight of the carriage, N
+  sim.advance(3.0);
+  EXPECT_NEAR(sim.position(0), 0.1, 1e-4);
+  EXPECT_FALSE(sim.hasGravcomp());
+  sim.setFeedforward(0, std::nan(""));  // non-finite counts as none
+  sim.advance(3.0);
+  EXPECT_NEAR(sim.position(0), 0.1 - kSag, 1e-3);
+}
+
 TEST(MujocoSim, MimicFollowerIsPlacedOnItsConstraint)
 {
   MujocoSim sim(kModel, {"slide"});

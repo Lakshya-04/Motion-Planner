@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>gravity_core</name>
+  <version>0.1.0</version>
+  <description>
+    Pure C++ joint-space gravity compensation (Eigen and tinyxml2, no ROS): the torque each lift and
+    arm joint needs to hold a pose, from a URDF (masses, centres of mass, mimic joints), with a
+    swappable tool payload and a configurable gravity direction. Not wired into a controller yet.
+  </description>
+  <maintainer email="100lakshyaagarwal@gmail.com">Lakshya Agarwal</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>eigen</depend>
+  <depend>tinyxml2</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
