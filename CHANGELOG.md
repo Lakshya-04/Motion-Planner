@@ -18,6 +18,8 @@ anything verified on hardware.
 - `moveit_ros_perception` (needed at run time by the live octomap) is an `exec_depend` of `mobile_manipulator_moveit_config`, not a build dependency. The older `motion-planner:build` image lacks it, so build and test pass there but `live_octomap:=true` fails until the image is rebuilt (it is in `docker/apt-extra.txt`). The feature stays opt-in.
 
 ### Added
+
+- `docker/tools/doctor.sh` (environment check, tests in `docker/tools/tests/test_doctor.py`) and a root `Makefile` (`make help`, `doctor`, `check`, `host-tests`, `py-tests`, `lint`, `images`, `robot-tools`). Verified 2026-11-26: 44 doctor tests pass (thresholds, classifiers, parsers, and the script end to end with stubbed docker, nvidia-smi, curl, openssl and df on PATH); `make help`, `make doctor`, `make host-tests` (114 passed), `docker/tools/run_host_python_tests.sh` (all suites pass) and `make lint` ran for real; image targets only with `make -n`. Not run: `make check`, the image builds, `doctor --gpu`.
 - `manipulation_manager`: opt-in `serpentine_columns` (default off): columns alternate direction, retract at the stroke end, lower the tool before a stow. Dock IK representatives are rebased to the live joint state only when real joint limits are known, keeping the wrist window and the branch joints of the accepted solution.
 - Compiler cache by default in every Docker image: `ccache` and `mold` installed in `base`, `CCACHE_*` and `CMAKE_{C,CXX,CUDA}_COMPILER_LAUNCHER` ENV, `docker/colcon-defaults.yaml` as `COLCON_DEFAULTS_FILE`, `/ccache` (mode 1777) mounted by `docker/compose.yaml` (`MP_CCACHE_DIR`), `docker/tools/ccache_stats.sh`, Dockerfile static test. Unbuilt: the images were not rebuilt (docs/docker.md "Compiler cache (default)").
 
