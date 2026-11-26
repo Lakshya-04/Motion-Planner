@@ -184,11 +184,12 @@
         </xacro:if>
         <xacro:if value="${hardware == 'mujoco'}">
           <plugin>sim_mujoco/MujocoSystemInterface</plugin>
-          <param name="mjcf">$(optenv SIM_MUJOCO_MJCF)</param>
+          <!-- unset env var: leave the param out, an empty one logs "text not specified" -->
+          <xacro:if value="${'$(optenv SIM_MUJOCO_MJCF)' != ''}"><param name="mjcf">$(optenv SIM_MUJOCO_MJCF)</param></xacro:if>
           <param name="gravity_feedforward">$(optenv SIM_MUJOCO_GRAVITY_FF false)</param>
-          <param name="gravity_payload_link">$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_LINK)</param>
-          <param name="gravity_payload_mass">$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_MASS)</param>
-          <param name="gravity_payload_cog">$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_COG)</param>
+          <xacro:if value="${'$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_LINK)' != ''}"><param name="gravity_payload_link">$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_LINK)</param></xacro:if>
+          <xacro:if value="${'$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_MASS)' != ''}"><param name="gravity_payload_mass">$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_MASS)</param></xacro:if>
+          <xacro:if value="${'$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_COG)' != ''}"><param name="gravity_payload_cog">$(optenv SIM_MUJOCO_GRAVITY_PAYLOAD_COG)</param></xacro:if>
         </xacro:if>
         <xacro:if value="${hardware == 'gazebo'}"><plugin>gz_ros2_control/GazeboSimSystem</plugin></xacro:if>
       </hardware>
