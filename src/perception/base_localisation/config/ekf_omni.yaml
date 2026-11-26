@@ -1,0 +1,47 @@
+# Omnidirectional base (mecanum, swerve, the simulators' base): body vx, vy and yaw rate are all measured.
+# State order of every *_config row: x y z roll pitch yaw vx vy vz vroll vpitch vyaw ax ay az.
+# Velocities only: odometry pose is not fused, so the filter integrates velocity from the odom frame origin and
+# does not inherit the pose drift of the wheels. The IMU contributes the yaw rate (gyro z), not its orientation.
+ekf_filter_node:
+  ros__parameters:
+    frequency: 30.0
+    sensor_timeout: 0.2
+    two_d_mode: true
+    publish_tf: true
+    publish_acceleration: false
+    print_diagnostics: false
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_footprint
+    world_frame: odom
+
+    # expanded to the 15 x 15 process_noise_covariance by base_localisation.ekf_params
+    process_noise_diag: [0.05, 0.05, 1.0e-6, 1.0e-6, 1.0e-6, 0.03,
+                         0.05, 0.05, 1.0e-6, 1.0e-6, 1.0e-6, 0.03,
+                         0.02, 0.02, 1.0e-6]
+
+    odom0: /odom
+    odom0_config: [false, false, false, false, false, false,
+                   true,  true,  false, false, false, true,
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative: false
+    odom0_queue_size: 10
+
+    imu0: /imu
+    imu0_config: [false, false, false, false, false, false,
+                  false, false, false, false, false, true,
+                  false, false, false]
+    imu0_differential: false
+    imu0_relative: false
+    imu0_queue_size: 20
+    imu0_remove_gravitational_acceleration: false
+
+    # scan matching (scan_match:=true): a velocity from consecutive scans, see scan_match_node
+    odom1: /scan_odom
+    odom1_config: [false, false, false, false, false, false,
+                   true,  true,  false, false, false, true,
+                   false, false, false]
+    odom1_differential: false
+    odom1_relative: false
+    odom1_queue_size: 10

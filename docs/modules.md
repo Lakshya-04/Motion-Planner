@@ -43,6 +43,7 @@ Column meanings. **ROS-free**: the library at the core of the package has no `rc
 | [`ft_conditioner`](../src/control/ft_conditioner/README.md) | control | ROS node | no | no | no | `core_types`, `force_core` |
 | [`lift_hardware`](../src/control/lift_hardware/README.md) | control | ROS node or plugin (hardware component) over a ROS-free core | partly | no | no | none |
 | [`sim_gazebo`](../src/simulation/sim_gazebo/README.md) | simulation | Simulator | no | no | is the simulator | `mobile_manipulator_description` |
+| [`base_localisation`](../src/perception/base_localisation/README.md) | perception | ROS nodes (python) over ROS-free scan matching and a derived IMU, plus `robot_localization`'s EKF | partly | no | no (works with both simulators) | none |
 | [`sim_realism`](../src/simulation/sim_realism/README.md) | simulation | ROS nodes (python) over ROS-free noise models | partly | no | no (works with both simulators) | none |
 | [`sim_isaac`](../src/simulation/sim_isaac/README.md) | simulation | Simulator (stub) | n/a | no | is the simulator | none |
 | [`sim_mujoco`](../src/simulation/sim_mujoco/README.md) | simulation | Simulator | partly | no | is the simulator | `coverage_planner`, `coverage_planner_msgs`, `coverage_task_msgs`, `ft_bridge_hardware`, `ft_conditioner`, `manipulation_manager`, `mobile_manipulator_description`, `mobile_manipulator_moveit_config`, `motion_planner_moveit`, `reachability`, `reachability_msgs`, `stand_navigator`, `stand_navigator_msgs`, `wall_detector` |
