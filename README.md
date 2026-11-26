@@ -14,7 +14,7 @@ The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/
 - **Single-stand wall passes** in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
 - **Two-stand passes in MuJoCo pass**, with MoveIt/OMPL and with cuRobo. The latest run (MoveIt/OMPL, scored on the tool pose after #167 and
   #172, one run): 10 of 10 columns, coverage 100 %, tool tilt at most 0.15 deg, wall gap at most 0.9 mm, peak force 22.1 N against a 10 N
-  target ([video below](#two-stand-pass-with-moveit-scored-on-the-tool-pose-mujoco)). Earlier same-session batches: 6 of 8 before the
+  target ([older run](docs/sim_mujoco.md), superseded by [Latest runs](#latest-runs)). Earlier same-session batches: 6 of 8 before the
   second-stand fix and 8 of 8 after (not significant on its own).
 - **cuRobo v0.9.0 as the free-space planner** completed a two-stand MuJoCo pass four times (10 of 10 columns, peaks 46.8 to 72.4 N), but
   MoveIt/OMPL still planned the stow and the second stand: cuRobo found no docked-to-stow path (its model treats low lift with the arm swung
@@ -42,7 +42,7 @@ The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/
   | Stand navigation planner (grid A* over the wall scene, shortcut, waypoint follower; opt-in) | host-tested only; the MuJoCo switch `MULTI_STAND_PATH_PLANNER` is not yet measured; `MULTI_STAND_WALL_DOCK=1` ran in one two-stand MuJoCo pass (same scorecard as without it, one run) | [docs/stand_navigation.md](docs/stand_navigation.md) |
   | Perception-in-the-loop mode (`MULTI_STAND_PERCEPTION=1`: simulated cloud to `wall_detector` to the coverage planner) | host-tested only (Python mirror of the fit); C++ node and simulator run unbuilt; `wall_detector` reports no obstacles | [docs/perception_live.md](docs/perception_live.md) |
   | Plan redundancy report (`plan_redundancy_report`, `score_run --plan`: jumps, repeated strokes, strip and stand order) | host-tested only (host g++ gtests); not built in the ROS image | [docs/coverage_planner.md](docs/coverage_planner.md) |
-  | Chained columns (`chain_columns`, opt-in, one straight move between neighbouring columns) | host-tested only; manager node wiring unbuilt | [docs/manager_parameters.md](docs/manager_parameters.md) |
+  | Chained columns (`chain_columns`, one straight move between neighbouring columns; on by default since #292) | built and run in the MuJoCo and Gazebo passes under [Latest runs](#latest-runs) | [docs/manager_parameters.md](docs/manager_parameters.md) |
   | Scenario sync, standoff advisor, per-module RViz profiles, plan-only playback | host-tested only | [docs/scenario_sync.md](docs/scenario_sync.md), [docs/standoff.md](docs/standoff.md), [docs/rviz/README.md](docs/rviz/README.md) |
   | Navigation safety layer (stale odometry, command gate, stuck detection, scan/cloud obstacle stop; default-on checks, tested not to change healthy runs) | host-tested only (pytest); built and unit-tested in the ROS image with the batch, never run in a simulator | [docs/stand_navigation.md](docs/stand_navigation.md#base-safety-layer-and-the-nav2-backend) |
   | Nav2 adapter (`backend:=nav2`, goal conversion and result mapping) | host-tested only (fake Nav2 client); no image has Nav2, so never run against a real Nav2 | [docs/stand_navigation.md](docs/stand_navigation.md#nav2-swap-path) |
@@ -94,127 +94,39 @@ CI runs the build, the colcon tests and the repository checks on free GitHub-hos
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)). It does not run simulators, GPU planners or hardware; those
 are run locally, and [CONTRIBUTING.md](CONTRIBUTING.md) lists every check.
 
-## Showcase
+## Latest runs
 
-A full MuJoCo manager pass on a plain wall (`run_manager_pass.sh`: coverage plan, dock, press, three stroke columns, retract),
-rendered headless from the recorded joint states with `render_run.py`. The gif is the run at 9x, the
-[mp4](docs/media/manager_pass.mp4) at 3x with a force trace.
+Two-stand wall passes (`run_multi_stand_pass.sh`) on current main with the defaults of #292: `serpentine_columns`, `chain_columns` and
+`contact_connectors` on (one pass per strip, strips joined by connectors that stay in contact), `contact_wiper` one pass, tool speed
+0.01 m/s. Recorded 2026-11-26/27, one run each, not repeated, so no spread is claimed. Peak and p99 are over every `run.csv` force sample
+(the scorer's `score_run`); the speed is the median over contact windows (force above 3 N, chord over at least 0.5 s, target 0.01 m/s,
+[docs/tcp_speed.md](docs/tcp_speed.md)). Only the contact strokes are held to a speed.
 
-![A full manager pass on a plain wall](docs/media/manager_pass.gif)
+| Run | Simulator | Columns done | Connectors used / fell back | Peak force | p99 force | Duration | TCP speed median | Note |
+|---|---|---|---|---|---|---|---|---|
+| `mujoco-final-tall` | MuJoCo | 10 of 10 (0 partial, 0 failed) | 8 / 0 | 307.3 N | 19.8 N | 1752 s | 0.00806 m/s (-19 %) | `two_panels_tall`, UR10e telescopic profile, lift cost 2x; 227 samples above 60 N, 55 "Cartesian offset diverged" resets |
+| `gazebo-final-onewall` | Gazebo | 10 of 10 | 8 / 0 | 8367 N | 173.7 N | 515 s | 0.01006 m/s (+0.6 %) | plain wall, joint position gain 2; single-sample spikes, 460 samples above 500 N |
+| `mujoco-connectors2` (earlier) | MuJoCo | 10 of 10 | 8 / 0 | 293.2 N | 19.6 N | 1898 s | 0.00969 m/s (-3.1 %) | same idea, earlier build |
+| `mujoco-main-liftcost` (earlier) | MuJoCo | 10 of 10 | none (old non-serpentine column mode) | 21.1 N | 14.3 N | 1774 s | 0.00942 m/s (-5.8 %) | same speed as the tall run, for comparison |
 
-| Robot overview | Arm at the wall, mid-stroke | Tool on the wall |
-|---|---|---|
-| ![overview](docs/media/overview.jpg) | ![arm at the wall](docs/media/arm_at_wall.jpg) | ![tool close-up](docs/media/tool_closeup.jpg) |
+![MuJoCo tall wall run at 20x](docs/media/latest_mujoco_tall.gif)
 
-![force and coverage of the run](docs/media/force_coverage.png)
+The MuJoCo tall-wall run above, drawn from the recorded joint states with `render_run.py` at 20x (1752 s of simulated time in 88 s of video),
+with the contact force trace and a close-up of the tool (the gif is a smaller copy, 560 px wide at 6 fps; [mp4](docs/media/latest_mujoco_tall.mp4)). How the media is made:
+[docs/sim_mujoco.md](docs/sim_mujoco.md#rendering-photos-and-videos). There is no video of the Gazebo run (no film was recorded for it).
 
-A non-contact pass, filmed the same way (`run_spray_pass.sh`: a spray gun held 0.30 m from the wall, valve open only during the strokes;
-the orange cone and the spots on the wall are drawn by `render_run.py --valve-log`, the sim itself has no spray). The gif is at 9x, the
-[mp4](docs/media/spray_pass.mp4) at 3x. Scored (`score_run --no-contact`, spray cone half-angle 20 deg): 3 columns done, coverage 100 %
-(930 of 930 cells), thickness CoV 0.52, valve open 15.6 s of 94.2 s, whole-run peak force 0.0 N.
+What is not good yet:
 
-![A spray pass on a plain wall](docs/media/spray_pass.gif)
+- **Force spikes in serpentine mode.** The tall-wall run peaked at 307 N (the old column mode peaked at 21.1 N at the same speed), mostly
+  mid-stroke, with 55 "Cartesian offset diverged" resets in the simulator log. The cause is open.
+- **Gazebo contact quality.** `run.csv` peaks at 8367 N in single samples (p99 174 N), while the manager's own filtered feedback peak is much
+  lower; the two disagree and this is under investigation. Columns finish, but the force is not under control there.
+- **Nothing on hardware.** All of this is simulation. The TCP-speed median is below the target in the MuJoCo runs, and the mean sits well below the median
+  (windows near standstill at column ends, turns and force dips), so the speed is kept in the median, not at every sample
+  ([docs/tcp_speed.md](docs/tcp_speed.md)).
 
-Scored result of the contact run above (`score_run`, 10 N target, 1.5 N band): 3 columns done, 0 partial, 0 failed; coverage
-93.1 % (866 of 930 cells); peak force 19.2 N; RMS force error 3.6 N; 49 % of the contact samples in the band; 144 s of
-simulated time, 83 s engaged. While stroking, the force ripples between 0 and about 18 N around the 10 N target. Nothing is
-tuned for the picture. The pass was run three times for filming: 93.1 % / 18.5 N / 3.6 N, 93.1 % / 19.2 N / 3.6 N (shown), and
-a first run with 93.3 % / 153.4 N / 8.0 N, which was made while the host was heavily loaded by other simulations and builds
-(load average 10 to 27); the cause was not isolated, but the two reruns on a quieter host agree with each other and with the standard run. How the media is made:
-[docs/sim_mujoco.md](docs/sim_mujoco.md#rendering-photos-and-videos). The same non-contact pass in Gazebo (`sim_gazebo/scripts/run_spray_pass.sh`, colour camera `rgb_camera:=true`, UR meshes `arm_meshes:=true`,
-stills from `capture_still.py`): the arm mid-stroke at the wall, and during the seeded first move. These stills come from a run with the arm meshes
-loaded, which also gives the arm collision geometry; that run scored 0.58 coverage (the plain runs without meshes: 1.0). Details and the numbers:
-[docs/sim_gazebo.md](docs/sim_gazebo.md#spray-pass-and-multi-stand-pass-parity-with-mujoco).
-
-| Gazebo: first move to the stroke | Gazebo: mid-stroke |
-|---|---|
-| ![gazebo seed](docs/media/gazebo_spray_seed.png) | ![gazebo stroke](docs/media/gazebo_spray_stroke.png) |
-
-### Two-stand pass with MoveIt, scored on the tool pose (MuJoCo)
-
-The same `run_multi_stand_pass.sh` on `two_panels_plain` with the default MoveIt/OMPL planners (no GPU node), on main after the tool-pose
-scoring (#167) and the review fixes (#172); filmed 2026-11-22. The video is the run at 12x (551 s of simulated time, 46 s of video) with the
-contact force trace and a close-up of the tool; [mp4](docs/media/two_stand_moveit.mp4). It replaces a first version of this video that was drawn
-without the driven base pose (the arm sat at the origin, 90 degrees off the wall); the renderer and the live viewer now replay the base pose.
-
-![A two-stand MuJoCo pass with MoveIt planners](docs/media/two_stand_moveit.gif)
-
-Scored result of the filmed run (`score_run`, one run, made with the live viewer open and the host busy): 10 columns done, 0 partial, 0 failed
-(stand 0: 6, stand 1: 4); coverage 100 % (2790 of 2790 cells); peak force 142.2 N scored, 20.9 N in the feedback; RMS force error 6.7 N; 34 % of the
-contact samples in the force band; tool tilt at most 31.8 deg (a transient: 0 tilted samples and 0 bad-pose samples by the scorer's rule), wall gap
-at most 15.8 mm; 277 s engaged. The 142 N is one spike between the two stands (visible in the force trace of the video at about 430 s of simulated time);
-its cause is not found. An earlier run of the same pass without the viewer scored 10 of 10, coverage 1.0, peak 22.1 N, tilt at most 0.15 deg, wall gap at
-most 0.9 mm. This pass runs the seeded dock IK (`dock_ik_seeded`), which is tuned for MuJoCo; the Gazebo pass needs a stiffer joint loop than the plugin default
-([docs/sim_gazebo.md](docs/sim_gazebo.md)).
-
-### cuRobo in a two-stand pass (MuJoCo)
-
-`run_multi_stand_pass.sh` on `two_panels_plain` (a free base, two stands, ten columns), with cuRobo v0.9.0 selected as the free-space planner
-(`planning_curobo.yaml`, MoveIt/OMPL as the fallback) and the wall pushed to the cuRobo node at every stand. The video is the run at 12x
-(1128 s of simulated time), with the contact force trace and a close-up of the tool; [mp4](docs/media/multi_stand_curobo.mp4).
-
-![A two-stand MuJoCo pass with cuRobo as the free-space planner](docs/media/multi_stand_curobo.gif)
-
-*Note (2026-11-22): this video was rendered before the renderer replayed the driven base pose, so the arm is drawn at the origin and not where the base was; the numbers below are from the run itself. It needs a rerun with the GPU node to be redrawn.*
-
-Scored result of that run: 10 columns done, 0 partial, 0 failed; coverage 100 % (2790 of 2790 cells); peak force 69.3 N (target 10 N);
-RMS force error 5.1 N; 33 % of the contact samples in the 1.5 N band; one collision-monitor line (a lift link pair at depth 0 in the first
-10 ms). Planner use in the run: cuRobo planned 7 segments (the priming move and 6 stand-0 approaches: 10 to 16 s of planning each, 0.4 to
-0.7 s of motion), MoveIt/OMPL planned the other 6 free-space segments (including the stow and the second stand), 4 to 50 s of motion each, because
-cuRobo's service did not answer for the stow (`unavailable`). Three earlier runs with the same setup also passed (peaks 46.8, 48.2, 72.4 N).
-Before those, three runs failed or stalled and each led to a fix (a 256-box cache that turned the wall into 20 cm slabs, a missing waypoint
-count that made every cuRobo plan look partial, the dock-to-stow move cuRobo cannot plan); the story and the commands:
-[docs/sim_mujoco.md](docs/sim_mujoco.md#running-a-pass-with-curobo-as-the-planner). The cuRobo moves are about 14 times faster than the
-MoveIt-retimed ones in the sim, far above what the MoveIt retiming allows, and have not been checked against the real arm's limits: do not run them on hardware as they are.
-
-### Obstacle scenarios (MuJoCo)
-
-`run_scenarios.sh` runs named walls through the manager pass (UR10e, each scenario twice). One filmed run per scenario is shown; the
-failing one is included on purpose. Full results, load averages and the failure analysis:
-[docs/sim_mujoco.md](docs/sim_mujoco.md#scenario-set-obstacles-on-the-wall).
-
-| scenario | runs passed | filmed run | film | force and coverage |
-|---|---|---|---|---|
-| plain | 2 of 2 | pass, coverage 1.000, peak 21.4 N | ![plain](docs/media/scenario_plain.gif) | [plot](docs/media/scenario_plain.png) |
-| plain_wide | 2 of 2 | pass, coverage 1.000, peak 19.9 N | ![plain_wide](docs/media/scenario_plain_wide.gif) | [plot](docs/media/scenario_plain_wide.png) |
-| window (hole in the wall) | 2 of 2 | pass, reachable coverage 1.000, peak 22.3 N | ![window](docs/media/scenario_window.gif) | [plot](docs/media/scenario_window.png) |
-| protrusion | 2 of 2 | pass, reachable coverage 0.983, peak 20.6 N | ![protrusion](docs/media/scenario_protrusion.gif) | [plot](docs/media/scenario_protrusion.png) |
-| two_panels (two stands, a rib) | 0 of 2 | **fail**, reachable coverage 0.670, peak 128.3 N | ![two_panels](docs/media/scenario_two_panels.gif) | [plot](docs/media/scenario_two_panels.png) |
-| two_panels_plain (two stands, no obstacle) | 1 of 2 | pass, coverage 1.000, one 451 N press transient | ![two_panels_plain](docs/media/scenario_two_panels_plain.gif) | [plot](docs/media/scenario_two_panels_plain.png) |
-
-The single-stand scenarios pass, with peaks near 20 N against a 10 N target. The two-stand ones fail about every second run at the second stand,
-including on a plain wall, so it is not the obstacle: the approach to the first columns is refused six times in a row by collision truncation
-and recovery finds no safe configuration. The cause is not isolated (the arm's pose at the second stand is the suspect). Several host loads were
-10 to 14 during these runs, recorded per run in the docs. No hardware was involved.
-
-**Update, 2026-11-20 (same-session batches of 8, MuJoCo):** after the second-stand fix `two_panels_plain` passed 8 of 8 (6 of 8 on the code before it) and `two_panels` 8 of 8 on
-both code states, scored on the reachable wall. The `two_panels` row above (0 of 2, coverage 0.670) was measured before the reachability and keep-out changes that
-are now in; the 0.88 wall coverage the pass script prints for `two_panels` is the whole-wall figure, not the reachable-wall one the scenario judges. Details:
-[docs/sim_mujoco.md](docs/sim_mujoco.md#scenario-set-obstacles-on-the-wall).
-
-## Recorded results
-
-Single runs, one per row, taken from the recorded `run.csv` and the manager's last `feedback:` line; not repeated, so no spread across runs is claimed.
-All five are the two-stand wall pass (`run_multi_stand_pass.sh`, target tool speed 0.01 m/s, swath 0.14 m), recorded 2026-11-26. Only
-the contact strokes are held to a speed ([docs/tcp_speed.md](docs/tcp_speed.md)); free-space, approach, retract and base moves are not.
-
-TCP speed over the contact strokes (`score_run --target-speed 0.01`: samples with force above 3 N, speed from the chord over at least 0.5 s):
-
-| Simulator | Run | Columns done / failed | Median (m/s) | vs 0.01 | Mean | Std | p5 | p95 | Peak force, feedback / `run.csv` |
-|---|---|---|---|---|---|---|---|---|---|
-| MuJoCo | `mujoco-main-liftcost` | 10 / 0 | 0.00942 | -5.8 % | 0.00571 | 0.00478 | 0.00022 | 0.01066 | 20.3 N / 21.1 N |
-| MuJoCo | `mujoco-main-perc` | 10 / 0 | 0.00928 | -7.2 % | 0.00598 | 0.00447 | 0.00019 | 0.01072 | 23.3 N / 21.2 N |
-| MuJoCo | `w2-mujoco-serp2` | 10 / 0 | 0.00962 | -3.8 % | 0.00594 | 0.00475 | 0.00018 | 0.01064 | 292.7 N / 222.1 N |
-| Gazebo | `w1-gz-onewall-gain2` | 10 / 0 | 0.01000 | +0.0 % | 0.00886 | 0.00498 | 0.00135 | 0.01123 | 98.4 N / 4175 N |
-| Gazebo | `gazebo-onewall-main1` | 10 / 0 | 0.00966 | -3.4 % | 0.01310 | 0.01915 | 0.00126 | 0.05844 | 59.4 N / 4161 N |
-
-How to read it: the **median** is within 0 to 7 % of the target in every run, which is the figure that says the stroke speed is kept while the
-tool is moving along a column. The **mean is well below the median** in the MuJoCo runs (about 0.006) and the spread is as large as the
-mean: many windows are close to standstill (p5 about 0.0002 m/s), from column ends and turns, pauses, and the force dropping below 3 N and rising again.
-The **Gazebo `main1` run is the bad one**: its p95 is 5.8 times the target and its mean is above it, so there are fast moves while the force is above 3 N
-(contact transients), and the force peaks are far above any sensible limit in both Gazebo runs (4 kN in `run.csv`, while the manager's feedback peak says 59 to 98 N; the two disagree and the cause was not investigated). The MuJoCo `serp2` run also peaked at 222 to 293 N. So these runs show the speed is kept
-in the median, not that every stroke sample is at 1 cm/s, and not that forces are under control in every run. The pass criterion of the
-runs ("10 of 10 columns done") says nothing about either.
+More: [docs/sim_mujoco.md](docs/sim_mujoco.md), [docs/sim_gazebo.md](docs/sim_gazebo.md), [docs/how_to_read_a_run.md](docs/how_to_read_a_run.md),
+[docs/manager_parameters.md](docs/manager_parameters.md#chained-columns-chain_columnstrue).
 
 ## Simulators
 

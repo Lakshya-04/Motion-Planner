@@ -39,6 +39,7 @@
 #include "geometry_msgs/msg/wrench_stamped.hpp"
 #include "coverage_task_msgs/action/execute_coverage.hpp"
 #include "coverage_task_msgs/srv/mission_command.hpp"
+#include "manipulation_manager/core/controller_names.hpp"
 #include "manipulation_manager/core/mission_verify.hpp"
 #include "stand_navigator_msgs/action/navigate_to_stand.hpp"
 #include "stand_navigator_msgs/action/wall_dock.hpp"
@@ -443,8 +444,14 @@ public:
     // The JTAC controller's node name: its action, parameters and force topic hang off it.
     controller_name_ = this->declare_parameter<std::string>(
       "controller_name", "combined_arm_lift_controller");
+    // Full-name overrides for the two interfaces; empty = relative to controller_name (the previous behaviour).
+    follow_action_name_ = manipulation_manager::resolveInterfaceName(
+      this->declare_parameter<std::string>("follow_action_name", ""), controller_name_,
+      "follow_joint_trajectory");
     force_pub_ = this->create_publisher<std_msgs::msg::Float64>(
-      "/" + controller_name_ + "/target_force_n", 10);
+      manipulation_manager::resolveInterfaceName(
+        this->declare_parameter<std::string>("target_force_topic", ""), controller_name_, "target_force_n"),
+      10);
 
     // Task interface (action `execute_coverage`, coverage_task_msgs). true (default): the old behaviour, run the
     // plan of the parameters once at start and exit. false: serve goals until shut down.
@@ -683,7 +690,7 @@ public:
     }
     initColumnIkCheck();
     execution_adapter_ = std::make_shared<JtacExecutionAdapter>(
-      shared_from_this(), "/" + controller_name_ + "/follow_joint_trajectory");
+      shared_from_this(), follow_action_name_);
     // Opt-in: the tool actuation executor (tool_actuation_node) owns the valve during a spray stroke. The
     // manager then publishes the stroke's window and trajectory time to it and no longer opens the valve itself.
     std::shared_ptr<manipulation_manager::ExecutionPort> exec_port = execution_adapter_;
@@ -3517,6 +3524,7 @@ private:
   double max_wall_penetration_{0.0};
   double target_force_n_{0.0};
   std::string controller_name_{"combined_arm_lift_controller"};
+  std::string follow_action_name_;
   double press_settle_s_{2.0};
   double unload_m_{0.02};
   double unload_release_force_n_{2.0};
