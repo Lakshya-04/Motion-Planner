@@ -192,6 +192,30 @@ both code states, scored on the reachable wall. The `two_panels` row above (0 of
 are now in; the 0.88 wall coverage the pass script prints for `two_panels` is the whole-wall figure, not the reachable-wall one the scenario judges. Details:
 [docs/sim_mujoco.md](docs/sim_mujoco.md#scenario-set-obstacles-on-the-wall).
 
+## Recorded results
+
+Single runs, one per row, taken from the recorded `run.csv` and the manager's last `feedback:` line; not repeated, so no spread across runs is claimed.
+All five are the two-stand wall pass (`run_multi_stand_pass.sh`, target tool speed 0.01 m/s, swath 0.14 m), recorded 2026-11-26. Only
+the contact strokes are held to a speed ([docs/tcp_speed.md](docs/tcp_speed.md)); free-space, approach, retract and base moves are not.
+
+TCP speed over the contact strokes (`score_run --target-speed 0.01`: samples with force above 3 N, speed from the chord over at least 0.5 s):
+
+| Simulator | Run | Columns done / failed | Median (m/s) | vs 0.01 | Mean | Std | p5 | p95 | Peak force, feedback / `run.csv` |
+|---|---|---|---|---|---|---|---|---|---|
+| MuJoCo | `mujoco-main-liftcost` | 10 / 0 | 0.00942 | -5.8 % | 0.00571 | 0.00478 | 0.00022 | 0.01066 | 20.3 N / 21.1 N |
+| MuJoCo | `mujoco-main-perc` | 10 / 0 | 0.00928 | -7.2 % | 0.00598 | 0.00447 | 0.00019 | 0.01072 | 23.3 N / 21.2 N |
+| MuJoCo | `w2-mujoco-serp2` | 10 / 0 | 0.00962 | -3.8 % | 0.00594 | 0.00475 | 0.00018 | 0.01064 | 292.7 N / 222.1 N |
+| Gazebo | `w1-gz-onewall-gain2` | 10 / 0 | 0.01000 | +0.0 % | 0.00886 | 0.00498 | 0.00135 | 0.01123 | 98.4 N / 4175 N |
+| Gazebo | `gazebo-onewall-main1` | 10 / 0 | 0.00966 | -3.4 % | 0.01310 | 0.01915 | 0.00126 | 0.05844 | 59.4 N / 4161 N |
+
+How to read it: the **median** is within 0 to 7 % of the target in every run, which is the figure that says the stroke speed is kept while the
+tool is moving along a column. The **mean is well below the median** in the MuJoCo runs (about 0.006) and the spread is as large as the
+mean: many windows are close to standstill (p5 about 0.0002 m/s), from column ends and turns, pauses, and the force dropping below 3 N and rising again.
+The **Gazebo `main1` run is the bad one**: its p95 is 5.8 times the target and its mean is above it, so there are fast moves while the force is above 3 N
+(contact transients), and the force peaks are far above any sensible limit in both Gazebo runs (4 kN in `run.csv`, while the manager's feedback peak says 59 to 98 N; the two disagree and the cause was not investigated). The MuJoCo `serp2` run also peaked at 222 to 293 N. So these runs show the speed is kept
+in the median, not that every stroke sample is at 1 cm/s, and not that forces are under control in every run. The pass criterion of the
+runs ("10 of 10 columns done") says nothing about either.
+
 ## Simulators
 
 Both run headless and sit behind `ros2_control`, so the same controllers run against them as against
@@ -237,7 +261,7 @@ Sources: `src/simulation/sim_mujoco/scripts/`, `src/simulation/sim_gazebo/script
 ## Documentation
 
 [docs/README.md](docs/README.md) is the index: [architecture](docs/architecture.md), [robot description](docs/robot_description.md),
-[design principles](docs/design_principles.md), [decision records](docs/adr/), [how to read a run](docs/how_to_read_a_run.md) (the files a pass writes and what each field means), [RViz profiles per module](docs/rviz/README.md). Third-party software and licences:
+[design principles](docs/design_principles.md), [decision records](docs/adr/), [TCP speed: what is held constant](docs/tcp_speed.md), [how to read a run](docs/how_to_read_a_run.md) (the files a pass writes and what each field means), [RViz profiles per module](docs/rviz/README.md). Third-party software and licences:
 [THIRD_PARTY.md](THIRD_PARTY.md). Changes: [CHANGELOG.md](CHANGELOG.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
