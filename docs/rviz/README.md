@@ -191,3 +191,10 @@ Notes: `stand_min_clearance_m` is the chassis-to-wall clearance (arm base about 
 arm base 0.70 m from the wall; 0.70 put the arm at its reach limit and the stow failed. `PB_EXTRA_STANDOFF` is
 `spray_extra_standoff_m`: at 0.02 the tool mount grazed the wall model at the ends of a stand's span.
 Columns still failing: the last waypoints of a strip at z 1.9 and the outer column of a stand.
+
+## The green TCP line
+
+`/mp_viz/tcp_executed` (the bright green line in `sim_overview.rviz`) draws the wall strokes only: the tool position while the
+conditioned force is above `path_contact_force_n` (default 2 N), with a break between strokes. Approach, retract, stow and base
+moves are free-space motion and are not drawn; `path_contact_only:=false` on `mp_viz_markers` draws everything again. Before this
+the line included every arm move and looped across the scene. It is a polyline of 1 cm steps (`path_min_step_m`).
