@@ -36,6 +36,7 @@ Column meanings. **ROS-free**: the library at the core of the package has no `rc
 | [`stand_navigator`](../src/manipulation/stand_navigator/README.md) | manipulation | ROS node (Python) over a ROS-free core | partly | no | no | `stand_navigator_msgs` |
 | [`stand_navigator_msgs`](../src/manipulation/stand_navigator_msgs/README.md) | manipulation | Message package | no | no | no | none |
 | [`vamp_planner`](../src/manipulation/vamp_planner/README.md) | manipulation | ROS-free core library + plugins | yes | no | no | `core_types`, `motion_planner` |
+| [`cartesian_tracking_controller`](../src/control/cartesian_tracking_controller/README.md) | control | ROS node or plugin (chainable controller) | no | no | no | `diff_ik_core` |
 | [`compliant_trajectory_controller`](../src/control/compliant_trajectory_controller/README.md) | control | ROS node or plugin (controller) | no | no | no | `core_types`, `force_core`, `ft_bridge_hardware`, `mobile_manipulator_description`, `mobile_manipulator_profile`, `ros_adapters` |
 | [`ft_bridge_hardware`](../src/control/ft_bridge_hardware/README.md) | control | ROS node or plugin (hardware component) | no | no | no | none |
 | [`ft_conditioner`](../src/control/ft_conditioner/README.md) | control | ROS node | no | no | no | `core_types`, `force_core` |
