@@ -209,6 +209,16 @@ public:
     if (!profile_warning.empty()) {
       RCLCPP_WARN(this->get_logger(), "%s", profile_warning.c_str());
     }
+    // The profile's per-joint movement cost (lift first). Empty when the profile has none: every consumer then keeps
+    // its own lift weight (dock_ik_lift_cost_weight, the planners' lift_cost_weight).
+    profile_joint_costs_ = profile.joint_costs;
+    if (!profile_joint_costs_.empty()) {
+      std::ostringstream costs;
+      for (size_t i = 0; i < profile_joint_costs_.size(); ++i) {
+        costs << (i ? ", " : "") << profile_joint_costs_[i];
+      }
+      RCLCPP_INFO(this->get_logger(), "joint_costs from profile %s: [%s]", profile.name.c_str(), costs.str().c_str());
+    }
     frame_id_ = this->declare_parameter<std::string>(
       "frame_id", profile.frameOr("world_base", "base_footprint"));
     planning_group_ = this->declare_parameter<std::string>("planning_group", "");
@@ -284,6 +294,8 @@ public:
       // Cost multiplier of the lift's delta in the continuity cost: 2.0 = lift motion twice as costly as arm motion, so
       // the choice prefers arm motion (and, with the reach preference, a lift that moves only as far as needed). 1.0 = off.
       dock_ik_sel_.lift_cost_weight = this->declare_parameter<double>("dock_ik_lift_cost_weight", 2.0);
+      // The profile's joint_costs, when it has them, replace the lift weight above (range-normalised, per joint).
+      dock_ik_sel_.joint_costs = profile_joint_costs_;
       dock_ik_sel_.reach_target_fraction = this->declare_parameter<double>("dock_ik_reach_fraction", 0.0);
       dock_ik_sel_.reach_m = this->declare_parameter<double>("dock_ik_reach_m", 0.0);
       dock_ik_sel_.lift_joint = static_cast<size_t>(std::max<int64_t>(0, this->declare_parameter<int>("dock_ik_lift_joint", 0)));
@@ -1967,6 +1979,20 @@ private:
       return false;
     }
 
+    // The profile's joint_costs reach the free-space planners as the plugin param `joint_costs`, unless the planning
+    // config already sets one for that plugin.
+    if (!profile_joint_costs_.empty()) {
+      std::ostringstream costs;
+      for (size_t i = 0; i < profile_joint_costs_.size(); ++i) {
+        costs << (i ? "," : "") << profile_joint_costs_[i];
+      }
+      for (const auto * name : {&selection.free_space, &selection.free_space_fallback}) {
+        if (!name->empty()) {
+          selection.plugin_params[*name].emplace("joint_costs", costs.str());
+        }
+      }
+    }
+
     plugin_registry_ = motion_planner::makePluginlibRegistry();
     plugin_context_.logger = std::make_shared<ros_adapters::RclcppLogger>(this->get_logger());
     plugin_context_.setFactory<rclcpp::Node>(
@@ -3384,6 +3410,7 @@ private:
   int dock_attempts_{3};
   bool dock_ik_seeded_{true};
   bool dock_ik_continuity_{false};
+  std::vector<double> profile_joint_costs_;   ///< the profile's `joint_costs`; empty = none given
   DockIkSelectorParams dock_ik_sel_;
   bool recovery_keeps_branch_{false};
   bool verify_approach_{true};
