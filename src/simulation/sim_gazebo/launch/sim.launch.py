@@ -8,6 +8,7 @@
   ros2 launch sim_gazebo sim.launch.py base_motion:=true                 # planar base on /cmd_vel, /odom, TF odom -> base_footprint
   ros2 launch sim_gazebo sim.launch.py rgb_camera:=true                  # gz colour camera -> /rgb_camera/image
   ros2 launch sim_gazebo sim.launch.py depth_sensor:=true                # gz depth camera -> /depth_sensor/points
+  ros2 launch sim_gazebo sim.launch.py lidar:=true                       # gz gpu_lidar -> /scan (LaserScan)
 
 What starts: gz sim (server only unless gui:=true), robot_state_publisher, the robot spawned from
 the description rendered with hardware:=gazebo from the profile's xacro args, ros_gz_bridge for
@@ -18,6 +19,7 @@ Sensors system, ogre2 renders headless in software),
 plus the broadcaster topic /force_torque_sensor_broadcaster/wrench (frame ft_sensor_link), and the controller spawners. The controller_manager
 lives inside the gz server (gz_ros2_control), not in a separate node.
 """
+import math
 import os
 import tempfile
 
@@ -133,6 +135,18 @@ def _launch(context):
         mappings.update(gz_depth_sensor='true', gz_depth_xyz=' '.join(map(str, pose[:3])),
                         gz_depth_rpy=' '.join(map(str, pose[3:])), gz_depth_noise=lc('depth_sensor_noise_m'),
                         gz_depth_rate=lc('depth_sensor_rate_hz'))
+    lidar = lc('lidar') == 'true'
+    if lidar:
+        pose = [float(v) for v in lc('lidar_pose').split()]
+        if len(pose) != 6:
+            raise ValueError('lidar_pose needs "x y z roll pitch yaw"')
+        lo, hi = math.radians(float(lc('lidar_angle_min_deg'))), math.radians(float(lc('lidar_angle_max_deg')))
+        step = math.radians(float(lc('lidar_angle_increment_deg')))
+        mappings.update(gz_lidar='true', gz_lidar_xyz=' '.join(map(str, pose[:3])),
+                        gz_lidar_rpy=' '.join(map(str, pose[3:])), gz_lidar_min_angle=repr(lo),
+                        gz_lidar_max_angle=repr(hi), gz_lidar_samples=str(int((hi - lo) / step + 1e-3) + 1),
+                        gz_lidar_min=lc('lidar_range_min_m'), gz_lidar_max=lc('lidar_range_max_m'),
+                        gz_lidar_rate=lc('lidar_rate_hz'), gz_lidar_noise=lc('lidar_noise_m'))
     rgb = lc('rgb_camera') == 'true'
     world_camera = ''
     if rgb:
@@ -158,7 +172,7 @@ def _launch(context):
         world = os.path.join(tempfile.mkdtemp(prefix='sim_gazebo_world_'), 'wall.sdf')
         wall_world.generate_world(lc('wall_scene'), world, wall_id=int(lc('wall_id')),
                                   standoff=float(lc('standoff')))
-    if depth or rgb:
+    if depth or rgb or lidar:
         # the render sensors need the Sensors system in the world (ogre2; no display: gz falls back to headless)
         with open(world) as f:
             sdf = f.read()
@@ -197,6 +211,8 @@ def _launch(context):
         remaps.append(('/rgb_camera', '/rgb_camera/image'))
     if depth:
         bridged.append('/depth_sensor/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked')
+    if lidar:
+        bridged.append('/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan')
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge', output='screen',
                   arguments=bridged, remappings=remaps,
                   parameters=[{'use_sim_time': True}])
@@ -291,6 +307,18 @@ def generate_launch_description():
                               description='"x y z roll pitch yaw" of depth_sensor_link in base_footprint (x forward)'),
         DeclareLaunchArgument('depth_sensor_noise_m', default_value='0.0', description='Gaussian range noise std, m'),
         DeclareLaunchArgument('depth_sensor_rate_hz', default_value='5.0', description='depth sensor rate, Hz'),
+        DeclareLaunchArgument('lidar', default_value='false',
+                              description='true: gz gpu_lidar on base_footprint, LaserScan on /scan in frame lidar_link '
+                                          '(needs gz rendering, ogre2); false adds nothing'),
+        DeclareLaunchArgument('lidar_pose', default_value='0.45 0 0.2 0 0 0',
+                              description='"x y z roll pitch yaw" of lidar_link in base_footprint (x forward)'),
+        DeclareLaunchArgument('lidar_angle_min_deg', default_value='-135.0', description='first ray, degrees'),
+        DeclareLaunchArgument('lidar_angle_max_deg', default_value='135.0', description='last ray, degrees'),
+        DeclareLaunchArgument('lidar_angle_increment_deg', default_value='0.5', description='ray spacing, degrees'),
+        DeclareLaunchArgument('lidar_range_min_m', default_value='0.05', description='lidar minimum range, m'),
+        DeclareLaunchArgument('lidar_range_max_m', default_value='10.0', description='lidar maximum range, m'),
+        DeclareLaunchArgument('lidar_rate_hz', default_value='10.0', description='lidar rate, Hz'),
+        DeclareLaunchArgument('lidar_noise_m', default_value='0.0', description='Gaussian range noise std of the lidar, m'),
         DeclareLaunchArgument('arm_meshes', default_value='true',
                               description='true (default): make the UR meshes resolvable in gz (visual AND collision); false: the '
                                           'UR links are invisible and have no collision in gz (the old behaviour)'),

@@ -293,6 +293,37 @@ A ray-cast depth sensor (`mj_multiRay` against the scene geoms) on the root link
 `live_octomap:=true` (with `move_group:=true`) feeds the cloud to MoveIt's octomap (`scripts/run_live_octomap.sh`).
 Details, the wall detector that consumes it and `scripts/run_depth_wall.sh` are in [perception_live.md](perception_live.md).
 
+## Lidar (`lidar:=true`)
+
+A 2D ray-cast lidar on the root link: a fan of `mj_multiRay` in the sensor's x-y plane against the scene geoms only (wall,
+obstacles), never the robot's own bodies. It publishes `sensor_msgs/LaserScan` on `/scan` in frame `lidar_link`; the launch file
+adds the static TF `base_footprint -> lidar_link`. Off by default and then the MJCF is unchanged.
+
+| Argument | Default |
+|---|---|
+| `lidar_pose` (`x y z roll pitch yaw`, root frame) | `0.45 0 0.2 0 0 0`: front edge of the stock footprint, 0.2 m up |
+| `lidar_angle_min_deg`, `lidar_angle_max_deg`, `lidar_angle_increment_deg` | -135, 135, 0.5 (541 rays) |
+| `lidar_range_min_m`, `lidar_range_max_m`, `lidar_rate_hz` | 0.05, 10, 10 |
+| `lidar_noise_m` (Gaussian on the range), `lidar_dropout` (chance a hit is lost), `lidar_seed` | 0, 0, 12345 |
+
+Ranges follow the `LaserScan` convention: `+inf` for no hit or beyond `range_max`, `-inf` inside `range_min`, `NaN` for a dropped
+return. Noise and dropout are seeded, so a run repeats. It sees only a horizontal slice at the mount height: the stock smoke wall
+spans 0.8 to 1.5 m, so a lidar at 0.2 m does not see it (a floor-standing box is seen). Rays are cast at one instant per scan, no
+motion distortion, no intensity, no glass or reflectivity effects. `stand_navigator` reads the scan with
+`obstacle_scan_topic:=/scan`; it treats the scan frame as the base frame, which with the lidar on the front edge makes the
+measured clearance the gap in front of the base.
+
+```bash
+bash $(ros2 pkg prefix sim_mujoco)/lib/sim_mujoco/run_lidar_stop.sh                      # with lidar: stops short of the box
+LIDAR_STOP_LIDAR=0 bash $(ros2 pkg prefix sim_mujoco)/lib/sim_mujoco/run_lidar_stop.sh   # without: drives into it
+```
+
+`run_lidar_stop.sh` puts a 0.3 x 0.3 x 0.6 m box in the straight path between a staging pose and the first stand (the box is not in
+the scene the planner sees), drives there through `navigate_to_stand` and checks the scan against the box geometry first. Results
+are in the changelog. Without the lidar the base drives into the box, stalls on contact and the navigator ends with
+`NAVIGATION_STUCK` after 20 s. The sim log's unexpected-contact scan reports nothing there (the box is touched, not penetrated), so
+contact is measured as the true footprint (odom) reaching the box face.
+
 ## MuJoCo 4 notes
 
 - 4.0 split the Python package into `mujoco-core` and `mujoco-studio` (the viewer lives with the

@@ -212,6 +212,157 @@ TEST(MujocoSimDepth, RangeNoiseIsAppliedAlongTheRay)
   EXPECT_NEAR(std::sqrt(sum2 / n), 0.005, 0.0015);
 }
 
+namespace
+{
+const std::string kLidarModel = std::string(SIM_MUJOCO_TEST_DATA) + "/lidar_wall.xml";
+
+// lidar_wall.xml with its numeric data replaced
+std::string lidarModelWith(const std::string & data, const std::string & name)
+{
+  std::string text;
+  {
+    std::ifstream in(kLidarModel);
+    text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  }
+  const std::string from = "-0.78539816 0.78539816 0.017453293 0.05 3.0 10.0 0.0 0.0 7";
+  const auto pos = text.find(from);
+  EXPECT_NE(pos, std::string::npos);
+  text.replace(pos, from.size(), data);
+  const std::string path = ::testing::TempDir() + "/" + name;
+  std::ofstream out(path);
+  out << text;
+  return path;
+}
+}  // namespace
+
+TEST(MujocoSimLidar, AbsentWithoutTheSiteAndNumeric)
+{
+  MujocoSim sim(kModel, {"slide"});
+  EXPECT_FALSE(sim.hasLidar());
+  EXPECT_TRUE(sim.lidarScan().empty());
+}
+
+TEST(MujocoSimLidar, WallAtAKnownDistanceGivesThatRangeAtTheConfiguredSpacing)
+{
+  MujocoSim sim(kLidarModel, {"slide"});
+  ASSERT_TRUE(sim.hasLidar());
+  sim.setJointPositions({0.0});
+  const auto & c = sim.lidarConfig();
+  const auto ranges = sim.lidarScan();
+  ASSERT_EQ(ranges.size(), 91u);
+  EXPECT_EQ(sim.lidarRayCount(), 91u);
+  EXPECT_NEAR(c.angle_increment, 0.017453293, 1e-9);
+  const double wall_half_angle = std::atan2(0.5, 2.0);
+  int hits = 0;
+  for (size_t i = 0; i < ranges.size(); ++i) {
+    const double a = c.angle_min + static_cast<double>(i) * c.angle_increment;
+    if (std::abs(a) < wall_half_angle - 1e-3) {
+      // ray i hits the plane x = 2 at 2 / cos(a): this also pins the angle of every index
+      EXPECT_NEAR(ranges[i], 2.0 / std::cos(a), 1e-4) << "ray " << i;
+      ++hits;
+    } else if (std::abs(a) > wall_half_angle + 1e-3) {
+      EXPECT_TRUE(std::isinf(ranges[i]) && ranges[i] > 0.0) << "ray " << i;
+    }
+  }
+  EXPECT_GT(hits, 20);
+  EXPECT_NEAR(ranges[45], 2.0, 1e-4);  // angle 0 is the middle ray
+}
+
+TEST(MujocoSimLidar, RobotBodiesAreNotScanned)
+{
+  MujocoSim sim(kLidarModel, {"slide"});
+  sim.setJointPositions({0.0});
+  const auto ranges = sim.lidarScan();
+  // the pad (group 0) is 0.25 m dead ahead inside the scan plane, the wall is the first thing the ray sees
+  EXPECT_GT(ranges[45], 1.9f);
+}
+
+TEST(MujocoSimLidar, BeyondMaxRangeReturnsInfAndInsideMinRangeMinusInf)
+{
+  {
+    MujocoSim sim(lidarModelWith("-0.78539816 0.78539816 0.017453293 0.05 1.5 10.0 0.0 0.0 7", "lidar_short.xml"),
+      {"slide"});
+    sim.setJointPositions({0.0});
+    for (const float r : sim.lidarScan()) {
+      EXPECT_TRUE(std::isinf(r) && r > 0.0) << "wall at 2 m, max range 1.5 m";
+    }
+  }
+  {
+    MujocoSim sim(lidarModelWith("-0.78539816 0.78539816 0.017453293 2.5 5.0 10.0 0.0 0.0 7", "lidar_blind.xml"),
+      {"slide"});
+    sim.setJointPositions({0.0});
+    EXPECT_TRUE(std::isinf(sim.lidarScan()[45]) && sim.lidarScan()[45] < 0.0) << "wall at 2 m, min range 2.5 m";
+  }
+}
+
+TEST(MujocoSimLidar, NoiseIsAppliedAlongTheRayAndSeeded)
+{
+  const std::string noisy = lidarModelWith("-0.78539816 0.78539816 0.017453293 0.05 3.0 10.0 0.01 0.0 7", "lidar_noise.xml");
+  MujocoSim a(noisy, {"slide"});
+  MujocoSim b(noisy, {"slide"});
+  a.setJointPositions({0.0});
+  b.setJointPositions({0.0});
+  const auto ra = a.lidarScan();
+  const auto rb = b.lidarScan();
+  EXPECT_EQ(ra, rb);  // same seed, same draws
+  EXPECT_NE(a.lidarScan(), ra);  // the next scan draws new noise
+  double sum = 0.0, sum2 = 0.0;
+  int n = 0;
+  for (size_t i = 0; i < ra.size(); ++i) {
+    const double ang = a.lidarConfig().angle_min + static_cast<double>(i) * a.lidarConfig().angle_increment;
+    if (std::isfinite(ra[i])) {
+      const double d = ra[i] - 2.0 / std::cos(ang);
+      sum += d;
+      sum2 += d * d;
+      ++n;
+    }
+  }
+  ASSERT_GT(n, 20);
+  EXPECT_NEAR(sum / n, 0.0, 0.006);
+  EXPECT_NEAR(std::sqrt(sum2 / n), 0.01, 0.003);
+  // another seed gives another scan
+  MujocoSim c(lidarModelWith("-0.78539816 0.78539816 0.017453293 0.05 3.0 10.0 0.01 0.0 8", "lidar_noise8.xml"),
+    {"slide"});
+  c.setJointPositions({0.0});
+  EXPECT_NE(c.lidarScan(), ra);
+}
+
+TEST(MujocoSimLidar, DropoutLosesSomeHitsAsNaNAndIsSeeded)
+{
+  const std::string path = lidarModelWith("-0.78539816 0.78539816 0.017453293 0.05 3.0 10.0 0.0 0.5 7", "lidar_drop.xml");
+  MujocoSim a(path, {"slide"});
+  MujocoSim b(path, {"slide"});
+  a.setJointPositions({0.0});
+  b.setJointPositions({0.0});
+  const auto ra = a.lidarScan();
+  const auto rb = b.lidarScan();
+  int nan = 0, hit = 0;
+  for (size_t i = 0; i < ra.size(); ++i) {
+    nan += std::isnan(ra[i]) ? 1 : 0;
+    hit += std::isfinite(ra[i]) ? 1 : 0;
+    EXPECT_EQ(std::isnan(ra[i]), std::isnan(rb[i]));  // NaN != NaN, so compare the pattern
+  }
+  EXPECT_GT(nan, 5);
+  EXPECT_GT(hit, 5);
+  // rays that miss the wall are inf, never NaN
+  EXPECT_TRUE(std::isinf(ra[0]));
+}
+
+TEST(MujocoSimLidar, ZeroNoiseZeroDropoutIsDeterministic)
+{
+  MujocoSim sim(kLidarModel, {"slide"});
+  sim.setJointPositions({0.0});
+  EXPECT_EQ(sim.lidarScan(), sim.lidarScan());
+}
+
+TEST(MujocoSimLidar, ThrowsOnInvalidConfiguration)
+{
+  EXPECT_THROW(MujocoSim(lidarModelWith("0.5 -0.5 0.0174533 0.05 3.0 10.0 0.0 0.0 7", "lidar_bad.xml"), {"slide"}),
+    std::runtime_error);
+  EXPECT_THROW(MujocoSim(lidarModelWith("-0.78539816 0.78539816 0.017453293 0.05 3.0 10.0 0.0 1.5 7", "lidar_bad2.xml"),
+    {"slide"}), std::runtime_error);
+}
+
 TEST(MujocoSim, UnexpectedContactsListSelfAndLinkOnWorldButNotTheTool)
 {
   MujocoSim sim(std::string(SIM_MUJOCO_TEST_DATA) + "/overlaps.xml", {"slide"});
