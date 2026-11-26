@@ -47,9 +47,20 @@ public:
         if (q->goal[0] > 5.0) {
           r->failure_reason_code = "no_path";
           r->failure_stage = "planning";
+          r->attempts = 20;
+          r->graph_calls = 2;
+          r->wall_s = 2.9;
           return;
         }
         r->success = true;
+        if (q->goal[0] == 4.0) {
+          r->attempts = 7;
+          r->graph_calls = 3;
+          r->graph_solve_s = 1.5;
+          r->wall_s = 2.9;
+        } else if (q->goal[0] == 1.0) {
+          r->wall_s = 0.2;
+        }
         r->failure_reason_code = "none";
         r->planning_time_s = 0.5;
         r->route = q->goal[0] == 3.0 ? "graph_seed" : "trajopt";
@@ -350,6 +361,21 @@ TEST(CuroboClient, JointValuesAndATrajectoryAreCheckedSeparately)
   c.joint_values = {0.5, 0.0};
   c.trajectory_joint_values = {{0.0, 0.0}, {2.0, 0.0}};
   EXPECT_FALSE(f.planner->collision(c).collision_free);
+}
+
+TEST(CuroboClient, SlowAndFailedPlansCarryTheServerTiming)
+{
+  Fixture f;
+  auto res = f.planner->plan(jointRequest(4.0));
+  ASSERT_TRUE(res.success) << res.message;
+  EXPECT_NE(res.message.find("attempts=7 graph_calls=3"), std::string::npos) << res.message;
+  EXPECT_NE(res.message.find("wall=2.90s"), std::string::npos) << res.message;
+  res = f.planner->plan(jointRequest(6.0));
+  EXPECT_FALSE(res.success);
+  EXPECT_NE(res.message.find("attempts=20 graph_calls=2"), std::string::npos) << res.message;
+  res = f.planner->plan(jointRequest(1.0));  // fast: left alone
+  ASSERT_TRUE(res.success);
+  EXPECT_TRUE(res.message.empty());
 }
 
 TEST(CuroboClient, GraphSeedRouteReachesTheResult)
