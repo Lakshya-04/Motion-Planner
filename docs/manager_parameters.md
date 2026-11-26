@@ -77,7 +77,8 @@ Declared in `retiming_wiring.cpp`. Only `retime` is read when it is false. Gtest
 | Parameter | Default | Meaning |
 |---|---|---|
 | `retime_tcp_link` | "" | Link whose speed is held constant on contact seams. Empty: the child link of the last active joint of the planning group. |
-| `retime_accel` | 2.0 | Acceleration limit used for both seams and transitions (the limits are the model's velocity limits, with this acceleration). |
+| `retime_accel` | 2.0 | Acceleration limit used for both seams and transitions (the limits are the model's velocity and acceleration limits; this value is only the fallback for a joint that has no acceleration limit in the model). |
+| `retime_vel_scale` | 1.0 | Scale (0.01 to 1) on the joint velocity limits of both seams and transitions. It can only slow things down: 1.0 is already the model's limit, so there is no faster free-space setting here. It is not a free-space-only knob; see [tcp_speed.md](tcp_speed.md). |
 | `retime_seam_jerk` | 20.0 | Jerk limit of contact seams (Ruckig smoothing). |
 | `retime_transition_jerk` | 0.0 | Jerk limit of transitions; 0 leaves the transition time-optimal without a jerk limit. |
 | `retime_transition_jerk_ratio` | 0.0 | Opt-in Ruckig smoothing of free-space transitions: jerk limit = ratio x each joint's acceleration limit. 0 = off (plain TOTG). Off by default: with 4.0 Ruckig failed on short moves in the MuJoCo run (66-72 planning failures per run). |
