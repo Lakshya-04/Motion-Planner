@@ -320,3 +320,16 @@ oriented boxes; links up to two moving joints apart are not checked). It runs on
 urdf_parser_py, numpy) and skips UR profiles without `ur_description`. It is the same question the
 `check` stage of [robot_assets.md](robot_assets.md#self-collision-sanity) asks of the FOAM spheres,
 answered earlier and without Docker; it is a planning-grade check on primitives, not a mesh check.
+
+## Joint movement cost (`joint_costs`)
+
+An optional array in the profile, one entry per joint in `joints` order (lift first, then the arm), each finite and above 0.
+Planners and the dock IK choice compare paths by each joint's travel as a fraction of its range (1 / range), multiplied by its
+entry: a higher entry makes that joint costlier to move, so plans prefer the others. `[2.0, 1, 1, 1, 1, 1, 1]` makes the lift
+twice as costly as an arm joint. Without the key the values are lift 2.0 and arm joints 1.0 (no lift: all 1.0).
+
+It is read in one place and handed to every consumer: the manager passes it to the dock IK choice and, as the plugin param
+`joint_costs`, to the free-space planners (`moveit_ompl`); the cuRobo node takes `profile:=<name>` or `joint_costs`. It only
+ranks finished candidates and guides shortcutting, so it acts where those modes are on (`free_space_optimize`,
+`dock_ik_continuity`); the planners' own internal costs (OMPL path length, cuRobo trajectory optimisation, VAMP) are not weighted.
+A size that does not match `joints` is an error when the profile is loaded.

@@ -180,3 +180,35 @@ TEST(PathQualityLiftWeight, WeightOneSelectionMatchesDefaultConfigExactly)
   EXPECT_EQ(s0.best_index, s1.best_index);
   EXPECT_DOUBLE_EQ(s0.length, s1.length);
 }
+
+TEST(PathQualityJointCosts, MultipliesEachJointByItsCost)
+{
+  const std::vector<double> base = weightsFromRanges({2.0, 4.0, 6.0});
+  const auto w = applyJointCosts(base, {3.0, 1.0, 0.5});
+  EXPECT_DOUBLE_EQ(w[0], 3.0 * base[0]);
+  EXPECT_DOUBLE_EQ(w[1], base[1]);
+  EXPECT_DOUBLE_EQ(w[2], 0.5 * base[2]);
+}
+
+TEST(PathQualityJointCosts, WrongSizeOrBadEntryLeavesTheWeights)
+{
+  const std::vector<double> base = weightsFromRanges({2.0, 4.0});
+  EXPECT_EQ(applyJointCosts(base, {2.0}), base);
+  EXPECT_EQ(applyJointCosts(base, {}), base);
+  const auto w = applyJointCosts(base, {-1.0, 2.0});   // the bad entry counts as 1
+  EXPECT_DOUBLE_EQ(w[0], base[0]);
+  EXPECT_DOUBLE_EQ(w[1], 2.0 * base[1]);
+}
+
+TEST(PathQualityJointCosts, LiftTwoArmOneIsTheLiftWeight)
+{
+  const std::vector<double> base = weightsFromRanges({1.5, 6.28, 6.28});
+  EXPECT_EQ(applyJointCosts(base, {2.0, 1.0, 1.0}), applyLiftCostWeight(base, {true, false, false}, 2.0));
+}
+
+TEST(PathQualityJointCosts, AnyJointCanBeTheCostlyOne)
+{
+  PathQualityConfig c;
+  c.weights = applyJointCosts({1.0, 1.0, 1.0}, {1.0, 4.0, 1.0});
+  EXPECT_NEAR(weightedDistance({0, 0, 0}, {0, 0.5, 0}, c), 4.0 * weightedDistance({0, 0, 0}, {0, 0, 0.5}, c), 1e-12);
+}

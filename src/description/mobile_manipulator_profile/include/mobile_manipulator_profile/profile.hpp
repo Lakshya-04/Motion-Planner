@@ -38,6 +38,8 @@ struct SensorSpec
   std::map<std::string, double> spec;
   std::string depth_noise_note;  ///< rgbd only
 };
+/// Movement cost of the lift when a profile gives no `joint_costs`; an arm joint is 1.0.
+inline constexpr double kDefaultLiftCost = 2.0;
 
 struct Profile
 {
@@ -48,6 +50,8 @@ struct Profile
   std::vector<std::string> arm_joints;
   std::vector<std::string> mimic_joints;
   std::map<std::string, double> home;
+  /// `joint_costs` of the profile, in joints() order. Empty when the profile has none; use jointCosts().
+  std::vector<double> joint_costs;
   std::map<std::string, std::string> frames;
   std::string arm_group = "arm";
   std::string whole_body_group = "lift_arm";
@@ -65,6 +69,16 @@ struct Profile
     if (!lift_joint.empty()) {all.push_back(lift_joint);}
     all.insert(all.end(), arm_joints.begin(), arm_joints.end());
     return all;
+  }
+  /// Movement cost per joint in joints() order: how much a joint's travel (as a fraction of its range) counts
+  /// against another's when planners and the dock IK choice compare paths. 1.0 is the plain range-normalised
+  /// travel. Without `joint_costs` in the profile: the lift kDefaultLiftCost, every arm joint 1.0.
+  std::vector<double> jointCosts() const
+  {
+    if (!joint_costs.empty()) {return joint_costs;}
+    std::vector<double> c(dof(), 1.0);
+    if (!lift_joint.empty()) {c[0] = kDefaultLiftCost;}
+    return c;
   }
   /// Home pose in joints() order.
   std::vector<double> homePositions() const
@@ -244,6 +258,16 @@ inline Profile parseProfile(const YAML::Node & root, const std::string & name)
     }
     if (root["arm"]["dof"] && root["arm"]["dof"].as<size_t>() != p.arm_joints.size()) {
       fail("arm.dof does not match joints.arm");
+    }
+  }
+  if (root["joint_costs"] && !root["joint_costs"].IsNull()) {
+    p.joint_costs = root["joint_costs"].as<std::vector<double>>();
+    if (p.joint_costs.size() != p.dof()) {
+      fail("joint_costs has " + std::to_string(p.joint_costs.size()) + " entries, joints() has " +
+        std::to_string(p.dof()) + " (lift first, then the arm)");
+    }
+    for (const double c : p.joint_costs) {
+      if (!(std::isfinite(c) && c > 0.0)) {fail("joint_costs entries must be finite and above 0");}
     }
   }
   if (root["home"]) {

@@ -234,6 +234,7 @@ class CuroboPlanner:
                  free_space_optimize: bool = False, free_space_time_budget_s: float = 20.0,
                  free_space_num_candidates: int = 6, free_space_objective: str = 'length',
                  lift_cost_weight: float = path_quality.DEFAULT_LIFT_COST_WEIGHT,
+                 joint_costs: Optional[Sequence[float]] = None,
                  optimal_trajopt_seeds: int = 32, optimal_num_knots: int = 24,
                  optimal_interpolation_dt: float = 0.01, optimal_finetune_attempts: int = 8,
                  optimal_max_attempts: int = 60, optimal_seed: int = 1234):
@@ -321,6 +322,8 @@ class CuroboPlanner:
         try:
             self._ik_weights = resolve_ik_weights(self.joint_names, ik_weights, prismatic_joints,
                                                   ik_prismatic_factor)
+            # per-joint movement cost of the optimal mode's candidate scoring; None keeps lift_cost_weight
+            self._joint_costs = path_quality.resolve_joint_costs(self.joint_names, joint_costs)
         except ValueError:
             self._planner.destroy()
             raise
@@ -490,7 +493,9 @@ class CuroboPlanner:
         t0 = time.monotonic()
         limits = self._joint_limits()
         weights = path_quality.joint_weights(*limits) if limits else None
-        if weights is not None:
+        if weights is not None and self._joint_costs is not None:
+            weights = path_quality.apply_joint_costs(weights, self._joint_costs)
+        elif weights is not None:
             weights = path_quality.apply_lift_cost_weight(
                 weights, self.joint_names, self._lift_joints, self._lift_cost_weight)
         cands, results = [], {}

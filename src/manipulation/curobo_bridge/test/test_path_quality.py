@@ -107,7 +107,7 @@ def _make(paths, straight_valid, objective='length', candidates=3):
     p._torch, p._planner = _Torch(), _Planner(paths)
     p._optimize, p._budget_s, p._num_candidates, p._objective = True, 100.0, candidates, objective
     p._finetune_attempts, p._seed0, p._interpolation_dt, p._max_attempts = 4, 7, 0.1, 10
-    p._lift_joints, p._lift_cost_weight = [], 1.0
+    p._lift_joints, p._lift_cost_weight, p._joint_costs = [], 1.0, None
     p._joint_limits = lambda: ([-1.0], [1.0])
     p._va_limits = lambda: ([1.0], [2.0])
     p.check_motion = lambda rows, step: straight_valid
@@ -157,3 +157,47 @@ def test_lift_cost_weight_prefers_arm_motion():
     assert w2 == [2.0, 1.0]
     assert pq.path_length(a, base) < pq.path_length(b, base)
     assert pq.path_length(b, w2) < pq.path_length(a, w2)
+
+
+def test_joint_costs_multiply_each_joint():
+    base = pq.joint_weights([0.0, -3.14, -3.14], [1.5, 3.14, 3.14])
+    w = pq.apply_joint_costs(base, [3.0, 1.0, 0.5])
+    assert w == [base[0] * 3.0, base[1], base[2] * 0.5]
+
+
+def test_lift_two_arm_one_equals_the_lift_weight():
+    names = ['lift', 'a', 'b']
+    base = pq.joint_weights([0.0, -3.14, -3.14], [1.5, 3.14, 3.14])
+    assert pq.apply_joint_costs(base, [2.0, 1.0, 1.0]) == pq.apply_lift_cost_weight(base, names, ['lift'], 2.0)
+
+
+def test_resolve_joint_costs_checks_size_and_values():
+    names = ['lift', 'a', 'b']
+    assert pq.resolve_joint_costs(names, None) is None
+    assert pq.resolve_joint_costs(names, []) is None
+    assert pq.resolve_joint_costs(names, [2, 1, 1]) == [2.0, 1.0, 1.0]
+    with pytest.raises(ValueError):
+        pq.resolve_joint_costs(names, [2.0, 1.0])
+    with pytest.raises(ValueError):
+        pq.resolve_joint_costs(names, [2.0, 0.0, 1.0])
+    with pytest.raises(ValueError):
+        pq.resolve_joint_costs(names, [2.0, float('nan'), 1.0])
+
+
+def test_apply_joint_costs_rejects_a_size_mismatch():
+    with pytest.raises(ValueError):
+        pq.apply_joint_costs([1.0, 1.0], [2.0])
+
+
+def test_optimal_mode_scores_with_the_joint_costs_when_given(monkeypatch):
+    seen = []
+    real = pq.score
+    monkeypatch.setattr(pq, 'score', lambda cand, weights=None: (seen.append(list(weights)), real(cand, weights))[1])
+    plain = _make([[[0.0], [0.4], [0.5]]] * 3, straight_valid=False)
+    costly = _make([[[0.0], [0.4], [0.5]]] * 3, straight_valid=False)
+    costly._joint_costs = [3.0]
+    assert plain._plan_joint_optimal([0.0], [0.5], None, None).success
+    plain_weights = seen[-1]
+    seen.clear()
+    assert costly._plan_joint_optimal([0.0], [0.5], None, None).success
+    assert seen and all(w == [3.0 * plain_weights[0]] for w in seen)
