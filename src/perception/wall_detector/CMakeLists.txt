@@ -24,13 +24,18 @@ find_package(octomap QUIET)
 find_package(octomap_msgs QUIET)
 
 # core/: ROS-free. Plane fit on a point cloud (scene_model) and the wall_scene.json writer.
-add_library(wall_detector_core src/core/wall_detection.cpp)
+add_library(wall_detector_core src/core/wall_detection.cpp src/core/prior_map.cpp)
 target_include_directories(wall_detector_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(wall_detector_core PUBLIC
   scene_model::scene_model_core Eigen3::Eigen nlohmann_json::nlohmann_json)
 target_compile_features(wall_detector_core PUBLIC cxx_std_17)
+
+# Prior map (OBJ / PLY / prior_surfaces JSON) -> wall_scene.json, ROS-free (docs/prior_map.md).
+add_executable(prior_map_to_wall_scene src/tools/prior_map_to_wall_scene.cpp)
+target_link_libraries(prior_map_to_wall_scene wall_detector_core)
+install(TARGETS prior_map_to_wall_scene DESTINATION lib/${PROJECT_NAME})
 
 # ros/: the node (TF, PointCloud2 in, JSON and MoveIt collision object out). Optional.
 find_package(rclcpp QUIET)
@@ -85,6 +90,9 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(wall_detection_test test/core/wall_detection_test.cpp)
   target_link_libraries(wall_detection_test wall_detector_core)
+  ament_add_gtest(prior_map_test test/core/prior_map_test.cpp)
+  target_compile_definitions(prior_map_test PRIVATE PRIOR_MAP_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/test/data")
+  target_link_libraries(prior_map_test wall_detector_core)
   if(TARGET wall_detector_octree)
     ament_add_gtest(octree_esdf_test test/core/octree_esdf_test.cpp)
     target_link_libraries(octree_esdf_test wall_detector_octree)
