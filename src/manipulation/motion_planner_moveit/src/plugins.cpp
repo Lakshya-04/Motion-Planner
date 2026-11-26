@@ -48,6 +48,14 @@ void configure(OmplPlanner & planner, const PluginParams & params)
     static_cast<int>(paramOr(params, "free_space_num_candidates", static_cast<double>(optimize.num_candidates)));
   optimize.objective = parseObjective(paramOr(params, "free_space_objective", std::string("length")));
   optimize.lift_cost_weight = paramOr(params, "lift_cost_weight", optimize.lift_cost_weight);
+  {
+    std::stringstream costs(paramOr(params, "joint_costs", std::string()));
+    for (std::string item; std::getline(costs, item, ',');) {
+      if (!item.empty()) {
+        optimize.joint_costs.push_back(std::stod(item));
+      }
+    }
+  }
   const std::string planners = paramOr(params, "free_space_planners", std::string());
   if (!planners.empty()) {
     optimize.planners.clear();
