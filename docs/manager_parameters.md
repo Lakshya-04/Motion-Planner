@@ -156,7 +156,7 @@ Any refusal (not adjacent, other plane, IK chain broken), failed or short connec
 
 ## Controller and frame names (what is parameterised, what is not)
 
-Naming follows the ros2_control convention: every controller is a node, and its `follow_joint_trajectory` action and its topics sit under the controller's name (the helper is `controller_names.hpp` in the manager core, gtested on the host).
+Naming follows the ros2_control convention: every controller is a node, and its `follow_joint_trajectory` action and its topics sit under the controller's name (the helper is the manager core header for controller names, gtested on the host).
 
 | Parameter | Default | Meaning |
 |---|---|---|
