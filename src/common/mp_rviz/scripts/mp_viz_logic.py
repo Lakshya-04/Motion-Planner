@@ -66,17 +66,38 @@ def format_readout(state, stand_index, stand_count, force_n, limit_n, column=Non
     return '%s\n%s\n%s' % (s, stand, f)
 
 
+def stroke_colour(force_n, target_n=10.0, band_n=4.0, limit_n=50.0, lost_n=2.0):
+    """Colour of one piece of the stroke line, by the contact force at that point (r, g, b in 0..1).
+
+    Blue: contact lost (below lost_n). Cyan: touching but below the band. Green: inside target +- band. Yellow to red: above the
+    band, red at limit_n and above. Grey: force unknown (None or not finite)."""
+    if force_n is None or not math.isfinite(force_n):
+        return (0.5, 0.5, 0.5)
+    if force_n < lost_n:
+        return (0.1, 0.3, 1.0)
+    if force_n < target_n - band_n:
+        return (0.0, 0.8, 0.9)
+    if force_n <= target_n + band_n:
+        return (0.0, 1.0, 0.0)
+    span = max(limit_n - (target_n + band_n), 1e-9)
+    t = min(max((force_n - (target_n + band_n)) / span, 0.0), 1.0)
+    return (1.0, 1.0 - t, 0.0)
+
+
 def line_list_points(points):
-    """Points for a LINE_LIST marker from a polyline in which ``None`` marks a break (the tool left the wall):
-    each run of consecutive points becomes segments between neighbours, and nothing joins two runs."""
-    out = []
+    """Vertices for a LINE_LIST marker from a polyline in which ``None`` marks a break (the tool left the wall); the points are
+    (x, y, z) or (x, y, z, force). Returns (vertices, forces): each run of consecutive points becomes segments between
+    neighbours, nothing joins two runs, and both vertices of a segment carry the force of its later point (None without one)."""
+    verts, forces = [], []
     prev = None
     for pt in points:
         if pt is None:
             prev = None
             continue
         if prev is not None:
-            out.append(prev)
-            out.append(pt)
+            f = pt[3] if len(pt) > 3 else None
+            verts.append(tuple(prev[:3]))
+            verts.append(tuple(pt[:3]))
+            forces.extend([f, f])
         prev = pt
-    return out
+    return verts, forces

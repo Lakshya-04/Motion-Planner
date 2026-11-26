@@ -10,8 +10,8 @@ Writes:  /mp_viz/mission_text (visualization_msgs/Marker, TEXT_VIEW_FACING above
          /mp_viz/tool_trace (visualization_msgs/MarkerArray, one LINE_STRIP of the tool positions, green to red by
          force against force_limit_n, at most trace_max_points points, 1 Hz, only while something subscribes),
          /mp_viz/tcp_executed (visualization_msgs/Marker, ONE thick bright-green LINE_LIST, the wall strokes only: the TCP motion actually
-         executed, TF fixed_frame -> tool_frame sampled at path_rate_hz (5), kept for path_max_points samples
-         (default 6000 at 1 cm steps, sampled at 5 Hz, older ones are thinned 2:1 instead of dropped, so the whole pass stays
+         executed, TF fixed_frame -> tool_frame sampled at path_rate_hz (10), kept for path_max_points samples
+         (default 20000 at 2 mm steps, sampled at 10 Hz, each piece coloured by the contact force, older ones are thinned 2:1 instead of dropped, so the whole pass stays
          visible), published at path_publish_hz (1) only on change and while subscribed). This is the main trail; the force trace is the secondary one.
 """
 import math
@@ -52,8 +52,8 @@ class MpVizMarkers(Node):
         self.trace = logic.TraceBuffer(max_points, float(p('trace_min_step_m', 0.002).value))
         self.force = None
         self.fb = None
-        self.path_max = int(p('path_max_points', 6000).value)
-        self.path_min_step = float(p('path_min_step_m', 0.01).value)   # 1 cm: the line stays smooth, 5x fewer points than 2 mm
+        self.path_max = int(p('path_max_points', 20000).value)
+        self.path_min_step = float(p('path_min_step_m', 0.002).value)   # 2 mm: a flickering force shows as short blue pieces along the stroke
         self.path_width = float(p('path_line_width_m', 0.02).value)
         # the green line shows the wall strokes only (the tool pressing, force above the threshold); approach, retract, stow and
         # base moves are free-space motion and drew big loops across the scene. path_contact_only:=false draws all of it again
@@ -63,6 +63,10 @@ class MpVizMarkers(Node):
         # drawing for this long after the last sample above the threshold: one unbroken line per stroke
         self.path_contact_hold_s = float(p('path_contact_hold_s', 1.0).value)
         self._last_contact_t = None
+        # the line is coloured by the force at each point so a flickering force stays visible: blue = contact lost (< path_contact_force_n),
+        # cyan = below the band, green = target +- band, yellow to red = above the band (red at force_limit_n)
+        self.path_target_force = float(p('path_target_force_n', 10.0).value)
+        self.path_band = float(p('path_band_n', 4.0).value)
         self.text_xyz = [float(c) for c in p('text_xyz', [0.9, -1.5, 2.4]).value]   # fixed_frame position of the readout
         self.path_pts = []
         self._path_dirty = False
@@ -80,7 +84,7 @@ class MpVizMarkers(Node):
         self.trace_pub = self.create_publisher(MarkerArray, '/mp_viz/tool_trace', 1)
         self.path_pub = self.create_publisher(Marker, '/mp_viz/tcp_executed', 1)
         self.create_timer(1.0 / rate, self._tick)
-        self.create_timer(1.0 / float(p('path_rate_hz', 5.0).value), self._sample_path)
+        self.create_timer(1.0 / float(p('path_rate_hz', 10.0).value), self._sample_path)
         self.create_timer(1.0 / float(p('path_publish_hz', 1.0).value), self._publish_path)
         self.create_timer(1.0 / float(p('trace_publish_hz', 1.0).value), self._publish_trace)
 
@@ -101,10 +105,10 @@ class MpVizMarkers(Node):
                 self.path_pts.append(None)   # the stroke ended: break the line here
                 self._path_dirty = True
             return
-        last = self.path_pts[-1] if self.path_pts else None   # None after a break: no distance check
+        last = self.path_pts[-1][:3] if self.path_pts and self.path_pts[-1] is not None else None   # None after a break: no distance check
         if last is not None and math.dist(pt, last) < self.path_min_step:
             return
-        self.path_pts.append(pt)
+        self.path_pts.append(pt + (self.force if self.force is not None else float('nan'),))
         self._path_dirty = True
         if len(self.path_pts) > self.path_max:  # thin the older half 2:1: the whole pass stays visible
             half = len(self.path_pts) // 2
@@ -124,7 +128,10 @@ class MpVizMarkers(Node):
         m.pose.orientation.w = 1.0
         m.scale.x = self.path_width
         m.color = ColorRGBA(r=0.0, g=1.0, b=0.0, a=1.0)
-        m.points = [Point(x=x, y=y, z=z) for x, y, z in logic.line_list_points(self.path_pts)]
+        verts, forces = logic.line_list_points(self.path_pts)
+        m.points = [Point(x=x, y=y, z=z) for x, y, z in verts]
+        m.colors = [ColorRGBA(r=c[0], g=c[1], b=c[2], a=1.0) for c in
+                    (logic.stroke_colour(f, self.path_target_force, self.path_band, self.limit) for f in forces)]
         self.path_pub.publish(m)
 
     def _on_force(self, msg):

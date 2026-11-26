@@ -57,9 +57,22 @@ def test_readout():
     assert 'force - N' in L.format_readout('x', 0, 0, math.nan, 50.0)
 
 
-def test_line_list_points_breaks_between_strokes():
-    pts = [(0, 0, 0), (1, 0, 0), (2, 0, 0), None, (5, 0, 0), (6, 0, 0), None, None, (9, 0, 0)]
-    out = L.line_list_points(pts)
-    assert out == [(0, 0, 0), (1, 0, 0), (1, 0, 0), (2, 0, 0), (5, 0, 0), (6, 0, 0)]   # no segment joins two strokes, a lone point draws nothing
-    assert L.line_list_points([]) == []
-    assert L.line_list_points([None, None]) == []
+def test_line_list_points_breaks_between_strokes_and_carries_the_force():
+    pts = [(0, 0, 0, 5.0), (1, 0, 0, 10.0), (2, 0, 0, 1.0), None, (5, 0, 0, 9.0), (6, 0, 0, 12.0), None, None, (9, 0, 0, 3.0)]
+    verts, forces = L.line_list_points(pts)
+    assert verts == [(0, 0, 0), (1, 0, 0), (1, 0, 0), (2, 0, 0), (5, 0, 0), (6, 0, 0)]   # no segment joins two strokes, a lone point draws nothing
+    assert forces == [10.0, 10.0, 1.0, 1.0, 12.0, 12.0]
+    assert L.line_list_points([]) == ([], [])
+    assert L.line_list_points([None, None]) == ([], [])
+    assert L.line_list_points([(0, 0, 0), (1, 0, 0)])[1] == [None, None]
+
+
+def test_stroke_colour_shows_lost_contact_and_the_band():
+    assert L.stroke_colour(0.5) == (0.1, 0.3, 1.0)          # contact lost: blue
+    assert L.stroke_colour(4.0) == (0.0, 0.8, 0.9)          # below the band (10 +- 4): cyan
+    assert L.stroke_colour(10.0) == (0.0, 1.0, 0.0)         # in band: green
+    assert L.stroke_colour(14.0) == (0.0, 1.0, 0.0)
+    assert L.stroke_colour(50.0) == (1.0, 0.0, 0.0)         # at the limit: red
+    r, g, b = L.stroke_colour(32.0)                         # halfway between band edge and limit: orange
+    assert r == 1.0 and 0.0 < g < 1.0 and b == 0.0
+    assert L.stroke_colour(float('nan')) == (0.5, 0.5, 0.5) and L.stroke_colour(None) == (0.5, 0.5, 0.5)
