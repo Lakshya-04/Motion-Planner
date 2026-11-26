@@ -33,6 +33,19 @@ ExpandedCoverage expandCoveragePasses(
   const Path & flat_path, const std::vector<MotionPlanSegment> & flat_segments,
   const WallPlane & wall, const coverage_planner::ToolCoverageProfile & tool_profile);
 
+/**
+ * @brief True when `add_strip_connectors` cannot be combined with the profile's passes.
+ * @details A reversed last pass (double_pass) makes a strip finish at its own start pose, while every connector is
+ *          generated against the flat single-pass plan and starts at a strip's END pose, so the expanded plan would
+ *          jump the full strip length at each strip/connector joint. Shared by the demo and service nodes.
+ */
+inline bool stripConnectorsConflictWithPasses(
+  const coverage_planner::ToolCoverageProfile & tool_profile, bool add_strip_connectors)
+{
+  return add_strip_connectors && !tool_profile.coverage.passes.empty() &&
+         tool_profile.coverage.passes.back().reverse_direction;
+}
+
 }  // namespace coverage_planner
 
 #endif  // COVERAGE_PLANNER__COVERAGE_PASS_EXPANDER_HPP_

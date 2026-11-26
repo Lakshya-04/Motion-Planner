@@ -15,7 +15,7 @@ on its feature's page.
 | `coverage_z_step_m` | 0.1 | Step in z (metres, in `frame_id`) between the points a wall column is resampled to. |
 | `coverage_z_max_m` | 1.60 | Upper z limit of a column in `frame_id`. |
 | `coverage_eef_speed_mps` | 0.02 | Target tool speed (m/s) of the contact segments, handed to the planner as `target_eef_speed` (2 cm/s: "a controlled press, not a crash"). |
-| `max_wall_penetration_m` | 0.12 | Largest distance a contact waypoint may lie behind the wall reference plane. A waypoint beyond it fails the segment with `wall_penetration_exceeded` (the check is in the OMPL planner's contact mode, `ompl_planner.cpp`). |
+| `max_wall_penetration_m` | 0.12 | Largest distance a contact waypoint may lie behind the wall reference plane. A waypoint beyond it fails the segment with `wall_penetration_exceeded` (the check is in the OMPL planner's contact mode, `src/manipulation/motion_planner_moveit/src/ompl_planner.cpp`). |
 
 (`coverage_z_min_m` is described in [sim_mujoco.md](sim_mujoco.md); it is the lower limit paired with `coverage_z_max_m`.)
 
@@ -60,6 +60,16 @@ Off by default. After the main pass, every column that ended failed or partial g
 | `retry_replan_stand` | false | Allow a re-planned nearby stand (multi-stand runs): at once after a navigation failure, from the second attempt after a dock failure. |
 | `retry_allow_branch_change` | false | From the second attempt on, the different dock solution may be on the other IK branch (the wrist and jump limits still apply). |
 | `retry_stop_after_failed` | 3 | Stop the pass after this many columns in a row used all attempts without recovering (0 = never stop). |
+
+## Dock verification and tool settling
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `verify_dock` | true | Before the press, check that the tool is within the tolerances below of the standoff pose. A column that fails is skipped as a failed dock (retried only through `column_retries`). |
+| `dock_tolerance_m` | 0.02 | Largest position error (m) of the tool at the standoff pose for `verify_dock`. |
+| `dock_tolerance_rad` | 0.17 | Largest orientation error (rad) of the tool at the standoff pose for `verify_dock`. |
+| `tcp_settle_timeout_s` | 0.0 | Seconds. > 0: after the fixed 0.5 s wait of the approach and dock checks, wait at most this long until the tool has stopped moving. 0 keeps the fixed wait only. Negative values are replaced by 0 with a warning. A cancel ends the wait. A failed TF lookup of `tcp_link` ends it early with a warning. |
+| `tcp_settle_tolerance_m` | 0.002 | Metres. The tool counts as stopped when its position moved less than this over the last 0.4 s. Must be > 0, otherwise 0.002 is used with a warning. |
 
 ## Recovery jog
 

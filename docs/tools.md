@@ -26,7 +26,7 @@ Both launch files take the same two arguments. Explicit parameters override sing
 profile and are only applied when set: `contact`, `standoff_m`, `tool_normal_policy`, `max_edge_tilt_deg`,
 `tool_frame_yaw_deg`, `swath_m`, `overlap_pct`, `sweep_direction`, `enable_boundary_pass`,
 `boundary_offset_m`, `obstacle_inflation`, `obstacle_inflation_radius_m`, `double_pass` (true forces two
-passes). An explicit `swath_m` also switches off the spray-cone derivation. If no inflation radius is set
+passes, false forces one pass whatever the profile says; it cannot be combined with `add_strip_connectors`, both nodes refuse that). An explicit `swath_m` also switches off the spray-cone derivation. If no inflation radius is set
 anywhere it falls back to half the swath.
 
 ```

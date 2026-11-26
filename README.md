@@ -12,20 +12,24 @@ The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/
 
 **Where it stands (2026-11-22, main at #204):**
 - **Single-stand wall passes** in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
-- **Two-stand passes in MuJoCo pass**, with MoveIt/OMPL and with cuRobo. The latest run (MoveIt/OMPL, scored on the tool pose after #167 and
-  #172, one run): 10 of 10 columns, coverage 100 %, tool tilt at most 0.15 deg, wall gap at most 0.9 mm, peak force 22.1 N against a 10 N
-  target ([video below](#two-stand-pass-with-moveit-scored-on-the-tool-pose-mujoco)). Earlier same-session batches: 6 of 8 before the
-  second-stand fix and 8 of 8 after (not significant on its own).
+- **Two-stand passes in MuJoCo pass**, with MoveIt/OMPL and with cuRobo. The latest verified run (MoveIt/OMPL, the stand navigator drives
+  the base, the wall is docked column by column, lift cost 2x the arm, one run): 10 of 10 columns, coverage 100 %, tool tilt at most
+  0.20 deg, wall gap at most 0.9 mm, scored peak force 22.4 N against a 10 N target (stand arm bases (0.26, 0.41) and (0.26, 0.99), tool
+  reach 74 to 77 %). On the 2.0 m tall wall five repeat runs all completed 10 of 10 columns; four peaked at 22 to 34 N and one at 318 N,
+  which the master attributed to lift stage stick-slip in the MuJoCo model (a fix is in #211; not yet re-measured), not to the planner
+  ([video below](#two-stand-pass-with-moveit-scored-on-the-tool-pose-mujoco)). Jerk smoothing of the transitions is off by default
+  (`fix/transition-jerk-smoothing` is opt-in).
 - **cuRobo v0.9.0 as the free-space planner** completed a two-stand MuJoCo pass four times (10 of 10 columns, peaks 46.8 to 72.4 N), but
   MoveIt/OMPL still planned the stow and the second stand: cuRobo found no docked-to-stow path (its model treats low lift with the arm swung
   out as in collision) or did not answer in time, and it needs 12 to 16 s per plan on the 4 GB laptop GPU. A `free_space_fallback` makes the
   hand-over automatic and logged; a start/goal precheck, a 7-joint collision-matrix fix (`--ignore-hops 2`) and a joint limit guard are in,
   but the cause of the low-lift refusal is a hypothesis until a GPU run confirms it ([docs/curobo_v2_notes.md](docs/curobo_v2_notes.md)).
-- **Gazebo two-stand passes still fail.** After the start-state clamps (#156, #157, no "start state out of bounds" error is left) the pass
-  completed 1 of 10 columns in the latest run (6 of 10 in the one before; the pass varies a lot between runs). The log shows the dock IK
-  jumping to another arm branch (shoulder pan -0.62 to +2.49 rad) and the wrist winding, after which every column fails. An opt-in dock IK
-  continuity choice (`dock_ik_continuity`, #169) targets that; it has not been measured in Gazebo on main yet
-  ([docs/sim_gazebo.md](docs/sim_gazebo.md)).
+- **Gazebo two-stand passes still fail.** On the tall wall with correct stand placement (stand 0 at (0.26, 0.41), reach 0.74) the latest
+  run completed 2 of 10 columns. Every failing column stops at the same gate, "docked 0.036 to 0.063 m off the standoff pose (limit
+  0.020 m)", at the wall bottom (first pose z 0.61, lift at its 0 m stop): the arm in Gazebo stops 4 to 6 cm above the commanded low pose,
+  which MuJoCo does not do. Raising the gz_ros2_control `position_proportional_gain` from 0.1 to 1 removed those rejections but moved the
+  failure to a collision truncation at the bottom row (octomap against `tool_mount_link`); a gain of 3 jittered (272 N). Both runs ended
+  early, so no column totals are claimed ([docs/sim_gazebo.md](docs/sim_gazebo.md)).
 - **Merged since the cuRobo work, mostly host-tested only (no simulator, GPU or hardware run unless stated):** column-sequence feasibility
   (approach, contact, strokes, retract; split avoidance), an RM4D-backed column port in the manager (advisory, off by default), `ColumnIkChain`
   and a path quality audit (not yet called by the planner), a stand-check gate and dock IK continuity (both opt-in), N-DOF arms and a
@@ -49,7 +53,7 @@ The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/
   | Wall dock step after `navigate_to_stand` (opt-in, feeds the stand check and the verify result) | host-tested only (gtests on the gate); built with the batch, never run in a simulator | [docs/manager_parameters.md](docs/manager_parameters.md) |
   | Failed-column retry (`retry_failed_columns`, next dock IK solution, fresh stow, optional stand re-plan; opt-in) | host-tested only (gtests on the policy); built with the batch, no simulator run yet | [docs/manager_parameters.md](docs/manager_parameters.md) |
   | Touch-up plan (undone cells of a recorded run to a serpentine `coverage_output.json`) | host-tested only (pytest); the plan has not been executed by the manager in a simulator | [docs/sim_overlay.md](docs/sim_overlay.md) |
-  | Gazebo multi-stand script parity with MuJoCo (double pass, reach, clearance, tall patch knobs) | host-tested only (script test); the Gazebo tall wall has never run, unverified in sim | [docs/sim_gazebo.md](docs/sim_gazebo.md) |
+  | Gazebo multi-stand script parity with MuJoCo (double pass, reach, clearance, tall patch knobs) | script test on the host; the Gazebo tall wall has run (2 of 10 columns, see the status above), not yet passing | [docs/sim_gazebo.md](docs/sim_gazebo.md) |
 
   None of these is verified in a simulator yet (the batch-2 rows were built and unit-tested in the ROS image, no more); the verified-in-sim results are the MuJoCo passes above.
 - **Navigation and perception are the weakest links.** The base drives a straight line to each stand on ground-truth simulator odometry (no map, no localisation; an opt-in planner, safety layer and Nav2 adapter now exist but have not run in a simulator), wall docking and `wall_detector` are not started in the two-stand passes (the wall is pre-baked), and the self filter is not in any pass. [docs/navigation_and_perception.md](docs/navigation_and_perception.md) has the component table and the ordered gap list.

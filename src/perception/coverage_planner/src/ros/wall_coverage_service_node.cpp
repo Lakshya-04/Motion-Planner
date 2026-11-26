@@ -143,6 +143,11 @@ void WallCoverageServiceNode::requestCoveragePath()
   request->edge_zone_m = static_cast<float>(tool_profile.coverage.edge_zone_m);
   request->edge_spacing_scale = static_cast<float>(tool_profile.coverage.edge_spacing_scale);
   request->add_strip_connectors = this->get_parameter("add_strip_connectors").as_bool();
+  if (stripConnectorsConflictWithPasses(tool_profile, request->add_strip_connectors)) {
+    throw std::runtime_error(
+      "'double_pass' and 'add_strip_connectors' cannot both be true -- the expanded plan would jump the full "
+      "strip length at every strip/connector joint.");
+  }
   request->allow_unknown = this->get_parameter("allow_unknown").as_bool();
 
   if (!coverage_client_) {
