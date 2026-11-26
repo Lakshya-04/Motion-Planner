@@ -8,6 +8,7 @@
 #include <new>
 
 #include "chain_helper.hpp"
+#include "diff_ik_core/cartesian_tracker.hpp"
 #include "diff_ik_core/diff_ik.hpp"
 
 // The replaced operator new forwards to malloc, so GCC's pairing heuristic is wrong here.
@@ -101,6 +102,33 @@ TEST(DiffIkAlloc, EightJointsAreStillAllocationFree)
   const long before = g_allocs.load();
   EXPECT_TRUE(computeStep(J, v, xy, q, lim, p).valid);
   EXPECT_EQ(g_allocs.load() - before, 0);
+}
+
+TEST(DiffIkAlloc, CartesianTrackerStepIsAllocationFree)
+{
+  const Chain c = arm7();
+  const Eigen::VectorXd q = vec({0.3, 0.8, -0.4, -1.2, 0.5, 0.9, 0.2});
+  const Eigen::MatrixXd J = c.jacobian(q);
+  const Eigen::Isometry3d T = c.fk(q);
+  TrackerParams tp;
+  tp.limits = limitsFor(7);
+  tp.tool.xyz = Eigen::Vector3d(0.0, 0.01, 0.15);
+  tp.plane_enabled = true;
+  tp.ik.null_space.push_back({std::make_shared<JointCenteringCost>(), 1.0});
+  CartesianTracker trk(tp);
+  TrackerReference ref;
+  ref.pose = T;
+  ref.pose.translation() += Eigen::Vector3d(0.01, 0.0, 0.0);
+  PlaneMeasurement m;
+  m.standoff_error = 0.01;
+  (void)trk.step(q, J, T, ref, m);
+  const long before = g_allocs.load();
+  double sink = 0.0;
+  for (int i = 0; i < 100; ++i) {
+    const TrackerOutput o = trk.step(q, J, T, ref, m);
+    sink += o.q_next(0) + o.sigma_min + o.joint_limit_margin;
+  }
+  EXPECT_EQ(g_allocs.load() - before, 0) << "sink " << sink;
 }
 
 TEST(DiffIkAlloc, TheCounterSeesAHeapVector)
