@@ -4,6 +4,7 @@
  */
 
 #include "compliant_trajectory_controller/jtac_controller.hpp"
+#include "compliant_trajectory_controller/integration_period.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -135,6 +136,10 @@ controller_interface::CallbackReturn JtacController::on_init()
     get_node()->declare_parameter(
       "redundancy_weights", std::vector<double>{10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
   }
+  if (!get_node()->has_parameter("max_integration_period_s")) {
+    get_node()->declare_parameter("max_integration_period_s", 0.0);
+  }
+  max_integration_period_s_ = get_node()->get_parameter("max_integration_period_s").as_double();
   enable_redundancy_weighting_ = get_node()->get_parameter("enable_redundancy_weighting").as_bool();
   redundancy_weights_ = get_node()->get_parameter("redundancy_weights").as_double_array();
   if (enable_redundancy_weighting_) {
@@ -903,11 +908,15 @@ controller_interface::return_type JtacController::update(
 
   state_desired_.positions = state_reference_.positions;
   state_desired_.velocities = state_reference_.velocities;
+  // An overrunning cycle must not hand the explicit-Euler admittance integrator a long step (see
+  // integration_period.hpp); the joint rate limits below still use the real period.
+  const rclcpp::Duration step =
+    rclcpp::Duration::from_seconds(cappedIntegrationPeriod(period.seconds(), max_integration_period_s_));
   if (enable_redundancy_weighting_) {
-    updateWeighted(biased_wrench, period);
+    updateWeighted(biased_wrench, step);
   } else {
     admittance_rule_->update(
-      state_current_, biased_wrench, state_reference_, period, state_desired_);
+      state_current_, biased_wrench, state_reference_, step, state_desired_);
   }
 
   // See clampCartesianOffset()'s own doc comment -- must run on EITHER path above, before the
@@ -916,7 +925,7 @@ controller_interface::return_type JtacController::update(
 
   if (force_limiter_) {
     if (params_.admittance.selected_axes[2]) {
-      applyForceLimiter(measured_wrench, period.seconds());
+      applyForceLimiter(measured_wrench, step.seconds());
     } else {
       // The force axis is not engaged (free-space moves, calibration: the wrench may still carry an
       // uncompensated payload): the limiter must not act on it. Start clean when it engages.
