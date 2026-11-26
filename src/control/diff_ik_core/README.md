@@ -83,6 +83,27 @@ Feed the shifted Jacobian to `computeStep`; add the servo twist to the path twis
 Not done: no controller plugin, no calibration capture (the offset comes from a record someone
 else made), no wear tracking, not run in any simulator. Host gtests only, on kinematic chains.
 
+## Cartesian tracker
+
+`cartesian_tracker.hpp`: `CartesianTracker` is the engine the later controller plugin would wrap. It
+is glue over the rest of the package. One `step(q, J_flange, T_world_flange, reference, plane)` moves
+the Jacobian to the contact point (`ToolOffset`), builds the twist (reference feedforward + pose
+feedback on the contact pose error, plus the plane servo twist when `plane_enabled` and a
+measurement is given), scales the whole twist uniformly to `max_linear_twist` / `max_angular_twist`,
+runs `computeStep` and `integrate`. With a plane measurement the servo owns standoff and tilt, so the
+pose feedback keeps only the in-plane position error and the rotation about the normal.
+`setToolOffset` swaps in a new calibration record from the next step. Non-finite or mis-sized input
+gives status `Invalid`, zero `qdot`, `q_next = q`. Allocation-free per step up to 8 joints
+(`diff_ik_alloc_test`).
+
+`TrackerOutput`: `status`, `qdot`, `q_next`, `twist` (after the limit), `position_error` (m) and
+`orientation_error` (rad) before the step, `sigma_min`, `condition`, `manipulability` (of the masked
+contact Jacobian), `twist_scale`, `task_scale` (twist scale times the IK velocity-limit scale),
+`joint_limit_margin`.
+
+Does not: no ros2_control plugin, no calibration capture, not run in a simulator, no stability
+analysis. Host gtests on kinematic chains only (`cartesian_tracker_test`).
+
 ## Dependencies
 
 `Eigen3` (build and run), `ament_cmake`. Tests: `ament_cmake_gtest`.
@@ -105,8 +126,8 @@ const auto next = diff_ik_core::integrate(q, qd, r.qd, dt, lim);
 
 ## Tests
 
-Five gtest executables (`jacobian_quality_test`, `diff_ik_test`, `pose_error_test`,
-`tool_correction_test`, `diff_ik_alloc_test`) with a generic DH chain helper in `test/chain_helper.hpp` (analytic geometric Jacobian, checked
+Six gtest executables (`jacobian_quality_test`, `diff_ik_test`, `pose_error_test`,
+`tool_correction_test`, `cartesian_tracker_test`, `diff_ik_alloc_test`) with a generic DH chain helper in `test/chain_helper.hpp` (analytic geometric Jacobian, checked
 against finite differences): planar 2R and 3R against the analytic inverse, spatial 6R and 7R,
 self-motion that leaves the twist unchanged, a path through a singularity (bounded joint velocity,
 stops), uniform scaling that keeps the direction, limits never exceeded over random
