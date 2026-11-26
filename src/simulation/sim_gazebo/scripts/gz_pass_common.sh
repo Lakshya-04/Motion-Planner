@@ -55,7 +55,7 @@ gz_sim_args() {
 gz_coverage() {
   local scene=$1 params=${2:-}
   rm -f "$COV"
-  timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args \
+  timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args -p double_pass:=${GZ_DOUBLE_PASS:-false} \
     -p wall_scene_json:=$scene -p output_json:=$COV \
     -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${GZ_TOOL_YAW:--90.0} \
     $params > "$OUT/coverage_demo.log" 2>&1 &
