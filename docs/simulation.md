@@ -12,7 +12,7 @@ uses ([scene_model.md](scene_model.md)).
 | Gazebo | `gazebo` | `sim_gazebo` | Gazebo Harmonic (gz-sim 8) with `gz_ros2_control` | not on this branch: arrives with the Gazebo PRs |
 | MuJoCo | `mujoco` | `sim_mujoco` | MuJoCo 4.x through our own ros2_control `SystemInterface` | not on this branch: arrives with the MuJoCo PRs |
 | Real robot | `real` | `mobile_manipulator_description` | vendor driver chosen by arm (xarm_ros2, ur_robot_driver, franka_ros2; not vendored), `real_driver:=mock` for CI | wiring and tests only, nothing run on hardware ([hardware_bringup.md](hardware_bringup.md) section 0a) |
-| Isaac Sim | `isaac` | `sim_isaac` | NVIDIA Isaac Sim | **stub**: contract and plan only, nothing runs |
+| Isaac Sim | `isaac` | `sim_isaac` | NVIDIA Isaac Sim, as an optional add-on in a sibling container | **partial, optional**: joint states, clock and position commands over the Isaac ROS 2 bridge, smoke test passes; no `hardware:=isaac` yet ([sim_isaac.md](sim_isaac.md)) |
 
 ## What every backend provides (the contract)
 
@@ -60,7 +60,7 @@ Docker: the `sim` target holds MuJoCo 4 (`mujoco-core`, MJX, JAX) for Python wor
 ([docker.md](docker.md)); a thin Gazebo target arrives with the Gazebo PRs. Isaac Sim is large and ships as its own NVIDIA
 image: it will run as a separate compose service, not inside ours.
 
-## Isaac Sim (stub, to be developed later)
+## Isaac Sim (optional add-on, first slice in [sim_isaac.md](sim_isaac.md); the plan below is still the plan)
 
 Planned shape, so the stub is a real placeholder and not a blank: the robot URDF is imported to USD (the
 Isaac Sim URDF importer, collision as convex hulls like the other backends); joints are driven through

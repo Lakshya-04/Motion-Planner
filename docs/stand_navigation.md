@@ -99,8 +99,9 @@ profile). The scene must be in the odom frame (nothing is transformed). Limits: 
 
 MuJoCo multi-stand pass switches (`run_multi_stand_pass.sh`): `MULTI_STAND_PATH_PLANNER=1` gives the navigator the pass's wall scene
 and `use_path_planner:=true`; `MULTI_STAND_WALL_DOCK=1` also starts `wall_docking_node` and latches the pass's scene
-(frame set to odom) on `/wall_detector/wall_scene` (the pass runs no wall_detector). Both default off. The manager does not send
-`WallDock` goals yet, so with the flag only the server is up (send a goal by hand, see the script header).
+(frame set to odom) on `/wall_detector/wall_scene` (the pass runs no wall_detector) and turns on the manager's
+`wall_dock_after_navigate` with `wall_dock_planned_standoff`, so each arrival is followed by a `WallDock` goal
+(`MULTI_STAND_WALL_DOCK_FACING` sets the node's `facing_rad`). Both default off.
 
 ## Wall docking: standoff and yaw from the fitted plane
 
@@ -321,6 +322,7 @@ The default-on checks cannot change a healthy run: the controller output is alre
 verdict), and the stuck window is long and reset by any progress; it does not count inside the goal tolerance. The obstacle stop
 looks only along the direction of travel (not during pure rotation), assumes the scan or cloud is in the base frame (no TF), and
 is not a certified safety function: it is a software stop on top of the velocity limits, not a replacement for a safety lidar or e-stop.
+The sim lidars feed it: `lidar:=true` on either simulator and `obstacle_scan_topic:=/scan` (`run_lidar_stop.sh` in `sim_mujoco` and `sim_gazebo`). A held base keeps looking along its last direction of travel, so the hold timer runs and the abort comes after `obstacle_hold_s`; a front-mounted scanner does not see an obstacle beside or behind the base once it turns or strafes past it.
 New error codes: `NAVIGATION_STUCK=6`, `OBSTACLE=7`, `BAD_COMMAND=8`, `NO_NAV2=9`.
 
 `backend:=nav2` (default `builtin`): `stand_navigator/nav2_adapter.py` converts the arm-base stand pose to a `base_footprint` goal
@@ -338,7 +340,7 @@ is a large dependency set, so it was not added. To switch:
 
 1. Install `ros-jazzy-navigation2` and `ros-jazzy-nav2-bringup` in the image.
 2. Costmap: a local and global costmap from the profile's `footprint` (the same polygon reachability uses), an
-   obstacle layer from the sim lidar once one exists (none yet), `odom` as the global frame until localisation is added.
+   obstacle layer from the sim lidar (`lidar:=true`, `/scan`), `odom` as the global frame until localisation is added.
    Controller: MPPI with the `Omni` motion model for omni profiles, `DiffDrive` for diff; velocity and acceleration
    limits from the profile.
 3. Set `backend:=nav2` (implemented, see above; or replace the node with a small bridge) that keeps the `NavigateToStand` interface: convert the arm-base pose to a

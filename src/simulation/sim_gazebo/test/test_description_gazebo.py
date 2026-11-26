@@ -109,6 +109,13 @@ def test_base_motion_and_depth_off_by_default():
     assert all(s.get('type') != 'depth_camera' for s in robot.iter('sensor'))
 
 
+def test_extra_plugin_params_only_when_asked():
+    plugin = _render_with({}).find('gazebo/plugin')
+    assert len(plugin.findall('parameters')) == 1
+    plugin = _render_with({'gz_extra_params': '/tmp/gain.yaml'}).find('gazebo/plugin')
+    assert [p.text for p in plugin.findall('parameters')][1:] == ['/tmp/gain.yaml']
+
+
 def test_base_motion_frees_the_base():
     robot = _render_with({'gz_base_motion': 'true'})
     assert robot.find("joint[@name='sim_world_joint']") is None
@@ -127,6 +134,19 @@ def test_depth_sensor_is_a_gz_depth_camera_on_depth_sensor_link():
     s = robot.find("gazebo[@reference='depth_sensor_link']/sensor[@type='depth_camera']")
     assert s.find('topic').text == '/depth_sensor' and s.find('gz_frame_id').text == 'depth_sensor_link'
     assert float(s.find('camera/noise/stddev').text) == 0.003
+
+
+def test_lidar_off_by_default_and_a_gz_gpu_lidar_on_lidar_link():
+    assert _render_with({}).find("link[@name='lidar_link']") is None
+    robot = _render_with({'gz_lidar': 'true', 'gz_lidar_xyz': '0.4 0 0.3', 'gz_lidar_samples': '181',
+                          'gz_lidar_noise': '0.01'})
+    j = robot.find("joint[@name='lidar_joint']")
+    assert j.find('parent').get('link') == 'base_footprint' and j.find('origin').get('xyz') == '0.4 0 0.3'
+    s = robot.find("gazebo[@reference='lidar_link']/sensor[@type='gpu_lidar']")
+    assert s.find('topic').text == '/scan' and s.find('gz_frame_id').text == 'lidar_link'
+    assert int(s.find('lidar/scan/horizontal/samples').text) == 181
+    assert float(s.find('lidar/noise/stddev').text) == 0.01
+    assert float(s.find('lidar/range/max').text) == 10.0
 
 
 def test_rgb_camera_off_by_default_and_a_gz_camera_on_rgb_camera_link():

@@ -1,0 +1,46 @@
+# Optional Isaac Sim add-on. Not started by anything else; docs/sim_isaac.md has the whole story.
+#   docker build -f docker/isaac/Dockerfile -t motion-planner:isaac .
+#   docker compose -f docker/compose.isaac.yaml --profile isaac up isaac
+# Setting ACCEPT_EULA=Y is you accepting NVIDIA's Isaac Sim licence. The robot USD comes from
+# src/simulation/sim_isaac/scripts/run_smoke.sh (it leaves it in ~/.cache/mp-isaac/assets) or urdf_to_usd.py.
+name: motion-planner-isaac
+
+services:
+  isaac:
+    profiles: [isaac]
+    image: ${ISAAC_SERVICE_IMAGE:-motion-planner:isaac}
+    entrypoint: ["/isaac-sim/python.sh"]
+    command: ["/sim_isaac/scripts/run_isaac.py", "--usd", "/assets/${PROFILE:-ur10e_telescopic}/robot.usd",
+              "--profile", "${PROFILE:-ur10e_telescopic}", "--profile-dir", "/sim_isaac/profiles"]
+    network_mode: host
+    environment:
+      ACCEPT_EULA: "Y"
+      PRIVACY_CONSENT: "N"
+      OMNI_KIT_ACCEPT_EULA: "YES"
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      ROS_DISTRO: jazzy
+      LD_LIBRARY_PATH: /isaac-sim/exts/isaacsim.ros2.bridge/jazzy/lib
+      FASTRTPS_DEFAULT_PROFILES_FILE: /sim_isaac/fastdds_udp.xml
+    volumes:
+      - ${ISAAC_WORK:-${HOME}/.cache/mp-isaac}/assets:/assets:ro
+      - ./isaac/fastdds_udp.xml:/sim_isaac/fastdds_udp.xml:ro
+      - isaac-kit-cache:/isaac-sim/kit/cache
+      - isaac-home-cache:/isaac-sim/.cache
+      - isaac-ov-data:/isaac-sim/.local/share/ov/data
+      - isaac-compute-cache:/isaac-sim/.nv/ComputeCache
+      - isaac-logs:/isaac-sim/.nvidia-omniverse/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  isaac-kit-cache:
+  isaac-home-cache:
+  isaac-ov-data:
+  isaac-compute-cache:
+  isaac-logs:

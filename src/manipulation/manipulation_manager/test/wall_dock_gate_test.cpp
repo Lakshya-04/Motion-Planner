@@ -122,3 +122,13 @@ TEST(WallDockGate, CancelSendsNoGoal)
   EXPECT_EQ(o.message, "canceled");
   EXPECT_EQ(d.goals, 0);
 }
+
+TEST(WallDockGate, PlannedStandoffIsTheDistanceToThePlanAlongTheWallDirection)
+{
+  // stand at x 0.08, wall at x 0.94, wall on +x
+  EXPECT_NEAR(plannedStandoff(0.94, 0.5, 0.08, 0.01, 1.0, 0.0), 0.86, 1e-12);
+  // wall on +y: only y counts
+  EXPECT_NEAR(plannedStandoff(3.0, 1.2, -1.0, 0.2, 0.0, 1.0), 1.0, 1e-12);
+  // slanted direction projects both
+  EXPECT_NEAR(plannedStandoff(1.0, 1.0, 0.0, 0.0, std::sqrt(0.5), std::sqrt(0.5)), std::sqrt(2.0), 1e-12);
+}
