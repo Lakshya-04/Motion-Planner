@@ -55,6 +55,8 @@ class T(Node):
         super().__init__('stand_navigation_test')
         self.lock = threading.Lock()
         self.odom, self.js, self.raw = None, None, None
+        self.truth = None   # /odom_truth, only there when the sim runs with odom_realism
+        self.create_subscription(Odometry, '/odom_truth', lambda m: setattr(self, 'truth', m), 10)
         self.create_subscription(Odometry, '/odom', self._odom, 10)
         self.create_subscription(JointState, '/joint_states', self._js, 10)
         self.create_subscription(WrenchStamped, '/sim_mujoco/ft_raw', self._raw, qos_profile_sensor_data)
@@ -203,6 +205,16 @@ def main():
     yerr = abs(math.atan2(math.sin(yaw1 - st.yaw), math.cos(yaw1 - st.yaw)))
     check('arm base arrival error (odom)', err < args.tol_xy and yerr < args.tol_yaw,
           f'{err * 1000:.1f} mm, {yerr:.4f} rad (limits {args.tol_xy * 1000:.0f} mm, {args.tol_yaw} rad)')
+    if node.truth is not None:
+        o = node.truth.pose.pose
+        xt, yt, yawt = o.position.x, o.position.y, yaw_of(o.orientation)
+        ct, stt = math.cos(yawt), math.sin(yawt)
+        errt = math.hypot(xt + ct * mount[0] - stt * mount[1] - st.x, yt + stt * mount[0] + ct * mount[1] - st.y)
+        yerrt = abs(math.atan2(math.sin(yawt - st.yaw), math.cos(yawt - st.yaw)))
+        check('arm base arrival error (odom_truth)', errt < args.tol_xy and yerrt < args.tol_yaw,
+              f'{errt * 1000:.1f} mm, {yerrt:.4f} rad (limits {args.tol_xy * 1000:.0f} mm, {args.tol_yaw} rad); '
+              f'reported odom was off the truth by {math.hypot(x1 - xt, y1 - yt) * 1000:.1f} mm, '
+              f'{math.degrees(math.atan2(math.sin(yaw1 - yawt), math.cos(yaw1 - yawt))):+.2f} deg')
     try:
         tf = node.tf_buffer.lookup_transform('odom', 'arm_base_link', rclpy.time.Time())
         tx, ty = tf.transform.translation.x, tf.transform.translation.y

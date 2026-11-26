@@ -85,7 +85,7 @@ mp_coverage() {
     params="-p swath_m:=${MANAGER_PASS_SWATH:-0.14} -p overlap_pct:=${MANAGER_PASS_OVERLAP:-15.0}"
   fi
   rm -f "$COV"
-  timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args \
+  timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args -p double_pass:=${MANAGER_PASS_DOUBLE_PASS:-false} \
     -p wall_scene_json:=$scene -p output_json:=$COV \
     -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${MANAGER_PASS_TOOL_YAW:-${MP_TOOL_YAW:--90.0}} \
     $params \

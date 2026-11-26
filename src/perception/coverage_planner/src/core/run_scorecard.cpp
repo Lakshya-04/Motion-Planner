@@ -10,6 +10,58 @@
 namespace coverage_planner
 {
 
+namespace
+{
+double quantile(const std::vector<double> & sorted, double q)
+{
+  const double pos = q * static_cast<double>(sorted.size() - 1);
+  const size_t lo = static_cast<size_t>(std::floor(pos));
+  const size_t hi = std::min(lo + 1, sorted.size() - 1);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - static_cast<double>(lo));
+}
+}  // namespace
+
+TcpSpeedStats computeTcpSpeedStats(
+  const std::vector<RunSample> & samples, double force_threshold_n, double window_s, double target_mps)
+{
+  TcpSpeedStats out;
+  out.target_mps = target_mps > 0.0 ? target_mps : 0.0;
+  if (!(window_s > 0.0)) {throw std::invalid_argument("tcp speed: window_s must be > 0");}
+  std::vector<double> v;
+  size_t i = 0;
+  while (i < samples.size()) {
+    if (!(samples[i].force_n > force_threshold_n)) {++i; continue;}
+    size_t end = i;   // [i, end) is one run of contact
+    while (end < samples.size() && samples[end].force_n > force_threshold_n &&
+      (end == i || samples[end].t_s - samples[end - 1].t_s <= window_s)) {++end;}   // a recording gap ends the run
+    size_t j = i;
+    for (size_t a = i; a < end; ++a) {
+      if (j < a) {j = a;}
+      while (j < end && samples[j].t_s - samples[a].t_s < window_s) {++j;}
+      if (j >= end) {break;}   // no later sample at least window_s away inside the run
+      const double dt = samples[j].t_s - samples[a].t_s;
+      const double dx = samples[j].x - samples[a].x, dy = samples[j].y - samples[a].y,
+        dz = samples[j].z - samples[a].z;
+      v.push_back(std::sqrt(dx * dx + dy * dy + dz * dz) / dt);
+    }
+    i = end;
+  }
+  out.windows = v.size();
+  if (v.empty()) {return out;}
+  double sum = 0.0;
+  for (double x : v) {sum += x;}
+  out.mean_mps = sum / static_cast<double>(v.size());
+  double sq = 0.0;
+  for (double x : v) {sq += (x - out.mean_mps) * (x - out.mean_mps);}
+  out.std_mps = std::sqrt(sq / static_cast<double>(v.size()));
+  std::sort(v.begin(), v.end());
+  out.median_mps = quantile(v, 0.5);
+  out.p5_mps = quantile(v, 0.05);
+  out.p95_mps = quantile(v, 0.95);
+  if (out.target_mps > 0.0) {out.median_rel_dev = (out.median_mps - out.target_mps) / out.target_mps;}
+  return out;
+}
+
 RunScorecard scoreRun(
   const WallPlane & wall, const std::vector<ObstacleRegion> & obstacles,
   const std::vector<RunSample> & samples, const ScorecardOptions & options,
@@ -122,6 +174,10 @@ RunScorecard scoreRun(
       static_cast<double>(card.bad_pose_samples) / static_cast<double>(engaged_n + card.bad_pose_samples);
   }
   card.coverage = verifier.report();
+  if (options.contact) {
+    card.tcp_speed = computeTcpSpeedStats(
+      samples, options.tcp_speed_force_n, options.tcp_speed_window_s, options.target_speed_mps);
+  }
   if (samples.size() > 1) {card.duration_s = samples.back().t_s - samples.front().t_s;}
   if (options.contact && engaged_n > 0) {
     card.force_rms_error_n = std::sqrt(sq_err / static_cast<double>(engaged_n));
