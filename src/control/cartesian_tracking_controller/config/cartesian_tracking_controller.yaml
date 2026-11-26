@@ -1,0 +1,20 @@
+# Example only; not loaded by any launch file yet.
+cartesian_tracking_controller:
+  ros__parameters:
+    joints: [lift_prismatic_joint, joint1, joint2, joint3, joint4, joint5, joint6]
+    command_interfaces: [velocity]
+    kinematics:
+      plugin_name: kinematics_interface_kdl/KinematicsInterfaceKDL
+      plugin_package: kinematics_interface
+      base: base_link
+      tip: link6          # the flange, not the contact point
+      alpha: 0.0005
+    tool:
+      xyz: [0.0, 0.0, 0.09]   # flange -> contact
+      rpy: [0.0, 0.0, 0.0]
+    max_linear_twist: 0.1
+    max_angular_twist: 0.5
+    feedback: {kp_linear: 2.0, kp_angular: 2.0, max_linear: 0.05, max_angular: 0.2}
+    plane: {enabled: false, kp_distance: 2.0, kp_tilt: 2.0, max_linear: 0.02, max_angular: 0.1}
+    reference_timeout: 0.5
+    diagnostics_rate: 10.0
