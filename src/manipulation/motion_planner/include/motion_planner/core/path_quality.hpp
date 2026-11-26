@@ -70,6 +70,21 @@ inline std::vector<double> weightsFromRanges(const std::vector<double> & ranges)
 /// 1.0 switches the preference off (the plain 1/range weighting).
 constexpr double kDefaultLiftCostWeight = 2.0;
 
+/// `weights` with joint j multiplied by `costs[j]`: the per-joint movement cost (profile `joint_costs`, lift first).
+/// Sizes must match, otherwise `weights` is returned unchanged; an entry that is not finite and above 0 counts as 1.
+inline std::vector<double> applyJointCosts(std::vector<double> weights, const std::vector<double> & costs)
+{
+  if (costs.size() != weights.size()) {
+    return weights;
+  }
+  for (std::size_t j = 0; j < weights.size(); ++j) {
+    if (std::isfinite(costs[j]) && costs[j] > 0.0) {
+      weights[j] *= costs[j];
+    }
+  }
+  return weights;
+}
+
 /// `weights` with every joint flagged in `is_lift` multiplied by `lift_cost_weight` (the per-joint cost weighting:
 /// lift 2.0, arm joints 1.0 by default). Missing flags count as arm joints; `weights` shorter than `is_lift` are
 /// padded with 1. A weight of 1.0 (or a non-finite / non-positive one) returns `weights` unchanged.

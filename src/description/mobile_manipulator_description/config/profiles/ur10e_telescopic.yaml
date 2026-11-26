@@ -45,6 +45,11 @@ joints:
     - lift_stage_1_joint
     - lift_stage_2_joint
 
+# Movement cost per joint, same order as the joints above (lift first). A joint's travel as a fraction of its range is
+# multiplied by its entry when planners and the dock IK choice compare paths, so a higher entry makes that joint costlier
+# to move. 2.0 on the lift prefers arm motion. Leave the key out for the same values (lift 2.0, arm joints 1.0).
+joint_costs: [2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
 lift:
   type: telescopic
   stroke_m: 1.5

@@ -382,6 +382,77 @@ TEST(DockWrapTest, LimitsSizeMismatchAndBadIndicesKeepTheValue)
 
 }
 
+// ---- per-joint costs (the profile's joint_costs) ----
+
+namespace
+{
+// Lift 0..1.5 m and two arm joints of +-pi: the ranking cost is cost_i * |dq_i| / range_i.
+DockIkSelectorParams perJointParams(const V & costs)
+{
+  DockIkSelectorParams p;
+  p.branch_joints = {};
+  p.joint_costs = costs;
+  p.joint_lower = {0.0, -M_PI, -M_PI};
+  p.joint_upper = {1.5, M_PI, M_PI};
+  return p;
+}
+}  // namespace
+
+TEST(DockIkSelectorJointCosts, CostIsRangeNormalisedPerJoint)
+{
+  const V ref{0.5, 0.0, 0.0};
+  const auto p = perJointParams({2.0, 1.0, 3.0});
+  EXPECT_NEAR(dockIkCost({0.8, 0.0, 0.0}, ref, p), 2.0 * 0.3 / 1.5, 1e-12);
+  EXPECT_NEAR(dockIkCost({0.5, 1.0, 0.0}, ref, p), 1.0 / (2.0 * M_PI), 1e-12);
+  EXPECT_NEAR(dockIkCost({0.5, 0.0, 1.0}, ref, p), 3.0 / (2.0 * M_PI), 1e-12);
+  // the raw checks (unweighted) are not touched by the costs
+  EXPECT_NEAR(dockIkCost({0.8, 0.0, 1.0}, ref, p, false), 1.0, 1e-12);
+}
+
+TEST(DockIkSelectorJointCosts, TheArrayDecidesWhichCandidateWins)
+{
+  const V ref{0.5, 0.0, 0.0};
+  const V a{0.8, 0.0, 0.0};   // 0.3 m of lift
+  const V b{0.5, 0.0, 1.0};   // 1 rad of the last joint
+  const std::vector<V> seeds{{0.1, 0.0, 0.0}, {0.2, 0.0, 0.0}};
+  const auto ik = tableIk(seeds, {std::optional<V>(a), std::optional<V>(b)});
+  // equal costs: the lift move is 0.2 of its range, the wrist move 0.159 of its range, so the wrist wins
+  auto even = selectDockIk(ik, seeds, ref, perJointParams({1.0, 1.0, 1.0}));
+  ASSERT_TRUE(even.ok);
+  EXPECT_EQ(even.q, b);
+  // a costly last joint flips it
+  auto wrist = selectDockIk(ik, seeds, ref, perJointParams({1.0, 1.0, 3.0}));
+  ASSERT_TRUE(wrist.ok);
+  EXPECT_EQ(wrist.q, a);
+  // and a costly lift keeps the wrist move
+  auto lift = selectDockIk(ik, seeds, ref, perJointParams({4.0, 1.0, 1.0}));
+  ASSERT_TRUE(lift.ok);
+  EXPECT_EQ(lift.q, b);
+}
+
+TEST(DockIkSelectorJointCosts, EmptyOrWrongSizeKeepsTheLiftWeight)
+{
+  const V ref{0.5, 0.0, 0.0};
+  DockIkSelectorParams legacy;
+  legacy.lift_cost_weight = 2.0;
+  EXPECT_NEAR(dockIkCost({0.8, 0.0, 0.0}, ref, legacy), 2.0 * 0.3, 1e-12);   // raw metres times 2, as before
+  auto wrong = perJointParams({2.0, 1.0});   // two entries for three joints
+  wrong.lift_cost_weight = 2.0;
+  EXPECT_NEAR(dockIkCost({0.8, 0.0, 0.0}, ref, wrong), 2.0 * 0.3, 1e-12);
+}
+
+TEST(DockIkSelectorJointCosts, WithoutLimitsTheLiftStrokeAndTwoPiAreTheRanges)
+{
+  const V ref{0.0, 0.0, 0.0};
+  DockIkSelectorParams p;
+  p.joint_costs = {1.0, 1.0, 1.0};
+  p.lift_min_m = 0.0;
+  p.lift_max_m = 1.5;
+  EXPECT_NEAR(dockIkCost({0.3, 0.0, 0.0}, ref, p), 0.3 / 1.5, 1e-12);
+  EXPECT_NEAR(dockIkCost({0.0, 1.0, 0.0}, ref, p), 1.0 / (2.0 * M_PI), 1e-12);
+
+}
+
 // Lift is metres, arm is radians. The cost is a max, never a sum, so 0.06 m of lift next to a 0.2 rad arm step
 // reads as 0.2; the reference here is the start state.
 TEST(DockIkSelectorTest, LiftMetresAreNotAnArmJumpAgainstTheStartState)
