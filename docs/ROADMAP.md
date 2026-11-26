@@ -45,7 +45,7 @@ without code, when we can implement it.
       no action interface, the `CoveragePlan` topic has no subscriber in the repo, nodes have only a conversions test
 - [~] Spiral is listed in the service but is a stub (the README now says so)
 - [x] All free components planned and ordered (rib = two panels; node default `plan_all_components` was false), short gap strokes beside obstacle keep-outs (`fill_gaps`, `min_stroke_length_m`), optional cell decomposition `decomposition: cells` (`docs/coverage_patterns.md`; gtests on synthetic rasters, covered fraction above 0.95; no sim rerun yet; exact cell ordering by a router not done)
-- [ ] Coverage feed over ROS (the manager reads `coverage_output.json`; a ROS `CoverageSource` is planned)
+- [~] Coverage feed over ROS. Done: `RosCoverageSource` (`coverage_source:=ros`, default `json` unchanged) takes the latched `CoveragePlan` of `wall_coverage_service_node` and builds the same intents as the JSON source through the shared `buildCoverageIntents()` (`docs/coverage_planner.md`; host gtests `coverage_plan_intents_test` on hand-built plans, JSON equality, validation, wait). Not done: the ROS glue is unbuilt (reviewed by hand, not compiled), no run in a simulator, no service-call variant, the message frame is not checked
 - [~] **Coverage verification**: `CoverageVerifier` raster (covered fraction, overlap, overspray, missed cells; `docs/coverage_patterns.md`). Scores recorded runs through `score_run` (contact and, with the valve column, spray: section 4)
 
 ## 3. Non-planar surfaces (floors, ceilings, columns, curved walls, meshes)
