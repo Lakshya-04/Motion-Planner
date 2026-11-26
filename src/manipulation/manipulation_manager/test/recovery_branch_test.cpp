@@ -83,4 +83,15 @@ TEST(RecoveryBranchTest, FlipRejectedFallsBackWhenNothingAcceptable)
   EXPECT_FALSE(selectRecoveryGoal(none, kLive, kOnBranch, params()).ok);
 }
 
+TEST(RecoveryBranchTest, LiftMetresAreNotAnArmJumpAgainstLive)
+{
+  auto p = params();
+  p.max_dq_rad = 0.1;
+  V q = kLive;
+  q[0] += 0.06;   // 0.06 m of lift
+  EXPECT_TRUE(recoveryConfigOnBranch(q, kLive, p));
+  q[2] += 0.2;    // 0.2 rad of arm
+  EXPECT_FALSE(recoveryConfigOnBranch(q, kLive, p));
+}
+
 }  // namespace manipulation_manager
