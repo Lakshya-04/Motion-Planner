@@ -41,6 +41,19 @@ def test_mujoco_branch_has_plugin_joints_and_ft_sensor():
 
 
 @needs_ros
+def test_sensor_frame_ids_come_from_the_environment(monkeypatch):
+    def params():
+        hw = render('mujoco').find("ros2_control[@type='system']/hardware")
+        return {p.get('name'): p.text for p in hw.findall('param')}
+    monkeypatch.delenv('SIM_MUJOCO_LIDAR_FRAME', raising=False)
+    monkeypatch.delenv('SIM_MUJOCO_DEPTH_FRAME', raising=False)
+    assert (params()['lidar_frame_id'], params()['depth_frame_id']) == ('lidar_link', 'depth_sensor_link')
+    monkeypatch.setenv('SIM_MUJOCO_LIDAR_FRAME', 'base_scan')
+    monkeypatch.setenv('SIM_MUJOCO_DEPTH_FRAME', 'front_camera_link')
+    assert (params()['lidar_frame_id'], params()['depth_frame_id']) == ('base_scan', 'front_camera_link')
+
+
+@needs_ros
 def test_other_backends_are_unchanged():
     mock = render('mock')
     assert mock.find('.//ros2_control/hardware/plugin').text == 'mock_components/GenericSystem'

@@ -299,6 +299,9 @@ A 2D ray-cast lidar on the root link: a fan of `mj_multiRay` in the sensor's x-y
 obstacles), never the robot's own bodies. It publishes `sensor_msgs/LaserScan` on `/scan` in frame `lidar_link`; the launch file
 adds the static TF `base_footprint -> lidar_link`. Off by default and then the MJCF is unchanged.
 
+`platform:=<profile or base name>` fills the lidar and depth arguments (mounts, lidar range, field of view, rate, noise, depth rate) and
+the two frame names from that platform's `sensors:` suite; arguments you pass still win. See [base_catalog.md](base_catalog.md#feeding-a-suite-to-the-simulators).
+
 | Argument | Default |
 |---|---|
 | `lidar_pose` (`x y z roll pitch yaw`, root frame) | `0.45 0 0.2 0 0 0`: front edge of the stock footprint, 0.2 m up |

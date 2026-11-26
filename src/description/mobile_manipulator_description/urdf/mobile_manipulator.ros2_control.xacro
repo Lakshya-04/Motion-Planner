@@ -185,6 +185,8 @@
         <xacro:if value="${hardware == 'mujoco'}">
           <plugin>sim_mujoco/MujocoSystemInterface</plugin>
           <param name="mjcf">$(optenv SIM_MUJOCO_MJCF)</param>
+          <param name="lidar_frame_id">$(optenv SIM_MUJOCO_LIDAR_FRAME lidar_link)</param>
+          <param name="depth_frame_id">$(optenv SIM_MUJOCO_DEPTH_FRAME depth_sensor_link)</param>
         </xacro:if>
         <xacro:if value="${hardware == 'gazebo'}"><plugin>gz_ros2_control/GazeboSimSystem</plugin></xacro:if>
       </hardware>

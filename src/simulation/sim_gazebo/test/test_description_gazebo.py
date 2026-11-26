@@ -142,6 +142,17 @@ def test_lidar_off_by_default_and_a_gz_gpu_lidar_on_lidar_link():
     assert float(s.find('lidar/range/max').text) == 10.0
 
 
+def test_lidar_and_depth_frames_can_be_renamed():
+    robot = _render_with({'gz_lidar': 'true', 'gz_lidar_frame': 'base_scan',
+                          'gz_depth_sensor': 'true', 'gz_depth_frame': 'front_camera_link'})
+    assert robot.find("link[@name='lidar_link']") is None and robot.find("link[@name='depth_sensor_link']") is None
+    s = robot.find("gazebo[@reference='base_scan']/sensor[@type='gpu_lidar']")
+    assert s.find('gz_frame_id').text == 'base_scan'
+    assert robot.find("joint[@name='lidar_joint']/child").get('link') == 'base_scan'
+    s = robot.find("gazebo[@reference='front_camera_link']/sensor[@type='depth_camera']")
+    assert s.find('gz_frame_id').text == 'front_camera_link'
+
+
 def test_rgb_camera_off_by_default_and_a_gz_camera_on_rgb_camera_link():
     assert _render_with({}).find("link[@name='rgb_camera_link']") is None
     robot = _render_with({'gz_rgb_camera': 'true', 'gz_rgb_xyz': '0.2 0 1.0', 'gz_rgb_width': '640', 'gz_rgb_height': '480'})
