@@ -144,6 +144,20 @@ python3 docker/tools/check_public_readiness.py
 #      src/simulation/sim_gazebo/scripts/run_manager_pass.sh
 ```
 
+The headless simulator checks have a command of their own, `docker/run_sim_checks.sh`. It runs in the `sim-gazebo`
+image (`docker build -f docker/Dockerfile --target sim-gazebo -t motion-planner:sim-gazebo .`), builds what it
+needs into the volumes `mp_sim_build`, `mp_sim_install` and `mp_sim_log`, starts each simulator on its own
+`ROS_DOMAIN_ID`, and prints a PASS/FAIL table with the seconds each took:
+
+```bash
+docker/run_sim_checks.sh                              # Gazebo: smoke, depth-wall, base-motion
+docker/run_sim_checks.sh --mujoco-root /opt/mujoco-sdk/mujoco-4.0.1   # also the MuJoCo smoke test
+docker/run_sim_checks.sh --no-build --only gazebo-smoke
+docker/run_sim_checks.sh --list
+```
+
+It does not run the contact scripts or the manager passes, which take minutes each (lines above).
+
 Give each simulator run its own `ROS_DOMAIN_ID`. The simulator scripts are not part of `colcon test`.
 A pass of lines 1 to 3 says nothing about GPU planning, the simulators or hardware.
 
