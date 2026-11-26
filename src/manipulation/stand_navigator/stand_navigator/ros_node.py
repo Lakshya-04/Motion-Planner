@@ -249,7 +249,7 @@ class StandNavigator(Node):
         last = time.monotonic()
         mon = SafetyMonitor(self.safety_cfg, last)
         sent = (0.0, 0.0, 0.0)
-        hold_dir = None   # last direction of travel, kept while held so the obstacle is still looked for
+        heading = nav_safety.HeldDirection()
         codes = {nav_safety.NO_ODOM: res.NO_ODOM, nav_safety.BAD_COMMAND: res.BAD_COMMAND,
                  nav_safety.NAVIGATION_STUCK: res.NAVIGATION_STUCK, nav_safety.OBSTACLE: res.OBSTACLE}
         while rclpy.ok():
@@ -264,15 +264,14 @@ class StandNavigator(Node):
             dist, yerr = ctl.errors(pose)
             v = mon.check(now, self.odom_stamp, nav_safety.progress_metric(dist, yerr, self.safety_cfg),
                           dist <= self.tol.xy and abs(yerr) <= self.tol.yaw,
-                          self._clearance(sent if math.hypot(sent[0], sent[1]) >= 1e-3 else (hold_dir or sent)),
+                          self._clearance(heading.look(sent)),
                           self.points_stamp, math.hypot(sent[0], sent[1]), self.profile.max_lin_acc)
             if v.action == nav_safety.ABORT:
                 self._stop()
                 self.get_logger().warn(f'navigate_to_stand aborted: {v.reason}')
                 return self._result(handle, False, codes[v.code], v.reason, ctl)
             if v.action == nav_safety.HOLD:
-                if math.hypot(sent[0], sent[1]) >= 1e-3:
-                    hold_dir = sent
+                heading.hold(sent)
                 self._stop()
                 sent = (0.0, 0.0, 0.0)
                 ctl.cmd = getattr(ctl, 'ctl', ctl).cmd = sent

@@ -10,3 +10,9 @@ string message
 string route
 trajectory_msgs/JointTrajectory trajectory
 float64 planning_time_s
+# where the time went (0 when the planner did not measure): cuRobo attempts on the main call, graph-planner
+# calls and their solve time, wall time of the whole request. planning_time_s can read far under wall_s.
+uint32 attempts
+uint32 graph_calls
+float64 graph_solve_s
+float64 wall_s
