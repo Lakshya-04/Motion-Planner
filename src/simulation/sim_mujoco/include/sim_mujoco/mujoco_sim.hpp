@@ -64,6 +64,13 @@ public:
   /// a NaN position holds the last valid target, a NaN velocity counts as zero.
   void setCommand(size_t i, double position, double velocity);
 
+  /// Feed-forward torque (N m, N for a prismatic joint) for joint i, held until changed. Applied as
+  /// ctrl += tau / kp, so the actuator force gains exactly tau (the force range still clamps it).
+  void setFeedforward(size_t i, double tau);
+
+  /// True if any body in the model has gravcomp set (it would double-count a gravity feed-forward).
+  bool hasGravcomp() const;
+
   /// Advance the simulation by `dt` seconds (rounded down to whole MuJoCo steps; the remainder is
   /// carried to the next call). Returns the number of steps taken.
   int advance(double dt);
@@ -138,7 +145,9 @@ private:
     int dof_adr{0};
     int actuator{0};
     double kv_over_kp{0.0};
+    double kp{0.0};
     double target{0.0};
+    double feedforward{0.0};
   };
   struct Base
   {
