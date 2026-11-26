@@ -365,3 +365,82 @@ TEST(RunScorecard, GateOptionChecks)
   n.max_tilt_deg = 5.0;
   EXPECT_NO_THROW(validateGateOptions(n, ScorecardLimits{}));
 }
+
+namespace
+{
+// A straight stroke along y at `speed`, sampled every `dt`, pressing at `force`.
+std::vector<RunSample> speedRun(double speed, double dt, double seconds, double force, double t0 = 0.0, double y0 = 0.0)
+{
+  std::vector<RunSample> out;
+  for (double t = 0.0; t <= seconds + 1e-9; t += dt) {
+    RunSample s;
+    s.t_s = t0 + t; s.x = 1.0; s.y = y0 + speed * t; s.z = 0.0; s.force_n = force;
+    out.push_back(s);
+  }
+  return out;
+}
+}  // namespace
+
+TEST(TcpSpeed, ConstantStrokeGivesTheSpeedAndZeroSpread)
+{
+  const auto st = computeTcpSpeedStats(speedRun(0.01, 0.01, 5.0, 10.0), 3.0, 0.5, 0.01);
+  EXPECT_GT(st.windows, 400U);
+  EXPECT_NEAR(st.mean_mps, 0.01, 1e-9);
+  EXPECT_NEAR(st.median_mps, 0.01, 1e-9);
+  EXPECT_NEAR(st.std_mps, 0.0, 1e-9);
+  EXPECT_NEAR(st.p5_mps, 0.01, 1e-9);
+  EXPECT_NEAR(st.p95_mps, 0.01, 1e-9);
+  EXPECT_NEAR(st.median_rel_dev, 0.0, 1e-9);
+}
+
+TEST(TcpSpeed, SlowerThanTargetIsANegativeDeviation)
+{
+  const auto st = computeTcpSpeedStats(speedRun(0.0095, 0.01, 5.0, 10.0), 3.0, 0.5, 0.01);
+  EXPECT_NEAR(st.median_rel_dev, -0.05, 1e-9);
+  const auto none = computeTcpSpeedStats(speedRun(0.0095, 0.01, 5.0, 10.0));
+  EXPECT_DOUBLE_EQ(none.median_rel_dev, 0.0);   // no target given
+}
+
+TEST(TcpSpeed, FastFreeSpaceMovesAndLowForceAreExcluded)
+{
+  auto s = speedRun(0.5, 0.01, 3.0, 0.0);                          // fast approach, no contact
+  const auto stroke = speedRun(0.01, 0.01, 5.0, 10.0, 3.01);       // the contact stroke
+  s.insert(s.end(), stroke.begin(), stroke.end());
+  const auto retract = speedRun(0.5, 0.01, 3.0, 0.0, 8.02);
+  s.insert(s.end(), retract.begin(), retract.end());
+  const auto st = computeTcpSpeedStats(s, 3.0, 0.5, 0.01);
+  EXPECT_NEAR(st.p95_mps, 0.01, 1e-9);                             // nothing of the fast parts leaks in
+  EXPECT_NEAR(st.median_mps, 0.01, 1e-9);
+}
+
+TEST(TcpSpeed, WindowsDoNotSpanASeparationOrAShortRun)
+{
+  auto s = speedRun(0.01, 0.01, 2.0, 10.0);
+  auto gap = speedRun(0.01, 0.01, 0.3, 10.0, 5.0);                  // a run shorter than the window
+  s.insert(s.end(), gap.begin(), gap.end());
+  const auto st = computeTcpSpeedStats(s, 3.0, 0.5, 0.0);
+  EXPECT_NEAR(st.mean_mps, 0.01, 1e-9);        // the 0.3 s run adds no window, the 5 s gap is not bridged
+  EXPECT_LT(st.windows, 160U);
+}
+
+TEST(TcpSpeed, NoContactMeansNoWindows)
+{
+  const auto st = computeTcpSpeedStats(speedRun(0.01, 0.01, 5.0, 1.0), 3.0, 0.5, 0.01);
+  EXPECT_EQ(st.windows, 0U);
+  EXPECT_DOUBLE_EQ(st.median_mps, 0.0);
+  EXPECT_THROW(computeTcpSpeedStats({}, 3.0, 0.0), std::invalid_argument);
+}
+
+TEST(TcpSpeed, ScorecardCarriesItForContactToolsOnly)
+{
+  const auto samples = speedRun(0.01, 0.01, 5.0, 10.0);
+  ScorecardOptions o = contactOptions();
+  o.target_speed_mps = 0.01;
+  const auto card = scoreRun(wall(), {}, samples, o);
+  EXPECT_NEAR(card.tcp_speed.median_mps, 0.01, 1e-9);
+  EXPECT_TRUE(scorecardToJson(card).contains("tcp_speed"));
+  o.contact = false;
+  const auto spray = scoreRun(wall(), {}, samples, o);
+  EXPECT_EQ(spray.tcp_speed.windows, 0U);
+  EXPECT_FALSE(scorecardToJson(spray).contains("tcp_speed"));
+}
