@@ -173,6 +173,30 @@ inline std::vector<double> rebaseDockIk(
   return q;
 }
 
+/// Moves the listed joints of `q` by whole turns to the value nearest `ref` (the stow pose), so a dock goal lands on
+/// the stow winding. A joint stays as it is when the nearest turn is outside [lower, upper] (when given) or is not finite.
+inline std::vector<double> wrapJointsToReference(
+  std::vector<double> q, const std::vector<double> & ref, const std::vector<size_t> & joints,
+  const std::vector<double> & lower = {}, const std::vector<double> & upper = {})
+{
+  if (q.size() != ref.size()) {
+    return q;
+  }
+  const bool have_limits = lower.size() == q.size() && upper.size() == q.size();
+  for (const size_t i : joints) {
+    if (i >= q.size() || !std::isfinite(q[i]) || !std::isfinite(ref[i]) || std::fabs(q[i]) > 1e3 ||
+      std::fabs(ref[i]) > 1e3)
+    {
+      continue;
+    }
+    const double v = q[i] + 2.0 * M_PI * std::round((ref[i] - q[i]) / (2.0 * M_PI));
+    if (!have_limits || (v >= lower[i] - 1e-9 && v <= upper[i] + 1e-9)) {
+      q[i] = v;
+    }
+  }
+  return q;
+}
+
 /// True when some branch joint is clearly on opposite sides of zero in `a` and `b`.
 inline bool dockBranchChanged(
   const std::vector<double> & a, const std::vector<double> & b, const DockIkSelectorParams & p)

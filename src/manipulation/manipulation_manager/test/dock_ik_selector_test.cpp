@@ -347,4 +347,37 @@ TEST(DockIkRebaseCheckedTest, KeepsBranchAndWristOfTheAcceptedSolution)
   EXPECT_DOUBLE_EQ(q[1], 3.0);
 }
 
+TEST(DockWrapTest, MovesListedJointsToTheReferenceWinding)
+{
+  const V stow{0.4, 0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0};
+  const V dock{0.07, -3.42, 2.72, -1.43, -1.30, 6.00, -1.5708};
+  const V q = wrapJointsToReference(dock, stow, {2});
+  EXPECT_NEAR(q[2], 2.72 - 2.0 * M_PI, 1e-12);
+  for (size_t i = 0; i < q.size(); ++i) {
+    if (i != 2) {EXPECT_DOUBLE_EQ(q[i], dock[i]);}
+  }
+  // same pose: a whole number of turns away
+  EXPECT_NEAR(std::remainder(q[2] - dock[2], 2.0 * M_PI), 0.0, 1e-12);
+}
+
+TEST(DockWrapTest, NoOpWhenAlreadyNearestOrEmptyList)
+{
+  const V stow{0.0, 0.0, -1.5708};
+  const V dock{0.1, 0.5, -2.0};
+  EXPECT_EQ(wrapJointsToReference(dock, stow, {1, 2}), dock);
+  EXPECT_EQ(wrapJointsToReference({0.1, 0.5, 2.7}, stow, {}), (V{0.1, 0.5, 2.7}));
+}
+
+TEST(DockWrapTest, LimitsSizeMismatchAndBadIndicesKeepTheValue)
+{
+  const V stow{0.0, 0.0, -1.5708};
+  const V dock{0.1, 0.0, 2.72};
+  // the nearest turn (-3.56) is under the lower limit
+  EXPECT_EQ(wrapJointsToReference(dock, stow, {2}, {0.0, -6.0, -3.0}, {1.5, 6.0, 6.0}), dock);
+  EXPECT_NEAR(wrapJointsToReference(dock, stow, {2}, {0.0, -6.0, -4.0}, {1.5, 6.0, 6.0})[2], 2.72 - 2.0 * M_PI, 1e-12);
+  EXPECT_EQ(wrapJointsToReference(dock, {0.0, 0.0}, {2}), dock);
+  EXPECT_EQ(wrapJointsToReference(dock, stow, {7}), dock);
+  EXPECT_EQ(wrapJointsToReference({0.1, 0.0, NAN}, stow, {2})[1], 0.0);
+}
+
 }  // namespace manipulation_manager
