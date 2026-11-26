@@ -12,6 +12,10 @@ layers is the same contract: waypoints plus `MotionPlanSegment`s (strip = cartes
 connector = free-space + retraction), then lifted onto the wall with standoff and tool
 orientation.
 
+The manager normally runs a connector as retract + approach. With `contact_connectors` (opt-in, see
+[manager_parameters.md](manager_parameters.md#contact-connectors-contact_connectorstrue)) a connector between adjacent strips of the same stand
+is instead a short Cartesian slide along the wall with the force loop engaged.
+
 ## Grid planners
 
 **boustrophedon** (existing): strip sweeps over the free cells of each connected component, with

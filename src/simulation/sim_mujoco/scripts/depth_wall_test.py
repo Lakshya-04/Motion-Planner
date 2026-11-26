@@ -42,7 +42,8 @@ WALL_Z = (0.80, 1.50)
 
 def xyz(msg):
     assert msg.fields[0].name == 'x' and msg.point_step == 12
-    return np.frombuffer(bytes(msg.data), dtype=np.float32).reshape(-1, 3).astype(float)
+    p = np.frombuffer(bytes(msg.data), dtype=np.float32).reshape(-1, 3).astype(float)
+    return p[np.isfinite(p).all(axis=1)]   # organised cloud: NaN rows are no return
 
 
 class Check(Node):

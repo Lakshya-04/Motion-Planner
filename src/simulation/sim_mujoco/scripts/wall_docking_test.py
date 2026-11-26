@@ -38,6 +38,8 @@ class Check(Node):
     def __init__(self):
         super().__init__('sim_mujoco_wall_docking_test')
         self.odom, self.scenes, self.feedback = None, 0, None
+        self.truth = None   # /odom_truth, only there when the sim runs with odom_realism
+        self.create_subscription(Odometry, '/odom_truth', lambda m: setattr(self, 'truth', m), 10)
         self.create_subscription(Odometry, '/odom', lambda m: setattr(self, 'odom', m), 10)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                              reliability=ReliabilityPolicy.RELIABLE)
@@ -152,6 +154,14 @@ def main():
           f'final standoff {standoff:.4f} m, error {(standoff - args.standoff_m) * 1000:.1f} mm (tolerance {args.tol_m * 1000:.0f})')
     check(abs(math.degrees(yaw_err)) <= args.tol_deg,
           f'final yaw error {math.degrees(yaw_err):.2f} deg (tolerance {args.tol_deg})')
+    if node.truth is not None:
+        o = node.truth.pose.pose
+        t_standoff, t_yaw = WALL_X - o.position.x, wrap(yaw_of(o.orientation))
+        check(abs(t_standoff - args.standoff_m) <= args.tol_m,
+              f'final standoff against /odom_truth {t_standoff:.4f} m, error {(t_standoff - args.standoff_m) * 1000:.1f} mm '
+              f'(tolerance {args.tol_m * 1000:.0f}); reported odom differs by {(standoff - t_standoff) * 1000:.1f} mm')
+        check(abs(math.degrees(t_yaw)) <= args.tol_deg,
+              f'final yaw error against /odom_truth {math.degrees(t_yaw):.2f} deg (tolerance {args.tol_deg})')
     print(f'      lateral drift {py * 1000:.1f} mm; start standoff {s0:.3f} -> {standoff:.4f} m, yaw '
           f'{math.degrees(y0):.1f} -> {math.degrees(yaw_err):.2f} deg', flush=True)
     print('wall docking check:', 'PASS' if not failures else f'FAIL ({len(failures)})')
