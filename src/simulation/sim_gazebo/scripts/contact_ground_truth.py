@@ -10,6 +10,8 @@ Convention matches the target of a wrench conditioner: pressing along tool +z gi
        /ft_sensor/ground_truth_info     (std_msgs/Float64MultiArray, one per Contacts message:
             [pairs, points, filtered_pairs, sum_point_norm_N, max_point_norm_N, duplicate_points];
             sum_point_norm >> |force| means points cancel or are counted twice, see docs/sim_gazebo.md)
+       /ft_sensor/ground_truth_others   (std_msgs/String, one per Contacts message: the names of the other
+            collisions the tool touches, comma separated; says WHAT was hit when a spike shows up)
 Parameters include_other / exclude_other (lists of substrings of the other collision's name, default empty =
 every pair): e.g. include_other:=['wall'] sums only tool-wall pairs. Behaviour is unchanged with the defaults.
 Never feed this to a controller: a real robot has no such signal.
@@ -22,7 +24,7 @@ from rclpy.node import Node
 from rclpy.time import Time
 from ros_gz_interfaces.msg import Contacts
 from sim_gazebo.contact_summary import tool_wrench_world
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, String
 from tf2_ros import Buffer, TransformListener
 
 TOOL_BODY = 'tool_tip_link'   # the tool's collision (spring-loaded tip, urdf/gazebo_tags.xacro)
@@ -51,6 +53,7 @@ class GroundTruth(Node):
         self.listener = TransformListener(self.tf, self)
         self.pub = self.create_publisher(WrenchStamped, '/ft_sensor/ground_truth_wrench', 10)
         self.info_pub = self.create_publisher(Float64MultiArray, '/ft_sensor/ground_truth_info', 10)
+        self.others_pub = self.create_publisher(String, '/ft_sensor/ground_truth_others', 10)
         self.last = self.get_clock().now()
         self.create_subscription(Contacts, '/tool_contact/contacts', self.on_contacts, 10)
         self.create_timer(0.05, self.publish_zero)
@@ -76,6 +79,7 @@ class GroundTruth(Node):
         info.data = [float(st['contacts']), float(st['points']), float(st['filtered']),
                      st['sum_point_norm'], st['max_point_norm'], float(st['dup_points'])]
         self.info_pub.publish(info)
+        self.others_pub.publish(String(data=','.join(st['others'])))
         out = WrenchStamped()
         out.header.stamp = self.get_clock().now().to_msg()
         out.header.frame_id = self.tcp
