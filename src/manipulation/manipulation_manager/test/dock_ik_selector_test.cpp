@@ -380,6 +380,8 @@ TEST(DockWrapTest, LimitsSizeMismatchAndBadIndicesKeepTheValue)
   EXPECT_EQ(wrapJointsToReference({0.1, 0.0, NAN}, stow, {2})[1], 0.0);
 
 
+}
+
 // Lift is metres, arm is radians. The cost is a max, never a sum, so 0.06 m of lift next to a 0.2 rad arm step
 // reads as 0.2; the reference here is the start state.
 TEST(DockIkSelectorTest, LiftMetresAreNotAnArmJumpAgainstTheStartState)
