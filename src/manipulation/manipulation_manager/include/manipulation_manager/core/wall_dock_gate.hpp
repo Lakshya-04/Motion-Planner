@@ -41,6 +41,14 @@ public:
   virtual bool stopRequested() const = 0;
 };
 
+/// Distance from a planned stand (arm base x, y) to the wall plane along `wall_dir` (horizontal part); the standoff the
+/// stand was planned for, so docking to it does not move the base off the stand.
+inline double plannedStandoff(
+  double wall_x, double wall_y, double stand_x, double stand_y, double dir_x, double dir_y)
+{
+  return (wall_x - stand_x) * dir_x + (wall_y - stand_y) * dir_y;
+}
+
 struct WallDockConfig
 {
   double standoff_tol_m{0.02};   ///< |standoff error| accepted.
