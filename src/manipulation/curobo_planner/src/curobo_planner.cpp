@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <future>
 #include <mutex>
@@ -175,6 +176,20 @@ mp::PlanningResult guarded(mp::PlanningResult out, const JointLimitPolicy & poli
   }
   return out;
 }
+
+/// Logs the server's timing breakdown for a slow or failed plan and appends it to the message.
+template<typename Response>
+void noteTelemetry(mp::PlanningResult & out, const Response & res, core_types::Logger & logger)
+{
+  constexpr double kSlowWallS = 1.0;
+  if (res.wall_s <= 0.0 || (out.success && res.wall_s <= kSlowWallS)) {return;}
+  char buf[128];
+  std::snprintf(
+    buf, sizeof(buf), "attempts=%u graph_calls=%u graph_solve=%.2fs wall=%.2fs", res.attempts, res.graph_calls,
+    res.graph_solve_s, res.wall_s);
+  logger.info(std::string("cuRobo plan ") + (out.success ? "slow: " : "failed: ") + buf);
+  out.message = out.message.empty() ? buf : out.message + "; " + buf;
+}
 }  // namespace
 
 mp::PlanningResult CuroboClientPlanner::plan(const mp::PlanningRequest & request)
@@ -191,6 +206,7 @@ mp::PlanningResult CuroboClientPlanner::plan(const mp::PlanningRequest & request
     auto res = impl_->call<PlanJoint>(impl_->plan_joint, req, error);
     if (!res) {return fail("unavailable", error, mp::FailureStage::kPrecheck);}
     auto out = guarded(toResult(*res), impl_->options.joint_limits, *impl_->logger);
+    noteTelemetry(out, *res, *impl_->logger);
     // reaching the target configuration is one unit of work (as the OMPL planner counts it); without it the
     // manager reads a successful plan as 0 of 1 waypoints done and calls the segment partially completed
     if (out.success) {out.waypoints_completed = 1;}
@@ -210,6 +226,7 @@ mp::PlanningResult CuroboClientPlanner::plan(const mp::PlanningRequest & request
     auto res = impl_->call<PlanPose>(impl_->plan_pose, req, error);
     if (!res) {return fail("unavailable", error, mp::FailureStage::kPrecheck);}
     auto out = guarded(toResult(*res), impl_->options.joint_limits, *impl_->logger);
+    noteTelemetry(out, *res, *impl_->logger);
     if (out.success) {out.waypoints_completed = std::max<size_t>(1, request.waypoint_indices.size());}
     return out;
   }
