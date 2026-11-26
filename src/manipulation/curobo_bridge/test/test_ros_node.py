@@ -39,7 +39,8 @@ class FakePlanner:
             return PlanResult(failure_reason_code='invalid_request', failure_stage='precheck',
                               message='bad length')
         return PlanResult(success=True, joint_names=self.joint_names, route='graph_seed',
-                          positions=[list(start), [0.5, 0.5], list(goal)], dt=0.1, planning_time_s=0.25)
+                          positions=[list(start), [0.5, 0.5], list(goal)], dt=0.1, planning_time_s=0.25,
+                          attempts=7, graph_calls=3, graph_solve_s=1.5, wall_s=2.9)
 
     def plan_pose(self, start, position, quat_wxyz):
         self._maybe_raise('plan_pose')
@@ -130,6 +131,14 @@ def test_plan_joint_returns_a_timed_trajectory(harness):
     assert list(r.trajectory.points[-1].positions) == [1.0, 1.0]
     assert r.planning_time_s == pytest.approx(0.25)
     assert r.route == 'graph_seed'      # an unoptimised path must not look like an ordinary success
+    assert (r.attempts, r.graph_calls) == (7, 3)
+    assert r.graph_solve_s == pytest.approx(1.5) and r.wall_s == pytest.approx(2.9)
+
+
+def test_pose_response_defaults_telemetry_to_zero(harness):
+    _, call = harness
+    r = call(msgs.PlanPose, 'plan_pose', msgs.PlanPose.Request(start=[0.0, 0.0]))
+    assert (r.attempts, r.graph_calls, r.graph_solve_s, r.wall_s) == (0, 0, 0.0, 0.0)
 
 
 def test_failures_keep_their_structure(harness):
