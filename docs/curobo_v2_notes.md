@@ -582,14 +582,16 @@ GPU and 8 busy CPU processes on the 8 cores the planner may use. "About 3 GB fre
 | shared | 179 s | 72/76 | 87 ms | 6.32 s | 26.7 s | 16.8 / 17.7 s | 6.4 / 26.7 s |
 | shared and about 3 GB free | 174 s | 72/76 | 87 ms | 4.31 s | 26.7 s | 16.6 / 17.6 s | 5.4 / 26.7 s |
 | idle, `max_attempts` 6 | 68 s | 72/76 | 25 ms | 0.45 s | 5.3 s | 2.4 / 2.5 s | 0.5 / 5.3 s |
+| shared, `max_attempts` 6 | 191 s | 72/76 | 66 ms | 1.21 s | 13.9 s | 6.0 / 6.7 s | 1.2 / 13.9 s |
 
 - A plan on cuRobo's normal route takes 25 ms idle (all 64 of them 30 ms or less) and about 90 ms shared. The slow plans are the ones
   that fail (`no_path`, 20 attempts) or end on the graph-seed fallback, and they sit on a few poses (docked columns 9, 10 and 18).
   Shared, a failed plan takes about 17 s: the 11 to 16 s seen in the sim passes fits this path, not the normal one.
 - VRAM is not the limit: the planner took 1.2 GB, and 3 GB free changed nothing.
-- `max_attempts` 6 solved the same 72 of 76 and cut failed plans from 5.5 s to 2.4 s and p95 from 1.3 s to 0.45 s (idle). The graph-seed
-  plans are not helped much (worst 5.3 s): they come after the attempts, from the separate `fallback_attempts`.
-- Not measured: `max_attempts` 6 under the shared load (about 3x the idle figure is a guess), a wall in the world, the laptop's own
+- `max_attempts` 6 solved the same 72 of 76 in every condition it was run in. Idle it cut failed plans from 5.5 s to 2.4 s and p95 from
+  1.3 s to 0.45 s. Shared it cut failed plans from 16.8 s to 6.0 s, p95 from 6.3 s to 1.2 s and the worst plan from 26.7 s to 13.9 s.
+  The graph-seed fallback is not bounded by it (worst 13.9 s shared): it comes after the attempts, from the separate `fallback_attempts`.
+- Not measured: a wall in the world, the laptop's own
   GPU and CPU, the simulator itself instead of the stand-in, one run per row. The unsolved four are the same two problems in every
   row (`docked_wall_column_10`, both directions, 2 repeats); why cuRobo cannot plan them is not investigated here.
 
