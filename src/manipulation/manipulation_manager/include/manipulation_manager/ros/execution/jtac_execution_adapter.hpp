@@ -18,6 +18,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "control_msgs/action/follow_joint_trajectory.hpp"
+#include "moveit_msgs/msg/display_trajectory.hpp"
 
 #include "manipulation_manager/core/execution/execution_port.hpp"
 
@@ -47,6 +48,10 @@ private:
 
   rclcpp::Node::SharedPtr node_;
   rclcpp_action::Client<FollowJointTrajectory>::SharedPtr client_;
+  /// Every trajectory sent to the controller is also published here (moveit_msgs/DisplayTrajectory, transient local)
+  /// so RViz's Trajectory display (mp_rviz sim_overview) shows the motion plan that is about to run, Cartesian
+  /// segments included (move_group only displays what its own pipeline planned).
+  rclcpp::Publisher<moveit_msgs::msg::DisplayTrajectory>::SharedPtr display_pub_;
   bool cancelled_{false};
   rclcpp_action::ClientGoalHandle<FollowJointTrajectory>::SharedPtr current_goal_;
 };

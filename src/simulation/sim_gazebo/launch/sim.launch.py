@@ -18,6 +18,7 @@ Sensors system, ogre2 renders headless in software),
 plus the broadcaster topic /force_torque_sensor_broadcaster/wrench (frame ft_sensor_link), and the controller spawners. The controller_manager
 lives inside the gz server (gz_ros2_control), not in a separate node.
 """
+import json
 import os
 import tempfile
 
@@ -154,10 +155,17 @@ def _launch(context):
         os.path.join(desc_pkg, 'urdf', 'mobile_manipulator.urdf.xacro'), mappings=mappings).toxml()
 
     world = lc('world') or os.path.join(pkg, 'worlds', 'empty.sdf')
+    rviz_world_wall = ''
     if lc('wall_scene'):
         world = os.path.join(tempfile.mkdtemp(prefix='sim_gazebo_world_'), 'wall.sdf')
-        wall_world.generate_world(lc('wall_scene'), world, wall_id=int(lc('wall_id')),
-                                  standoff=float(lc('standoff')))
+        shapes = wall_world.generate_world(lc('wall_scene'), world, wall_id=int(lc('wall_id')),
+                                           standoff=float(lc('standoff')))
+        if os.path.splitext(lc('wall_scene'))[1].lower() == '.json':
+            # RViz must draw the wall where the world put it (the scene file is in the as-mapped frame: plane x = 2 for the
+            # smoke wall, the world's is `standoff` in front of the base), so write the placed wall for mp_viz_scene
+            rviz_world_wall = os.path.join(os.path.dirname(world), 'rviz_world_wall.json')
+            with open(rviz_world_wall, 'w') as f:
+                json.dump(wall_world.world_wall_scene(shapes, int(lc('wall_id'))), f, indent=2)
     if depth or rgb:
         # the render sensors need the Sensors system in the world (ogre2; no display: gz falls back to headless)
         with open(world) as f:
@@ -207,6 +215,24 @@ def _launch(context):
                               'world_frame': 'odom' if base_motion else 'world'}])
 
     actions = [gz, rsp, bridge, truth, spawn]
+    # the same RViz window as the MuJoCo sim (mp_rviz view.launch.py); on by default, skipped without a display or when
+    # mp_rviz is not installed, rviz:=false opts out
+    if lc('rviz').lower() in ('1', 'true', 'yes') and (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+        try:
+            rviz_launch = os.path.join(get_package_share_directory('mp_rviz'), 'launch', 'view.launch.py')
+        except Exception as e:
+            print(f'sim_gazebo: RViz skipped, mp_rviz not found ({e})')
+            rviz_launch = None
+        if rviz_launch:
+            actions.append(IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(rviz_launch),
+                # this sim runs on /clock (robot_state_publisher, bridge and odom use sim time), so RViz must too, or
+                # every TF lookup against wall time fails and nothing shows
+                launch_arguments={'profile': lc('rviz_profile'), 'use_sim_time': 'true',
+                                  'markers': 'true', 'scene': lc('rviz_scene'), 'fixed_frame': 'odom',
+                                  'scene_frame': 'odom', 'plan_file': lc('rviz_plan_file'),
+                                  'wall_scene_json': lc('rviz_wall_scene') or rviz_world_wall or lc('wall_scene'),
+                                  'moveit_profile': lc('profile')}.items()))
     if lc('arm_meshes') == 'true':
         # gz resolves the description's model://ur_description/... URIs through GZ_SIM_RESOURCE_PATH; without it the UR links
         # have no visual and no collision geometry in gz (only the primitives of the lift, tool and sensor link exist)
@@ -264,6 +290,11 @@ def generate_launch_description():
                               description='wall_scene.json / SceneModel YAML; generates the world'),
         DeclareLaunchArgument('wall_id', default_value='0'),
         DeclareLaunchArgument('standoff', default_value='0.9', description='wall distance in front of the base (m)'),
+        DeclareLaunchArgument('rviz', default_value='true', description='open the same RViz window as the MuJoCo sim (mp_rviz); skipped without a display, rviz:=false opts out'),
+        DeclareLaunchArgument('rviz_profile', default_value='sim_overview', description='mp_rviz profiles/<name>.rviz'),
+        DeclareLaunchArgument('rviz_scene', default_value='true', description='also start mp_viz_scene.py (wall, plan columns, stands)'),
+        DeclareLaunchArgument('rviz_plan_file', default_value='', description='coverage_output.json the manager executes (plan columns)'),
+        DeclareLaunchArgument('rviz_wall_scene', default_value='', description='wall_scene.json for the wall display (default: wall_scene)'),
         DeclareLaunchArgument('gui', default_value='false', description='true opens the gz GUI (server only otherwise)'),
         DeclareLaunchArgument('controller', default_value='jtc', description='jtc | jtac | none'),
         DeclareLaunchArgument('ft_conditioner', default_value='false',

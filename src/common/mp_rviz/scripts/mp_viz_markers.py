@@ -8,8 +8,13 @@ Reads:   force_topic (geometry_msgs/WrenchStamped; default /ft_conditioner/wrenc
          TF fixed_frame -> tool_frame (default tcp_link, the frame the manager looks up).
 Writes:  /mp_viz/mission_text (visualization_msgs/Marker, TEXT_VIEW_FACING above the tool),
          /mp_viz/tool_trace (visualization_msgs/MarkerArray, one LINE_STRIP of the tool positions, green to red by
-         force against force_limit_n, at most trace_max_points points).
+         force against force_limit_n, at most trace_max_points points, 1 Hz, only while something subscribes),
+         /mp_viz/tcp_executed (visualization_msgs/Marker, ONE thick bright-green LINE_STRIP: the TCP motion actually
+         executed, TF fixed_frame -> tool_frame sampled at path_rate_hz (5), kept for path_max_points samples
+         (default 6000 at 1 cm steps, sampled at 5 Hz, older ones are thinned 2:1 instead of dropped, so the whole pass stays
+         visible), published at path_publish_hz (1) only on change and while subscribed). This is the main trail; the force trace is the secondary one.
 """
+import math
 import os
 import sys
 
@@ -42,11 +47,19 @@ class MpVizMarkers(Node):
         self.tool_frame = p('tool_frame', 'tcp_link').value
         self.fixed_frame = p('fixed_frame', 'base_footprint').value
         self.limit = float(p('force_limit_n', 50.0).value)
-        max_points = int(p('trace_max_points', 2000).value)
-        rate = float(p('rate_hz', 20.0).value)
+        max_points = int(p('trace_max_points', 1000).value)
+        rate = float(p('rate_hz', 4.0).value)   # mission text; was 20 Hz (RViz redraws every message)
         self.trace = logic.TraceBuffer(max_points, float(p('trace_min_step_m', 0.002).value))
         self.force = None
         self.fb = None
+        self.path_max = int(p('path_max_points', 6000).value)
+        self.path_min_step = float(p('path_min_step_m', 0.01).value)   # 1 cm: the line stays smooth, 5x fewer points than 2 mm
+        self.path_width = float(p('path_line_width_m', 0.02).value)
+        self.text_xyz = [float(c) for c in p('text_xyz', [0.9, -1.5, 2.4]).value]   # fixed_frame position of the readout
+        self.path_pts = []
+        self._path_dirty = False
+        self._trace_dirty = False
+        self._path_subs = 0
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -57,7 +70,44 @@ class MpVizMarkers(Node):
             self.get_logger().warn('coverage_task_msgs not found: no mission state in the readout')
         self.text_pub = self.create_publisher(Marker, '/mp_viz/mission_text', 1)
         self.trace_pub = self.create_publisher(MarkerArray, '/mp_viz/tool_trace', 1)
+        self.path_pub = self.create_publisher(Marker, '/mp_viz/tcp_executed', 1)
         self.create_timer(1.0 / rate, self._tick)
+        self.create_timer(1.0 / float(p('path_rate_hz', 5.0).value), self._sample_path)
+        self.create_timer(1.0 / float(p('path_publish_hz', 1.0).value), self._publish_path)
+        self.create_timer(1.0 / float(p('trace_publish_hz', 1.0).value), self._publish_trace)
+
+    def _sample_path(self):
+        try:
+            t = self.tf_buffer.lookup_transform(self.fixed_frame, self.tool_frame, rclpy.time.Time(),
+                                                timeout=Duration(seconds=0.0))
+        except Exception:
+            return
+        q = t.transform.translation
+        pt = (q.x, q.y, q.z)
+        if self.path_pts and math.dist(pt, self.path_pts[-1]) < self.path_min_step:
+            return
+        self.path_pts.append(pt)
+        self._path_dirty = True
+        if len(self.path_pts) > self.path_max:  # thin the older half 2:1: the whole pass stays visible
+            half = len(self.path_pts) // 2
+            self.path_pts = self.path_pts[:half:2] + self.path_pts[half:]
+
+    def _publish_path(self):
+        subs = self.path_pub.get_subscription_count()
+        if subs > self._path_subs:   # a late RViz (Volatile topic) gets the whole line on its first tick
+            self._path_dirty = True
+        self._path_subs = subs
+        if not self._path_dirty or subs == 0:
+            return
+        self._path_dirty = False
+        m = Marker()
+        m.header.frame_id, m.header.stamp = self.fixed_frame, self.get_clock().now().to_msg()
+        m.ns, m.id, m.type, m.action = 'mp_viz_tcp_executed', 0, Marker.LINE_STRIP, Marker.ADD
+        m.pose.orientation.w = 1.0
+        m.scale.x = self.path_width
+        m.color = ColorRGBA(r=0.0, g=1.0, b=0.0, a=1.0)
+        m.points = [Point(x=x, y=y, z=z) for x, y, z in self.path_pts]
+        self.path_pub.publish(m)
 
     def _on_force(self, msg):
         f = msg.wrench.force
@@ -74,13 +124,14 @@ class MpVizMarkers(Node):
             return
         pos = t.transform.translation
         now = self.get_clock().now().to_msg()
-        self.trace.add(pos.x, pos.y, pos.z, self.force if self.force is not None else 0.0)
+        if self.trace.add(pos.x, pos.y, pos.z, self.force if self.force is not None else 0.0) is not False:
+            self._trace_dirty = True
 
         fb = self.fb
         text = Marker()
         text.header.frame_id, text.header.stamp = self.fixed_frame, now
         text.ns, text.id, text.type, text.action = 'mp_viz_text', 0, Marker.TEXT_VIEW_FACING, Marker.ADD
-        text.pose.position.x, text.pose.position.y, text.pose.position.z = pos.x, pos.y, pos.z + 0.25
+        text.pose.position.x, text.pose.position.y, text.pose.position.z = self.text_xyz   # fixed corner, not over the tool
         text.pose.orientation.w = 1.0
         text.scale.z = 0.07
         text.color = ColorRGBA(r=1.0, g=1.0, b=1.0, a=1.0)
@@ -89,11 +140,17 @@ class MpVizMarkers(Node):
             self.force, self.limit, fb.column if fb else None)
         self.text_pub.publish(text)
 
+    def _publish_trace(self):
+        # the force-coloured trace is off in RViz by default and was 61 KB x 20 Hz: only with a subscriber, 1 Hz, on change
+        if not self._trace_dirty or self.trace_pub.get_subscription_count() == 0:
+            return
+        self._trace_dirty = False
+        now = self.get_clock().now().to_msg()
         line = Marker()
         line.header.frame_id, line.header.stamp = self.fixed_frame, now
         line.ns, line.id, line.type, line.action = 'mp_viz_trace', 0, Marker.LINE_STRIP, Marker.ADD
         line.pose.orientation.w = 1.0
-        line.scale.x = 0.006
+        line.scale.x = 0.004
         for x, y, z, f in self.trace.points():
             line.points.append(Point(x=x, y=y, z=z))
             r, g, b = logic.force_to_rgb(f, self.limit)

@@ -13,7 +13,9 @@ using GoalHandle = rclcpp_action::ClientGoalHandle<JtacExecutionAdapter::FollowJ
 JtacExecutionAdapter::JtacExecutionAdapter(
   const rclcpp::Node::SharedPtr & node, const std::string & action_name)
 : node_(node),
-  client_(rclcpp_action::create_client<FollowJointTrajectory>(node, action_name))
+  client_(rclcpp_action::create_client<FollowJointTrajectory>(node, action_name)),
+  display_pub_(node->create_publisher<moveit_msgs::msg::DisplayTrajectory>(
+      "/mp_viz/planned_trajectory", rclcpp::QoS(1).transient_local().reliable()))
 {
 }
 
@@ -38,6 +40,15 @@ ExecutionResult JtacExecutionAdapter::execute(const ExecutionRequest & request)
 
   auto goal_msg = FollowJointTrajectory::Goal();
   goal_msg.trajectory = ros_adapters::toRos(request.trajectory);
+
+  {
+    moveit_msgs::msg::DisplayTrajectory display;
+    display.trajectory.emplace_back();
+    display.trajectory.back().joint_trajectory = goal_msg.trajectory;
+    display.trajectory_start.joint_state.name = goal_msg.trajectory.joint_names;
+    display.trajectory_start.joint_state.position = goal_msg.trajectory.points.front().positions;
+    display_pub_->publish(display);
+  }
 
   auto result_promise = std::make_shared<std::promise<bool>>();
   auto result_future = result_promise->get_future().share();
