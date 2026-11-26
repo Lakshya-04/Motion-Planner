@@ -9,7 +9,7 @@ Reads:   force_topic (geometry_msgs/WrenchStamped; default /ft_conditioner/wrenc
 Writes:  /mp_viz/mission_text (visualization_msgs/Marker, TEXT_VIEW_FACING above the tool),
          /mp_viz/tool_trace (visualization_msgs/MarkerArray, one LINE_STRIP of the tool positions, green to red by
          force against force_limit_n, at most trace_max_points points, 1 Hz, only while something subscribes),
-         /mp_viz/tcp_executed (visualization_msgs/Marker, ONE thick bright-green LINE_STRIP: the TCP motion actually
+         /mp_viz/tcp_executed (visualization_msgs/Marker, ONE thick bright-green LINE_LIST, the wall strokes only: the TCP motion actually
          executed, TF fixed_frame -> tool_frame sampled at path_rate_hz (5), kept for path_max_points samples
          (default 6000 at 1 cm steps, sampled at 5 Hz, older ones are thinned 2:1 instead of dropped, so the whole pass stays
          visible), published at path_publish_hz (1) only on change and while subscribed). This is the main trail; the force trace is the secondary one.
@@ -55,6 +55,10 @@ class MpVizMarkers(Node):
         self.path_max = int(p('path_max_points', 6000).value)
         self.path_min_step = float(p('path_min_step_m', 0.01).value)   # 1 cm: the line stays smooth, 5x fewer points than 2 mm
         self.path_width = float(p('path_line_width_m', 0.02).value)
+        # the green line shows the wall strokes only (the tool pressing, force above the threshold); approach, retract, stow and
+        # base moves are free-space motion and drew big loops across the scene. path_contact_only:=false draws all of it again
+        self.path_contact_only = bool(p('path_contact_only', True).value)
+        self.path_contact_force = float(p('path_contact_force_n', 2.0).value)
         self.text_xyz = [float(c) for c in p('text_xyz', [0.9, -1.5, 2.4]).value]   # fixed_frame position of the readout
         self.path_pts = []
         self._path_dirty = False
@@ -84,13 +88,19 @@ class MpVizMarkers(Node):
             return
         q = t.transform.translation
         pt = (q.x, q.y, q.z)
-        if self.path_pts and math.dist(pt, self.path_pts[-1]) < self.path_min_step:
+        if self.path_contact_only and not (self.force is not None and self.force > self.path_contact_force):
+            if self.path_pts and self.path_pts[-1] is not None:
+                self.path_pts.append(None)   # the stroke ended: break the line here
+                self._path_dirty = True
+            return
+        last = self.path_pts[-1] if self.path_pts else None   # None after a break: no distance check
+        if last is not None and math.dist(pt, last) < self.path_min_step:
             return
         self.path_pts.append(pt)
         self._path_dirty = True
         if len(self.path_pts) > self.path_max:  # thin the older half 2:1: the whole pass stays visible
             half = len(self.path_pts) // 2
-            self.path_pts = self.path_pts[:half:2] + self.path_pts[half:]
+            self.path_pts = [x for i, x in enumerate(self.path_pts[:half]) if i % 2 == 0 or x is None] + self.path_pts[half:]
 
     def _publish_path(self):
         subs = self.path_pub.get_subscription_count()
@@ -102,11 +112,11 @@ class MpVizMarkers(Node):
         self._path_dirty = False
         m = Marker()
         m.header.frame_id, m.header.stamp = self.fixed_frame, self.get_clock().now().to_msg()
-        m.ns, m.id, m.type, m.action = 'mp_viz_tcp_executed', 0, Marker.LINE_STRIP, Marker.ADD
+        m.ns, m.id, m.type, m.action = 'mp_viz_tcp_executed', 0, Marker.LINE_LIST, Marker.ADD
         m.pose.orientation.w = 1.0
         m.scale.x = self.path_width
         m.color = ColorRGBA(r=0.0, g=1.0, b=0.0, a=1.0)
-        m.points = [Point(x=x, y=y, z=z) for x, y, z in self.path_pts]
+        m.points = [Point(x=x, y=y, z=z) for x, y, z in logic.line_list_points(self.path_pts)]
         self.path_pub.publish(m)
 
     def _on_force(self, msg):
