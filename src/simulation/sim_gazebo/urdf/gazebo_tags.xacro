@@ -27,6 +27,7 @@
      gz_lidar:=true (launch arg lidar:=true) adds the link lidar_link on base_footprint (gz_lidar_xyz / gz_lidar_rpy,
      x forward) with a gz-sim gpu_lidar (gz_lidar_samples rays from gz_lidar_min_angle to gz_lidar_max_angle, range
      gz_lidar_min to gz_lidar_max, gz_lidar_rate Hz, optional Gaussian range noise) that publishes gz LaserScan on /scan;
+     gz_lidar_frame renames the link and the scan frame (gz_depth_frame: the same for the depth sensor);
      the launch file adds the Sensors system to the world and bridges it to sensor_msgs/LaserScan. Off by default.
 
      gz_rgb_camera:=true (launch arg rgb_camera:=true) adds the link rgb_camera_link on base_footprint (gz_rgb_xyz /
@@ -47,6 +48,7 @@
   <xacro:arg name="gz_depth_rpy" default="0 0 0"/>
   <xacro:arg name="gz_depth_noise" default="0.0"/>
   <xacro:arg name="gz_depth_rate" default="5.0"/>
+  <xacro:arg name="gz_depth_frame" default="depth_sensor_link"/>
   <xacro:arg name="gz_lidar" default="false"/>
   <xacro:arg name="gz_lidar_xyz" default="0.45 0 0.2"/>
   <xacro:arg name="gz_lidar_rpy" default="0 0 0"/>
@@ -57,6 +59,7 @@
   <xacro:arg name="gz_lidar_max" default="10.0"/>
   <xacro:arg name="gz_lidar_rate" default="10.0"/>
   <xacro:arg name="gz_lidar_noise" default="0.0"/>
+  <xacro:arg name="gz_lidar_frame" default="lidar_link"/>
   <xacro:arg name="gz_imu" default="false"/>
   <xacro:arg name="gz_imu_xyz" default="0 0 0.1"/>
   <xacro:arg name="gz_imu_rpy" default="0 0 0"/>
@@ -126,19 +129,19 @@
     </gazebo>
 
     <xacro:if value="${'$(arg gz_depth_sensor)' == 'true'}">
-      <link name="depth_sensor_link"/>
+      <link name="$(arg gz_depth_frame)"/>
       <joint name="depth_sensor_joint" type="fixed">
         <parent link="base_footprint"/>
-        <child link="depth_sensor_link"/>
+        <child link="$(arg gz_depth_frame)"/>
         <origin xyz="$(arg gz_depth_xyz)" rpy="$(arg gz_depth_rpy)"/>
       </joint>
-      <gazebo reference="depth_sensor_link">
+      <gazebo reference="$(arg gz_depth_frame)">
         <sensor name="depth_sensor" type="depth_camera">
           <always_on>true</always_on>
           <update_rate>$(arg gz_depth_rate)</update_rate>
           <visualize>false</visualize>
           <topic>/depth_sensor</topic>
-          <gz_frame_id>depth_sensor_link</gz_frame_id>
+          <gz_frame_id>$(arg gz_depth_frame)</gz_frame_id>
           <camera>
             <horizontal_fov>1.0472</horizontal_fov>
             <image><width>96</width><height>64</height></image>
@@ -155,19 +158,19 @@
     </xacro:if>
 
     <xacro:if value="${'$(arg gz_lidar)' == 'true'}">
-      <link name="lidar_link"/>
+      <link name="$(arg gz_lidar_frame)"/>
       <joint name="lidar_joint" type="fixed">
         <parent link="base_footprint"/>
-        <child link="lidar_link"/>
+        <child link="$(arg gz_lidar_frame)"/>
         <origin xyz="$(arg gz_lidar_xyz)" rpy="$(arg gz_lidar_rpy)"/>
       </joint>
-      <gazebo reference="lidar_link">
+      <gazebo reference="$(arg gz_lidar_frame)">
         <sensor name="lidar" type="gpu_lidar">
           <always_on>true</always_on>
           <update_rate>$(arg gz_lidar_rate)</update_rate>
           <visualize>false</visualize>
           <topic>/scan</topic>
-          <gz_frame_id>lidar_link</gz_frame_id>
+          <gz_frame_id>$(arg gz_lidar_frame)</gz_frame_id>
           <lidar>
             <scan>
               <horizontal>

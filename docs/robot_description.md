@@ -195,6 +195,9 @@ a one-carriage column (`telescopic`, `stages: 0`, stroke 0.35 / 0.386 m), the ex
 `fr3_tiago_style_torso`, `generic_6dof_fetch_style_torso`. The sizes are payload-honest only for the
 small arms chosen; check the platform rating.
 
+What each platform ships with (lidars, cameras) and which numbers have a source is in
+[base_catalog.md](base_catalog.md); the profile's optional `sensors:` list holds the sensors; `platform:=` on the sim launches feeds a suite to the lidar and depth arguments.
+
 Swap steps: `xacro urdf/mobile_manipulator.urdf.xacro arm:=ur10e base:=ranger_mini`, or pick the
 matching profile. The lift mounts at `lift_mount_link`; shift it with the `lift_mount_xyz` xacro
 arg (or edit `mount_x`/`mount_y` in the base macro's defaults) if your lift is not at the body

@@ -8,6 +8,7 @@
 //   p.joints();           // lift joint first, then the arm joints in kinematic order
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <map>
@@ -26,6 +27,19 @@ inline constexpr char kDefaultProfile[] = "ur10e_telescopic";
 
 /// Movement cost of the lift when a profile gives no `joint_costs`; an arm joint is 1.0.
 inline constexpr double kDefaultLiftCost = 2.0;
+/// One sensor on the base (profile `sensors:` entry). `spec` holds the numeric fields of the type.
+struct SensorSpec
+{
+  std::string type;  ///< lidar2d | rgbd | imu | lidar3d
+  std::string name;
+  std::string frame;  ///< child of base_link
+  std::array<double, 3> xyz{0, 0, 0};  ///< mount in base_link
+  std::array<double, 3> rpy{0, 0, 0};
+  bool factory = false;
+  std::string source;
+  std::map<std::string, double> spec;
+  std::string depth_noise_note;  ///< rgbd only
+};
 
 struct Profile
 {
@@ -43,6 +57,7 @@ struct Profile
   std::string whole_body_group = "lift_arm";
   std::string tool_group = "tool";
   std::string controller_family;
+  std::vector<SensorSpec> sensors;  ///< Empty when the profile has no `sensors:` block.
 
   size_t armDof() const {return arm_joints.size();}
   /// Whole-body DOF: the lift (if actuated) plus the arm.
@@ -90,6 +105,109 @@ inline std::string profilesDir()
   }
   return ament_index_cpp::get_package_share_directory("mobile_manipulator_description") +
          "/config/profiles";
+}
+
+/// Read and validate the optional `sensors:` list into p.sensors; errors name the profile and entry.
+inline void parseSensors(const YAML::Node & root, Profile & p)
+{
+  const auto & node = root["sensors"];
+  if (!node || node.IsNull()) {return;}
+  auto fail = [&p](const std::string & what) {
+      throw std::runtime_error("profile " + p.name + ": " + what);
+    };
+  if (!node.IsSequence()) {fail("sensors must be a list");}
+  struct Rule
+  {
+    std::vector<std::string> required;
+    std::vector<std::string> optional;
+  };
+  const std::map<std::string, Rule> rules = {
+    {"lidar2d", {{"angle_min_rad", "angle_max_rad", "angle_increment_rad", "range_min_m",
+      "range_max_m", "rate_hz"}, {"range_noise_std_m"}}},
+    {"rgbd", {{"width", "height", "hfov_rad", "range_min_m", "range_max_m", "rate_hz"}, {}}},
+    {"imu", {{"rate_hz"}, {}}},
+    {"lidar3d", {{"channels", "hfov_rad", "vfov_rad", "range_min_m", "range_max_m", "rate_hz"},
+      {}}},
+  };
+  std::set<std::string> names, frames;
+  size_t index = 0;
+  for (const auto & e : node) {
+    const std::string where = "sensors[" + std::to_string(index++) + "]" +
+      ((e.IsMap() && e["name"]) ? " (" + e["name"].as<std::string>() + ")" : "");
+    auto bad = [&](const std::string & what) {fail(where + ": " + what);};
+    if (!e.IsMap()) {bad("must be a map");}
+    auto text = [&](const char * key) {
+        if (!e[key] || !e[key].IsScalar() || e[key].as<std::string>().empty()) {
+          bad(std::string("missing ") + key);
+        }
+        return e[key].as<std::string>();
+      };
+    auto number = [&](const YAML::Node & n, const std::string & what) {
+        double v = 0;
+        try {v = n.as<double>();} catch (const YAML::Exception &) {bad(what + " is not a number");}
+        if (!std::isfinite(v)) {bad(what + " is not finite");}
+        return v;
+      };
+    SensorSpec s;
+    s.type = text("type");
+    s.name = text("name");
+    s.frame = text("frame");
+    s.source = text("source");
+    const auto rule = rules.find(s.type);
+    if (rule == rules.end()) {bad("unknown type " + s.type);}
+    if (!names.insert(s.name).second) {bad("duplicate name");}
+    if (s.frame == "base_link" || !frames.insert(s.frame).second) {
+      bad("frame must be unique and not base_link");
+    }
+    if (!e["factory"] || !e["factory"].IsScalar()) {bad("missing factory");}
+    try {s.factory = e["factory"].as<bool>();} catch (const YAML::Exception &) {
+      bad("factory must be true or false");
+    }
+    const auto & mount = e["mount"];
+    if (!mount || !mount.IsMap()) {bad("missing mount");}
+    for (const char * key : {"xyz", "rpy"}) {
+      if (!mount[key] || !mount[key].IsSequence() || mount[key].size() != 3) {
+        bad(std::string("mount.") + key + " needs three numbers");
+      }
+      auto & dst = std::string(key) == "xyz" ? s.xyz : s.rpy;
+      for (size_t i = 0; i < 3; ++i) {
+        dst[i] = number(mount[key][i], std::string("mount.") + key);
+      }
+    }
+    const auto & spec = e["spec"];
+    if (!spec || !spec.IsMap()) {bad("missing spec");}
+    for (const auto & key : rule->second.required) {
+      if (!spec[key]) {bad("spec." + key + " missing");}
+      s.spec[key] = number(spec[key], "spec." + key);
+    }
+    for (const auto & key : rule->second.optional) {
+      if (spec[key]) {s.spec[key] = number(spec[key], "spec." + key);}
+    }
+    for (const auto & kv : s.spec) {
+      // angle bounds may be zero or negative; the noise std may be zero
+      if (kv.first == "angle_min_rad" || kv.first == "angle_max_rad") {continue;}
+      if (kv.first == "range_noise_std_m" ? kv.second < 0 : kv.second <= 0) {
+        const bool noise = kv.first == "range_noise_std_m";
+        bad("spec." + kv.first + (noise ? " is negative" : " must be positive"));
+      }
+    }
+    if (s.type == "lidar2d") {
+      if (s.spec["angle_min_rad"] >= s.spec["angle_max_rad"]) {
+        bad("angle_min_rad must be below angle_max_rad");
+      }
+    }
+    if (s.spec.count("range_max_m") && s.spec["range_max_m"] <= s.spec["range_min_m"]) {
+      bad("range_max_m must exceed range_min_m");
+    }
+    if (s.type == "rgbd") {
+      if (s.spec["hfov_rad"] >= 3.14159265358979323846) {bad("hfov_rad must be below pi");}
+      if (e["spec"]["depth_noise_note"]) {
+        s.depth_noise_note = e["spec"]["depth_noise_note"].as<std::string>();
+      }
+      if (s.depth_noise_note.empty()) {bad("spec.depth_noise_note missing");}
+    }
+    p.sensors.push_back(s);
+  }
 }
 
 /// Validate and read a parsed profile. Throws std::runtime_error on a missing or inconsistent field.
@@ -160,6 +278,7 @@ inline Profile parseProfile(const YAML::Node & root, const std::string & name)
   for (const auto & j : p.joints()) {
     if (!p.home.count(j)) {fail("home pose misses joint " + j);}
   }
+  parseSensors(root, p);
   return p;
 }
 

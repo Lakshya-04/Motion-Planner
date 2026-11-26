@@ -28,6 +28,10 @@ depth_sensor:=true adds a simulated depth sensor (ray-cast, MuJoCo mj_multiRay a
                  and this launch file adds the static TF <root frame> -> depth_sensor_link. Off by
                  default: the MJCF is then unchanged.
 
+platform:=<profile or base name> takes the lidar and depth mounts, the lidar range, FOV, rate and noise, the depth rate
+                 and the sensor frame names from the platform's sensors: suite (docs/base_catalog.md); the lidar_* and
+                 depth_sensor_* arguments still override it. It switches nothing on: lidar:=true / depth_sensor:=true do.
+
 lidar:=true adds a simulated 2D lidar (ray-cast against the scene, not the robot) on the root link at lidar_pose
                  "x y z roll pitch yaw" (default: base front, 0.2 m up): the plugin publishes sensor_msgs/LaserScan on
                  /scan in frame lidar_link and this launch file adds the static TF <root frame> -> lidar_link.
@@ -69,6 +73,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
+from mobile_manipulator_description.sensor_suite import DEPTH_ARGS, LIDAR_ARGS, resolve_sensor_args
 from sim_mujoco.sim_noise import parse_sim_noise
 from sim_mujoco.generate import (command_joints, generate, jtac_overrides, load_profile, render_urdf,
                                  tool_payload)
@@ -118,24 +123,28 @@ def _setup(context, *args, **kwargs):
     scene = arg('scene') or None
     offset = [float(v) for v in arg('scene_offset').split()]
 
+    want_depth, want_lidar = arg('depth_sensor') == 'true', arg('lidar') == 'true'
+    sv = resolve_sensor_args({k: arg(k) for k in LIDAR_ARGS + DEPTH_ARGS}, arg('platform'), want_lidar, want_depth)
     depth = None
-    if arg('depth_sensor') == 'true':
-        pose = [float(v) for v in arg('depth_sensor_pose').split()]
+    if want_depth:
+        pose = [float(v) for v in sv['depth_sensor_pose'].split()]
         if len(pose) != 6:
             raise ValueError('depth_sensor_pose needs "x y z roll pitch yaw"')
-        depth = dict(pos=pose[:3], rpy=pose[3:], noise_std=float(arg('depth_sensor_noise_m')),
-                     rate_hz=float(arg('depth_sensor_rate_hz')))
+        depth = dict(pos=pose[:3], rpy=pose[3:], noise_std=float(sv['depth_sensor_noise_m']),
+                     rate_hz=float(sv['depth_sensor_rate_hz']))
+        os.environ['SIM_MUJOCO_DEPTH_FRAME'] = sv['depth_sensor_frame']
     lidar = None
-    if arg('lidar') == 'true':
-        pose = [float(v) for v in arg('lidar_pose').split()]
+    if want_lidar:
+        pose = [float(v) for v in sv['lidar_pose'].split()]
         if len(pose) != 6:
             raise ValueError('lidar_pose needs "x y z roll pitch yaw"')
-        lidar = dict(pos=pose[:3], rpy=pose[3:], angle_min=math.radians(float(arg('lidar_angle_min_deg'))),
-                     angle_max=math.radians(float(arg('lidar_angle_max_deg'))),
-                     angle_increment=math.radians(float(arg('lidar_angle_increment_deg'))),
-                     range_min=float(arg('lidar_range_min_m')), range_max=float(arg('lidar_range_max_m')),
-                     rate_hz=float(arg('lidar_rate_hz')), noise_std=float(arg('lidar_noise_m')),
+        lidar = dict(pos=pose[:3], rpy=pose[3:], angle_min=math.radians(float(sv['lidar_angle_min_deg'])),
+                     angle_max=math.radians(float(sv['lidar_angle_max_deg'])),
+                     angle_increment=math.radians(float(sv['lidar_angle_increment_deg'])),
+                     range_min=float(sv['lidar_range_min_m']), range_max=float(sv['lidar_range_max_m']),
+                     rate_hz=float(sv['lidar_rate_hz']), noise_std=float(sv['lidar_noise_m']),
                      dropout=float(arg('lidar_dropout')), seed=int(arg('lidar_seed')))
+        os.environ['SIM_MUJOCO_LIDAR_FRAME'] = sv['lidar_frame']
     gravity_comp = arg('gravity_comp')
     if gravity_comp not in ('mujoco', 'core', 'none'):
         raise ValueError("gravity_comp must be mujoco, core or none")
@@ -231,14 +240,14 @@ def _setup(context, *args, **kwargs):
         nodes.append(Node(package='tf2_ros', executable='static_transform_publisher', name='depth_sensor_tf',
                           arguments=['--x', str(p[0]), '--y', str(p[1]), '--z', str(p[2]),
                                      '--roll', str(r[0]), '--pitch', str(r[1]), '--yaw', str(r[2]),
-                                     '--frame-id', root_frame, '--child-frame-id', 'depth_sensor_link']))
+                                     '--frame-id', root_frame, '--child-frame-id', sv['depth_sensor_frame']]))
     if lidar is not None:
         root_frame = profile.get('frames', {}).get('world_base') or 'base_footprint'
         p, r = lidar['pos'], lidar['rpy']
         nodes.append(Node(package='tf2_ros', executable='static_transform_publisher', name='lidar_tf',
                           arguments=['--x', str(p[0]), '--y', str(p[1]), '--z', str(p[2]),
                                      '--roll', str(r[0]), '--pitch', str(r[1]), '--yaw', str(r[2]),
-                                     '--frame-id', root_frame, '--child-frame-id', 'lidar_link']))
+                                     '--frame-id', root_frame, '--child-frame-id', sv['lidar_frame']]))
     if imu:
         root_frame = profile.get('frames', {}).get('world_base') or 'base_footprint'
         pose = [float(v) for v in arg('imu_pose').split()]
@@ -331,28 +340,32 @@ def generate_launch_description():
                               description='planar base (x, y, yaw) driven by geometry_msgs/Twist on /cmd_vel '
                                           '(omni or diff per the profile drive_type), odom on /odom and TF '
                                           'odom -> base_footprint; false keeps the base static'),
+        DeclareLaunchArgument('platform', default_value='',
+                              description='profile or base name whose sensors: suite sets the lidar_* and depth_sensor_* '
+                                          'values and frames (explicit arguments still win); empty keeps the defaults. '
+                                          'lidar:= and depth_sensor:= still switch the sensors on'),
         DeclareLaunchArgument('depth_sensor', default_value='false',
                               description='simulated ray-cast depth sensor: PointCloud2 on /depth_sensor/points, '
                                           'TF root -> depth_sensor_link; false leaves the MJCF unchanged'),
-        DeclareLaunchArgument('depth_sensor_pose', default_value='0.1 0 1.15 0 0 0',
-                              description='depth sensor mounting in the root link frame: "x y z roll pitch yaw" '
+        DeclareLaunchArgument('depth_sensor_pose', default_value='',
+                              description='default 0.1 0 1.15 0 0 0, or from platform: depth sensor mounting in the root link frame: "x y z roll pitch yaw" '
                                           '(x forward, z up)'),
-        DeclareLaunchArgument('depth_sensor_noise_m', default_value='0.0',
-                              description='Gaussian range noise of the depth sensor, m'),
-        DeclareLaunchArgument('depth_sensor_rate_hz', default_value='5.0', description='depth sensor rate, Hz'),
+        DeclareLaunchArgument('depth_sensor_noise_m', default_value='',
+                              description='default 0.0, or from platform: Gaussian range noise of the depth sensor, m'),
+        DeclareLaunchArgument('depth_sensor_rate_hz', default_value='', description='default 5.0, or from platform: depth sensor rate, Hz'),
         DeclareLaunchArgument('lidar', default_value='false',
                               description='simulated 2D ray-cast lidar: LaserScan on /scan, TF root -> lidar_link; '
                                           'false leaves the MJCF unchanged'),
-        DeclareLaunchArgument('lidar_pose', default_value='0.45 0 0.2 0 0 0',
-                              description='lidar mounting in the root link frame: "x y z roll pitch yaw" '
+        DeclareLaunchArgument('lidar_pose', default_value='',
+                              description='default 0.45 0 0.2 0 0 0, or from platform: lidar mounting in the root link frame: "x y z roll pitch yaw" '
                                           '(x forward, z up; the default is the front edge of the stock footprint)'),
-        DeclareLaunchArgument('lidar_angle_min_deg', default_value='-135.0', description='first ray, degrees'),
-        DeclareLaunchArgument('lidar_angle_max_deg', default_value='135.0', description='last ray, degrees'),
-        DeclareLaunchArgument('lidar_angle_increment_deg', default_value='0.5', description='ray spacing, degrees'),
-        DeclareLaunchArgument('lidar_range_min_m', default_value='0.05', description='lidar minimum range, m'),
-        DeclareLaunchArgument('lidar_range_max_m', default_value='10.0', description='lidar maximum range, m'),
-        DeclareLaunchArgument('lidar_rate_hz', default_value='10.0', description='lidar rate, Hz'),
-        DeclareLaunchArgument('lidar_noise_m', default_value='0.0', description='Gaussian range noise of the lidar, m'),
+        DeclareLaunchArgument('lidar_angle_min_deg', default_value='', description='default -135.0, or from platform: first ray, degrees'),
+        DeclareLaunchArgument('lidar_angle_max_deg', default_value='', description='default 135.0, or from platform: last ray, degrees'),
+        DeclareLaunchArgument('lidar_angle_increment_deg', default_value='', description='default 0.5, or from platform: ray spacing, degrees'),
+        DeclareLaunchArgument('lidar_range_min_m', default_value='', description='default 0.05, or from platform: lidar minimum range, m'),
+        DeclareLaunchArgument('lidar_range_max_m', default_value='', description='default 10.0, or from platform: lidar maximum range, m'),
+        DeclareLaunchArgument('lidar_rate_hz', default_value='', description='default 10.0, or from platform: lidar rate, Hz'),
+        DeclareLaunchArgument('lidar_noise_m', default_value='', description='default 0.0, or from platform: Gaussian range noise of the lidar, m'),
         DeclareLaunchArgument('lidar_dropout', default_value='0.0',
                               description='probability that a lidar return is lost (NaN), 0..1'),
         DeclareLaunchArgument('lidar_seed', default_value='12345', description='seed of the lidar noise and dropout'),

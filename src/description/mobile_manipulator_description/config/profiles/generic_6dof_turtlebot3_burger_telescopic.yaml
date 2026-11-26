@@ -62,3 +62,20 @@ base:
   lift_mount_height_m: 0.192     # lift_mount_link above base_footprint
   ground_clearance_m: 0.01
   mass_kg: 1.0
+
+# Sensors on the base: typical add-ons unless factory is true. Mounts are in base_link
+# (body box centre, x forward). See docs/base_catalog.md for what is verified.
+sensors:
+  - type: lidar2d
+    name: lidar
+    frame: base_scan
+    mount: {xyz: [-0.032, 0.0, 0.13], rpy: [0.0, 0.0, 0.0]}
+    factory: true
+    source: "ROBOTIS LDS-01 specifications, https://emanual.robotis.com/docs/en/platform/turtlebot3/appendix_lds_01/ (mount is an integrator choice)"
+    spec:
+      angle_min_rad: 0.0
+      angle_max_rad: 6.28319
+      angle_increment_rad: 0.0174533
+      range_min_m: 0.12
+      range_max_m: 3.5
+      rate_hz: 5.0               # 300 +/- 10 rpm

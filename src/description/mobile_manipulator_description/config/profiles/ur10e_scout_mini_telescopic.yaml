@@ -73,3 +73,34 @@ base:
   lift_mount_height_m: 0.235     # lift_mount_link above base_footprint
   ground_clearance_m: 0.107
   mass_kg: 23.0
+
+# Sensors on the base: typical add-ons unless factory is true. Mounts are in base_link
+# (body box centre, x forward). See docs/base_catalog.md for what is verified.
+sensors:
+  - type: lidar2d
+    name: lidar
+    frame: lidar_link
+    mount: {xyz: [0.25, 0.0, 0.12], rpy: [0.0, 0.0, 0.0]}
+    factory: false
+    source: "Slamtec RPLIDAR A2M8 datasheet v1.0, https://cdn.sparkfun.com/assets/e/a/f/9/8/LD208_SLAMTEC_rplidar_datasheet_A2M8_v1.0_en.pdf (mount is an integrator choice)"
+    spec:
+      angle_min_rad: 0.0
+      angle_max_rad: 6.28319
+      angle_increment_rad: 0.015708
+      range_min_m: 0.15
+      range_max_m: 8.0
+      rate_hz: 10.0
+  - type: rgbd
+    name: front_camera
+    frame: front_camera_link
+    mount: {xyz: [0.28, 0.0, 0.15], rpy: [0.0, 0.0, 0.0]}
+    factory: false
+    source: "Intel RealSense D435, https://www.realsenseai.com/products/stereo-depth-camera-d435/ (mount is an integrator choice)"
+    spec:
+      width: 1280
+      height: 720
+      hfov_rad: 1.51844
+      range_min_m: 0.28
+      range_max_m: 3.0
+      rate_hz: 30.0              # the page says up to 90 fps; 30 is a typical stream setting
+      depth_noise_note: "depth accuracy under 2 percent at 2 m (vendor page)"
