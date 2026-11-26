@@ -73,3 +73,35 @@ base:
   lift_mount_height_m: 0.264     # lift_mount_link above base_footprint
   ground_clearance_m: 0.04
   mass_kg: 70.0
+
+# Sensors on the base: typical add-ons unless factory is true. Mounts are in base_link
+# (body box centre, x forward). See docs/base_catalog.md for what is verified.
+sensors:
+  - type: lidar2d
+    name: lidar
+    frame: lidar_link
+    mount: {xyz: [0.30, 0.0, 0.16], rpy: [0.0, 0.0, 0.0]}
+    factory: false
+    source: "Hokuyo UST-10LX, https://www.hokuyo-aut.jp/search/single.php?serial=167 (mount is an integrator choice)"
+    spec:
+      angle_min_rad: -2.35619
+      angle_max_rad: 2.35619
+      angle_increment_rad: 0.00436332
+      range_min_m: 0.06
+      range_max_m: 10.0
+      rate_hz: 40.0              # 25 ms per scan
+      range_noise_std_m: 0.03    # repeatability sigma < 30 mm, an upper bound
+  - type: rgbd
+    name: front_camera
+    frame: front_camera_link
+    mount: {xyz: [0.33, 0.0, 0.22], rpy: [0.0, 0.0, 0.0]}
+    factory: false
+    source: "Intel RealSense D455, https://www.realsenseai.com/products/stereo-depth-camera-d455/ (mount is an integrator choice)"
+    spec:
+      width: 1280
+      height: 720
+      hfov_rad: 1.51844
+      range_min_m: 0.52
+      range_max_m: 6.0
+      rate_hz: 30.0              # the page says up to 90 fps; 30 is a typical stream setting
+      depth_noise_note: "depth accuracy under 2 percent at 4 m (vendor page)"
