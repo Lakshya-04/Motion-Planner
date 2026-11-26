@@ -10,6 +10,7 @@
 #   build : deps + the workspace built and tested with colcon (CI-style, no GPU needed)
 #   gpu   : dev + CUDA-enabled PyTorch + cuRobo v2 pinned (needs the NVIDIA container runtime)
 #   sim-gazebo : deps + Gazebo Harmonic (ros_gz, gz_ros2_control) for the headless simulation backend
+#   nav2  : sim-gazebo + Nav2 (opt-in, docs/nav2.md)
 #   vamp  : upstream VAMP (SIMD CPU planner) built from a pinned commit, installed to /opt/vamp
 #   full  : gpu + vamp  (the "everything" image)
 #
@@ -162,6 +163,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-ros-gz-sim ros-${ROS_DISTRO}-ros-gz-bridge \
       ros-${ROS_DISTRO}-gz-ros2-control \
+    && rm -rf /var/lib/apt/lists/*
+
+############################ nav2 #############################
+# Opt-in: Nav2 on top of sim-gazebo, for the omni base (config/nav2/, docs/nav2.md). Not part of any other stage.
+FROM sim-gazebo AS nav2
+ARG ROS_DISTRO
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-navigation2 ros-${ROS_DISTRO}-nav2-bringup \
     && rm -rf /var/lib/apt/lists/*
 
 ############################ vamp #############################

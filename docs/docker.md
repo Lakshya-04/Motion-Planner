@@ -16,6 +16,7 @@ dependency listed in the repo. Files live in [`docker/`](../docker/).
 | `full` | `gpu` + VAMP | everything |
 | `sim` | `gpu` + MuJoCo 4 (`mujoco-core`) + MJX with JAX (`docker/requirements-sim.txt`) | MuJoCo Python tools, cross-check, MJX; optional |
 | `sim-gazebo` | `deps` + Gazebo Harmonic through `ros-<distro>-ros-gz-sim`, `ros-gz-bridge`, `gz-ros2-control` | headless Gazebo backend (`sim_gazebo`); optional, no GPU |
+| `nav2` | `sim-gazebo` + `navigation2`, `nav2-bringup` | opt-in Nav2 for the omni base, see [nav2.md](nav2.md) |
 
 `sim` is built on its own (`docker build -f docker/Dockerfile --target sim -t motion-planner:sim .`) and
 is not part of `full`. MuJoCo 4 splits the Python package: `mujoco-core` is the headless library and
