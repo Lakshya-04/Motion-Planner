@@ -129,6 +129,22 @@ class SafetyMonitor:
 
 # ---- sensor summaries (points are (x, y) in the base frame, +x forward) ----
 
+class HeldDirection:
+    """Direction of travel to check for obstacles; remembers the last one while the base is held."""
+
+    def __init__(self):
+        self.last = None
+
+    def hold(self, sent):
+        if math.hypot(sent[0], sent[1]) >= 1e-3:
+            self.last = sent
+
+    def look(self, sent):
+        if math.hypot(sent[0], sent[1]) >= 1e-3:
+            return sent
+        return self.last or sent
+
+
 def corridor_clearance(points, direction, half_width, max_range=5.0):
     """Distance to the nearest point inside a corridor `half_width` each side of the ray at angle `direction`
     (rad, base frame). Points behind the base are ignored. Returns max_range when the corridor is empty."""

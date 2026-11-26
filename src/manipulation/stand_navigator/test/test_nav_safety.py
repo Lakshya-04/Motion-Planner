@@ -133,3 +133,23 @@ def test_cloud_to_points_filters_height_and_nan():
     data = b''.join(struct.pack('<ffff', x, y, z, 1.0) for x, y, z in rows)
     pts = ns.cloud_to_points(data, step, (0, 4, 8))
     assert pts == [(pytest.approx(1.0), 0.0), (pytest.approx(0.7), pytest.approx(-0.1))]
+
+
+def test_held_direction_still_looks_at_the_obstacle():
+    h = ns.HeldDirection()
+    assert h.look((0.3, 0.0, 0.0)) == (0.3, 0.0, 0.0)
+    h.hold((0.3, 0.0, 0.0))
+    # stopped: clearance must still be measured along the old direction
+    assert h.look((0.0, 0.0, 0.0)) == (0.3, 0.0, 0.0)
+    pts = [(0.5, 0.0)]
+    cmd = h.look((0.0, 0.0, 0.0))
+    assert ns.corridor_clearance(pts, math.atan2(cmd[1], cmd[0]), 0.4) == pytest.approx(0.5)
+
+
+def test_held_direction_before_any_motion_and_after_resume():
+    h = ns.HeldDirection()
+    assert h.look((0.0, 0.0, 0.0)) == (0.0, 0.0, 0.0)
+    h.hold((0.0, 0.0, 0.0))
+    assert h.last is None
+    h.hold((0.0, 0.2, 0.0))
+    assert h.look((0.1, 0.0, 0.0)) == (0.1, 0.0, 0.0)
