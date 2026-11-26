@@ -26,7 +26,7 @@ xhost +SI:localuser:root >/dev/null 2>&1
 docker rm -f plan_pb plan_pb_rviz >/dev/null 2>&1
 PBENV=(); for v in $(compgen -e | grep "^PB_"); do PBENV+=(-e "$v=${!v}"); done   # every PB_* setting reaches the container
 docker run -d --name plan_pb --ipc=host --net=host --memory=3200m -e ROS_DOMAIN_ID=$DOM "${PBENV[@]}" -e PB_OUT=/out -e PB_MP_RVIZ=/mp_rviz \
-  -v "${PB_BUILD_VOL:-gzcols_b}":/ws/build -v "${PB_INSTALL_VOL:-gzcols_i}":/ws/install -v "$SRC":/ws/src \
+  -v "${PB_BUILD_VOL:-gzcols_b}":/ws/build -v "${PB_INSTALL_VOL:-gzcols_i}":/ws/install -v "$SRC":/ws/src ${PB_OVERLAY:+-v $PB_OVERLAY:/ov:ro -v $PB_OVERLAY/../build/coverage_planner:/ws/build/coverage_planner:ro -v $PB_OVERLAY/../build/manipulation_manager:/ws/build/manipulation_manager:ro} \
   -v "$HERE":/mp_rviz:ro -v "$OUT":/out "$IMG" bash /mp_rviz/scripts/plan_playback_inner.sh
 # RViz side: plan layers (coverage_output.json of the run), the tool trace from TF tcp_link in odom, live robot
 docker run -d --name plan_pb_rviz --ipc=host --net=host --memory=1500m -e ROS_DOMAIN_ID=$DOM -e LIBGL_ALWAYS_SOFTWARE=1 \

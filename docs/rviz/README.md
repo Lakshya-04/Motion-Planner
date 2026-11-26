@@ -171,3 +171,23 @@ Differences from the simulator pass, on purpose:
 - The mock plain controller rejects goals that end with a tiny nonzero velocity; the script sets
   `allow_nonzero_velocity_at_trajectory_end` on `lift_arm_controller` at run time, nothing in the packages is changed.
 - The base is kinematic (no wheel slip, no odometry error), so the stand arrival is exact.
+
+## Plan-only playback: the best known configuration
+
+`scripts/plan_playback.sh` runs the real manager, reachability and stand navigator on mock hardware (no simulator)
+and opens RViz with the plan layers. The settings below gave 17 of 19 columns and 806 s on the 3 x 2 m wall at 0.2 m/s
+(the same wall with the old defaults: 15 of 19, 1179 s). They need a workspace with `serpentine_columns`,
+`chain_columns` and `stand_merge_tol_m` in the manager (merged in #210, all opt-in; the `stand_merge_tol_m` default on main is 0 = off, so set 0.15 as below), built as an overlay if your workspace predates it.
+
+```bash
+PB_OUT=/path/to/run PB_OVERLAY=/path/to/overlay/install \
+PB_COV_EXTRA="-p double_pass:=false" \
+PB_MANAGER_EXTRA=$'    chain_columns: true\n    chain_max_shift_m: 0.4\n    serpentine_columns: true\n    stand_merge_tol_m: 0.15\n    stand_min_clearance_m: 0.40' \
+PB_EXTRA_STANDOFF=0.05 PB_SPEED=0.2 PB_Z_MIN=0.5 PB_Z_MAX=1.9 PB_MAX_SPAN=0.5 PB_PLANE_X=0.98 \
+bash src/common/mp_rviz/scripts/plan_playback.sh
+```
+
+Notes: `stand_min_clearance_m` is the chassis-to-wall clearance (arm base about 0.30 m further out), so 0.40 is an
+arm base 0.70 m from the wall; 0.70 put the arm at its reach limit and the stow failed. `PB_EXTRA_STANDOFF` is
+`spray_extra_standoff_m`: at 0.02 the tool mount grazed the wall model at the ends of a stand's span.
+Columns still failing: the last waypoints of a strip at z 1.9 and the outer column of a stand.

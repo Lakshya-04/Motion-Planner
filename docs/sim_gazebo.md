@@ -733,3 +733,15 @@ Read from the plain-wall run's `manager.log` and `sim_launch.log` (10 columns, 2
 
 One run each. The 872.5 N is a single episode at sim time 399.9 to 401.2 s (32 samples above 350 N, 774 above 100 N of 282663), on stand 1 (y 0.48 to 0.59 m,
 z 1.18 to 1.27 m); the feedback peak of the pass was 33.5 N. Not investigated, and one run does not show the pass is stable.
+
+### Queued visible runs (maintainer tooling)
+
+`docker/tools/gazebo-infra/` holds the wrappers used to run the two-stand pass visibly through a one-at-a-time job queue:
+`gz_queue.sh <prio> <name> <worktree> [VAR=val ...]` writes a job, `gz_run.sh` builds in the `sim-gazebo` image (shared ccache, per-lane
+build volumes), waits for the host's memory slots, runs `run_multi_stand_pass.sh` with `gui:=true` and the `MULTI_STAND_*` knobs from the
+environment, and writes `<name>_out`. The host layout is set by `MP_INFRA` (default `$HOME/mp-infra`: `cp/` for outputs, `jobs/`, `cctool`), `MP_REPO` (default `$HOME/Motion-Planner`, for `docker/tools/hostwatch`) and `SIMQ_ADD` (the queue's add script); `gz_in.sh` is the in-container driver the run script mounts from `$MP_INFRA/cp`. Copy and adapt.
+
+The sim container runs as `--user 1000:1000` with `--gpus all`, `NVIDIA_DRIVER_CAPABILITIES=all`, `__GLX_VENDOR_LIBRARY_NAME=nvidia` and
+`__NV_PRIME_RENDER_OFFLOAD=1`, so the Gazebo GUI renders on the NVIDIA GPU of a hybrid-graphics laptop. `MULTI_STAND_TCP_SETTLE_TOL` (default 0.002 m) is the arm-arrival tolerance next to
+`MULTI_STAND_TCP_SETTLE`: with the position loop's 10 s time constant a larger settle time and a tighter tolerance make the dock check
+wait for the arm instead of rejecting a pose it is still approaching.

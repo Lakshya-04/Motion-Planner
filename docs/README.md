@@ -1,5 +1,7 @@
 # Documentation
 
+Status of the newest additions (coverage paint, reach report, stand navigation planner, perception-in-the-loop mode, plan redundancy report, chained columns, navigation safety and Nav2 adapter, wall dock after navigate, column retry, touch-up plan, Gazebo script parity), each tagged verified in sim, host-tested only or unbuilt: see the table in the [top-level README](../README.md). At present none is verified in a simulator (all are host-tested only); the per-area evidence is in [ROADMAP.md](ROADMAP.md).
+
 | Document | What it covers |
 |---|---|
 | [ROADMAP.md](ROADMAP.md) | Status checklist for the whole workflow (done / partial / not done), the reuse map of open source and recent papers, the milestone order and the open decisions |
@@ -37,6 +39,7 @@
 | [sim_gazebo.md](sim_gazebo.md) | Gazebo Harmonic backend (`hardware:=gazebo`): headless launch, wall worlds from wall_scene.json, raw F/T sensor and ground-truth contact wrench, smoke test, limits |
 | [sim_overlay.md](sim_overlay.md) | Coverage plan columns and stand poses drawn inside Gazebo (gz-sim /marker) and MuJoCo (viewer user_scn); host-tested only, never run in a simulator |
 | [hardware_bringup.md](hardware_bringup.md) | Commissioning procedure for the force path on a real arm and sensor (sign and frame checks, payload identification, limits, slow first contact), abort thresholds, what the simulations do not model; nothing verified on hardware. Parameter template: [`hardware_template.yaml`](../src/control/compliant_trajectory_controller/config/hardware_template.yaml) |
+| [hardware_readiness.md](hardware_readiness.md) | Checklist of what is untested on real hardware and the commissioning order (lift, F/T, gains, safety limits, e-stop, base), each item with its file, parameter and status |
 | [lift.md](lift.md) | Driving the one lift joint: `lift_hardware` (home on connect, stroke clamp, velocity and acceleration limits, fault hold, reconnect backoff), the `LiftTransport` interface, the simulated and scripted transports, how a device transport plugs in (the device protocol is not public); the reference lift profile |
 | [calibration.md](calibration.md) | Calibration procedures in one place: F/T sign and bias, tool TCP (pivot calibration), payload services, wall plane, base-to-wall; nothing verified on hardware |
 | [release_checklist.md](release_checklist.md) | Public scan (names, paths, secrets), licence and version checks before a release; the maintainer decisions left open |
