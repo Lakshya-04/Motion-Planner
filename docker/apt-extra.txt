@@ -33,6 +33,9 @@ ros-@ROS@-pinocchio
 # orchestration / behavior trees (recovery manager, task sequencing)
 ros-@ROS@-behaviortree-cpp
 
+# base localisation (EKF fusing wheel odometry, IMU and scan matching)
+ros-@ROS@-robot-localization
+
 # robot descriptions (UR family for the starter configuration; arm:=ur10e)
 ros-@ROS@-ur-description
 ros-@ROS@-xacro
