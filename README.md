@@ -21,11 +21,11 @@ The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/
   out as in collision) or did not answer in time, and it needs 12 to 16 s per plan on the 4 GB laptop GPU. A `free_space_fallback` makes the
   hand-over automatic and logged; a start/goal precheck, a 7-joint collision-matrix fix (`--ignore-hops 2`) and a joint limit guard are in,
   but the cause of the low-lift refusal is a hypothesis until a GPU run confirms it ([docs/curobo_v2_notes.md](docs/curobo_v2_notes.md)).
-- **Gazebo two-stand passes still fail.** After the start-state clamps (#156, #157, no "start state out of bounds" error is left) the pass
-  completed 1 of 10 columns in the latest run (6 of 10 in the one before; the pass varies a lot between runs). The log shows the dock IK
-  jumping to another arm branch (shoulder pan -0.62 to +2.49 rad) and the wrist winding, after which every column fails. An opt-in dock IK
-  continuity choice (`dock_ik_continuity`, #169) targets that; it has not been measured in Gazebo on main yet
-  ([docs/sim_gazebo.md](docs/sim_gazebo.md)).
+- **Gazebo two-stand pass: failed on main, passes with the joint gain at 2 /s.** On main the pass completed 3 of 10 columns (coverage 0.32,
+  peak 1886 N, wall gap 57 mm, 1592 s). The cause is gz_ros2_control's joint position loop (gain 0.1 /s, a 10 s time constant): the arm
+  is still converging when the manager docks. `run_multi_stand_pass.sh` now sets `position_gain:=2.0`: 4 of 4 runs, 10 of 10 columns, coverage 100 %,
+  peak 45 to 59 N, wall gap at most 15 mm, about 9 minutes. Gains 3 and 4 bounce on the wall, 1 still fails columns. Force quality is behind MuJoCo (about 20 N);
+  other profiles and a tall wall are not measured ([docs/sim_gazebo.md](docs/sim_gazebo.md)).
 - **Merged since the cuRobo work, mostly host-tested only (no simulator, GPU or hardware run unless stated):** column-sequence feasibility
   (approach, contact, strokes, retract; split avoidance), an RM4D-backed column port in the manager (advisory, off by default), `ColumnIkChain`
   and a path quality audit (not yet called by the planner), a stand-check gate and dock IK continuity (both opt-in), N-DOF arms and a
@@ -144,7 +144,7 @@ Scored result of the filmed run (`score_run`, one run, made with the live viewer
 contact samples in the force band; tool tilt at most 31.8 deg (a transient: 0 tilted samples and 0 bad-pose samples by the scorer's rule), wall gap
 at most 15.8 mm; 277 s engaged. The 142 N is one spike between the two stands (visible in the force trace of the video at about 430 s of simulated time);
 its cause is not found. An earlier run of the same pass without the viewer scored 10 of 10, coverage 1.0, peak 22.1 N, tilt at most 0.15 deg, wall gap at
-most 0.9 mm. This pass runs the seeded dock IK (`dock_ik_seeded`), which is tuned for MuJoCo; the same pass in Gazebo still fails
+most 0.9 mm. This pass runs the seeded dock IK (`dock_ik_seeded`), which is tuned for MuJoCo; the Gazebo pass needs a stiffer joint loop than the plugin default
 ([docs/sim_gazebo.md](docs/sim_gazebo.md)).
 
 ### cuRobo in a two-stand pass (MuJoCo)

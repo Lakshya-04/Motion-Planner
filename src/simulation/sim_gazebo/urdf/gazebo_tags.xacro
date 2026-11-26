@@ -31,6 +31,7 @@
      Off by default. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:arg name="gz_base_motion" default="false"/>
+  <xacro:arg name="gz_extra_params" default=""/>
   <xacro:arg name="gz_depth_sensor" default="false"/>
   <xacro:arg name="gz_depth_xyz" default="0.1 0 1.15"/>
   <xacro:arg name="gz_depth_rpy" default="0 0 0"/>
@@ -92,6 +93,7 @@
     <gazebo>
       <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
         <parameters>$(find sim_gazebo)/config/controllers.yaml</parameters>
+        <xacro:if value="${'$(arg gz_extra_params)' != ''}"><parameters>$(arg gz_extra_params)</parameters></xacro:if>
       </plugin>
     </gazebo>
 
