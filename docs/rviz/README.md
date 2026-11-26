@@ -96,7 +96,7 @@ wall keys (`observed_area_m2`, `observed_fraction`, `plane_rms_mm`, `spread_p95_
 `merged_layers`, `layer_offset_spread_mm`), which it also writes.
 
 Measured on the full 3 x 2 m fixture with `contact_wiper`: 20 vertical strips, 0.15 m apart, centres y -1.475 to 1.375
-(each 0.2 m wide, so the whole 3.0 m width), two passes each, 80 poses; the planner reports 41.85 m of path and 8.37 m2
+(each 0.2 m wide, so the whole 3.0 m width), two passes each (the numbers were recorded before one pass became the default), 80 poses; the planner reports 41.85 m of path and 8.37 m2
 swept (overlap and the second pass counted), the unique strokes drawn are about 3.9 m2 of strip length x 0.2 m, and the
 wall is 6.0 m2 (the observed mask from the synthetic cloud is 2400/2400 cells). The strips run bottom-to-top and the
 planner joins one strip to the next with a straight diagonal (no connector segments unless `add_strip_connectors:=true`),
@@ -137,7 +137,7 @@ PB_OUT=/path/to/run_dir PB_SRC=$PWD/src PB_RVIZ_WS=/path/to/ws_with_mp_rviz_buil
 
 `PB_OUT` holds `coverage_output.json`, `data/walls.pcd` and `ur10e.rm4d` of an earlier run (reused, so the plan is
 reproducible); missing ones are built. By default the plan covers the WHOLE 3.0 x 2.0 m wall (`make_full_wall_fixture.py`
-in the odom frame, wall plane at `PB_PLANE_X`, strokes 0.2 m wide, 20 % overlap, two passes); `PB_FULL_WALL=0` plans the
+in the odom frame, wall plane at `PB_PLANE_X`, strokes 0.2 m wide, 20 % overlap, one pass; `PB_DOUBLE_PASS=true` adds the reverse pass); `PB_FULL_WALL=0` plans the
 0.9 m x 0.3 m patch of `run_multi_stand_pass.sh` instead. `data/smoke_wall_scene.json` there draws the wall in RViz.
 `PB_BUILD_VOL` / `PB_INSTALL_VOL` (default `gzcols_b` / `gzcols_i`) are the colcon build and install of `PB_SRC`.
 Every `PB_*` variable reaches the container. Settings: `PB_DOMAIN` (92), `PB_IMAGE`, `PB_SPEED` (tool speed along the
@@ -191,3 +191,10 @@ Notes: `stand_min_clearance_m` is the chassis-to-wall clearance (arm base about 
 arm base 0.70 m from the wall; 0.70 put the arm at its reach limit and the stow failed. `PB_EXTRA_STANDOFF` is
 `spray_extra_standoff_m`: at 0.02 the tool mount grazed the wall model at the ends of a stand's span.
 Columns still failing: the last waypoints of a strip at z 1.9 and the outer column of a stand.
+
+## The green TCP line
+
+`/mp_viz/tcp_executed` (the bright green line in `sim_overview.rviz`) draws the wall strokes only: the tool position while the
+conditioned force is above `path_contact_force_n` (default 2 N), with a break between strokes. Approach, retract, stow and base
+moves are free-space motion and are not drawn; `path_contact_only:=false` on `mp_viz_markers` draws everything again. Before this
+the line included every arm move and looped across the scene. It is a polyline of 1 cm steps (`path_min_step_m`).

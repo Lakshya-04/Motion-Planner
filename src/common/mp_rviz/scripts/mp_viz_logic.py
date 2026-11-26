@@ -64,3 +64,19 @@ def format_readout(state, stand_index, stand_count, force_n, limit_n, column=Non
             if force_n > limit_n:
                 f += '  OVER LIMIT'
     return '%s\n%s\n%s' % (s, stand, f)
+
+
+def line_list_points(points):
+    """Points for a LINE_LIST marker from a polyline in which ``None`` marks a break (the tool left the wall):
+    each run of consecutive points becomes segments between neighbours, and nothing joins two runs."""
+    out = []
+    prev = None
+    for pt in points:
+        if pt is None:
+            prev = None
+            continue
+        if prev is not None:
+            out.append(prev)
+            out.append(pt)
+        prev = pt
+    return out
