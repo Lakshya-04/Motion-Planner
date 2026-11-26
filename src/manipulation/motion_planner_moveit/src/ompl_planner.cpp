@@ -81,7 +81,16 @@ bool OmplPlanner::planOptimized(
   for (const auto * joint : jmg->getActiveJointModels()) {
     is_lift.push_back(joint->getType() == moveit::core::JointModel::PRISMATIC);
   }
-  quality.weights = applyLiftCostWeight(quality.weights, is_lift, optimize_.lift_cost_weight);
+  if (optimize_.joint_costs.empty()) {
+    quality.weights = applyLiftCostWeight(quality.weights, is_lift, optimize_.lift_cost_weight);
+  } else if (optimize_.joint_costs.size() == quality.weights.size()) {
+    quality.weights = applyJointCosts(quality.weights, optimize_.joint_costs);
+  } else {
+    RCLCPP_WARN(
+      log, "joint_costs has %zu entries but the group has %zu active joints: using lift_cost_weight instead",
+      optimize_.joint_costs.size(), quality.weights.size());
+    quality.weights = applyLiftCostWeight(quality.weights, is_lift, optimize_.lift_cost_weight);
+  }
   for (const auto & l : limits) {
     quality.velocity_limits.push_back(l.velocity);
     quality.acceleration_limits.push_back(l.acceleration);

@@ -35,7 +35,7 @@ With the lift free the IK tends to dock with the lift near its start and the too
 | Parameter | Default | Meaning |
 |---|---|---|
 | `dock_ik_reach_fraction` | 0.0 | Wanted upper bound of tool distance from the `arm_base_frame` origin over `dock_ik_reach_m`. 0 = off. |
-| `dock_ik_lift_cost_weight` | 2.0 | Multiplier of the lift (linear joint) delta in the dock IK candidate cost, so arm motion is preferred over lift motion. 1.0 restores the unweighted ordering. The `dock_ik_max_dq_rad` rejection stays on the raw delta. |
+| `dock_ik_lift_cost_weight` | 2.0 | Multiplier of the lift (linear joint) delta in the dock IK candidate cost, so arm motion is preferred over lift motion. 1.0 restores the unweighted ordering. The `dock_ik_max_dq_rad` rejection stays on the raw delta. Ignored when the profile has `joint_costs`: the choice then ranks by `cost_i * |dq_i| / range_i` per joint, like the planners. |
 | `dock_ik_reach_m` | 0.0 | Arm reach (m) from the `arm_base_frame` origin. Must be > 0 for the preference to act. |
 | `dock_ik_lift_joint` | 0 | Index of the lift joint in the planning group. |
 | `dock_ik_lift_min_m`, `dock_ik_lift_max_m` | 0.0, 1.5 | Stroke the proposed lift is clamped into. |
@@ -141,10 +141,10 @@ Between two columns of one stand the manager retracts and then plans an approach
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `chain_columns` | false | Try the straight chained approach between columns of one stand. |
+| `chain_columns` | true | Try the straight chained approach between columns of one stand. |
 | `chain_max_shift_m` | 0.4 | Longest distance (m) between the previous dock pose and the next approach pose that is still chained. |
-| `serpentine_columns` | false | Keep the plan's up/down direction per column, retract (straight, fsp fallback) at the stroke END, lower the tool before a stow from the top; use with `double_pass:=false`. Mock playback 3 x 2 m: 16/19 columns, 1090 s vs 15/19, 1179 s. |
-| `contact_connectors` | false | Between two adjacent strips of one stand, slide along the wall in contact to the start of the next strip (one Cartesian move, force loop still engaged) instead of retract + dock + approach. Use with `serpentine_columns` and `chain_columns`. See below. |
+| `serpentine_columns` | true | Keep the plan's up/down direction per column, retract (straight, fsp fallback) at the stroke END, lower the tool before a stow from the top; use with `double_pass:=false`. Mock playback 3 x 2 m: 16/19 columns, 1090 s vs 15/19, 1179 s. |
+| `contact_connectors` | true | Between two adjacent strips of one stand, slide along the wall in contact to the start of the next strip (one Cartesian move, force loop still engaged) instead of retract + dock + approach. Use with `serpentine_columns` and `chain_columns`. See below. |
 | `contact_connector_max_step_m` | 0.15 | Longest stroke-end to next-stroke-start distance (m) that still counts as adjacent (about 1.5 x the swath spacing). |
 | `contact_connector_plane_tol_m` | 0.02 | Largest offset (m) of that step along the wall normal (the two strips must lie on one wall plane). |
 
