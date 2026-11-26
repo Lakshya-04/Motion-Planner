@@ -127,6 +127,7 @@ test | coverage_output_json_source_test | manipulation_manager_core | src/manipu
 test | coverage_task_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/coverage_task_test.cpp | 
 test | dock_ik_selector_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/dock_ik_selector_test.cpp |
 test | serpentine_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/serpentine_test.cpp | 
+test | contact_connector_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/contact_connector_test.cpp | 
 test | frame_transform_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/frame_transform_test.cpp | 
 test | geometric_coverage_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/geometric_coverage_test.cpp | 
 test | joint_names_test | manipulation_manager_core | src/manipulation/manipulation_manager/test/joint_names_test.cpp | 
