@@ -111,6 +111,18 @@ nvcc is cached where CMake drives it (`CMAKE_CUDA_COMPILER_LAUNCHER`). `/ccache`
 | Python / GPU stack (torch, cuRobo, trimesh, ...) with pins | `docker/requirements-gpu.txt` |
 | Pinned third-party commits | `Dockerfile` args (`VAMP_REF`), `requirements-gpu.txt` (cuRobo), `docker/tools/build_robot_tools.sh` (FOAM, Cricket) |
 
+## Developer entry points
+
+`make help` lists every common task with a one-line description; each target prints the command it runs.
+`make doctor` (`docker/tools/doctor.sh`) checks the machine in a few seconds and says what to fix: free disk on
+the Docker root and the repo (warn under 40 GB, fail under 15 GB), Docker and buildx, which images are built,
+the NVIDIA runtime, whether the Ubuntu mirrors, GitHub, PyPI, PyTorch and conda are reachable (and whether a
+TLS inspection proxy sits in between), the ROS variables, the MuJoCo SDK and the profiles. It exits non-zero
+only on a failure, not a warning. Options: `--quiet`, `--json`, `--gpu` (a real `docker run --gpus all` smoke,
+needs the `gpu` image), `--repo` (also the public-readiness scan), `--no-network`; pass them to make as
+`make doctor ARGS=--repo`. Other targets: `check`, `host-tests`, `py-tests`, `lint`, `images` and one
+`image-<target>` per Dockerfile target, `robot-tools`, `robot-assets PROFILE=...`. Nothing in the Makefile deletes anything.
+
 ## Run all checks
 
 CI ([`ci.yml`](../.github/workflows/ci.yml)) runs the build, the colcon tests and the readiness scan on free runners; simulators and GPU stay local ([CONTRIBUTING.md](../CONTRIBUTING.md)). One script runs lines 1 to 3 below:
@@ -144,6 +156,26 @@ python3 docker/tools/check_public_readiness.py
 #      ros2 run sim_gazebo smoke_test.py    ros2 run sim_gazebo contact_control_test.py
 #      src/simulation/sim_gazebo/scripts/run_manager_pass.sh
 ```
+
+The headless simulator checks have a command of their own, `docker/run_sim_checks.sh`. It runs in the `sim-gazebo`
+image (`docker build -f docker/Dockerfile --target sim-gazebo -t motion-planner:sim-gazebo .`), builds what it
+needs into the volumes `mp_sim_build`, `mp_sim_install` and `mp_sim_log`, starts each simulator on its own
+`ROS_DOMAIN_ID`, and prints a PASS/FAIL table with the seconds each took:
+
+```bash
+docker/run_sim_checks.sh                              # Gazebo: smoke, depth-wall, base-motion
+docker/run_sim_checks.sh --mujoco-root /opt/mujoco-sdk/mujoco-4.0.1   # also the MuJoCo smoke test
+docker/run_sim_checks.sh --no-build --only gazebo-smoke
+docker/run_sim_checks.sh --out /tmp/sim_checks         # keep each check's log and a results.json there
+docker/run_sim_checks.sh --list
+```
+
+It does not run the contact scripts or the manager passes, which take minutes each (lines above).
+
+`.github/workflows/nightly-sim-checks.yml` runs the Gazebo checks every night on a GitHub-hosted runner (CPU, no MuJoCo, no GPU
+planners) and uploads the `--out` directory and the console log as an artifact; a failed check fails the run. It has not run on a
+runner yet, only the script was run locally and the YAML went through actionlint. The first run builds the image from scratch, so
+expect it to be slow.
 
 Give each simulator run its own `ROS_DOMAIN_ID`. The simulator scripts are not part of `colcon test`.
 A pass of lines 1 to 3 says nothing about GPU planning, the simulators or hardware.
