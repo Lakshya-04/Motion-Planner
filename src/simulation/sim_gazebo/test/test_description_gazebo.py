@@ -160,6 +160,19 @@ def test_lidar_and_depth_frames_can_be_renamed():
     assert s.find('gz_frame_id').text == 'front_camera_link'
 
 
+def test_imu_off_by_default_and_a_gz_imu_with_opt_in_noise_on_imu_link():
+    assert _render_with({}).find("link[@name='imu_link']") is None
+    robot = _render_with({'gz_imu': 'true', 'gz_imu_xyz': '0 0 0.2', 'gz_imu_gyro_noise': '0.002',
+                          'gz_imu_accel_bias': '0.05'})
+    j = robot.find("joint[@name='imu_joint']")
+    assert j.find('parent').get('link') == 'base_footprint' and j.find('origin').get('xyz') == '0 0 0.2'
+    s = robot.find("gazebo[@reference='imu_link']/sensor[@type='imu']")
+    assert s.find('topic').text == '/imu' and s.find('gz_frame_id').text == 'imu_link'
+    assert float(s.find('imu/angular_velocity/z/noise/stddev').text) == 0.002
+    assert float(s.find('imu/angular_velocity/z/noise/bias_stddev').text) == 0.0
+    assert float(s.find('imu/linear_acceleration/x/noise/bias_stddev').text) == 0.05
+
+
 def test_rgb_camera_off_by_default_and_a_gz_camera_on_rgb_camera_link():
     assert _render_with({}).find("link[@name='rgb_camera_link']") is None
     robot = _render_with({'gz_rgb_camera': 'true', 'gz_rgb_xyz': '0.2 0 1.0', 'gz_rgb_width': '640', 'gz_rgb_height': '480'})

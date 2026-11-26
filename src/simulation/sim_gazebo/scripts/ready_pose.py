@@ -30,14 +30,14 @@ PROFILE = 'ur10e_telescopic'
 FREE = [0.4, -0.0363, 0.2528, 1.1964, 1.6924, -1.5345, 1.5708]
 
 
-def planned_trajectory(node, joints, target, scale):
-    """Plan-only MoveGroup goal on lift_arm (collision-checked, from the live state); the JointTrajectory or None."""
+def planned_trajectory(node, joints, target, scale, group):
+    """Plan-only MoveGroup goal on `group` (the profile's whole-body group; collision-checked, from the live state); the JointTrajectory or None."""
     client = ActionClient(node, MoveGroup, '/move_action')
     if not client.wait_for_server(timeout_sec=30.0):
         print('ready_pose: no /move_action server', file=sys.stderr)
         return None
     req = MotionPlanRequest()
-    req.group_name = 'lift_arm'
+    req.group_name = group
     req.num_planning_attempts = 5
     req.allowed_planning_time = 10.0
     req.max_velocity_scaling_factor = scale
@@ -87,6 +87,8 @@ def execute(node, traj):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--controller', default='combined_arm_lift_controller')
+    ap.add_argument('--profile', default=PROFILE, help='robot profile (joint order and planning group)')
+    ap.add_argument('--group', default='', help='MoveIt group of --planned; empty = the profile whole-body group')
     ap.add_argument('--seconds', type=float, default=8.0)
     ap.add_argument('--joints', help='7 comma separated joint values in the order of FREE')
     ap.add_argument('--planned', action='store_true', help='plan with move_group (collision-checked) instead of a joint move')
@@ -99,7 +101,8 @@ def main():
         if len(target) != len(FREE):
             print(f'ready_pose: --joints needs {len(FREE)} values', file=sys.stderr)
             os._exit(1)
-    joints = prof.controlled_joints(prof.load_profile(PROFILE))
+    profile = prof.load_profile(args.profile)
+    joints = prof.controlled_joints(profile)
     rclpy.init()
     node = st.Probe(joints, args.controller)
     if not node.spin_until(lambda: node.sim_time is not None and not any(math.isnan(v) for v in node.positions())
@@ -107,7 +110,7 @@ def main():
         print('ready_pose: no clock / joint states / action server', file=sys.stderr)
         os._exit(1)
     if args.planned:
-        traj = planned_trajectory(node, joints, target, args.scale)
+        traj = planned_trajectory(node, joints, target, args.scale, args.group or profile.whole_body_group)
         ok = traj is not None and execute(node, traj)
     else:
         ok = node.send(target, args.seconds)

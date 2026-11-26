@@ -34,7 +34,12 @@
      gz_rgb_rpy, x forward) with a gz-sim colour camera (gz_rgb_width x gz_rgb_height, 60 degrees, 0.05 to 20 m,
      gz_rgb_rate Hz) that publishes gz Image on /rgb_camera/image; the launch file adds the Sensors system to the
      world and bridges it to sensor_msgs/Image. For stills of a run (capture_still.py); not part of the control loop.
-     Off by default. -->
+     Off by default.
+
+     gz_imu:=true (launch arg imu:=true) adds the link imu_link on base_footprint (gz_imu_xyz / gz_imu_rpy) with a gz-sim
+     imu sensor (gz_imu_rate Hz) that publishes gz IMU on /imu; the launch file adds the Imu system to the world and bridges
+     it to sensor_msgs/Imu. Noise is off: gz_imu_gyro_noise / gz_imu_accel_noise are the white std per sample (rad/s, m/s^2),
+     gz_imu_gyro_bias / gz_imu_accel_bias the std of a constant per-axis offset drawn once at start. Off by default. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:arg name="gz_base_motion" default="false"/>
   <xacro:arg name="gz_extra_params" default=""/>
@@ -55,6 +60,14 @@
   <xacro:arg name="gz_lidar_rate" default="10.0"/>
   <xacro:arg name="gz_lidar_noise" default="0.0"/>
   <xacro:arg name="gz_lidar_frame" default="lidar_link"/>
+  <xacro:arg name="gz_imu" default="false"/>
+  <xacro:arg name="gz_imu_xyz" default="0 0 0.1"/>
+  <xacro:arg name="gz_imu_rpy" default="0 0 0"/>
+  <xacro:arg name="gz_imu_rate" default="100.0"/>
+  <xacro:arg name="gz_imu_gyro_noise" default="0.0"/>
+  <xacro:arg name="gz_imu_gyro_bias" default="0.0"/>
+  <xacro:arg name="gz_imu_accel_noise" default="0.0"/>
+  <xacro:arg name="gz_imu_accel_bias" default="0.0"/>
   <xacro:arg name="gz_rgb_camera" default="false"/>
   <xacro:arg name="gz_rgb_xyz" default="0.0 -2.4 1.6"/>
   <xacro:arg name="gz_rgb_rpy" default="0 0.11 1.38"/>
@@ -178,6 +191,36 @@
               <stddev>$(arg gz_lidar_noise)</stddev>
             </noise>
           </lidar>
+        </sensor>
+      </gazebo>
+    </xacro:if>
+
+    <xacro:if value="${'$(arg gz_imu)' == 'true'}">
+      <link name="imu_link"/>
+      <joint name="imu_joint" type="fixed">
+        <parent link="base_footprint"/>
+        <child link="imu_link"/>
+        <origin xyz="$(arg gz_imu_xyz)" rpy="$(arg gz_imu_rpy)"/>
+      </joint>
+      <gazebo reference="imu_link">
+        <sensor name="imu" type="imu">
+          <always_on>true</always_on>
+          <update_rate>$(arg gz_imu_rate)</update_rate>
+          <visualize>false</visualize>
+          <topic>/imu</topic>
+          <gz_frame_id>imu_link</gz_frame_id>
+          <imu>
+            <angular_velocity>
+              <x><noise type="gaussian"><mean>0.0</mean><stddev>$(arg gz_imu_gyro_noise)</stddev><bias_mean>0.0</bias_mean><bias_stddev>$(arg gz_imu_gyro_bias)</bias_stddev></noise></x>
+              <y><noise type="gaussian"><mean>0.0</mean><stddev>$(arg gz_imu_gyro_noise)</stddev><bias_mean>0.0</bias_mean><bias_stddev>$(arg gz_imu_gyro_bias)</bias_stddev></noise></y>
+              <z><noise type="gaussian"><mean>0.0</mean><stddev>$(arg gz_imu_gyro_noise)</stddev><bias_mean>0.0</bias_mean><bias_stddev>$(arg gz_imu_gyro_bias)</bias_stddev></noise></z>
+            </angular_velocity>
+            <linear_acceleration>
+              <x><noise type="gaussian"><mean>0.0</mean><stddev>$(arg gz_imu_accel_noise)</stddev><bias_mean>0.0</bias_mean><bias_stddev>$(arg gz_imu_accel_bias)</bias_stddev></noise></x>
+              <y><noise type="gaussian"><mean>0.0</mean><stddev>$(arg gz_imu_accel_noise)</stddev><bias_mean>0.0</bias_mean><bias_stddev>$(arg gz_imu_accel_bias)</bias_stddev></noise></y>
+              <z><noise type="gaussian"><mean>0.0</mean><stddev>$(arg gz_imu_accel_noise)</stddev><bias_mean>0.0</bias_mean><bias_stddev>$(arg gz_imu_accel_bias)</bias_stddev></noise></z>
+            </linear_acceleration>
+          </imu>
         </sensor>
       </gazebo>
     </xacro:if>

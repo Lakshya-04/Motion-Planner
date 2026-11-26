@@ -176,6 +176,13 @@ centre, extent), and that the coverage planner accepts the written scene. Result
 median x 0.8150 m (wall at 0.8150), normal error 0.008 degrees, plane error 0.08 mm, rms 2.99 mm, extent 0.95 x 0.64 m, coverage plan 14 waypoints
 and 1.02 m^2. At the home pose the fit is clean (the robot does not block the view); an arm raised in front of the sensor would appear in the cloud and is not filtered.
 
+## IMU (`imu:=true`)
+
+Default `false`: nothing is added. With `true` the description gets `imu_link` (on `base_footprint` at `imu_pose`, default `0 0 0.1 0 0 0`) with a gz-sim
+`imu` sensor at `imu_rate_hz` (100), the launch file adds `gz-sim-imu-system` to the world and bridges `/imu` to `sensor_msgs/Imu`. Noise and bias are
+off; `imu_gyro_noise`, `imu_gyro_bias`, `imu_accel_noise`, `imu_accel_bias` switch them on (Gazebo's gaussian `<noise>`, bias drawn once at start). The
+gz covariance fields stay 0. Used by the opt-in EKF, `localisation:=true` ([localisation.md](localisation.md)); `worlds/room.sdf` is the closed room that run uses.
+
 ## Colour camera (`rgb_camera:=true`)
 
 Default `false`: nothing is added. With `true` the description gets `rgb_camera_link` (on `base_footprint` at `rgb_camera_pose`,
