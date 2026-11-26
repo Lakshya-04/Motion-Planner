@@ -182,7 +182,12 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        node._stop()
+        # Ctrl-C already shut the context down, so only stop the base if it is still up
+        if rclpy.ok():
+            node._stop()
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
