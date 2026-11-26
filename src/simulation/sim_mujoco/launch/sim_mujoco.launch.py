@@ -168,7 +168,12 @@ def _setup(context, *args, **kwargs):
             nodes.append(IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(rviz_launch),
                 launch_arguments={'profile': arg('rviz_profile'), 'use_sim_time': 'false',
-                                  'markers': arg('rviz_markers'), 'scene': arg('rviz_scene')}.items()))
+                                  'markers': arg('rviz_markers'), 'scene': arg('rviz_scene'), 'fixed_frame': 'odom',
+                                  'scene_frame': 'odom', 'plan_file': arg('rviz_plan_file'),
+                                  'wall_scene_json': arg('rviz_wall_scene'),
+                                  # the wall geom of the generated MJCF is the wall the sim has; an explicit rviz_wall_scene wins
+                                  'wall_mjcf': '' if arg('rviz_wall_scene') or not arg('scene') else str(mjcf),
+                                  'moveit_profile': arg('profile')}.items()))
     if arg('base_motion') == 'true':
         # the plugin publishes the base pose as geometry_msgs only; this turns it into /odom and TF
         nodes.append(Node(package='sim_mujoco', executable='base_odom.py', name='base_odom', output='screen',
@@ -254,8 +259,10 @@ def generate_launch_description():
                               description='open the MuJoCo viewer (needs a display and python mujoco)'),
         DeclareLaunchArgument('rviz', default_value='true',
                               description='open the same RViz window as the Gazebo sim (mp_rviz view.launch.py); on by default, skipped without a display, rviz:=false opts out'),
-        DeclareLaunchArgument('rviz_profile', default_value='mission_overview', description='mp_rviz profiles/<name>.rviz'),
+        DeclareLaunchArgument('rviz_profile', default_value='sim_overview', description='mp_rviz profiles/<name>.rviz'),
+        DeclareLaunchArgument('rviz_plan_file', default_value='', description='coverage_output.json the manager executes (plan columns)'),
+        DeclareLaunchArgument('rviz_wall_scene', default_value='', description='wall_scene.json for the wall display (default: scene)'),
         DeclareLaunchArgument('rviz_markers', default_value='true', description='also start mp_viz_markers.py'),
-        DeclareLaunchArgument('rviz_scene', default_value='false', description='also start mp_viz_scene.py'),
+        DeclareLaunchArgument('rviz_scene', default_value='true', description='also start mp_viz_scene.py (wall, plan columns, stands)'),
         OpaqueFunction(function=_setup),
     ])
