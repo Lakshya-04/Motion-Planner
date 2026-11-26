@@ -211,6 +211,28 @@ The `name` in the XML is what the config uses. Without ROS (unit tests, other ho
 factories in a `FactoryRegistry` and call `PlanningPipeline::build` directly; see
 `motion_planner/test/core/planning_pipeline_test.cpp`.
 
+## Pose goals for joint-goal planners (`IkThenPlanPlanner`)
+
+`IkThenPlanPlanner` (`core/planners/ik_then_plan_planner.hpp`, ROS-free) wraps a planner that only
+takes a joint goal, VAMP for one, and gives it a pose goal. A joint goal goes straight through. For
+a pose goal it asks the `IkPort` from the start state, then from up to `max_ik_seeds` more seeds
+(the home pose, then perturbed starts from a fixed RNG seed), keeps the first solution that is
+inside the joint limits and, if a `CollisionPort` was given, collision-free, and plans to it.
+
+Failures name the stage: `ik_failed`, `ik_goal_in_collision`, `unsupported_constraint`,
+`invalid_request`, `ik_timeout`, `cancelled`, `collision_check_failed` come from the IK stage (message
+starts `ik stage:`); anything the inner planner returns keeps its own code (message starts `plan stage:`).
+
+A pose tolerance is never loosened. `IkRequest` has `position_tolerance` / `orientation_tolerance`
+(unset by default) and the MoveIt IK backend ignores them, so a configured tolerance only works with
+`ik_honors_tolerance = true`; otherwise a pose goal fails with `unsupported_constraint`. One pose
+goal per request. `time_budget_s` and a `cancel` callback are checked between IK seeds, not inside a solve.
+
+What it does not do: it is not a pluginlib plugin and cannot be selected from `planning_config`
+yet (it would be a `free_space` wrapper built from the selected `ik`, `collision` and free-space
+plugins); it has not been run with VAMP, cuRobo or in a simulator, only against fakes in
+`ik_then_plan_planner_test`.
+
 ## Limitations
 
 What each backend can do today (see also the table in [ROADMAP.md](ROADMAP.md) section 5):
@@ -224,7 +246,7 @@ What each backend can do today (see also the table in [ROADMAP.md](ROADMAP.md) s
 
 - A plugin is selected for a role, not checked against the request: choosing `vamp` for
   `free_space` makes the planner return `unsupported`/invalid-request failures for pose-only
-  segments. Using VAMP from the manager needs an IK step in front of it, which is not built.
+  segments. Using VAMP from the manager needs an IK step in front of it: `IkThenPlanPlanner` is that step, but it is not wired or selectable yet (see above).
 - The selected `ik` and `collision` plugins are built, initialized and published to the context
   (and available from `PlanningPipeline::ik()` / `collision()`), but `MotionPlanner` does not call
   them: each planner still answers `ik()` and `collision()` itself. Selecting another IK therefore
