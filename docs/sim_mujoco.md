@@ -115,6 +115,24 @@ is not (see below). The generator option `gravcomp` takes `True` (default, as de
 `0.0005 * effort`; lift 100 N s/m and 2 kg) chosen so the implicit-fast integrator stays stable at
 2 ms and a 100 Hz controller.
 
+### Gravity: `gravity_comp:=mujoco|core|none`
+
+| Value | What holds the arm | Use |
+|---|---|---|
+| `mujoco` (default) | MuJoCo `gravcomp` on every body before the F/T site | unchanged behaviour |
+| `core` | `gravcomp` off; the plugin adds a [`gravity_core`](../src/control/gravity_core/README.md) torque to every joint | what a real arm needs, and the way to test it |
+| `none` | `gravcomp` off, plain PD | shows the sag the PD alone gives |
+
+With `core` the plugin builds the model from the robot description it was loaded with (masses and centres of
+mass, mimic lift stages included) and, once per control period, adds `tau_g(q) / kp` to `ctrl` at the measured
+joint positions, next to the velocity feed-forward. The force range still clamps it. The tool is part of the
+model, so its weight is carried too; the F/T conditioner still removes it from the wrench as before.
+
+It is a hardware parameter (`gravity_feedforward`, set from `SIM_MUJOCO_GRAVITY_FF` by the launch). If it is on and
+the MJCF still has `gravcomp` bodies the plugin warns: gravity would be counted twice. An extra payload can be
+given with `gravity_payload_link`, `gravity_payload_mass` and `gravity_payload_cog`
+(`SIM_MUJOCO_GRAVITY_PAYLOAD_*`). Results of the three modes in [gravity_compensation.md](gravity_compensation.md).
+
 ## Tool force/torque
 
 Modelled like a real wrist sensor, nothing is pre-compensated:
