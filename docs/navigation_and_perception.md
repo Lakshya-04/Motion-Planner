@@ -27,6 +27,7 @@ Details live in [perception_live.md](perception_live.md), [stand_navigation.md](
 | Component | Status | MuJoCo | Gazebo | Hardware |
 |---|---|---|---|---|
 | Depth sensor | sim only | Ray-cast (`mj_multiRay`) on scene geoms only, optional Gaussian range noise; no robot self hits, no texture | gz `depth_camera`, optional noise; used in `run_depth_wall.sh` only | untested; no driver in the repo |
+| 2D lidar | sim only | `lidar:=true`: `mj_multiRay` fan on scene geoms only, `LaserScan` on `/scan`; `run_lidar_stop.sh` | `lidar:=true`: gz `gpu_lidar`, `/scan`; `run_lidar_stop.sh` | untested; no driver in the repo |
 | `robot_self_filter` | real (29 tests), not in any pass | not started (the MuJoCo cloud never contains the robot) | not started | untested |
 | `wall_detector` (RANSAC + PCA plane) | real for one plane; sim input only | started only by `run_sensed_pass.sh`, `run_depth_wall.sh`, `run_live_octomap.sh`, `run_wall_docking.sh`; not by the two-stand pass | `run_depth_wall.sh` only; not in the two-stand pass | untested |
 | `scene_model` (loaders, RANSAC, ESDF) | real library | used by the detector and the loaders | same | untested |
@@ -40,7 +41,7 @@ Details live in [perception_live.md](perception_live.md), [stand_navigation.md](
 | `wall_docking_node` (`WallDock`) | real controller, tested in sim in isolation, not wired into the manager | only `run_wall_docking.sh` (single dock, wall plane from `wall_detector` on odom; 3 runs: 5 mm and 0.01 deg) | none | untested |
 | Localisation | missing: the odom frame is the world frame, the base starts at its origin | `/odom` = simulated pose, no noise | `/odom` = `OdometryPublisher`, no noise | untested |
 | Nav2 | not installed in any image, no adapter | none | none | none |
-| Base safety (obstacle stop, e-stop on the base) | missing; the manager stops the base only on cancel, timeout, stale odom | none | none | none |
+| Base safety (obstacle stop, e-stop on the base) | `nav_safety` obstacle stop from a `LaserScan` exists in `stand_navigator` (`obstacle_scan_topic`, off by default); not an e-stop, not in the manager passes | `run_lidar_stop.sh`: stops 0.30 m short of a floor box seen by the sim lidar; without the lidar the base drives into it | same, in an empty world | none |
 | Manager `navigate_to_stand` call | real client; goal in the world (odom) frame, waits for the result, optional stand-check gate on arrival error (`stand_check`) | used | used | untested |
 | MoveIt / cuRobo / VAMP planning | real | real, against the baked wall | real, against the baked wall | untested |
 | JTAC + F/T | real controller; sensing is simulated | simulated F/T | simulated F/T | untested (see [hardware_bringup.md](hardware_bringup.md)) |
