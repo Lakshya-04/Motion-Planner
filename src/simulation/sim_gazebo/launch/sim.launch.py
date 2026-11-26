@@ -9,6 +9,8 @@
   ros2 launch sim_gazebo sim.launch.py rgb_camera:=true                  # gz colour camera -> /rgb_camera/image
   ros2 launch sim_gazebo sim.launch.py depth_sensor:=true                # gz depth camera -> /depth_sensor/points
   ros2 launch sim_gazebo sim.launch.py lidar:=true                       # gz gpu_lidar -> /scan (LaserScan)
+  ros2 launch sim_gazebo sim.launch.py imu:=true                         # gz imu -> /imu (noise and bias off unless set)
+  ros2 launch sim_gazebo sim.launch.py base_motion:=true odom_realism:=typical imu:=true localisation:=true  # EKF -> /odometry/filtered
 
 What starts: gz sim (server only unless gui:=true), robot_state_publisher, the robot spawned from
 the description rendered with hardware:=gazebo from the profile's xacro args, ros_gz_bridge for
@@ -39,6 +41,7 @@ from sim_gazebo import profile as prof
 from sim_gazebo import wall_world
 
 FT_FRAME = 'ft_sensor_link'   # raw wrench frame: the sensor body between flange and tool
+IMU_PLUGIN = '  <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>\n'
 SENSORS_PLUGIN = ('  <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">'
                   '<render_engine>ogre2</render_engine></plugin>\n')
 WORLD_CAMERA_MODEL = '''  <model name="rgb_camera_world">
@@ -153,6 +156,21 @@ def _launch(context):
                         gz_lidar_max_angle=repr(hi), gz_lidar_samples=str(int((hi - lo) / step + 1e-3) + 1),
                         gz_lidar_min=lc('lidar_range_min_m'), gz_lidar_max=lc('lidar_range_max_m'),
                         gz_lidar_rate=lc('lidar_rate_hz'), gz_lidar_noise=lc('lidar_noise_m'))
+    imu = lc('imu') == 'true'
+    if imu:
+        pose = [float(v) for v in lc('imu_pose').split()]
+        if len(pose) != 6:
+            raise ValueError('imu_pose needs "x y z roll pitch yaw"')
+        mappings.update(gz_imu='true', gz_imu_xyz=' '.join(map(str, pose[:3])), gz_imu_rpy=' '.join(map(str, pose[3:])),
+                        gz_imu_rate=lc('imu_rate_hz'), gz_imu_gyro_noise=lc('imu_gyro_noise'),
+                        gz_imu_gyro_bias=lc('imu_gyro_bias'), gz_imu_accel_noise=lc('imu_accel_noise'),
+                        gz_imu_accel_bias=lc('imu_accel_bias'))
+    localise = lc('localisation') == 'true'
+    if localise and not (base_motion and lc('odom_realism') != 'off'):
+        raise ValueError('localisation:=true needs base_motion:=true and odom_realism:=good|typical|poor '
+                         '(with truth odometry there is nothing to filter)')
+    if localise and lc('localisation_scan_match') == 'true' and not lidar:
+        raise ValueError('localisation_scan_match:=true needs lidar:=true')
     rgb = lc('rgb_camera') == 'true'
     world_camera = ''
     if rgb:
@@ -185,13 +203,18 @@ def _launch(context):
             rviz_world_wall = os.path.join(os.path.dirname(world), 'rviz_world_wall.json')
             with open(rviz_world_wall, 'w') as f:
                 json.dump(wall_world.world_wall_scene(shapes, int(lc('wall_id'))), f, indent=2)
-    if depth or rgb or lidar:
-        # the render sensors need the Sensors system in the world (ogre2; no display: gz falls back to headless)
+    if depth or rgb or lidar or imu:
+        # the render sensors need the Sensors system in the world (ogre2; no display: gz falls back to headless),
+        # the imu its own system
         with open(world) as f:
             sdf = f.read()
-        if 'gz-sim-sensors-system' not in sdf or world_camera:
-            if 'gz-sim-sensors-system' not in sdf:
+        need_sensors = (depth or rgb or lidar) and 'gz-sim-sensors-system' not in sdf
+        need_imu = imu and 'gz-sim-imu-system' not in sdf
+        if need_sensors or need_imu or world_camera:
+            if need_sensors:
                 sdf = sdf.replace('</world>', SENSORS_PLUGIN + '</world>', 1)
+            if need_imu:
+                sdf = sdf.replace('</world>', IMU_PLUGIN + '</world>', 1)
             sdf = sdf.replace('</world>', world_camera + '</world>', 1)
             world = os.path.join(tempfile.mkdtemp(prefix='sim_gazebo_world_'), 'world_sensors.sdf')
             with open(world, 'w') as f:
@@ -231,6 +254,8 @@ def _launch(context):
             remaps.append(('/depth_sensor/points', '/depth_sensor/points_truth'))
     if lidar:
         bridged.append('/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan')
+    if imu:
+        bridged.append('/imu@sensor_msgs/msg/Imu[gz.msgs.IMU')
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge', output='screen',
                   arguments=bridged, remappings=remaps,
                   parameters=[{'use_sim_time': True}])
@@ -266,7 +291,14 @@ def _launch(context):
             launch_arguments={'odom_realism': lc('odom_realism') if base_motion else 'off',
                               'depth_realism': lc('depth_realism') if depth else 'off',
                               'seed': lc('realism_seed'), 'overrides': lc('realism_overrides'),
-                              'use_sim_time': 'true'}.items()))
+                              # the EKF publishes odom -> base_footprint instead when localisation is on
+                              'publish_tf': 'false' if localise else 'true', 'use_sim_time': 'true'}.items()))
+    if localise:
+        actions.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(get_package_share_directory('base_localisation'), 'launch',
+                                                       'localisation.launch.py')),
+            launch_arguments={'platform': lc('localisation_platform'), 'imu': 'true' if imu else 'false',
+                              'scan_match': lc('localisation_scan_match'), 'use_sim_time': 'true'}.items()))
     if lc('arm_meshes') == 'true':
         # gz resolves the description's model://ur_description/... URIs through GZ_SIM_RESOURCE_PATH; without it the UR links
         # have no visual and no collision geometry in gz (only the primitives of the lift, tool and sensor link exist)
@@ -371,6 +403,27 @@ def generate_launch_description():
         DeclareLaunchArgument('lidar_range_max_m', default_value='10.0', description='lidar maximum range, m'),
         DeclareLaunchArgument('lidar_rate_hz', default_value='10.0', description='lidar rate, Hz'),
         DeclareLaunchArgument('lidar_noise_m', default_value='0.0', description='Gaussian range noise std of the lidar, m'),
+        DeclareLaunchArgument('imu', default_value='false',
+                              description='true: gz imu on base_footprint, sensor_msgs/Imu on /imu in frame imu_link; false adds '
+                                          'nothing. Noise and bias are off (imu_gyro_noise, imu_gyro_bias, imu_accel_noise, '
+                                          'imu_accel_bias)'),
+        DeclareLaunchArgument('imu_pose', default_value='0 0 0.1 0 0 0',
+                              description='"x y z roll pitch yaw" of imu_link in base_footprint'),
+        DeclareLaunchArgument('imu_rate_hz', default_value='100.0', description='imu rate, Hz'),
+        DeclareLaunchArgument('imu_gyro_noise', default_value='0.0', description='gyro white noise std per sample, rad/s'),
+        DeclareLaunchArgument('imu_gyro_bias', default_value='0.0',
+                              description='std of the constant gyro bias drawn per axis at start, rad/s'),
+        DeclareLaunchArgument('imu_accel_noise', default_value='0.0',
+                              description='accelerometer white noise std per sample, m/s^2'),
+        DeclareLaunchArgument('imu_accel_bias', default_value='0.0',
+                              description='std of the constant accelerometer bias drawn per axis at start, m/s^2'),
+        DeclareLaunchArgument('localisation', default_value='false',
+                              description='true: robot_localization EKF (base_localisation) on /odom and /imu (and /scan with '
+                                          'localisation_scan_match) -> /odometry/filtered and TF odom -> base_footprint; '
+                                          'needs base_motion:=true and odom_realism on'),
+        DeclareLaunchArgument('localisation_platform', default_value='omni', description='diff | omni | ackermann'),
+        DeclareLaunchArgument('localisation_scan_match', default_value='false',
+                              description='true: also fuse lidar scan matching (needs lidar:=true)'),
         DeclareLaunchArgument('odom_realism', default_value='off',
                               description='off|good|typical|poor: wheel-odometry noise from sim_realism (needs base_motion:=true); '
                                           'gz odometry becomes /odom_truth, the node publishes /odom and TF (docs/sim_realism.md)'),

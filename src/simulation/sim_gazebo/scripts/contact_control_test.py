@@ -43,7 +43,7 @@ import smoke_test as st
 from sim_gazebo import fk
 from sim_gazebo import profile as prof
 
-JTAC = 'combined_arm_lift_controller'
+JTAC = os.environ.get('JTAC_CONTROLLER_NAME', 'combined_arm_lift_controller')
 SETPOINT_TOPIC = '/ft_bridge_hardware_ft_sensor_tcp/target_wrench'
 # wrist poses around pose A (the tool 0.3 m short of the wall): tool pitched up and down and rolled
 # about its axis, so gravity points in clearly different directions in the sensor frame
