@@ -9,6 +9,8 @@ from dataclasses import dataclass
 
 import yaml
 
+from stand_navigator.modes import derive_mode, parse_modes
+
 
 def wrap(a):
     return math.atan2(math.sin(a), math.cos(a))
@@ -27,10 +29,16 @@ class BaseProfile:
     max_ang_acc: float = 1.0            # rad/s^2
     arm_mount: tuple = (0.0, 0.0)       # arm base in base_footprint
     footprint: tuple = ()               # ((x, y), ...) rectangle corners in base_footprint; () = unknown
+    modes: tuple = ()                   # DriveMode list from `base.modes`; () = one derived from `drive`
 
     @property
     def holonomic(self):
         return self.drive in ('omni', '4ws')
+
+    def drive_modes(self):
+        """The profile's modes, or the one derived from `drive` and the limits."""
+        return self.modes or (derive_mode(self.drive, self.max_lin, self.max_ang, self.max_lin_acc,
+                                          self.max_ang_acc),)
 
 
 def load_profile(path):
@@ -39,14 +47,16 @@ def load_profile(path):
         b = yaml.safe_load(f)['base']
     d = BaseProfile()
     mount = b.get('arm_mount_xy') or [0.0, 0.0]
+    lim = (float(b.get('max_linear_velocity_mps', d.max_lin)),
+           float(b.get('max_angular_velocity_radps', d.max_ang)),
+           float(b.get('max_linear_acceleration_mps2', d.max_lin_acc)),
+           float(b.get('max_angular_acceleration_radps2', d.max_ang_acc)))
     return BaseProfile(
         drive=str(b.get('drive_type', d.drive)),
-        max_lin=float(b.get('max_linear_velocity_mps', d.max_lin)),
-        max_ang=float(b.get('max_angular_velocity_radps', d.max_ang)),
-        max_lin_acc=float(b.get('max_linear_acceleration_mps2', d.max_lin_acc)),
-        max_ang_acc=float(b.get('max_angular_acceleration_radps2', d.max_ang_acc)),
+        max_lin=lim[0], max_ang=lim[1], max_lin_acc=lim[2], max_ang_acc=lim[3],
         arm_mount=(float(mount[0]), float(mount[1])),
-        footprint=tuple((float(p[0]), float(p[1])) for p in (b.get('footprint') or ())))
+        footprint=tuple((float(p[0]), float(p[1])) for p in (b.get('footprint') or ())),
+        modes=parse_modes(b, str(b.get('name', path)), lim))
 
 
 def arm_to_footprint(arm_x, arm_y, yaw, mount):

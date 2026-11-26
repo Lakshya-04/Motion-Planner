@@ -102,6 +102,79 @@ and `use_path_planner:=true`; `MULTI_STAND_WALL_DOCK=1` also starts `wall_dockin
 (frame set to odom) on `/wall_detector/wall_scene` (the pass runs no wall_detector). Both default off. The manager does not send
 `WallDock` goals yet, so with the flag only the server is up (send a goal by hand, see the script header).
 
+## Drive modes (opt-in, host-tested only)
+
+A base is more than "omni or diff": the Ranger Mini 2.0 steers all four wheels and has Ackermann, crab (the manual
+calls it oblique) and spin modes, a Scout or Husky skid-steers (no sideways, turns on the spot with tyre scrub), a MiR
+or TurtleBot turns on the spot, a mecanum base goes anywhere. The profile `base:` block can now list them:
+
+```yaml
+modes:                       # optional; absent = one mode derived from drive_type, exactly as before
+  - name: ackermann          # omni | diff_turn_in_place | skid | ackermann | crab | spin
+    default: true            # at most one; the first listed is the default when none says so
+    min_turn_radius_m: 0.81  # required for ackermann, null for every other mode
+    max_linear_mps: 1.5      # optional, also max_angular_radps, max_*_acceleration_*; missing = the profile's
+    max_linear_turning_mps: 0.75   # ackermann only: speed cap on curved pieces
+```
+
+`can_strafe` and `can_spin_in_place` follow from the name (omni: both; crab: strafe; diff, skid, spin: spin; ackermann:
+neither) and may be restated but not contradicted. `stand_navigator/modes.py` validates it and `load_profile` fills
+`BaseProfile.modes`; an error names the profile and the mode (unknown name, non-positive limit, two defaults, no radius).
+`BaseProfile.drive_modes()` gives the listed modes, or the derived one (omni and 4ws -> `omni`, skid -> `skid`, anything
+else -> `diff_turn_in_place`, the same split as `BaseProfile.holonomic`). The C++ profile reader is untouched and ignores the block.
+
+Which platform uses which (shipped profiles): Ranger Mini 2.0 lists ackermann (default), crab and spin; Scout Mini lists
+skid; every other profile has no `modes` and behaves as before (omni: mpo_500, dingo_o, the generic boxes; diff: MiR100,
+TIAGo/Fetch-style, TurtleBot3, Jackal; skid: Husky, Scout).
+
+Numbers and sources. Ranger Mini 2.0, from the AgileX RANGER MINI 2.0 User Manual V2.0.1 (2023.08): minimum turning radius
+810 mm in Ackermann mode and 0 mm in spin mode, 5.4 km/h top speed (1.5 m/s), CAN command limits of 1.5 m/s linear (0.75 m/s
+once the steering angle is above 20 degrees, which is why crab and curved Ackermann pieces are capped at 0.75), spin up to
+3.259 rad/s, steering up to 90 degrees in oblique mode. The manual does not say where the radius is measured; the planner
+takes it at `base_footprint`. Accelerations are not in the manual: those modes inherit the profile's nominal values
+(unverified). Scout Mini: the manual says the minimum turning radius is "able to turn on a pivot" and its FAQ says turning on
+the spot wears the tyres; its speed figures disagree between sections, so the profile's limits stay. Scout 2.0, Husky, Jackal,
+MiR100 and the others have no `modes` block because no vendor number was sourced for them.
+
+Planning (`mode_planner.py`, `plan_with_modes`): from a start and goal base_footprint pose, in the same scene obstacles as
+the grid planner, it returns segments with a drive mode, a kind (rotate, drive, arc, translate, crab) and dense waypoints
+with heading, gear and curvature.
+
+- omni: straight when free, else the grid path; yaw spread along it.
+- crab: the same xy path at a constant heading; a yaw change needs a spinning mode (rotate first, else last).
+- diff, skid, spin: rotate in place to each leg heading, drive straight, rotate to the final yaw; the rotation swept area is
+  checked with the exact footprint, short way then long way.
+- ackermann: Hybrid A* (forward and reverse arcs, 15-degree heading bins) with a Reeds-Shepp connection (`reeds_shepp.py`) to
+  the exact goal pose. Arcs are planned at 1.15 times the limit radius so the follower has steering left to correct with; the
+  radius is never undercut. When nothing fits, the plan is not ok and the reason says whether the search was exhausted (the
+  radius cannot work in that space) or hit its expansion budget (not proven).
+- Several modes: every strategy the mode set allows is planned and the one with the shortest estimated duration (length over
+  the mode's speed, plus turning time and a stop per segment) wins, ties by listing order. With the Ranger numbers that is
+  Ackermann for long moves, crab for short sideways ones, spin for turns on the spot. Given `dock_dir` (world angle of the
+  last move, e.g. toward the wall) and a crab mode, the last `crab_final_m` (1 m, halved while blocked) is a crab leg along
+  it at the goal yaw, and the travel before it is planned to the leg start.
+
+Following (`mode_follower.py`, `ModeFollower`): same surface as the other controllers (`step`, `arrived`, `errors`, `phase`,
+`cmd`). Diff, skid, spin and Ackermann legs never get a lateral velocity; Ackermann keeps |wz| <= |v| / radius and uses a
+tracking law on the path (the profile's yaw acceleration limit does not apply to steering, since its rate is not in the
+profile); rotations, crab and omni legs use the profile or mode limits. Between legs of different modes the base stops and a
+`set_mode(old, new)` callback is called, which returns True once the new mode is active (zero command until then); the
+change is logged on `stand_navigator.modes`. The node passes a callback that returns True at once: the vendor call is not
+wired.
+
+Node: `use_drive_modes` (default false). Off, nothing in the node runs differently (the controller and the path planner are
+untouched, and `test_drive_modes.py` pins the old controller output). On, `navigate_to_stand` plans with the modes and
+rejects a goal they cannot reach with `INVALID_GOAL` and the reason.
+
+What was checked: host pytest only (`test/test_drive_modes.py`, `test_mode_planner.py`, `test_mode_follower.py`, plus the
+package's old tests in `colcon test` in the Jazzy image): curvature of every Ackermann plan sampled against the radius, a
+diff plan turning only in place, crab at constant heading, final pose within 2 cm and 0.02 rad for a planar kinematic
+simulation of each mode, a corridor where Ackermann is reported infeasible and a diff base turns around, determinism,
+mode-switch callback. Not checked: any simulator run, any hardware, the Nav2 backend with modes. The simulators' base is a
+planar velocity-commanded body that takes any `cmd_vel`; it does not enforce modes, so a mode-blind command would still
+"work" there. The follower assumes the odometry pose is exact; wall docking is unchanged and still treats the base as a
+point that can go sideways.
+
 ## Wall docking: standoff and yaw from the fitted plane
 
 For the last metres after `NavigateToStand`. `stand_navigator/wall_docking.py` (ROS-free, `test/test_wall_docking.py`, 21 tests)

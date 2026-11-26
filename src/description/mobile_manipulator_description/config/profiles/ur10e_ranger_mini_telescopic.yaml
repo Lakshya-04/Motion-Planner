@@ -69,6 +69,21 @@ base:
   max_angular_velocity_radps: 1.5
   max_linear_acceleration_mps2: 1.0
   max_angular_acceleration_radps2: 2.0
+  # Drive modes. Source: AgileX RANGER MINI 2.0 User Manual V2.0.1 (2023.08), spec table (min turning radius
+  # 0 mm spin, 810 mm Ackermann; 5.4 km/h = 1.5 m/s) and the CAN motion-control frame (linear speed +-1.5 m/s,
+  # +-0.75 m/s once the steering angle is above 20 deg; spin +-3.259 rad/s; oblique mode steers up to 90 deg).
+  # The radius is taken at base_footprint (the manual does not say where it is measured). Accelerations are
+  # not in the manual, so the modes inherit the profile's nominal ones (unverified).
+  modes:
+    - name: ackermann
+      default: true
+      min_turn_radius_m: 0.81
+      max_linear_mps: 1.5
+      max_linear_turning_mps: 0.75
+    - name: crab               # the manual's "oblique" mode
+      max_linear_mps: 0.75     # sideways needs a steering angle above 20 deg
+    - name: spin
+      max_angular_radps: 3.259
   arm_mount_xy: [0.0, 0.0]      # arm base in base_footprint (x, y); stationing places the footprint by it
   lift_mount_height_m: 0.264     # lift_mount_link above base_footprint
   ground_clearance_m: 0.04
