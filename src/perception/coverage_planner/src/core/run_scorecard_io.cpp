@@ -147,6 +147,16 @@ nlohmann::json scorecardToJson(const RunScorecard & c)
       {"tilt_mean_deg", c.tilt_mean_deg}, {"tilt_max_deg", c.tilt_max_deg},
       {"wall_gap_mean_m", c.wall_gap_mean_m}, {"wall_gap_max_abs_m", c.wall_gap_max_abs_m}}},
     {"strokes", c.strokes}};
+  if (c.tcp_speed.windows > 0) {
+    const auto & t = c.tcp_speed;
+    j["tcp_speed"] = {
+      {"windows", t.windows}, {"mean_mps", t.mean_mps}, {"median_mps", t.median_mps}, {"std_mps", t.std_mps},
+      {"p5_mps", t.p5_mps}, {"p95_mps", t.p95_mps}};
+    if (t.target_mps > 0.0) {
+      j["tcp_speed"]["target_mps"] = t.target_mps;
+      j["tcp_speed"]["median_rel_dev"] = t.median_rel_dev;
+    }
+  }
   if (c.coverage.thickness.valid) {
     j["thickness"] = {
       {"mean", c.coverage.thickness.mean}, {"cov", c.coverage.thickness.cov},

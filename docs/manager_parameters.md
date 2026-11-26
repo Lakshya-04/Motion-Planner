@@ -77,7 +77,8 @@ Declared in `retiming_wiring.cpp`. Only `retime` is read when it is false. Gtest
 | Parameter | Default | Meaning |
 |---|---|---|
 | `retime_tcp_link` | "" | Link whose speed is held constant on contact seams. Empty: the child link of the last active joint of the planning group. |
-| `retime_accel` | 2.0 | Acceleration limit used for both seams and transitions (the limits are the model's velocity limits, with this acceleration). |
+| `retime_accel` | 2.0 | Acceleration limit used for both seams and transitions (the limits are the model's velocity and acceleration limits; this value is only the fallback for a joint that has no acceleration limit in the model). |
+| `retime_vel_scale` | 1.0 | Scale (0.01 to 1) on the joint velocity limits of both seams and transitions. It can only slow things down: 1.0 is already the model's limit, so there is no faster free-space setting here. It is not a free-space-only knob; see [tcp_speed.md](tcp_speed.md). |
 | `retime_seam_jerk` | 20.0 | Jerk limit of contact seams (Ruckig smoothing). |
 | `retime_transition_jerk` | 0.0 | Jerk limit of transitions; 0 leaves the transition time-optimal without a jerk limit. |
 | `retime_transition_jerk_ratio` | 0.0 | Opt-in Ruckig smoothing of free-space transitions: jerk limit = ratio x each joint's acceleration limit. 0 = off (plain TOTG). Off by default: with 4.0 Ruckig failed on short moves in the MuJoCo run (66-72 planning failures per run). |
@@ -143,3 +144,12 @@ Between two columns of one stand the manager retracts and then plans an approach
 | `chain_columns` | false | Try the straight chained approach between columns of one stand. |
 | `chain_max_shift_m` | 0.4 | Longest distance (m) between the previous dock pose and the next approach pose that is still chained. |
 | `serpentine_columns` | false | Keep the plan's up/down direction per column, retract (straight, fsp fallback) at the stroke END, lower the tool before a stow from the top; use with `double_pass:=false`. Mock playback 3 x 2 m: 16/19 columns, 1090 s vs 15/19, 1179 s. |
+| `contact_connectors` | false | Between two adjacent strips of one stand, slide along the wall in contact to the start of the next strip (one Cartesian move, force loop still engaged) instead of retract + dock + approach. Use with `serpentine_columns` and `chain_columns`. See below. |
+| `contact_connector_max_step_m` | 0.15 | Longest stroke-end to next-stroke-start distance (m) that still counts as adjacent (about 1.5 x the swath spacing). |
+| `contact_connector_plane_tol_m` | 0.02 | Largest offset (m) of that step along the wall normal (the two strips must lie on one wall plane). |
+
+### Contact connectors (`contact_connectors:=true`)
+
+A strip normally ends with unload, retract, dock and approach, so the tool leaves the wall between two neighbouring strips. With `contact_connectors` the manager keeps the tool on the wall instead: after the last pose of a stroke it checks `decideContactConnector` (`core/contact_connector.hpp`): the next column is of the same stand, the stroke reached its end, the arm is not stuck, the step to the next stroke's start is at most `contact_connector_max_step_m`, it stays within `contact_connector_plane_tol_m` of one wall plane and the tool orientation is about the same. It then runs the column IK check on the next strip and one short Cartesian segment (all of it or none) to the next start, with the admittance and force target left engaged (no unload, no force ramp to zero, no retract). The next column skips its dock, approach and press and strokes straight on (serpentine: up, step over, down).
+
+Any refusal (not adjacent, other plane, IK chain broken), failed or short connector move falls back to the normal unload, retract and approach of that column; the run message ends with `contact connectors: N used, M fell back to retract/approach (last: reason)`. The last column of a stand always retracts. The check that nothing is between the strips is the Cartesian planner's own collision check of the connector move (the wall itself is excluded as for any contact segment); there is no separate obstacle test. Not run in a simulator yet, see the pull request.

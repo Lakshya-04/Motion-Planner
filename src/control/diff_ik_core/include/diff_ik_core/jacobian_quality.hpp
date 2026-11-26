@@ -12,6 +12,8 @@
 
 #include <vector>
 
+#include "diff_ik_core/null_space_costs.hpp"
+
 namespace diff_ik_core
 {
 
@@ -25,6 +27,12 @@ struct JacobianQuality
 
 /// All four measures from one SVD. An empty Jacobian gives all zeros.
 JacobianQuality jacobianQuality(const Eigen::MatrixXd & J);
+
+/// Row-selected Jacobian with inline storage (no heap), at most 6 rows and kMaxJoints columns.
+using JacobianRows = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, 0, 6, kMaxJoints>;
+
+/// Same measures for an inline-storage Jacobian; no heap allocation.
+JacobianQuality jacobianQuality(const JacobianRows & J);
 
 /// Smallest singular value (0 when the Jacobian has more rows than columns, or is empty).
 double minSingularValue(const Eigen::MatrixXd & J);
@@ -49,6 +57,9 @@ double directionalGain(const Eigen::MatrixXd & J, const Eigen::VectorXd & direct
 double jointLimitMargin(
   const std::vector<double> & q, const std::vector<double> & lower,
   const std::vector<double> & upper);
+
+/// Same as above on Eigen vectors, no heap allocation. Returns -1 on a size mismatch.
+double jointLimitMargin(const JointRef & q, const JointRef & lower, const JointRef & upper);
 
 /// True for a joint with a real position limit (positive range below 2*pi), false for continuous.
 bool isLimitedJoint(double lower, double upper);

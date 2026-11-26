@@ -3,7 +3,7 @@
 self_filter:
   ros__parameters:
     root_link: ""                 # empty = the URDF root (base_footprint for mobile_manipulator_description)
-    links: []                     # empty = every link with a collision shape
+    # links: [a, b]               # unset = every link with a collision shape (an empty list here crashes the node: untyped)
     padding:
       sphere: 0.02
       box: [0.02, 0.02, 0.02]
@@ -14,7 +14,6 @@ self_filter:
     # `arm_wrist_3_link` on a UR, `arm_link7` on the Panda-like arm), so name yours here, e.g.
     #   padding_overrides: [<last arm link>]
     #   padding_overrides.<last arm link>.sphere: 0.01
-    padding_overrides: []
     min_sensor_distance: 0.0      # drop points this close to the sensor (its own mount, cables)
     shadow: false                 # also drop points hidden behind a link (deletes real surfaces)
     contact_link: tool_mount_link # reduced padding on this link while ~/contact_mode is true

@@ -80,6 +80,7 @@
 #include "manipulation_manager/core/recovery_jog.hpp"
 #include "manipulation_manager/core/stand_check.hpp"
 #include "manipulation_manager/core/column_chain.hpp"
+#include "manipulation_manager/core/contact_connector.hpp"
 #include "manipulation_manager/core/serpentine.hpp"
 #include "manipulation_manager/core/stand_gate.hpp"
 #include "manipulation_manager/core/wall_dock_gate.hpp"
@@ -341,6 +342,13 @@ public:
     // where this one finished. Off: every column runs bottom to top and the retract returns to the column's start
     // (a full-length trip back down the wall after every stroke).
     serpentine_columns_ = this->declare_parameter<bool>("serpentine_columns", false);
+    // Contact connectors (default off): between two adjacent strips of one stand the tool stays on the wall and slides
+    // to the start of the next strip (one short Cartesian move with the force loop still engaged) instead of
+    // retract + dock + approach. Needs serpentine_columns to be useful (the next strip must start where this one ends).
+    // Any refusal or failure falls back to the normal retract and approach; the result message counts both.
+    contact_connectors_ = this->declare_parameter<bool>("contact_connectors", false);
+    connector_cfg_.max_step_m = this->declare_parameter<double>("contact_connector_max_step_m", 0.15);
+    connector_cfg_.plane_tol_m = this->declare_parameter<double>("contact_connector_plane_tol_m", 0.02);
     if (serpentine_columns_ && !dock_at_stroke_start_) {
       RCLCPP_WARN(
         this->get_logger(), "serpentine_columns without dock_at_stroke_start: every column docks at its middle "
@@ -1083,6 +1091,9 @@ private:
     }
 
     TaskStateMachine machine(nav_attempts_);
+    connector_log_ = ConnectorLog{};
+    connector_carry_ = false;
+    next_in_stand_ = nullptr;
     if (!req.multi_stand) {
       machine.startSingle();
       logColumnReach(sel);
@@ -1099,12 +1110,16 @@ private:
         all[i] = i;
       }
       last_good_state_ = readCurrentJointState(shared_from_this(), joint_name_candidates_);
-      for (const size_t i : orderColumns(all, sel)) {
+      const auto order = orderColumns(all, sel);
+      for (size_t k = 0; k < order.size(); ++k) {
+        const size_t i = order[k];
         if (stop()) {
           break;
         }
+        setNextInStand(k + 1 < order.size() ? &sel[order[k + 1]] : nullptr, k + 1 < order.size() ? ids[order[k + 1]] : 0);
         tracker_.columnFinished(0, ids[i], runColumnWithRetry(sel[i], ids[i]));
       }
+      setNextInStand(nullptr, 0);
       retryFailedColumns(sel, ids, nullptr);
       if (!stop()) {
         machine.singleFinished();
@@ -1124,6 +1139,9 @@ private:
       setValve(false);
       if (out.message.empty()) {
         out.message = tracker_.summary();
+        if (contact_connectors_ && !connector_log_.summary().empty()) {
+          out.message += "; " + connector_log_.summary();
+        }
       }
     }
     setState(out.canceled ? "canceled" : "done", -1);
@@ -1265,13 +1283,18 @@ private:
           // turn away from the stow pose)
           dock_branch_seed_.clear();
         }
-        for (const size_t c : orderColumns(visit_columns[s], sel)) {
+        const auto order = orderColumns(visit_columns[s], sel);
+        for (size_t k = 0; k < order.size(); ++k) {
+          const size_t c = order[k];
           if (stop()) {
             break;
           }
           arm_deployed_ = true;
+          setNextInStand(k + 1 < order.size() ? &sel[order[k + 1]] : nullptr, k + 1 < order.size() ? ids[order[k + 1]] : 0);
           tracker_.columnFinished(s, ids[c], runColumnWithRetry(sel[c], ids[c]));
         }
+        setNextInStand(nullptr, 0);
+        connector_carry_ = false;
         if (!stop()) {
           machine.standFinished();
         }
@@ -2711,13 +2734,28 @@ private:
     return true;
   }
 
+  /// The column that follows in the same stand (nullptr: none), for contact_connectors. Cleared after the stand.
+  void setNextInStand(const CoverageSegmentIntent * next, size_t id)
+  {
+    next_in_stand_ = contact_connectors_ ? next : nullptr;
+    next_in_stand_id_ = id;
+  }
+
   ColumnOutcome runColumn(const CoverageSegmentIntent & world_intent, size_t column)
   {
     setState("docking", static_cast<int>(column));
+    // The previous column of this stand slid onto this column's first stroke pose in contact (contact_connectors): the
+    // force loop is engaged and the tool is there, so the dock, the approach and the press are skipped.
+    const bool carried = connector_carry_ && connector_carry_column_ == column;
+    connector_carry_ = false;
     // The column as planned in world_frame, expressed in frame_id for where the base is now. The
     // wall direction is rotated with it (the base may have stopped at another yaw).
     CoverageSegmentIntent intent = world_intent;
     WallDirection wall_dir = wall_dir_;
+    std::optional<CoverageSegmentIntent> next_intent;
+    if (next_in_stand_ != nullptr && !next_in_stand_->poses.empty()) {
+      next_intent = *next_in_stand_;
+    }
     if (!world_frame_.empty()) {
       FrameTransform base_in_world;
       if (!lookup(world_frame_, frame_id_, base_in_world)) {
@@ -2727,6 +2765,7 @@ private:
       const auto world_in_base = base_in_world.inverse();
       intent = transformIntent(world_in_base, world_intent);
       wall_dir = world_in_base.apply(wall_dir_);
+      if (next_intent) {next_intent = transformIntent(world_in_base, *next_intent);}
       RCLCPP_INFO(
         this->get_logger(), "%s: base at (%.3f, %.3f) yaw %.3f in %s; column starts at (%.3f, %.3f, %.3f) in %s",
         intent.label.c_str(), base_in_world.t[0], base_in_world.t[1], base_in_world.yaw(),
@@ -2753,162 +2792,164 @@ private:
     standoff_pose.qz = rep.qz;
     standoff_pose.qw = rep.qw;
 
-    MotionSegmentSpec dock_seg;
-    dock_seg.label = intent.label + "_dock";
-    dock_seg.mode_hint = "fsp";
-    dock_seg.waypoint_indices = {0};
-    // MotionPlanner always tries Cartesian first for an fsp-hinted segment, keeping that
-    // result if it clears min_path_fraction (default 0.5) -- too low for a single free-space
-    // waypoint: a partial straight-line Cartesian attempt (observed live: 61.5%, truncated by
-    // the same base/lift self-collision this repo's own contact tuning already works around)
-    // leaves the arm short of the actual target, not usably "docked". Require near-full
-    // completion so anything but a clean, direct Cartesian path properly falls back to OMPL.
-    dock_seg.min_path_fraction = 0.99;
-    // OMPL's own sampling is randomized -- coverage_pass_demo_node.cpp's own retract already
-    // retries for exactly this reason (a genuine failure to find any path is worth one more
-    // attempt before giving up); dock deserves the same tolerance.
-    MotionExec dock_exec;
-    const core_types::Pose first_goal = dock_approach_extra_m_ > 0.0 ?
-      wall_dir.approachPose(standoff_pose, dock_approach_extra_m_) : standoff_pose;
-    const auto dock_round = [&]() {
-    // the first goal (the approach pose, or the dock pose without an approach) as a joint goal on the branch of
-    // the previous dock; every second attempt falls back to the pose goal the planner samples itself
-    std::vector<double> goal_q;
-    if (dock_ik_seeded_ || dock_ik_continuity_) {
-      goal_q = seededDockIk(first_goal);
-    }
-    bool pin_q = false;   // recovery_keeps_branch: after a short approach every attempt uses the joint goal
-    for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
-      const bool use_q = !goal_q.empty() && (attempt % 2 == 0 || pin_q);
-      bool did_chain = false;
-      if (attempt == 0) {
-        const auto cd = decideChain(
-          chain_columns_, chain_ok, arm_stuck_, dock_approach_extra_m_ > 0.0,
-          {chain_last_standoff_.x, chain_last_standoff_.y, chain_last_standoff_.z},
-          {first_goal.x, first_goal.y, first_goal.z}, chain_max_shift_m_);
-        if (cd.chain) {
-          MotionSegmentSpec chain_seg = dock_seg;
-          chain_seg.label = intent.label + "_chain";
-          chain_seg.mode_hint = "cartesian";
-          const auto chain_exec = manager_.executeMotionSegments(
-            frame_id_, {chain_seg}, std::vector<core_types::Pose>{first_goal}, planning_group_);
-          double chain_err = 0.0;
-          if (chain_exec.success && (waitFor(0.5, false), tcpNear(first_goal, approach_tolerance_m_, chain_err))) {
-            RCLCPP_INFO(
-              this->get_logger(), "%s: chained from the previous column in one straight move (%.3f m)",
-              intent.label.c_str(), cd.shift_m);
-            did_chain = true;
-          } else {
-            RCLCPP_WARN(
-              this->get_logger(), "%s: chain move %s, using the normal approach", intent.label.c_str(),
-              chain_exec.success ? "ended short" : "failed");
+    if (!carried) {
+      MotionSegmentSpec dock_seg;
+      dock_seg.label = intent.label + "_dock";
+      dock_seg.mode_hint = "fsp";
+      dock_seg.waypoint_indices = {0};
+      // MotionPlanner always tries Cartesian first for an fsp-hinted segment, keeping that
+      // result if it clears min_path_fraction (default 0.5) -- too low for a single free-space
+      // waypoint: a partial straight-line Cartesian attempt (observed live: 61.5%, truncated by
+      // the same base/lift self-collision this repo's own contact tuning already works around)
+      // leaves the arm short of the actual target, not usably "docked". Require near-full
+      // completion so anything but a clean, direct Cartesian path properly falls back to OMPL.
+      dock_seg.min_path_fraction = 0.99;
+      // OMPL's own sampling is randomized -- coverage_pass_demo_node.cpp's own retract already
+      // retries for exactly this reason (a genuine failure to find any path is worth one more
+      // attempt before giving up); dock deserves the same tolerance.
+      MotionExec dock_exec;
+      const core_types::Pose first_goal = dock_approach_extra_m_ > 0.0 ?
+        wall_dir.approachPose(standoff_pose, dock_approach_extra_m_) : standoff_pose;
+      const auto dock_round = [&]() {
+      // the first goal (the approach pose, or the dock pose without an approach) as a joint goal on the branch of
+      // the previous dock; every second attempt falls back to the pose goal the planner samples itself
+      std::vector<double> goal_q;
+      if (dock_ik_seeded_ || dock_ik_continuity_) {
+        goal_q = seededDockIk(first_goal);
+      }
+      bool pin_q = false;   // recovery_keeps_branch: after a short approach every attempt uses the joint goal
+      for (int attempt = 0; attempt < dock_attempts_ && !stop(); ++attempt) {
+        const bool use_q = !goal_q.empty() && (attempt % 2 == 0 || pin_q);
+        bool did_chain = false;
+        if (attempt == 0) {
+          const auto cd = decideChain(
+            chain_columns_, chain_ok, arm_stuck_, dock_approach_extra_m_ > 0.0,
+            {chain_last_standoff_.x, chain_last_standoff_.y, chain_last_standoff_.z},
+            {first_goal.x, first_goal.y, first_goal.z}, chain_max_shift_m_);
+          if (cd.chain) {
+            MotionSegmentSpec chain_seg = dock_seg;
+            chain_seg.label = intent.label + "_chain";
+            chain_seg.mode_hint = "cartesian";
+            const auto chain_exec = manager_.executeMotionSegments(
+              frame_id_, {chain_seg}, std::vector<core_types::Pose>{first_goal}, planning_group_);
+            double chain_err = 0.0;
+            if (chain_exec.success && (waitFor(0.5, false), tcpNear(first_goal, approach_tolerance_m_, chain_err))) {
+              RCLCPP_INFO(
+                this->get_logger(), "%s: chained from the previous column in one straight move (%.3f m)",
+                intent.label.c_str(), cd.shift_m);
+              did_chain = true;
+            } else {
+              RCLCPP_WARN(
+                this->get_logger(), "%s: chain move %s, using the normal approach", intent.label.c_str(),
+                chain_exec.success ? "ended short" : "failed");
+            }
           }
         }
-      }
-      if (dock_approach_extra_m_ > 0.0 && !did_chain) {
-        MotionSegmentSpec approach_seg = dock_seg;
-        approach_seg.label = intent.label + "_approach";
-        if (use_q) {
-          approach_seg.target_joint_state = goal_q;
-        }
-        const auto approach_exec = manager_.executeMotionSegments(
-          frame_id_, {approach_seg}, use_q ? std::vector<core_types::Pose>{} :
-          std::vector<core_types::Pose>{first_goal},
-          planning_group_);
-        if (!approach_exec.success) {
-          RCLCPP_WARN(
-            this->get_logger(), "%s: approach attempt %d failed, retrying...", intent.label.c_str(),
-            attempt + 1);
-          continue;
-        }
-        // "completed" only says the trajectory ran: an arm that did not move (the first plan after a drive that
-        // is a no-op) or that rests on the wall's top edge half way stops short of the pose, and the dock from
-        // there starts a Cartesian path from the wrong place and ends on another branch. Check where the tool is.
-        if (verify_approach_) {
-          waitTcpSettled();
-          double err = 0.0;
-          if (!tcpNear(first_goal, approach_tolerance_m_, err)) {
+        if (dock_approach_extra_m_ > 0.0 && !did_chain) {
+          MotionSegmentSpec approach_seg = dock_seg;
+          approach_seg.label = intent.label + "_approach";
+          if (use_q) {
+            approach_seg.target_joint_state = goal_q;
+          }
+          const auto approach_exec = manager_.executeMotionSegments(
+            frame_id_, {approach_seg}, use_q ? std::vector<core_types::Pose>{} :
+            std::vector<core_types::Pose>{first_goal},
+            planning_group_);
+          if (!approach_exec.success) {
             RCLCPP_WARN(
-              this->get_logger(), "%s: approach attempt %d ended %.3f m from the approach pose, not docking from there",
-              intent.label.c_str(), attempt + 1, err);
-            logArmState("approach_short_" + intent.label);
-            if (!recoverArm("approach")) {
-              primeContinuityFromLiveState();
-            }
-            if (recovery_keeps_branch_) {
-              const auto g = recoveryGoalIk(first_goal);
-              if (!g.empty()) {
-                goal_q = g;
-                pin_q = true;
-              }
-            }
+              this->get_logger(), "%s: approach attempt %d failed, retrying...", intent.label.c_str(),
+              attempt + 1);
             continue;
           }
+          // "completed" only says the trajectory ran: an arm that did not move (the first plan after a drive that
+          // is a no-op) or that rests on the wall's top edge half way stops short of the pose, and the dock from
+          // there starts a Cartesian path from the wrong place and ends on another branch. Check where the tool is.
+          if (verify_approach_) {
+            waitTcpSettled();
+            double err = 0.0;
+            if (!tcpNear(first_goal, approach_tolerance_m_, err)) {
+              RCLCPP_WARN(
+                this->get_logger(), "%s: approach attempt %d ended %.3f m from the approach pose, not docking from there",
+                intent.label.c_str(), attempt + 1, err);
+              logArmState("approach_short_" + intent.label);
+              if (!recoverArm("approach")) {
+                primeContinuityFromLiveState();
+              }
+              if (recovery_keeps_branch_) {
+                const auto g = recoveryGoalIk(first_goal);
+                if (!g.empty()) {
+                  goal_q = g;
+                  pin_q = true;
+                }
+              }
+              continue;
+            }
+          }
         }
-      }
-      if (dock_approach_extra_m_ > 0.0 || !use_q) {
-        dock_exec = manager_.executeMotionSegments(
-          frame_id_, {dock_seg}, {standoff_pose}, planning_group_);
-      } else {
-        MotionSegmentSpec q_seg = dock_seg;
-        q_seg.target_joint_state = goal_q;
-        dock_exec = manager_.executeMotionSegments(frame_id_, {q_seg}, {}, planning_group_);
-      }
-      if (dock_exec.success) {
-        break;
-      }
-      RCLCPP_WARN(
-        this->get_logger(), "%s: dock attempt %d failed, retrying...", intent.label.c_str(),
-        attempt + 1);
-    }
-    };
-    dock_round();
-    // Every try failed: a start state the planners refuse (self-collision at the end of the last reach) is
-    // moved back toward the last good configuration once, then the tries are repeated.
-    if (!dock_exec.success && !stop() && recoverArm("dock")) {
-      dock_round();
-    }
-    if (!dock_exec.success) {
-      RCLCPP_WARN(
-        this->get_logger(), "%s: dock %s, skipping column", intent.label.c_str(),
-        stop() ? "stopped" : "failed");
-      column_reason_ = SkipReason::kDockFailed;
-      return ColumnOutcome::kFailed;
-    }
-
-    if (stop()) {
-      return ColumnOutcome::kFailed;
-    }
-    if (verify_dock_) {
-      waitTcpSettled(); // let the controller and TF settle after the last point, as verify_approach does
-      double pos_err = 0.0, ang_err = 0.0;
-      if (tcpPoseError(standoff_pose, pos_err, ang_err) &&
-        (pos_err > dock_tolerance_m_ || ang_err > dock_tolerance_rad_))
-      {
+        if (dock_approach_extra_m_ > 0.0 || !use_q) {
+          dock_exec = manager_.executeMotionSegments(
+            frame_id_, {dock_seg}, {standoff_pose}, planning_group_);
+        } else {
+          MotionSegmentSpec q_seg = dock_seg;
+          q_seg.target_joint_state = goal_q;
+          dock_exec = manager_.executeMotionSegments(frame_id_, {q_seg}, {}, planning_group_);
+        }
+        if (dock_exec.success) {
+          break;
+        }
         RCLCPP_WARN(
-          this->get_logger(),
-          "%s: docked %.3f m and %.1f deg off the standoff pose (limits %.3f m, %.1f deg), not pressing from there",
-          intent.label.c_str(), pos_err, ang_err * 180.0 / M_PI, dock_tolerance_m_,
-          dock_tolerance_rad_ * 180.0 / M_PI);
-        logArmState("dock_off_pose_" + intent.label);
+          this->get_logger(), "%s: dock attempt %d failed, retrying...", intent.label.c_str(),
+          attempt + 1);
+      }
+      };
+      dock_round();
+      // Every try failed: a start state the planners refuse (self-collision at the end of the last reach) is
+      // moved back toward the last good configuration once, then the tries are repeated.
+      if (!dock_exec.success && !stop() && recoverArm("dock")) {
+        dock_round();
+      }
+      if (!dock_exec.success) {
+        RCLCPP_WARN(
+          this->get_logger(), "%s: dock %s, skipping column", intent.label.c_str(),
+          stop() ? "stopped" : "failed");
         column_reason_ = SkipReason::kDockFailed;
         return ColumnOutcome::kFailed;
       }
+
+      if (stop()) {
+        return ColumnOutcome::kFailed;
+      }
+      if (verify_dock_) {
+        waitTcpSettled(); // let the controller and TF settle after the last point, as verify_approach does
+        double pos_err = 0.0, ang_err = 0.0;
+        if (tcpPoseError(standoff_pose, pos_err, ang_err) &&
+          (pos_err > dock_tolerance_m_ || ang_err > dock_tolerance_rad_))
+        {
+          RCLCPP_WARN(
+            this->get_logger(),
+            "%s: docked %.3f m and %.1f deg off the standoff pose (limits %.3f m, %.1f deg), not pressing from there",
+            intent.label.c_str(), pos_err, ang_err * 180.0 / M_PI, dock_tolerance_m_,
+            dock_tolerance_rad_ * 180.0 / M_PI);
+          logArmState("dock_off_pose_" + intent.label);
+          column_reason_ = SkipReason::kDockFailed;
+          return ColumnOutcome::kFailed;
+        }
+      }
+      markGoodState();
+      dock_branch_seed_ = last_good_state_;
+      logArmState("docked_" + intent.label);
     }
-    markGoodState();
-    dock_branch_seed_ = last_good_state_;
-    logArmState("docked_" + intent.label);
     if (!contact_) {
       return runSprayStroke(intent, wall_dir, standoff_pose);
     }
 
-    setAdmittanceEngaged(true);
+    if (!carried) {setAdmittanceEngaged(true);}
     {
       std_msgs::msg::Float64 msg;
       msg.data = target_force_n_;
       force_pub_->publish(msg);
     }
-    if (!waitFor(0.5)) {
+    if (!carried && !waitFor(0.5)) {
       return ColumnOutcome::kFailed;   // canceled: the task's cleanup unloads and disengages
     }
     tracking_peak_ = true;
@@ -2946,7 +2987,7 @@ private:
     // Press first, then stroke: the admittance needs a couple of seconds at rest to settle on the
     // target force; stroking straight out of the approach drags the first-contact creep (about
     // 13 N) along the wall.
-    if (press_settle_s_ > 0.0 && !contact_waypoints.empty()) {
+    if (!carried && press_settle_s_ > 0.0 && !contact_waypoints.empty()) {
       MotionSegmentSpec press_seg = contact_seg;
       press_seg.label = intent.label + "_press";
       press_seg.waypoint_indices = {0};
@@ -2972,6 +3013,54 @@ private:
     tracking_peak_ = false;
     if (stop()) {
       return ColumnOutcome::kFailed;
+    }
+    // Contact connector: slide to the start of the next strip with the force loop engaged, no unload, retract or dock.
+    if (contact_connectors_ && next_intent && !contact_waypoints.empty()) {
+      const core_types::Pose next_start = wall_dir.shifted(
+        next_intent->poses.front(), columnSteps(true, contact_y_overshoot_, 0.0).stroke_shift_m);
+      const bool complete = contact_exec.success && contact_exec.waypoints_completed == intent.poses.size();
+      const auto dec = decideContactConnector(
+        true, true, complete, !arm_stuck_, contact_waypoints.back(), next_start, wall_dir, connector_cfg_);
+      std::string why = dec.reason;
+      bool slid = false;
+      if (dec.eligible) {
+        const auto saved_reason = column_reason_;
+        const bool ik_ok = columnIkAllows(*next_intent, wall_dir);   // the IK chain of the next strip
+        column_reason_ = saved_reason;
+        if (!ik_ok) {
+          why = "no continuous IK chain on the next strip";
+        } else {
+          const auto target = connectorTarget(contact_waypoints.back(), next_start, wall_dir);
+          MotionSegmentSpec conn = contact_seg;
+          conn.label = intent.label + "_connector";
+          conn.waypoint_indices = {0};
+          conn.min_path_fraction = 0.99;   // all of the slide or none of it
+          setState("connecting");
+          const auto conn_exec = manager_.executeMotionSegments(frame_id_, {conn}, {target}, planning_group_);
+          double err = 0.0;
+          if (!conn_exec.success) {
+            why = "connector move failed";
+          } else if (!tcpNear(target, approach_tolerance_m_, err)) {
+            why = "connector ended " + std::to_string(err) + " m short";
+          } else {
+            slid = true;
+          }
+        }
+      }
+      if (slid) {
+        connector_log_.used();
+        RCLCPP_INFO(
+          this->get_logger(), "%s: slid %.3f m along the wall to the next strip in contact", intent.label.c_str(),
+          dec.step_m);
+        connector_carry_ = true;
+        connector_carry_column_ = next_in_stand_id_;
+        chain_valid_ = false;
+        return ColumnOutcome::kDone;
+      }
+      connector_log_.fellBack(why);
+      RCLCPP_WARN(
+        this->get_logger(), "%s: no contact connector (%s), retracting and approaching as usual", intent.label.c_str(),
+        why.c_str());
     }
     // Back the reference off the wall while the admittance is still engaged: switching it off with the
     // reference 1.5 mm inside the wall snaps the arm onto that reference (27-31 N spikes at every
@@ -3338,6 +3427,13 @@ private:
   bool chain_columns_{false};
   double chain_max_shift_m_{0.4};
   bool serpentine_columns_{false};
+  bool contact_connectors_{false};
+  ConnectorConfig connector_cfg_;
+  ConnectorLog connector_log_;
+  const CoverageSegmentIntent * next_in_stand_{nullptr};   ///< the next column of the stand being run, if any
+  size_t next_in_stand_id_{0};
+  bool connector_carry_{false};            ///< the tool slid onto the start of connector_carry_column_ and is in contact
+  size_t connector_carry_column_{0};
   bool chain_valid_{false};                 ///< the tool is at chain_last_standoff_ after a finished column of this stand
   core_types::Pose chain_last_standoff_;
   std::string base_check_mode_{"off"};
