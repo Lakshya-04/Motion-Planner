@@ -12,8 +12,10 @@ Details live in [perception_live.md](perception_live.md), [stand_navigation.md](
   simulators as they would on a robot.
 - The base side is a stand-in. `stand_navigator` drives a straight line from the current odometry to the stand. It has no map,
   no costmap and no obstacle avoidance, and it does not localise: it trusts `/odom`.
-- In both simulators `/odom` is the simulated base pose itself (no noise, no drift, no slip), and `/cmd_vel` is applied as a
-  planar velocity. Navigation error in the sim passes is therefore much smaller than any real base will give.
+- In both simulators `/odom` is by default the simulated base pose itself (no noise, no drift, no slip), and `/cmd_vel` is applied as a
+  planar velocity. Navigation error in the sim passes is therefore much smaller than any real base will give. Opt-in
+  `odom_realism:=good|typical|poor` (package `sim_realism`, [sim_realism.md](sim_realism.md)) adds wheel-odometry scale error, a drifting
+  yaw bias, slip, latency and dropout on top, and keeps the truth on `/odom_truth`.
 - Perception is not in the loop of the two-stand passes. The wall the coverage planner plans on is a pre-baked JSON
   (`make_scenario_scene.py`), and the wall in MoveIt's scene is a baked `walls_sim.pcd` (MuJoCo) or `walls.pcd` (Gazebo)
   loaded by `world_model_loader_node`. `wall_detector` is not started. `wall_docking_node` is not started either.
@@ -26,9 +28,9 @@ Details live in [perception_live.md](perception_live.md), [stand_navigation.md](
 
 | Component | Status | MuJoCo | Gazebo | Hardware |
 |---|---|---|---|---|
-| Depth sensor | sim only | Ray-cast (`mj_multiRay`) on scene geoms only, optional Gaussian range noise; no robot self hits, no texture | gz `depth_camera`, optional noise; used in `run_depth_wall.sh` only | untested; no driver in the repo |
+| Depth sensor | sim only | Ray-cast (`mj_multiRay`) on scene geoms only, optional Gaussian range noise; no robot self hits, no texture. Opt-in `depth_realism` adds depth-dependent noise, dropouts, flying pixels, outliers, quantisation | gz `depth_camera`, optional noise; used in `run_depth_wall.sh` only. Same opt-in `depth_realism` | untested; no driver in the repo |
 | 2D lidar | sim only | `lidar:=true`: `mj_multiRay` fan on scene geoms only, `LaserScan` on `/scan`; `run_lidar_stop.sh` | `lidar:=true`: gz `gpu_lidar`, `/scan`; `run_lidar_stop.sh` | untested; no driver in the repo |
-| `robot_self_filter` | real (29 tests), not in any pass | not started (the MuJoCo cloud never contains the robot) | not started | untested |
+| `robot_self_filter` | real (29 tests); opt-in in the multi-stand passes (`MULTI_STAND_SELF_FILTER=1`, observer only) | the MuJoCo cloud never contains the robot, nothing to remove | `run_self_filter_check.sh` measures it on the gz cloud ([sim_realism.md](sim_realism.md)) | untested |
 | `wall_detector` (RANSAC + PCA plane) | real for one plane; sim input only | started only by `run_sensed_pass.sh`, `run_depth_wall.sh`, `run_live_octomap.sh`, `run_wall_docking.sh`; not by the two-stand pass | `run_depth_wall.sh` only; not in the two-stand pass | untested |
 | `scene_model` (loaders, RANSAC, ESDF) | real library | used by the detector and the loaders | same | untested |
 | Wall for coverage planning | pre-baked JSON in the passes | `make_scenario_scene.py` writes `wall_scene.json` and `walls_sim.pcd` (the sim wall world is generated from the same file) | `shift_wall_scene.py` shifts the stock scene and cloud | would come from `wall_detector` or a map; not wired |
@@ -39,7 +41,7 @@ Details live in [perception_live.md](perception_live.md), [stand_navigation.md](
 | `NavigateToStand` (`stand_navigator_node`) | stand-in: proportional controller, straight line, speed and acceleration limits per drive type | runs in the multi-stand, stand and navigation scripts | runs in the multi-stand pass | untested |
 | Obstacle-aware base path | missing | none | none | none |
 | `wall_docking_node` (`WallDock`) | real controller, tested in sim in isolation, not wired into the manager | only `run_wall_docking.sh` (single dock, wall plane from `wall_detector` on odom; 3 runs: 5 mm and 0.01 deg) | none | untested |
-| Localisation | missing: the odom frame is the world frame, the base starts at its origin | `/odom` = simulated pose, no noise | `/odom` = `OdometryPublisher`, no noise | untested |
+| Localisation | missing: the odom frame is the world frame, the base starts at its origin | `/odom` = simulated pose, no noise unless `odom_realism` is on | `/odom` = `OdometryPublisher`, no noise unless `odom_realism` is on | untested |
 | Nav2 | not installed in any image, no adapter | none | none | none |
 | Base safety (obstacle stop, e-stop on the base) | `nav_safety` obstacle stop from a `LaserScan` exists in `stand_navigator` (`obstacle_scan_topic`, off by default); not an e-stop, not in the manager passes | `run_lidar_stop.sh`: stops 0.30 m short of a floor box seen by the sim lidar; without the lidar the base drives into it | same, in an empty world | none |
 | Manager `navigate_to_stand` call | real client; goal in the world (odom) frame, waits for the result, optional stand-check gate on arrival error (`stand_check`) | used | used | untested |
@@ -51,7 +53,8 @@ Details live in [perception_live.md](perception_live.md), [stand_navigation.md](
 - `/cmd_vel` (`geometry_msgs/Twist`): the MuJoCo plugin applies it as a kinematic planar velocity (no floor, wheels or slip;
   `base_motion:=true`). Gazebo uses `VelocityControl` (no command timeout: a stale command keeps driving; no wheel physics).
 - `/odom` and TF `odom -> base_footprint`: MuJoCo `base_odom.py` republishes the simulated base pose; Gazebo's
-  `OdometryPublisher` does the same. No noise, no drift, no latency model. `odom` starts at the spawn pose and is treated
+  `OdometryPublisher` does the same. No noise, no drift, no latency model by default; `odom_realism` switches one on
+  (`/odom_truth` keeps the exact pose for scoring). `odom` starts at the spawn pose and is treated
   as the world frame by the manager (`world_frame: odom`).
 - So `stand_navigator` is closed on the true pose. Arrival errors of 1 cm in [stand_navigation.md](stand_navigation.md)
   measure the controller, not odometry or localisation. [sim_vs_real.md](sim_vs_real.md) lists what a real base adds.
@@ -74,8 +77,8 @@ margin. There is no wall-dock step in between, no replan of the path, and no cho
 3. **Wall docking in the pass.** Start `wall_docking_node` and the detector with `target_frame:=odom` in both two-stand
    scripts, call `WallDock` after `NavigateToStand`, and feed the measured standoff and yaw error into the stand check. The
    lateral term and typed outcomes exist in the core only ([stand_navigation.md](stand_navigation.md)).
-4. **Localisation.** Odometry plus a wall or map reference (`robot_localization` first); then add odom noise and drift to
-   the simulators so the controllers meet it before hardware does.
+4. **Localisation.** Odometry plus a wall or map reference (`robot_localization` first). The odom noise and drift for the
+   simulators now exist as an opt-in (`sim_realism`), so the controllers can meet it before hardware does; the localisation is still missing.
 5. **Nav2 adapter.** `NavigateToStand` is shaped like `NavigateToPose`; install Nav2 in an image, write a bridge, and use
    `opennav_docking` with a wall-plane dock plugin if it beats `wall_docking_node`. This comes after 1 to 4 because Nav2
    needs the map and localisation anyway.
