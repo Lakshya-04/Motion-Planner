@@ -33,6 +33,15 @@ lidar:=true adds a simulated 2D lidar (ray-cast against the scene, not the robot
                  /scan in frame lidar_link and this launch file adds the static TF <root frame> -> lidar_link.
                  Default 270 degrees, 0.5 degree steps, 0.05 to 10 m, 10 Hz (lidar_* arguments). Off by default.
 
+imu:=true starts sim_imu_node (base_localisation): an IMU derived from the base odometry twist (gyro z = yaw rate,
+                 accelerometer from the twist derivative plus gravity; no orientation) on /imu in frame imu_link, plus the
+                 static TF <root frame> -> imu_link at imu_pose. Needs base_motion:=true. Noise and bias are off
+                 (imu_gyro_noise, imu_gyro_bias, imu_accel_noise, imu_accel_bias). Off by default.
+
+localisation:=true starts the robot_localization EKF of base_localisation on /odom, /imu (and /scan with
+                 localisation_scan_match:=true) -> /odometry/filtered and TF odom -> base_footprint. Needs base_motion:=true
+                 and odom_realism on (the EKF then owns the TF). Off by default.
+
 base_motion:=true adds a planar base (three joints under base_footprint, stiff position hold): send
                  geometry_msgs/Twist on /cmd_vel (body frame; vy ignored for diff / skid profiles,
                  limited to the profile's max velocities, zero after 0.5 s without a command); the plugin
@@ -127,6 +136,15 @@ def _setup(context, *args, **kwargs):
                      range_min=float(arg('lidar_range_min_m')), range_max=float(arg('lidar_range_max_m')),
                      rate_hz=float(arg('lidar_rate_hz')), noise_std=float(arg('lidar_noise_m')),
                      dropout=float(arg('lidar_dropout')), seed=int(arg('lidar_seed')))
+    imu = arg('imu') == 'true'
+    localise = arg('localisation') == 'true'
+    if imu and arg('base_motion') != 'true':
+        raise ValueError('imu:=true needs base_motion:=true (the IMU is derived from the base odometry)')
+    if localise and not (arg('base_motion') == 'true' and arg('odom_realism') != 'off'):
+        raise ValueError('localisation:=true needs base_motion:=true and odom_realism:=good|typical|poor '
+                         '(with truth odometry there is nothing to filter)')
+    if localise and arg('localisation_scan_match') == 'true' and lidar is None:
+        raise ValueError('localisation_scan_match:=true needs lidar:=true')
     mjcf, skipped = generate(profile, render_urdf(profile), out_dir, scene=scene,
                              scene_offset=tuple(offset),
                              base_motion=arg('base_motion') == 'true', depth_sensor=depth, lidar=lidar)
@@ -210,13 +228,36 @@ def _setup(context, *args, **kwargs):
                           arguments=['--x', str(p[0]), '--y', str(p[1]), '--z', str(p[2]),
                                      '--roll', str(r[0]), '--pitch', str(r[1]), '--yaw', str(r[2]),
                                      '--frame-id', root_frame, '--child-frame-id', 'lidar_link']))
+    if imu:
+        root_frame = profile.get('frames', {}).get('world_base') or 'base_footprint'
+        pose = [float(v) for v in arg('imu_pose').split()]
+        if len(pose) != 6:
+            raise ValueError('imu_pose needs "x y z roll pitch yaw"')
+        nodes.append(Node(package='tf2_ros', executable='static_transform_publisher', name='imu_tf',
+                          arguments=['--x', str(pose[0]), '--y', str(pose[1]), '--z', str(pose[2]),
+                                     '--roll', str(pose[3]), '--pitch', str(pose[4]), '--yaw', str(pose[5]),
+                                     '--frame-id', root_frame, '--child-frame-id', 'imu_link']))
+        nodes.append(Node(package='base_localisation', executable='sim_imu_node', name='sim_imu', output='screen',
+                          parameters=[{'odom_topic': '/odom_truth' if arg('odom_realism') != 'off' else '/odom',
+                                       'gyro_noise': float(arg('imu_gyro_noise')), 'gyro_bias': float(arg('imu_gyro_bias')),
+                                       'accel_noise': float(arg('imu_accel_noise')),
+                                       'accel_bias': float(arg('imu_accel_bias')),
+                                       'seed': int(arg('realism_seed'))}]))
+    if localise:
+        nodes.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(get_package_share_directory('base_localisation'), 'launch',
+                                                       'localisation.launch.py')),
+            launch_arguments={'platform': arg('localisation_platform'), 'imu': 'true' if imu else 'false',
+                              'scan_match': arg('localisation_scan_match')}.items()))
     if arg('odom_realism') != 'off' or depth_real:
         nodes.append(IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(get_package_share_directory('sim_realism'), 'launch',
                                                        'realism.launch.py')),
             launch_arguments={'odom_realism': arg('odom_realism') if arg('base_motion') == 'true' else 'off',
                               'depth_realism': arg('depth_realism') if depth is not None else 'off',
-                              'seed': arg('realism_seed'), 'overrides': arg('realism_overrides')}.items()))
+                              'seed': arg('realism_seed'), 'overrides': arg('realism_overrides'),
+                              # the EKF publishes odom -> base_footprint instead when localisation is on
+                              'publish_tf': 'false' if localise else 'true'}.items()))
     if conditioner:
         # raw wrench is in tool_mount_link (the sensor frame) and includes the payload weight; sign
         # +1 (the plugin reports the load the tool puts on the sensor); the sensor-to-tcp offset and
@@ -300,6 +341,24 @@ def generate_launch_description():
         DeclareLaunchArgument('lidar_dropout', default_value='0.0',
                               description='probability that a lidar return is lost (NaN), 0..1'),
         DeclareLaunchArgument('lidar_seed', default_value='12345', description='seed of the lidar noise and dropout'),
+        DeclareLaunchArgument('imu', default_value='false',
+                              description='IMU derived from the base odometry twist on /imu in frame imu_link (needs '
+                                          'base_motion:=true); false starts nothing'),
+        DeclareLaunchArgument('imu_pose', default_value='0 0 0.1 0 0 0',
+                              description='imu_link in the root link frame: "x y z roll pitch yaw"'),
+        DeclareLaunchArgument('imu_gyro_noise', default_value='0.0', description='gyro white noise std per sample, rad/s'),
+        DeclareLaunchArgument('imu_gyro_bias', default_value='0.0',
+                              description='std of the constant gyro bias drawn per axis per run, rad/s'),
+        DeclareLaunchArgument('imu_accel_noise', default_value='0.0',
+                              description='accelerometer white noise std per sample, m/s^2'),
+        DeclareLaunchArgument('imu_accel_bias', default_value='0.0',
+                              description='std of the constant accelerometer bias drawn per axis per run, m/s^2'),
+        DeclareLaunchArgument('localisation', default_value='false',
+                              description='true: robot_localization EKF (base_localisation) -> /odometry/filtered and TF odom -> '
+                                          'base_footprint; needs base_motion:=true and odom_realism on'),
+        DeclareLaunchArgument('localisation_platform', default_value='omni', description='diff | omni | ackermann'),
+        DeclareLaunchArgument('localisation_scan_match', default_value='false',
+                              description='true: also fuse lidar scan matching (needs lidar:=true)'),
         DeclareLaunchArgument('odom_realism', default_value='off',
                               description='off|good|typical|poor: wheel-odometry noise from sim_realism (needs base_motion:=true); '
                                           'the sim then publishes /odom_truth and the node /odom + TF (docs/sim_realism.md)'),
