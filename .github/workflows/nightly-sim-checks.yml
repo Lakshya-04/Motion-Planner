@@ -1,0 +1,53 @@
+# Nightly headless simulator checks (docker/run_sim_checks.sh) on a standard GitHub-hosted runner.
+# CPU only: the Gazebo checks. The MuJoCo check needs an extracted SDK and the GPU planners need a GPU, so neither runs here.
+# Same free-tier caveat as ci.yml: if the repository is ever made private, this bills minutes; disable it then.
+name: nightly-sim-checks
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-sim-checks
+  cancel-in-progress: false
+
+jobs:
+  sim-checks:
+    name: Gazebo checks (headless, CPU)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+      - name: Free disk space on the runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Build the sim-gazebo image
+        run: docker build -f docker/Dockerfile --target sim-gazebo -t motion-planner:sim-gazebo .
+      - name: Run the checks
+        run: |
+          docker/run_sim_checks.sh --out "$RUNNER_TEMP/sim-checks" 2>&1 | tee "$RUNNER_TEMP/sim-checks.log"
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '### Sim checks'
+            echo '```'
+            sed -n '/^=== summary/,$p' "$RUNNER_TEMP/sim-checks.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload logs and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sim-checks-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/sim-checks
+            ${{ runner.temp }}/sim-checks.log
+          if-no-files-found: warn
+          retention-days: 30
