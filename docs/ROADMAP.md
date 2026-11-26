@@ -179,7 +179,7 @@ without code, when we can implement it.
 - [ ] MuJoCo Warp (Apache-2.0, active) for parallel gain sweeps (released with MuJoCo 3.5; small batches on a 4 GB GPU, not verified with MuJoCo 4); avoid Isaac Lab / Genesis on this machine
 - [ ] Contact and smoke scripts run by `colcon test` or one documented command (today: scripts the author ran)
 - [x] Sim-vs-real differences document (`docs/sim_vs_real.md`; a table, not a measurement against hardware)
-- [ ] `sim_isaac`: stub only; deferred (Isaac Sim does not run on this machine)
+- [ ] `sim_isaac`: optional add-on, first slice only. Isaac Sim 5.1.0 runs headless on the RTX 5080 in a sibling container; the UR10e-on-lift USD, a ROS 2 bridge runner and a smoke test (clock, joint states, one-joint command) pass (`docs/sim_isaac.md`). Not done: ros2_control `hardware:=isaac`, wall world, F/T, cameras, base motion, manager pass, CI
 
 ## 11. The end-to-end gap (the main remaining work)
 

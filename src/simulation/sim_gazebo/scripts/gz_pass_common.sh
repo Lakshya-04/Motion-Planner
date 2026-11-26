@@ -9,7 +9,8 @@
 #                      GZ_TOOL_YAW (default -90, the UR10e ready pose); params are the extra wall_coverage_demo_node arguments
 #   gz_wall_pcd file [y0 y1]  the wall plane the tcp touches (x 0.98 in base_footprint) as a 1 cm grid, z 0.6..2.0
 #   gz_world_model pcd frame  start world_model_loader_node for the cloud (pid in WM)
-#   gz_sim_args        the launch arguments every pass shares (profile, JTAC position only, conditioner, MoveIt)
+#   gz_sim_args        the launch arguments every pass shares (profile, JTAC position only, conditioner, MoveIt);
+#                      GZ_POSITION_GAIN adds position_gain:= (gz_ros2_control joint loop, 1/s; unset = plugin default 0.1)
 #   gz_stills          GZ_PASS_STILLS=N: also start capture_still.py (N PNGs, one every GZ_PASS_STILLS_EVERY s, default 25)
 # The UR meshes (visual and collision) are on by default; GZ_PASS_MESHES=0 turns them off (arm_meshes:=false, the old no-arm-geometry physics).
 # GZ_PASS_STILLS makes gz_sim_args add rgb_camera:=true (the camera pose is GZ_PASS_CAMERA_POSE, "x y z roll pitch yaw"
@@ -44,6 +45,7 @@ gz_stop_all() {
 gz_sim_args() {
   local a="profile:=${GZ_PROFILE:-ur10e_telescopic} controller:=jtac jtac_position_only:=true ft_conditioner:=true payload_mass_kg:=0.8 move_group:=true gui:=false"
   [ "${GZ_PASS_MESHES:-1}" = 0 ] && a="$a arm_meshes:=false"
+  [ -n "${GZ_POSITION_GAIN:-}" ] && a="$a position_gain:=$GZ_POSITION_GAIN"
   if [ -n "${GZ_PASS_STILLS:-}" ]; then
     a="$a rgb_camera:=true rgb_camera_frame:=${GZ_PASS_CAMERA_FRAME:-base} rgb_camera_pose:='${GZ_PASS_CAMERA_POSE:-0.0 -2.4 1.6 0 0.11 1.38}'"
   fi
