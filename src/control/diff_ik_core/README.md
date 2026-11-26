@@ -66,6 +66,23 @@ Behaviour of `computeStep`:
   `NullSpaceCost` classes are outside that guarantee.
 - A masked task (`AxisMask`) tracks a subset of x, y, z, rx, ry, rz and leaves the others free.
 
+## Tool correction
+
+`tool_correction.hpp` moves the Jacobian from the flange to the contact point and gives a small
+corrective twist to hold a wall standoff and keep the tool square to it.
+
+| Function | Input | Output |
+|---|---|---|
+| `ToolOffset` | `xyz`, `rpy` (flange -> contact frame, URDF `Rz Ry Rx`, same as `tcp_xyz` / `tcp_rpy` in the calibration record) | `rotation()`, `transform()` |
+| `shiftJacobianToTool` | flange Jacobian (6xN, world frame, `[lin; ang]`), `R_world_flange`, offset, frame | contact-point Jacobian: `lin - skew(R p) * ang`, angular rows unchanged; `TwistFrame::Contact` rotates both blocks into the contact axes |
+| `toolPoseFromFlange` | flange pose, offset | contact frame pose in the world |
+| `planeServoTwist` | wall normal (away from the wall), standoff error (target - measured, m), tool axis, gains and limits | world twist at the contact point: `Kp_d * error * n` along the normal, `Kp_t * (axis x -n)` for tilt, each limited; zero on target |
+
+Feed the shifted Jacobian to `computeStep`; add the servo twist to the path twist.
+
+Not done: no controller plugin, no calibration capture (the offset comes from a record someone
+else made), no wear tracking, not run in any simulator. Host gtests only, on kinematic chains.
+
 ## Dependencies
 
 `Eigen3` (build and run), `ament_cmake`. Tests: `ament_cmake_gtest`.
@@ -88,8 +105,8 @@ const auto next = diff_ik_core::integrate(q, qd, r.qd, dt, lim);
 
 ## Tests
 
-Four gtest executables (`jacobian_quality_test`, `diff_ik_test`, `pose_error_test`,
-`diff_ik_alloc_test`) with a generic DH chain helper in `test/chain_helper.hpp` (analytic geometric Jacobian, checked
+Five gtest executables (`jacobian_quality_test`, `diff_ik_test`, `pose_error_test`,
+`tool_correction_test`, `diff_ik_alloc_test`) with a generic DH chain helper in `test/chain_helper.hpp` (analytic geometric Jacobian, checked
 against finite differences): planar 2R and 3R against the analytic inverse, spatial 6R and 7R,
 self-motion that leaves the twist unchanged, a path through a singularity (bounded joint velocity,
 stops), uniform scaling that keeps the direction, limits never exceeded over random
@@ -114,4 +131,4 @@ colcon test --packages-select diff_ik_core
   limits) while it leaves the tool where it is.
 - At most 8 joints (`kMaxJoints`); larger chains are rejected.
 - Limit-based null-space costs skip joints whose range is 2*pi or more, also when flagged not continuous.
-- Orientation error is the rotation vector in the base frame; no tool-frame or tilted-tool handling.
+- Orientation error is the rotation vector in the base frame; the tool offset only shifts the Jacobian (no tool-frame pose error).

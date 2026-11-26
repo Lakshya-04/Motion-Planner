@@ -323,6 +323,65 @@ def test_depth_sensor_model_compiles_and_a_ray_hits_only_the_scene(tmp_path):
     assert m.geom(geomid[0]).name == 'wall'
 
 
+# ------------------------------------------------------------------ lidar (lidar)
+def test_lidar_off_leaves_the_model_unchanged(tmp_path, mjcf):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME, commanded=COMMANDED, lidar=None)
+    assert path.read_text() == mjcf.read_text()
+    assert not [s for s in ET.parse(path).getroot().iter('site') if s.get('name') == 'lidar']
+
+
+def test_lidar_adds_site_numeric_and_scene_group(tmp_path):
+    scene_geom = ET.Element('geom', name='wall', type='box', size='0.5 0.5 0.05')
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME, commanded=COMMANDED,
+                        world_geoms=[scene_geom],
+                        lidar=dict(pos=(0.45, 0.0, 0.2), rpy=(0.0, 0.0, math.pi / 2), noise_std=0.01, dropout=0.05,
+                                   seed=9))
+    root = ET.parse(path).getroot()
+    root_body = root.find('worldbody').find('body')
+    site = [s for s in root_body.findall('site') if s.get('name') == 'lidar'][0]
+    assert site.get('pos').split() == ['0.45', '0', '0.2']
+    q = [float(v) for v in site.get('quat').split()]
+    assert q == pytest.approx([math.sqrt(0.5), 0, 0, math.sqrt(0.5)])
+    nums = {n.get('name'): [float(v) for v in n.get('data').split()] for n in root.find('custom')}
+    assert nums['sim_mujoco_lidar'] == pytest.approx(
+        [-0.75 * math.pi, 0.75 * math.pi, math.radians(0.5), 0.05, 10.0, 10.0, 0.01, 0.05, 9])
+    assert [g.get('group') for g in root.find('worldbody').findall('geom')] == ['1']
+    assert all(g.get('group') is None for g in root_body.iter('geom'))
+
+
+def test_lidar_and_depth_and_base_share_one_custom_block(tmp_path):
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, base_motion=BASE,
+                        depth_sensor=dict(pos=(0, 0, 1)), lidar=dict(pos=(0, 0, 0.2)))
+    root = ET.parse(path).getroot()
+    assert len(root.findall('custom')) == 1
+    assert [n.get('name') for n in root.find('custom')] == [
+        'sim_mujoco_base_diff', 'sim_mujoco_base_max_vel', 'sim_mujoco_depth', 'sim_mujoco_lidar']
+
+
+def test_lidar_with_a_bad_value_is_refused(tmp_path):
+    with pytest.raises(ValueError):
+        urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, lidar=dict(pos=(0, 0, 0.2), dropout=2.0))
+
+
+@needs_mujoco
+def test_lidar_model_compiles_and_the_fan_hits_only_the_scene(tmp_path):
+    scene_geom = ET.Element('geom', name='wall', type='box', size='0.05 3 1', pos='2.05 0 0.2')
+    path = urdf_to_mjcf(URDF.read_text(), tmp_path, urdf_dir=DATA, home=HOME, commanded=COMMANDED,
+                        world_geoms=[scene_geom], lidar=dict(pos=(0, 0, 0.2)))
+    m = load(path)
+    d = mujoco.MjData(m)
+    mujoco.mj_forward(m, d)
+    site = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, 'lidar')
+    assert site >= 0
+    groups = np.array([0, 1, 0, 0, 0, 0], dtype=np.uint8)
+    geomid = np.zeros(1, dtype=np.int32)
+    for ang in (0.0, 0.5, -0.8):
+        v = d.site_xmat[site].reshape(3, 3) @ np.array([math.cos(ang), math.sin(ang), 0.0])
+        dist = mujoco.mj_ray(m, d, d.site_xpos[site], v, groups, 1, -1, geomid)
+        assert dist == pytest.approx((2.0 - d.site_xpos[site][0]) / math.cos(ang), abs=1e-6)
+        assert m.geom(geomid[0]).name == 'wall'
+
+
 # ---------------------------------------------------------------- per-body gravcomp
 
 
