@@ -319,22 +319,22 @@ public:
     // gap (0 = plan straight to the dock pose). Planning to a pose a few cm from the wall fails or times out
     // when the tool mount clips the wall voxels on the way in; see docs/sim_mujoco.md.
     dock_approach_extra_m_ = this->declare_parameter<double>("dock_approach_extra_m", 0.0);
-    // Chained columns (default off): after a column's retract the tool stands at that column's dock pose. When the
+    // Chained columns (default on; false: every approach is a randomized OMPL plan): after a column's retract the tool stands at that column's dock pose. When the
     // next column of the same stand starts within chain_max_shift_m of it, the approach is first tried as one
     // straight Cartesian move (deterministic, short) instead of a randomized OMPL plan with a joint goal; a failed or
     // short chain move falls back to the normal approach, planned from where the tool really is.
-    chain_columns_ = this->declare_parameter<bool>("chain_columns", false);
+    chain_columns_ = this->declare_parameter<bool>("chain_columns", true);
     chain_max_shift_m_ = this->declare_parameter<double>("chain_max_shift_m", 0.4);
-    // Serpentine columns (default off): each column keeps the direction the coverage plan gave it (up, then down, ...)
+    // Serpentine columns (default on): each column keeps the direction the coverage plan gave it (up, then down, ...)
     // and the retract backs the tool off the wall at the END of the stroke, not at its start, so the next column starts
-    // where this one finished. Off: every column runs bottom to top and the retract returns to the column's start
+    // where this one finished. false: every column runs bottom to top and the retract returns to the column's start
     // (a full-length trip back down the wall after every stroke).
-    serpentine_columns_ = this->declare_parameter<bool>("serpentine_columns", false);
-    // Contact connectors (default off): between two adjacent strips of one stand the tool stays on the wall and slides
+    serpentine_columns_ = this->declare_parameter<bool>("serpentine_columns", true);
+    // Contact connectors (default on): between two adjacent strips of one stand the tool stays on the wall and slides
     // to the start of the next strip (one short Cartesian move with the force loop still engaged) instead of
     // retract + dock + approach. Needs serpentine_columns to be useful (the next strip must start where this one ends).
     // Any refusal or failure falls back to the normal retract and approach; the result message counts both.
-    contact_connectors_ = this->declare_parameter<bool>("contact_connectors", false);
+    contact_connectors_ = this->declare_parameter<bool>("contact_connectors", true);
     connector_cfg_.max_step_m = this->declare_parameter<double>("contact_connector_max_step_m", 0.15);
     connector_cfg_.plane_tol_m = this->declare_parameter<double>("contact_connector_plane_tol_m", 0.02);
     if (serpentine_columns_ && !dock_at_stroke_start_) {
@@ -3397,10 +3397,10 @@ private:
   std::vector<double> dock_branch_seed_;   ///< the last docked configuration: the IK seed of the next dock
   double travel_lift_margin_{0.01};
   double dock_approach_extra_m_{0.0};
-  bool chain_columns_{false};
+  bool chain_columns_{true};
   double chain_max_shift_m_{0.4};
-  bool serpentine_columns_{false};
-  bool contact_connectors_{false};
+  bool serpentine_columns_{true};
+  bool contact_connectors_{true};
   ConnectorConfig connector_cfg_;
   ConnectorLog connector_log_;
   const CoverageSegmentIntent * next_in_stand_{nullptr};   ///< the next column of the stand being run, if any

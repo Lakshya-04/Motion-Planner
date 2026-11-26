@@ -141,10 +141,10 @@ Between two columns of one stand the manager retracts and then plans an approach
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `chain_columns` | false | Try the straight chained approach between columns of one stand. |
+| `chain_columns` | true | Try the straight chained approach between columns of one stand. |
 | `chain_max_shift_m` | 0.4 | Longest distance (m) between the previous dock pose and the next approach pose that is still chained. |
-| `serpentine_columns` | false | Keep the plan's up/down direction per column, retract (straight, fsp fallback) at the stroke END, lower the tool before a stow from the top; use with `double_pass:=false`. Mock playback 3 x 2 m: 16/19 columns, 1090 s vs 15/19, 1179 s. |
-| `contact_connectors` | false | Between two adjacent strips of one stand, slide along the wall in contact to the start of the next strip (one Cartesian move, force loop still engaged) instead of retract + dock + approach. Use with `serpentine_columns` and `chain_columns`. See below. |
+| `serpentine_columns` | true | Keep the plan's up/down direction per column, retract (straight, fsp fallback) at the stroke END, lower the tool before a stow from the top; use with `double_pass:=false`. Mock playback 3 x 2 m: 16/19 columns, 1090 s vs 15/19, 1179 s. |
+| `contact_connectors` | true | Between two adjacent strips of one stand, slide along the wall in contact to the start of the next strip (one Cartesian move, force loop still engaged) instead of retract + dock + approach. Use with `serpentine_columns` and `chain_columns`. See below. |
 | `contact_connector_max_step_m` | 0.15 | Longest stroke-end to next-stroke-start distance (m) that still counts as adjacent (about 1.5 x the swath spacing). |
 | `contact_connector_plane_tol_m` | 0.02 | Largest offset (m) of that step along the wall normal (the two strips must lie on one wall plane). |
 
