@@ -13,12 +13,15 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kRankTol = 1e-9;
 }  // namespace
 
-JacobianQuality jacobianQuality(const Eigen::MatrixXd & J)
+namespace
+{
+template<typename M>
+JacobianQuality qualityOf(const M & J)
 {
   JacobianQuality out;
   if (J.rows() == 0 || J.cols() == 0) {return out;}
-  Eigen::JacobiSVD<Eigen::MatrixXd> svd(J);
-  const Eigen::VectorXd s = svd.singularValues();
+  Eigen::JacobiSVD<M> svd(J);
+  const auto & s = svd.singularValues();
   out.sigma_max = s.maxCoeff();
   if (J.rows() > J.cols()) {
     out.sigma_min = 0.0;
@@ -31,6 +34,11 @@ JacobianQuality jacobianQuality(const Eigen::MatrixXd & J)
     std::numeric_limits<double>::infinity();
   return out;
 }
+}  // namespace
+
+JacobianQuality jacobianQuality(const Eigen::MatrixXd & J) {return qualityOf(J);}
+
+JacobianQuality jacobianQuality(const JacobianRows & J) {return qualityOf(J);}
 
 double minSingularValue(const Eigen::MatrixXd & J)
 {
@@ -75,6 +83,18 @@ double jointLimitMargin(
     if (!isLimitedJoint(lower[j], upper[j])) {continue;}
     const double range = upper[j] - lower[j];
     m = std::min(m, std::max(0.0, std::min(q[j] - lower[j], upper[j] - q[j])) / range);
+  }
+  return m;
+}
+
+double jointLimitMargin(const JointRef & q, const JointRef & lower, const JointRef & upper)
+{
+  if (q.size() != lower.size() || q.size() != upper.size()) {return -1.0;}
+  double m = 0.5;
+  for (Eigen::Index j = 0; j < q.size(); ++j) {
+    if (!isLimitedJoint(lower(j), upper(j))) {continue;}
+    const double range = upper(j) - lower(j);
+    m = std::min(m, std::max(0.0, std::min(q(j) - lower(j), upper(j) - q(j))) / range);
   }
   return m;
 }

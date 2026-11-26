@@ -60,7 +60,7 @@ trap stop_all EXIT
 # 1. coverage plan for the wall's contact region, in the world frame
 rm -f "$COV"
 sleep 3
-timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args \
+timeout 120 ros2 run coverage_planner wall_coverage_demo_node --ros-args -p double_pass:=${STAND_PASS_DOUBLE_PASS:-false} \
   -p wall_scene_json:=$OUT/data/wall_pass_coverage_scene.json -p output_json:=$COV \
   -p orientation_format:=quaternion -p tool_frame_yaw_deg:=${STAND_PASS_TOOL_YAW:--90.0} \
   -p swath_m:=${STAND_PASS_SWATH:-0.14} -p overlap_pct:=${STAND_PASS_OVERLAP:-15.0} > "$OUT/coverage_demo.log" 2>&1 &

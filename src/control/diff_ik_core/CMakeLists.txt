@@ -17,6 +17,7 @@ add_library(${PROJECT_NAME}
   src/diff_ik.cpp
   src/pose_error.cpp
   src/tool_correction.cpp
+  src/cartesian_tracker.cpp
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -58,6 +59,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(tool_correction_test test/tool_correction_test.cpp)
   target_link_libraries(tool_correction_test ${PROJECT_NAME})
+
+  ament_add_gtest(cartesian_tracker_test test/cartesian_tracker_test.cpp)
+  target_link_libraries(cartesian_tracker_test ${PROJECT_NAME})
 
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)

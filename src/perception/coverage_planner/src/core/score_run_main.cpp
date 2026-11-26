@@ -5,6 +5,7 @@
 //             [--keepout-margin 0.07] [--obstacle-margin 0] [--obstacle-tol 0.003] [--max-obstacle-contacts N]
 //             [--max-wall-gap 0.01] [--max-tilt 10] [--nominal-tilt 0] [--max-bad-pose 0.05]  (tool on the wall and square to it; needs tilt_deg;
 //             --max-bad-pose needs a gate, --nominal-tilt needs --max-tilt, --max-wall-gap is ignored with --no-contact)
+//             [--target-speed 0.01] [--speed-force 3] [--speed-window 0.5]  (TCP speed over contact, adds "tcp_speed"; reported only)
 //             [--min-coverage 0.95] [--max-rms 0] [--max-peak 0] [--min-in-band 0]
 //             [--mode contact|non_contact|spray]  (per-mode default limits; explicit flags override)
 //             [--plan coverage_output.json]  (adds a "plan_redundancy" field: see plan_redundancy.hpp)
@@ -55,6 +56,9 @@ int main(int argc, char ** argv)
     o.max_wall_gap_m = num("--max-wall-gap", o.max_wall_gap_m);
     o.max_tilt_deg = num("--max-tilt", o.max_tilt_deg);
     o.nominal_tilt_deg = num("--nominal-tilt", o.nominal_tilt_deg);
+    o.target_speed_mps = num("--target-speed", o.target_speed_mps);
+    o.tcp_speed_force_n = num("--speed-force", o.tcp_speed_force_n);
+    o.tcp_speed_window_s = num("--speed-window", o.tcp_speed_window_s);
     if (!contact && a.count("--spray-standoff")) {
       o.spray = coverage_planner::SprayFootprint::fromCone(
         std::stod(a["--spray-standoff"]), num("--spray-half-angle", 20.0), num("--spray-sigma", 0.25));
