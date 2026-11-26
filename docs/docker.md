@@ -153,10 +153,16 @@ needs into the volumes `mp_sim_build`, `mp_sim_install` and `mp_sim_log`, starts
 docker/run_sim_checks.sh                              # Gazebo: smoke, depth-wall, base-motion
 docker/run_sim_checks.sh --mujoco-root /opt/mujoco-sdk/mujoco-4.0.1   # also the MuJoCo smoke test
 docker/run_sim_checks.sh --no-build --only gazebo-smoke
+docker/run_sim_checks.sh --out /tmp/sim_checks         # keep each check's log and a results.json there
 docker/run_sim_checks.sh --list
 ```
 
 It does not run the contact scripts or the manager passes, which take minutes each (lines above).
+
+`.github/workflows/nightly-sim-checks.yml` runs the Gazebo checks every night on a GitHub-hosted runner (CPU, no MuJoCo, no GPU
+planners) and uploads the `--out` directory and the console log as an artifact; a failed check fails the run. It has not run on a
+runner yet, only the script was run locally and the YAML went through actionlint. The first run builds the image from scratch, so
+expect it to be slow.
 
 Give each simulator run its own `ROS_DOMAIN_ID`. The simulator scripts are not part of `colcon test`.
 A pass of lines 1 to 3 says nothing about GPU planning, the simulators or hardware.

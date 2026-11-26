@@ -8,6 +8,7 @@
 #   docker/run_sim_checks.sh --skip gazebo-depth-wall
 #   docker/run_sim_checks.sh --no-build              reuse the build and install volumes
 #   docker/run_sim_checks.sh --image IMG             image to use (default motion-planner:sim-gazebo)
+#   docker/run_sim_checks.sh --out DIR               keep each check's log and a results.json in DIR
 #   docker/run_sim_checks.sh --list
 #
 # Checks: gazebo-smoke, gazebo-depth-wall, gazebo-base-motion, mujoco-smoke (needs --mujoco-root).
@@ -19,6 +20,7 @@ IMAGE="${SIM_CHECK_IMAGE:-motion-planner:sim-gazebo}"
 ONLY=""
 SKIP=""
 NO_BUILD=0
+OUT_HOST=""
 MUJOCO_ROOT_HOST=""
 ALL_CHECKS=(gazebo-smoke gazebo-depth-wall gazebo-base-motion mujoco-smoke)
 while [ $# -gt 0 ]; do
@@ -27,9 +29,10 @@ while [ $# -gt 0 ]; do
     --skip) SKIP="$2"; shift ;;
     --no-build) NO_BUILD=1 ;;
     --image) IMAGE="$2"; shift ;;
+    --out) OUT_HOST="$2"; shift ;;
     --mujoco-root) MUJOCO_ROOT_HOST="$2"; shift ;;
     --list) printf '%s\n' "${ALL_CHECKS[@]}"; exit 0 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -40,9 +43,13 @@ cd "$ROOT"
 
 if [ "${INSIDE_SIM_CHECKS:-0}" != "1" ]; then
   MOUNTS=()
+  if [ -n "$OUT_HOST" ]; then
+    mkdir -p "$OUT_HOST" && chmod a+rwx "$OUT_HOST" || exit 2
+    MOUNTS+=(-v "$(cd "$OUT_HOST" && pwd):/out" -e SIM_OUT=/out)
+  fi
   if [ -n "$MUJOCO_ROOT_HOST" ]; then
     [ -f "$MUJOCO_ROOT_HOST/include/mujoco/mujoco.h" ] || { echo "no mujoco.h under $MUJOCO_ROOT_HOST/include" >&2; exit 2; }
-    MOUNTS=(-v "$(cd "$MUJOCO_ROOT_HOST" && pwd):/opt/mujoco:ro" -e MUJOCO_ROOT=/opt/mujoco)
+    MOUNTS+=(-v "$(cd "$MUJOCO_ROOT_HOST" && pwd):/opt/mujoco:ro" -e MUJOCO_ROOT=/opt/mujoco)
   fi
   docker image inspect "$IMAGE" >/dev/null 2>&1 || {
     echo "image $IMAGE not found. Build it: docker build -f docker/Dockerfile --target sim-gazebo -t $IMAGE ." >&2; exit 2; }
@@ -96,10 +103,12 @@ run_check() {  # name, command...
   local rc=$?
   SECONDS_TAKEN[$name]=$((SECONDS - t0))
   tail -4 "/tmp/$name.log" | cut -c1-160
+  [ -n "${SIM_OUT:-}" ] && cp "/tmp/$name.log" "$SIM_OUT/$name.log"
   if [ $rc = 0 ]; then RESULT[$name]=PASS; else RESULT[$name]=FAIL; echo "  (full log: /tmp/$name.log, gone with the container)"; fi
 }
 
 run_check gazebo-smoke timeout 900 ros2 run sim_gazebo smoke_test.py
+[ -n "${SIM_OUT:-}" ] && export DEPTH_WALL_OUT="$SIM_OUT/depth_wall"
 run_check gazebo-depth-wall timeout 900 bash "$(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_depth_wall.sh"
 run_check gazebo-base-motion timeout 900 bash "$(ros2 pkg prefix sim_gazebo)/lib/sim_gazebo/run_base_motion.sh"
 if [ "$HAVE_MUJOCO" = 1 ]; then
@@ -114,9 +123,15 @@ fi
 
 echo "=== summary"
 fail=0
+json=""
 for n in "${ALL_CHECKS[@]}"; do
   r="${RESULT[$n]:-SKIP}"
   printf '  %-20s %-5s %s\n' "$n" "$r" "${SECONDS_TAKEN[$n]:+(${SECONDS_TAKEN[$n]} s)}"
+  json+="${json:+, }\"$n\": {\"result\": \"$r\", \"seconds\": ${SECONDS_TAKEN[$n]:-0}}"
   [ "$r" = FAIL ] && fail=1
 done
+if [ -n "${SIM_OUT:-}" ]; then
+  echo "{$json}" > "$SIM_OUT/results.json"
+  chmod -R a+rX "$SIM_OUT"
+fi
 exit $fail

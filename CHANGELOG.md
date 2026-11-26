@@ -19,6 +19,7 @@ anything verified on hardware.
 
 ### Added
 - `docker/run_sim_checks.sh`: one command for the headless simulator checks (Gazebo smoke, depth-wall perception, base motion; MuJoCo smoke with `--mujoco-root`), PASS/FAIL table, `--only` / `--skip` / `--no-build`. All four passed in the `sim-gazebo` image on 2026-11-26 (21, 12, 16 and 28 s). No contact scripts or manager passes in it, not wired into `colcon test` or CI. [docs/docker.md](docs/docker.md).
+- `.github/workflows/nightly-sim-checks.yml`: scheduled run of `docker/run_sim_checks.sh` (Gazebo checks, CPU) with logs and `results.json` uploaded as an artifact; `run_sim_checks.sh --out DIR` keeps the per-check logs. Not run on a GitHub runner yet.
 - `manipulation_manager`: opt-in `serpentine_columns` (default off): columns alternate direction, retract at the stroke end, lower the tool before a stow. Dock IK representatives are rebased to the live joint state only when real joint limits are known, keeping the wrist window and the branch joints of the accepted solution.
 - Compiler cache by default in every Docker image: `ccache` and `mold` installed in `base`, `CCACHE_*` and `CMAKE_{C,CXX,CUDA}_COMPILER_LAUNCHER` ENV, `docker/colcon-defaults.yaml` as `COLCON_DEFAULTS_FILE`, `/ccache` (mode 1777) mounted by `docker/compose.yaml` (`MP_CCACHE_DIR`), `docker/tools/ccache_stats.sh`, Dockerfile static test. Unbuilt: the images were not rebuilt (docs/docker.md "Compiler cache (default)").
 
