@@ -46,6 +46,9 @@
 
 #pragma once
 
+#include <Eigen/Core>
+
+#include "gravity_core/gravity_model.hpp"
 #include <memory>
 #include <string>
 #include <vector>
@@ -88,6 +91,9 @@ public:
 
 private:
   std::unique_ptr<MujocoSim> sim_;
+  std::unique_ptr<gravity_core::GravityModel> gravity_;  ///< set when gravity_feedforward is on
+  Eigen::VectorXd gravity_q_;
+  Eigen::VectorXd gravity_tau_;
   std::string sensor_name_;
   bool ft_tare_{false};
   std::string ft_frame_id_;
