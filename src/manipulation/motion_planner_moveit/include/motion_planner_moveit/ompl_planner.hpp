@@ -45,6 +45,10 @@ struct FreeSpaceOptimizeConfig
   /// arm motion. 1.0 = the plain 1/range weighting. The OMPL planners' own internal objective is MoveIt's unweighted
   /// path length; the weighting decides among the candidates and the post-processing.
   double lift_cost_weight{kDefaultLiftCostWeight};
+  /// Plugin param `joint_costs` (comma separated, one per active joint of the planning group, lift first): the
+  /// per-joint cost multiplier, the same array as the profile's `joint_costs`. When it has the right size it replaces
+  /// `lift_cost_weight`; empty (default) keeps `lift_cost_weight`. The manager fills it from the profile.
+  std::vector<double> joint_costs;
   /// planner_configs of ompl_planning.yaml, used round robin for the OMPL candidates.
   std::vector<std::string> planners{
     "BITstarkConfigDefault", "RRTstarkConfigDefault", "AITstarkConfigDefault", "InformedRRTstarkConfigDefault"};
