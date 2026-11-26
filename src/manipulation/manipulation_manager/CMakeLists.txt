@@ -11,6 +11,7 @@ find_package(ament_index_cpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(control_msgs REQUIRED)
+find_package(moveit_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
@@ -69,6 +70,7 @@ ament_target_dependencies(${PROJECT_NAME}_core
   rclcpp
   rclcpp_action
   control_msgs
+  moveit_msgs
 )
 
 # RM4D-backed ColumnReachabilityPort (adapters/): its own library so manipulation_manager_core stays free of
@@ -375,6 +377,7 @@ ament_export_dependencies(
   rclcpp
   rclcpp_action
   control_msgs
+  moveit_msgs
   core_types
   ros_adapters
   motion_planner

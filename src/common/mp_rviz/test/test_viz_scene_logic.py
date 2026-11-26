@@ -112,3 +112,55 @@ def test_transitions_between_strips():
     joins, nums = L.transitions(segs, pts)
     assert joins == [{'a': (0, 0, 0), 'b': (0, 1, 1)}]
     assert [n['n'] for n in nums] == [1, 2]
+
+
+# ---- the drawn wall matches the world wall --------------------------------------------------------------------
+GZ_SDF_WALL_X = 0.915   # Gazebo world wall front face: smoke scene aligned to standoff 0.915 (sim_gazebo wall_world)
+MJ_GEOM = dict(pos=(1.03, 0.75, 1.3), quat=(0.5, -0.5, -0.5, 0.5), half=(0.7, 1.0, 0.05))   # mujoco-fix-nav3 robot.xml wall_0
+
+
+def test_mujoco_wall_geom_front_face():
+    w = L.wall_from_box(MJ_GEOM['pos'], MJ_GEOM['quat'], MJ_GEOM['half'])
+    assert L.wall_plane_distance(w) == pytest.approx(0.98, abs=1e-9)          # 1.03 - 0.05
+    assert w['normal_outward'] == pytest.approx([-1.0, 0.0, 0.0], abs=1e-9)
+    assert w['thickness_m'] == pytest.approx(0.1)
+    cs = L.wall_corners(w)
+    assert {round(c[0], 9) for c in cs} == {0.98}
+    ys = sorted(c[1] for c in cs)
+    zs = sorted(c[2] for c in cs)
+    assert (ys[0], ys[-1]) == pytest.approx((0.05, 1.45)) and (zs[0], zs[-1]) == pytest.approx((0.3, 2.3))
+    assert {round(c[0], 9) for c in L.wall_back_outline(w)} == {1.08}
+
+
+def test_mjcf_file_wall(tmp_path):
+    f = tmp_path / 'r.xml'
+    f.write_text('<mujoco><worldbody><geom name="wall_0" type="box" pos="1.03 0.75 1.3" quat="0.5 -0.5 -0.5 0.5" '
+                 'size="0.7 1 0.05"/></worldbody></mujoco>')
+    w = L.wall_from_mjcf(str(f))
+    assert L.wall_plane_distance(w) == pytest.approx(0.98)
+    with pytest.raises(KeyError):
+        L.wall_from_mjcf(str(f), 'nope')
+
+
+def test_gazebo_world_wall_scene_matches_world_wall():
+    """The wall mp_viz_scene draws from the launch's rviz_world_wall.json is the generated world's wall: front plane
+    x = standoff (0.915), 3 x 2 m, floor to 2 m, 0.1 m thick behind the face; the old drawing (the scene file as is) was at x = 2.0."""
+    import json
+    sg = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'simulation', 'sim_gazebo')
+    sys.path.insert(0, sg)
+    from sim_gazebo import wall_world as ww
+    smoke = os.path.join(sg, 'test', 'data', 'smoke_wall_scene.json')
+    shapes = ww.load_shapes(smoke, standoff=GZ_SDF_WALL_X)
+    drawn = ww.world_wall_scene(shapes)['walls'][0]
+    sdf_wall = next(s for s in shapes if s.role == 'wall')
+    sdf_front_x = sdf_wall.position[0] - sdf_wall.dims[2] / 2.0   # the SDF box's front face (normal -x)
+    assert L.wall_plane_distance(drawn) == pytest.approx(GZ_SDF_WALL_X, abs=1e-6)
+    assert drawn['origin_xyz'][0] == pytest.approx(sdf_front_x, abs=1e-6)
+    cs = L.wall_corners(drawn)
+    assert {round(c[0], 6) for c in cs} == {GZ_SDF_WALL_X}
+    assert (min(c[1] for c in cs), max(c[1] for c in cs)) == pytest.approx((-1.5, 1.5))
+    assert (min(c[2] for c in cs), max(c[2] for c in cs)) == pytest.approx((0.0, 2.0))
+    assert drawn['thickness_m'] == pytest.approx(ww.WALL_THICKNESS)
+    with open(smoke) as f:
+        old = L.wall_from_scene(json.load(f))
+    assert abs(L.wall_plane_distance(old) - GZ_SDF_WALL_X) == pytest.approx(1.085)   # the mismatch that was drawn
