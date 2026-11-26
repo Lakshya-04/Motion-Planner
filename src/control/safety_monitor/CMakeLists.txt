@@ -8,6 +8,13 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(core_types REQUIRED)
+find_package(ros_adapters REQUIRED)
 
 # May be linked into a shared library (a controller plugin), so the static library must be PIC.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -18,6 +25,7 @@ add_library(${PROJECT_NAME}
   src/distance_source.cpp
   src/safety_monitor.cpp
   src/safety_chain.cpp
+  src/safety_chain_node_core.cpp
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -25,6 +33,13 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 target_link_libraries(${PROJECT_NAME} PUBLIC Eigen3::Eigen yaml-cpp)
+
+# Opt-in node (not started by any launch file in this repository except safety_chain.launch.py).
+add_executable(safety_chain_node src/safety_chain_node.cpp)
+target_link_libraries(safety_chain_node ${PROJECT_NAME} ros_adapters::ros_adapters)
+ament_target_dependencies(safety_chain_node rclcpp geometry_msgs sensor_msgs std_msgs std_srvs)
+install(TARGETS safety_chain_node DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 install(
   DIRECTORY include/
@@ -59,6 +74,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(safety_chain_test test/safety_chain_test.cpp)
   target_link_libraries(safety_chain_test ${PROJECT_NAME})
+
+  ament_add_gtest(safety_chain_node_core_test test/safety_chain_node_core_test.cpp)
+  target_link_libraries(safety_chain_node_core_test ${PROJECT_NAME})
 
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)
