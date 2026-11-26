@@ -10,7 +10,7 @@ ROS node (`manipulation_manager_node`, `tool_actuation_node`) over a mostly ROS-
 
 - Action server `execute_coverage` (`coverage_task_msgs/ExecuteCoverage`: single stand or several, selected columns, tool mode, resume). Service and topic `mission_command` (`MissionCommand`, and `std_msgs/String` `pause` / `resume`).
 - Clients and publishers: action `navigate_to_stand` (`stand_navigator_msgs`), service `PlanStands` of `reachability_msgs`, the controller's `follow_joint_trajectory` and `/<controller_name>/target_force_n` (default controller `combined_arm_lift_controller`), `valve_topic` (default `/tool/valve`, `std_msgs/Bool`); reads `force_topic` (default `/ft_conditioner/wrench_conditioned`) for the peak force.
-- Input plan: `coverage_output.json` from `coverage_planner` (parameter `coverage_json_path`).
+- Input plan: `coverage_output.json` from `coverage_planner` (parameter `coverage_json_path`), or with `coverage_source:=ros` the latched `CoveragePlan` on `coverage_plan_topic` (`docs/coverage_planner.md`).
 - Ports you can implement or call from C++: `ExecutionPort` (`core/execution/execution_port.hpp`), `CoverageSource` (`core/coverage_source.hpp`), `ColumnReachabilityPort` (`core/column_reach_port.hpp`).
 - Planning backends are chosen by name in a YAML (`planning_config` parameter; `config/planning.yaml`, `config/planning_curobo.yaml`).
 - Parameters: many; see the `declare_parameter` calls in `src/ros/manipulation_manager_node.cpp` (profile, frames, contact and spray tool settings, base stance check, retries, ledger, `run_on_start`, ...).
