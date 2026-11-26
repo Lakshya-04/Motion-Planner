@@ -1,0 +1,10 @@
+<library path="cartesian_tracking_controller">
+  <class name="cartesian_tracking_controller/CartesianTrackingController"
+         type="cartesian_tracking_controller::CartesianTrackingController"
+         base_class_type="controller_interface::ChainableControllerInterface">
+    <description>
+      Tracks a Cartesian contact-point pose (plus feedforward twist) with joint velocity commands,
+      using diff_ik_core::CartesianTracker.
+    </description>
+  </class>
+</library>
