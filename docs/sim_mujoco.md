@@ -342,6 +342,13 @@ are in the changelog. Without the lidar the base drives into the box, stalls on 
 `NAVIGATION_STUCK` after 20 s. The sim log's unexpected-contact scan reports nothing there (the box is touched, not penetrated), so
 contact is measured as the true footprint (odom) reaching the box face.
 
+## IMU (`imu:=true`)
+
+Default `false`: nothing starts. With `true` (needs `base_motion:=true`) `sim_imu_node` of `base_localisation` publishes `sensor_msgs/Imu` on `/imu` in frame `imu_link`,
+derived from the base twist (yaw rate on the gyro z, the twist derivative plus `w x v` and gravity on the accelerometer, no orientation), and the launch file adds
+the static TF to `imu_link` at `imu_pose`. The plugin's own gyro and accelerometer sensors are not used. Noise and bias off; `imu_gyro_noise`,
+`imu_gyro_bias`, `imu_accel_noise`, `imu_accel_bias` as in Gazebo. `localisation:=true` adds the EKF ([localisation.md](localisation.md)). Unit-tested; the launch path is not run here.
+
 ## MuJoCo 4 notes
 
 - 4.0 split the Python package into `mujoco-core` and `mujoco-studio` (the viewer lives with the
