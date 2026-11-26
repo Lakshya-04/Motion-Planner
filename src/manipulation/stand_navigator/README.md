@@ -56,6 +56,10 @@ with `obstacle_stop_m`, `obstacle_hold_s`, `obstacle_corridor_half_width_m`, `ob
 (`NO_NAV2` if it is absent; `nav2_msgs` is imported only then). Both are host-tested with fakes (`test/test_nav_safety.py`,
 `test/test_nav2_adapter.py`); nothing ran in colcon or against a real Nav2. See [stand_navigation.md](../../../docs/stand_navigation.md).
 
+## Drive modes
+
+Optional `base.modes` in the profile and the opt-in `use_drive_modes` parameter: a mode-aware planner (`mode_planner.py`, `reeds_shepp.py`) and follower (`mode_follower.py`) for Ackermann, crab, spin, skid and diff bases. Default off; host-tested only. Details and sources: [stand_navigation.md](../../../docs/stand_navigation.md) "Drive modes".
+
 ## Dock Monte Carlo
 
 ```bash

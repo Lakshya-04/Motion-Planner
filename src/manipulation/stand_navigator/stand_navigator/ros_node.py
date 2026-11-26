@@ -20,6 +20,10 @@ straight line when that is free (default behaviour) and plans around the obstacl
 when `use_path_planner` is true. Parameters: `use_path_planner` (false), `wall_scene_json` (''),
 `wall_scene_topic` ('', e.g. /wall_detector/wall_scene), `planner_resolution_m` (0.05), `planner_margin_m` (0.02),
 `planner_lookahead_m` (0 = from the profile). Without a scene, nothing changes.
+
+Drive modes (mode_planner.py, mode_follower.py): `use_drive_modes` (false) plans with the profile's `base.modes`
+(or the one mode its `drive_type` stands for) and follows the result mode by mode; a goal the modes cannot
+reach (e.g. an Ackermann base in a space too tight for its radius) is rejected with INVALID_GOAL. Off by default.
 """
 import json
 import math
@@ -41,6 +45,8 @@ from stand_navigator.core import (
     StandController, Tolerance, arm_to_footprint, footprint_to_arm, load_profile)
 from stand_navigator import nav_safety
 from stand_navigator.nav_safety import SafetyConfig, SafetyMonitor
+from stand_navigator.mode_follower import ModeFollower
+from stand_navigator.mode_planner import plan_with_modes
 from stand_navigator.path_planner import (
     PathFollower, plan_path, scene_obstacles, straight_line_free)
 
@@ -66,6 +72,7 @@ class StandNavigator(Node):
         self.margin = self.declare_parameter('planner_margin_m', 0.02).value
         look = self.declare_parameter('planner_lookahead_m', 0.0).value
         self.lookahead = look if look > 0.0 else None
+        self.use_modes = self.declare_parameter('use_drive_modes', False).value
         self.backend = self.declare_parameter('backend', 'builtin').value
         if self.backend not in ('builtin', 'nav2'):
             raise RuntimeError(f"parameter backend must be 'builtin' or 'nav2', got {self.backend!r}")
@@ -118,6 +125,10 @@ class StandNavigator(Node):
         self.get_logger().info(
             f'navigate_to_stand ready: drive {self.profile.drive}, max {self.profile.max_lin} m/s '
             f'{self.profile.max_ang} rad/s, arm mount {self.profile.arm_mount}')
+
+    def _request_mode(self, old, new):
+        # vendor driver call (service or topic) goes here; ModeFollower logs the change
+        return True
 
     def _on_odom(self, msg):
         self.odom = msg
@@ -211,7 +222,14 @@ class StandNavigator(Node):
         ctl = StandController(self.profile, goal_fp, self.tol)
         note = ''
         straight = math.hypot(fx - start[0], fy - start[1])
-        if self.obstacles:
+        if self.use_modes:
+            mp = plan_with_modes(self.profile, start, goal_fp, self.obstacles, self.res, self.margin)
+            if not mp.ok:
+                return self._result(handle, False, res.INVALID_GOAL, f'no feasible drive-mode plan: {mp.reason}')
+            ctl = ModeFollower(self.profile, mp, goal_fp, self.tol, self._request_mode)
+            note = f' (modes {mp.strategy}, {mp.length():.2f} m)'
+            self.get_logger().info(f'navigate_to_stand:{note.strip()}, modes {mp.modes}')
+        elif self.obstacles:
             fp = self.profile.footprint
             free = straight_line_free(self.profile.holonomic, fp, start, goal_fp, self.obstacles, self.margin)
             if self.use_planner or not free:
