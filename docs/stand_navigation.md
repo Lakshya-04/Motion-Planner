@@ -99,8 +99,9 @@ profile). The scene must be in the odom frame (nothing is transformed). Limits: 
 
 MuJoCo multi-stand pass switches (`run_multi_stand_pass.sh`): `MULTI_STAND_PATH_PLANNER=1` gives the navigator the pass's wall scene
 and `use_path_planner:=true`; `MULTI_STAND_WALL_DOCK=1` also starts `wall_docking_node` and latches the pass's scene
-(frame set to odom) on `/wall_detector/wall_scene` (the pass runs no wall_detector). Both default off. The manager does not send
-`WallDock` goals yet, so with the flag only the server is up (send a goal by hand, see the script header).
+(frame set to odom) on `/wall_detector/wall_scene` (the pass runs no wall_detector) and turns on the manager's
+`wall_dock_after_navigate` with `wall_dock_planned_standoff`, so each arrival is followed by a `WallDock` goal
+(`MULTI_STAND_WALL_DOCK_FACING` sets the node's `facing_rad`). Both default off.
 
 ## Wall docking: standoff and yaw from the fitted plane
 

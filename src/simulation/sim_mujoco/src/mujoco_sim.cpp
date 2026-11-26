@@ -61,6 +61,7 @@ MujocoSim::MujocoSim(
       joint.dof_adr = model_->jnt_dofadr[j];
       joint.actuator = act;
       joint.kv_over_kp = kv / kp;
+      joint.kp = kp;
       joint.target = data_->qpos[joint.qpos_adr];
       joint_.push_back(joint);
     }
@@ -409,6 +410,21 @@ void MujocoSim::setCommand(size_t i, double position, double velocity)
   velocity_command_[i] = std::isfinite(velocity) ? velocity : 0.0;
 }
 
+void MujocoSim::setFeedforward(size_t i, double tau)
+{
+  joint_[i].feedforward = std::isfinite(tau) ? tau : 0.0;
+}
+
+bool MujocoSim::hasGravcomp() const
+{
+  for (int b = 0; b < model_->nbody; ++b) {
+    if (model_->body_gravcomp[b] != 0.0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 int MujocoSim::advance(double dt)
 {
   carry_ += dt;
@@ -417,7 +433,8 @@ int MujocoSim::advance(double dt)
   carry_ -= n * h;
   for (int s = 0; s < n; ++s) {
     for (size_t i = 0; i < joint_.size(); ++i) {
-      data_->ctrl[joint_[i].actuator] = joint_[i].target + joint_[i].kv_over_kp * velocity_command_[i];
+      data_->ctrl[joint_[i].actuator] = joint_[i].target + joint_[i].kv_over_kp * velocity_command_[i] +
+        joint_[i].feedforward / joint_[i].kp;
     }
     if (base_.present) {
       // Integrate the set point along the commanded body velocity (zero command = hold position),
