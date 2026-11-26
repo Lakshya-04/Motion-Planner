@@ -394,6 +394,16 @@ checks that the header and the variables the script reads agree in both): `MULTI
 `MULTI_STAND_COVERAGE_EXTRA`, `MULTI_STAND_TOOL_YAW`. Both scripts end with one line `multi_stand knobs: sim=... patch_z=... double_pass=...`
 so a run's output says which knobs it used.
 
+Whole wall in MoveIt's scene: `MULTI_STAND_FULL_WALL_SCENE` (default 1; 0 = the old patch-only scene). `shift_wall_scene.py` also writes
+`walls_scene.pcd`, the Gazebo world wall's whole face (the shifted / widened / tall `smoke_wall_scene.json` extent: y over the full wall width, z 0 to
+the top, 2 m stock or `hi + 0.3` m for `MULTI_STAND_PATCH_Z`) on the tool's contact plane x = 0.98 with a 0.01 m grid (the octomap resolution; a
+coarser grid leaves gaps), and the manager's stand-arrival `world_model_loader_node` and the first scene load use it. Reason (run files,
+`gazebo-final-onewall`, `gazebo-onewall-main1`, `w1-gz-onewall-names`): the planning scene only knew `walls.pcd`, the contact patch (y 0.25..1.25, z
+0.95..1.35), so OMPL free-space approaches to the first column of every stand swung the tool (z about 2.07, x 1.06) through wall MoveIt did not know
+and dragged it down to the dock: 1.2 to 18 kN peaks. `walls.pcd` (coverage planner observed mask, reachability, scoring) and the cuRobo world
+(box limit) are unchanged. The same idea as MuJoCo's `walls_sim.pcd` (`sim_mujoco/scripts/shift_wall_scene.py`, `sim_wall_pcd`), without its curtain.
+Offline tests only (`test_wall_scene_pcd.py`); NOT run in Gazebo. The cloud is at x 0.98, the world face is at 0.915 (the tool's contact plane, as the patch).
+
 Tall wall: `MULTI_STAND_PATCH_Z="0.6,2.0"` moves the patch (coverage scene, `walls.pcd`, the manager's `coverage_z_min_m`/`_max_m`, the
 recorder's wall band) and makes the sim wall `hi + 0.3` m high (`shift_wall_scene.py`, argument 6; the stock wall is 2 m and the world
 generator puts its bottom on the floor). `MULTI_STAND_SCENARIO` (`make_scenario_scene.py`, obstacles and named walls) is MuJoCo only and
