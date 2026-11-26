@@ -136,6 +136,19 @@ def test_depth_sensor_is_a_gz_depth_camera_on_depth_sensor_link():
     assert float(s.find('camera/noise/stddev').text) == 0.003
 
 
+def test_lidar_off_by_default_and_a_gz_gpu_lidar_on_lidar_link():
+    assert _render_with({}).find("link[@name='lidar_link']") is None
+    robot = _render_with({'gz_lidar': 'true', 'gz_lidar_xyz': '0.4 0 0.3', 'gz_lidar_samples': '181',
+                          'gz_lidar_noise': '0.01'})
+    j = robot.find("joint[@name='lidar_joint']")
+    assert j.find('parent').get('link') == 'base_footprint' and j.find('origin').get('xyz') == '0.4 0 0.3'
+    s = robot.find("gazebo[@reference='lidar_link']/sensor[@type='gpu_lidar']")
+    assert s.find('topic').text == '/scan' and s.find('gz_frame_id').text == 'lidar_link'
+    assert int(s.find('lidar/scan/horizontal/samples').text) == 181
+    assert float(s.find('lidar/noise/stddev').text) == 0.01
+    assert float(s.find('lidar/range/max').text) == 10.0
+
+
 def test_rgb_camera_off_by_default_and_a_gz_camera_on_rgb_camera_link():
     assert _render_with({}).find("link[@name='rgb_camera_link']") is None
     robot = _render_with({'gz_rgb_camera': 'true', 'gz_rgb_xyz': '0.2 0 1.0', 'gz_rgb_width': '640', 'gz_rgb_height': '480'})

@@ -1,0 +1,36 @@
+<!-- lidar_wall.xml: slide_wall.xml plus a lidar (site `lidar` at the carriage origin, scanning the x-y plane, the numeric
+     sim_mujoco_lidar: -45..45 deg in 1 degree steps, 0.05 to 3 m, 10 Hz, no noise, no dropout, seed 7) and the scene
+     in geom group 1. A robot pad sits 0.25 m in front of the lidar inside the scan plane (group 0: must not be hit).
+     A wall front face at x = 2 m, 1 m wide. -->
+<mujoco model="lidar_wall">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" integrator="implicitfast"/>
+  <worldbody>
+    <body name="carriage" pos="0 0 0">
+      <joint name="slide" type="slide" axis="0 0 1" range="-0.5 0.5" damping="50" armature="1"/>
+      <inertial pos="0.05 0 0" mass="2" diaginertia="0.01 0.01 0.01"/>
+      <geom name="pad" type="box" size="0.02 0.3 0.05" pos="0.25 0 0"/>
+      <site name="ft_sensor" size="0.01"/>
+      <site name="lidar" pos="0 0 0" size="0.01"/>
+      <site name="tcp_site" pos="0.1 0 0.05" size="0.01"/>
+      <body name="follower">
+        <joint name="slave" type="slide" axis="0 0 1" damping="50" armature="1"/>
+        <inertial pos="0 0 0" mass="0.001" diaginertia="0.01 0.01 0.01"/>
+      </body>
+    </body>
+    <geom name="wall" group="1" type="box" size="0.05 0.5 0.5" pos="2.05 0 0"/>
+  </worldbody>
+  <custom>
+    <numeric name="sim_mujoco_lidar" data="-0.78539816 0.78539816 0.017453293 0.05 3.0 10.0 0.0 0.0 7"/>
+  </custom>
+  <equality>
+    <joint joint1="slave" joint2="slide" polycoef="0 0.5 0 0 0"/>
+  </equality>
+  <actuator>
+    <position name="act_slide" joint="slide" kp="1000" kv="100" forcerange="-500 500"/>
+  </actuator>
+  <sensor>
+    <force name="ft_force" site="ft_sensor"/>
+    <torque name="ft_torque" site="ft_sensor"/>
+  </sensor>
+</mujoco>
