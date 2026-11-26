@@ -59,6 +59,10 @@ class MpVizMarkers(Node):
         # base moves are free-space motion and drew big loops across the scene. path_contact_only:=false draws all of it again
         self.path_contact_only = bool(p('path_contact_only', True).value)
         self.path_contact_force = float(p('path_contact_force_n', 2.0).value)
+        # the contact force flickers (several dropouts per second below the threshold even on a good stroke), so the line keeps
+        # drawing for this long after the last sample above the threshold: one unbroken line per stroke
+        self.path_contact_hold_s = float(p('path_contact_hold_s', 1.0).value)
+        self._last_contact_t = None
         self.text_xyz = [float(c) for c in p('text_xyz', [0.9, -1.5, 2.4]).value]   # fixed_frame position of the readout
         self.path_pts = []
         self._path_dirty = False
@@ -88,7 +92,11 @@ class MpVizMarkers(Node):
             return
         q = t.transform.translation
         pt = (q.x, q.y, q.z)
-        if self.path_contact_only and not (self.force is not None and self.force > self.path_contact_force):
+        now_s = self.get_clock().now().nanoseconds * 1e-9
+        if self.force is not None and self.force > self.path_contact_force:
+            self._last_contact_t = now_s
+        in_contact = self._last_contact_t is not None and now_s - self._last_contact_t <= self.path_contact_hold_s
+        if self.path_contact_only and not in_contact:
             if self.path_pts and self.path_pts[-1] is not None:
                 self.path_pts.append(None)   # the stroke ended: break the line here
                 self._path_dirty = True
