@@ -55,3 +55,11 @@ def test_readout():
     assert 'OVER LIMIT' in L.format_readout('stroking', 0, 1, 60.0, 50.0)
     assert L.format_readout('', 0, 0, None, 50.0) == 'no mission feedback\nstand -\nforce - N'
     assert 'force - N' in L.format_readout('x', 0, 0, math.nan, 50.0)
+
+
+def test_line_list_points_breaks_between_strokes():
+    pts = [(0, 0, 0), (1, 0, 0), (2, 0, 0), None, (5, 0, 0), (6, 0, 0), None, None, (9, 0, 0)]
+    out = L.line_list_points(pts)
+    assert out == [(0, 0, 0), (1, 0, 0), (1, 0, 0), (2, 0, 0), (5, 0, 0), (6, 0, 0)]   # no segment joins two strokes, a lone point draws nothing
+    assert L.line_list_points([]) == []
+    assert L.line_list_points([None, None]) == []

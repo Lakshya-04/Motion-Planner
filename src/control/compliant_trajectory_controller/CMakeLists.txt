@@ -434,6 +434,14 @@ if(BUILD_TESTING)
     )
     target_include_directories(test_pose_inputs PRIVATE include)
   endif()
+
+  # Step cap of the admittance integrator and the force limiter (ROS-free helper).
+  ament_add_gtest(test_integration_period
+    test/test_integration_period.cpp
+  )
+  if(TARGET test_integration_period)
+    target_include_directories(test_integration_period PRIVATE include)
+  endif()
 endif()
 
 ament_package()
