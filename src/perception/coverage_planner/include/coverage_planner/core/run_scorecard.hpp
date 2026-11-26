@@ -69,7 +69,33 @@ struct ScorecardOptions
   double max_wall_gap_m{0.0};
   double max_tilt_deg{0.0};              ///< Allowed deviation of the tilt from `nominal_tilt_deg`; 0 = not checked.
   double nominal_tilt_deg{0.0};          ///< The tool's intended angle to the wall normal (0 for a flat pad, e.g. 30 for an angled tool).
+  /// TCP speed statistics (contact tools only, reported, never a pass criterion): windows of contact where the force
+  /// is above `tcp_speed_force_n`, speed taken over `tcp_speed_window_s` of travel (see `computeTcpSpeedStats`).
+  double tcp_speed_force_n{3.0};
+  double tcp_speed_window_s{0.5};
+  double target_speed_mps{0.0};          ///< The commanded stroke speed; 0 = no deviation figure.
 };
+
+/// Speed of the tool point over the contact strokes only. Each value is |p(t+W) - p(t)| / W for a sample inside a
+/// run of consecutive samples whose force is above `force_threshold_n`, with W the shortest span of at least
+/// `window_s` that stays inside the run (the position CSV is rounded to 10 um, so a single 10 ms step would carry
+/// ~10 % noise at 1 cm/s). Windows overlap (one per sample). A turn inside a window lowers that window's value. A gap of more than `window_s` between two samples ends a run.
+struct TcpSpeedStats
+{
+  size_t windows{0};              ///< Number of speed values; 0 = no contact run was long enough, the rest is 0.
+  double mean_mps{0.0};
+  double median_mps{0.0};
+  double std_mps{0.0};
+  double p5_mps{0.0};
+  double p95_mps{0.0};
+  double target_mps{0.0};         ///< Echo of the target (0 = none given).
+  /// (median - target) / target; only meaningful when `target_mps` > 0, else 0.
+  double median_rel_dev{0.0};
+};
+
+TcpSpeedStats computeTcpSpeedStats(
+  const std::vector<RunSample> & samples, double force_threshold_n = 3.0, double window_s = 0.5,
+  double target_mps = 0.0);
 
 struct ScorecardLimits
 {
@@ -105,6 +131,7 @@ struct RunScorecard
   double tilt_max_deg{0.0};             ///< Largest recorded tilt among them.
   double wall_gap_mean_m{0.0};          ///< Signed tool-point height over the wall (+ = in front), same samples.
   double wall_gap_max_abs_m{0.0};       ///< Largest |gap| among them.
+  TcpSpeedStats tcp_speed;              ///< Contact tools only; all zero for a non-contact run.
   bool passed{false};
   std::vector<std::string> failures;
 };
