@@ -127,6 +127,14 @@ Differences from MuJoCo: `VelocityControl` has no command timeout (a stale `/cmd
 acceleration limits (use `stand_navigator`'s), omni only (the profile `drive_type` is not applied, `vy` is not dropped for
 `diff`), and no odom noise. The manager pass with a free base is the multi-stand pass below.
 
+## Gravity check
+
+`ros2 run sim_gazebo gravity_check.py` starts the sim, drives home and a few poses through the joint trajectory
+controller, and compares the effort Gazebo reports for each joint at rest with the torque from
+[`gravity_core`](../src/control/gravity_core/README.md) for the same URDF. Exit code 0 when every joint is within
+`--tol` (default 2 N m or N). The telescopic stages are compared as outputs of their own, because Gazebo reports the
+lift joint alone. Result and numbers: [gravity_compensation.md](gravity_compensation.md).
+
 ## Depth sensor (`depth_sensor:=true`)
 
 Default `false`: nothing is added. With `true` the description gets `depth_sensor_link` (on `base_footprint` at
@@ -290,7 +298,8 @@ coverage file, zero force target before disengage):
   gain of 0.1 /s (10 s time constant), so the arm settles slowly (the ready pose needs about 20 s; the calibration poses of
   `contact_control_test.py` do not settle in its 5 s moves and fail, so it keeps the default). A gain of 10
   (`position_proportional_gain`) makes the joints stiff and the contact bounces (8 kN peaks); the soft loop is part of
-  why the contact holds. Not fixed: a properly tuned joint model.
+  why the contact holds. The manager passes now set the gain to 2 (`position_gain:=`, see "Cause found" below); 0.1 left the arm behind the plan.
+  Not fixed: a properly tuned joint model.
 - JTAC's Cartesian offset clamp (3 mm instead of the default 0.1 m) made no difference to this pass and is not used.
 - The tool roll is -90 degrees because the UR10e ready pose has the same roll as in MuJoCo; the generic 6-DOF profile
   (smoke test pose, wrist roll -46.4 degrees) also ran end to end but its ACM only has adjacent pairs, and
@@ -549,6 +558,36 @@ Same-session runs of `run_multi_stand_pass.sh` (two stands, ten columns, no cuRo
   2e-14 even with the clamp, so some request path still sends an unclamped start state (not found; the only caller of `MoveGroupInterface::plan` is `OmplPlanner`);
   force peaks of 1820 N in the scored trace (583.9 N before the second-stand fix) are an unrelated problem of the Gazebo contact model that this pass shows and
   does not explain. The Gazebo two-stand pass is therefore still failing; the numbers above are single runs.
+
+- **Cause found (2026-11-26): the joint loop gain, not the planner, the tool or the contact model.** A baseline run on main (no options, headless, idle host)
+  gave 3 of 10 columns, coverage 0.32 (884 of 2790 cells), peak 1886 N, wall gap 57 mm, 1592 s. Its `manager.log`: 77 `approach attempt ... ended 0.13 to 0.91 m from the
+  approach pose` with `tool still moving after 4.0 s of settling` each time, 5 `dock failed`, and three columns that docked to 2 to 4 mm but
+  `17 to 85 deg off the standoff pose`, so no press. gz_ros2_control's position loop (`jtac_position_only`) has a gain of 0.1 /s, a 10 s time constant,
+  while a planned approach lasts 1 to 6 s: the joints are still converging when the manager looks, 4 s later. The 4 s settle check only watches the
+  tool position, which does not move when wrist 3 (the tool axis) turns, so it passes while the roll is tens of degrees off. Every failed column starts from that
+  half-converged arm (wrist joint winding to -4.4 rad in the log), which is what the earlier IK-branch notes above saw. The force peaks are the tool
+  meeting the wall in these off-pose arms. MuJoCo's position actuators are far stiffer (kp 10 N m/rad per N m of effort limit, `mjcf_generator.py`) and follow the plans.
+  **Fix:** launch argument `position_gain:=G` (xacro `gz_extra_params`, a second `<parameters>` file with `gz_ros_control.position_proportional_gain`),
+  and `run_multi_stand_pass.sh` now defaults `GZ_POSITION_GAIN` to 2.0 (the plugin default stays 0.1 everywhere else; `GZ_POSITION_GAIN=0.1` gives the old behaviour).
+  Same script, same map, headless, one run each unless noted (peak = scorer's ground truth; the feedback peak is the manager's conditioned wrench):
+
+  | gain /s | columns done | coverage | peak (score) | wall gap max | duration | scorer |
+  |---|---|---|---|---|---|---|
+  | 0.1 (main) | 3 of 10 | 0.32 | 1886 N | 57 mm | 1592 s | fails |
+  | 1 | 6 of 10 (10 `not pressing`, orientation) | 0.70 | 29.6 N | 22 mm | 421 s | fails |
+  | 2 (4 runs, the last one on the new script default) | 10 of 10 each | 1.00 each | 58.7, 50.9, 44.6, 53.5 N | 15, 12, 7, 13 mm | 540 to 559 s | passes 4 of 4 |
+  | 3 | 7 of 10 | 0.90 | 15 005 N | 56 mm | 534 s | fails |
+  | 4 | 8 of 10 | 0.96 | 17 036 N | 58 mm | 583 s | passes (coverage only; in-band 0.05) |
+
+  The usable window is narrow: at 3 /s and up the stiff joints bounce on the wall (the earlier 8 kN note under `jtac_position_only`), at 1 /s the
+  roll is still off at the dock. 2 /s is a measured sweet spot, not a derived one. At 2 /s the peak is 45 to 59 N against about 20 N in MuJoCo and the
+  in-band fraction is 0.45 to 0.53, so the force quality is still behind MuJoCo (why is not isolated; the soft tip and the 200 Hz controller are
+  suspects, not tuned here). The single-stand `run_manager_pass.sh` (4 columns, 930 cells) shows the same thing: at 0.1 /s on main, run 1 docked
+  nothing useful (coverage 0, peak 1131 N, 4 columns `not pressing` or `dock failed`), run 2 got coverage 1.0 with a 1100 N peak; at 2 /s 4 of 4 runs
+  have coverage 1.0, peaks 31 to 59 N, RMS error about 3 N, but only 24 to 34 % of the contact samples in the force band (the older 0.85 was at 0.1 /s). It
+  defaults to 2.0 now too (`GZ_POSITION_GAIN`). Not verified: other profiles, the spray pass (it keeps the plugin default, its 27 s seed move was
+  built for the slow loop), a tall wall, a loaded host beyond the load average of 19 seen during 2 of the gain-2 runs. A better fix would be a settle check that
+  includes the joints, or a properly tuned joint model; neither is done.
 
 - **Run after #157 (2026-11-21):** no `Start state out of bounds` error at all (0 of the 19 earlier ones), so the unclamped path was the Cartesian planner. The pass is still
   failing and was worse in this single run (1 / 9; the earlier run was 6 / 4, so the pass varies a lot between runs). What the log shows: the first dock approach on stand 0

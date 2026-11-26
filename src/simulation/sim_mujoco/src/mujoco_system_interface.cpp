@@ -6,8 +6,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 
+#include "gravity_core/urdf_loader.hpp"
 #include "pluginlib/class_list_macros.hpp"
 
 namespace sim_mujoco
@@ -113,6 +115,29 @@ CallbackReturn MujocoSystemInterface::on_init(const hardware_interface::Hardware
   } catch (const std::exception & e) {
     RCLCPP_FATAL(kLogger, "%s", e.what());
     return CallbackReturn::ERROR;
+  }
+  if (param(info_, "gravity_feedforward", "false") == "true") {
+    try {
+      gravity_ = std::make_unique<gravity_core::GravityModel>(
+        gravity_core::loadUrdf(info_.original_xml, joints));
+      const std::string link = param(info_, "gravity_payload_link", "");
+      if (!link.empty()) {
+        std::istringstream cog(param(info_, "gravity_payload_cog", "0 0 0"));
+        Eigen::Vector3d c = Eigen::Vector3d::Zero();
+        cog >> c[0] >> c[1] >> c[2];
+        gravity_->setPayload(link, std::stod(param(info_, "gravity_payload_mass", "0")), c);
+      }
+    } catch (const std::exception & e) {
+      RCLCPP_FATAL(kLogger, "gravity_feedforward: %s", e.what());
+      return CallbackReturn::ERROR;
+    }
+    gravity_q_.setZero(joints.size());
+    gravity_tau_.setZero(joints.size());
+    if (sim_->hasGravcomp()) {
+      RCLCPP_WARN(kLogger, "gravity_feedforward is on but the MJCF still has gravcomp bodies: "
+        "gravity is compensated twice. Generate with gravcomp=False (launch gravity_comp:=core).");
+    }
+    RCLCPP_INFO(kLogger, "Gravity feed-forward from gravity_core on %zu joints", joints.size());
   }
   const size_t n = joints.size();
   state_position_.assign(n, 0.0);
@@ -361,6 +386,20 @@ hardware_interface::return_type MujocoSystemInterface::write(
         noise_.cmd_vel_m[i].step(command_velocity_[i]));
     } else {
       sim_->setCommand(i, command_position_[i], command_velocity_[i]);
+    }
+  }
+  if (gravity_) {
+    // Measured positions, like a real arm's feed-forward; skipped until the first read() filled them.
+    bool finite = true;
+    for (size_t i = 0; i < state_position_.size(); ++i) {
+      gravity_q_[i] = state_position_[i];
+      finite = finite && std::isfinite(gravity_q_[i]);
+    }
+    if (finite) {
+      gravity_->compute(gravity_q_, gravity_tau_);
+      for (size_t i = 0; i < state_position_.size(); ++i) {
+        sim_->setFeedforward(i, gravity_tau_[i]);
+      }
     }
   }
   if (sim_->hasBase()) {
