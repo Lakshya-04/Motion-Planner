@@ -417,6 +417,8 @@ TEST(DockIkSelectorJointCosts, WithoutLimitsTheLiftStrokeAndTwoPiAreTheRanges)
   EXPECT_NEAR(dockIkCost({0.3, 0.0, 0.0}, ref, p), 0.3 / 1.5, 1e-12);
   EXPECT_NEAR(dockIkCost({0.0, 1.0, 0.0}, ref, p), 1.0 / (2.0 * M_PI), 1e-12);
 
+}
+
 // Lift is metres, arm is radians. The cost is a max, never a sum, so 0.06 m of lift next to a 0.2 rad arm step
 // reads as 0.2; the reference here is the start state.
 TEST(DockIkSelectorTest, LiftMetresAreNotAnArmJumpAgainstTheStartState)
