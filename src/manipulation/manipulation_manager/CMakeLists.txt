@@ -48,8 +48,10 @@ add_library(${PROJECT_NAME}_core
   src/core/base_stance_check.cpp
   src/core/stand_check.cpp
   src/core/coverage_task.cpp
+  src/core/coverage_plan_intents.cpp
   src/ros/execution/jtac_execution_adapter.cpp
   src/ros/coverage/coverage_output_json_source.cpp
+  src/ros/coverage/ros_coverage_source.cpp
 )
 
 target_link_libraries(${PROJECT_NAME}_core
@@ -68,6 +70,7 @@ target_compile_features(${PROJECT_NAME}_core PUBLIC c_std_99 cxx_std_17)
 
 ament_target_dependencies(${PROJECT_NAME}_core
   rclcpp
+  coverage_planner_msgs
   rclcpp_action
   control_msgs
   moveit_msgs
@@ -259,6 +262,11 @@ if(BUILD_TESTING)
   ament_add_gtest(coverage_output_json_source_test test/coverage_output_json_source_test.cpp)
   if(TARGET coverage_output_json_source_test)
     target_link_libraries(coverage_output_json_source_test ${PROJECT_NAME}_core core_types::core_types)
+  endif()
+
+  ament_add_gtest(coverage_plan_intents_test test/coverage_plan_intents_test.cpp)
+  if(TARGET coverage_plan_intents_test)
+    target_link_libraries(coverage_plan_intents_test ${PROJECT_NAME}_core core_types::core_types)
   endif()
 
   ament_add_gtest(wall_direction_test test/wall_direction_test.cpp)
