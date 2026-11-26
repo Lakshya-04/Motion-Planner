@@ -308,6 +308,9 @@ private:
   std::vector<std::string> state_interface_types_;
 
   // -- redundancy weighting: per-joint Per-joint redundancy weighting -- see this class's own header doc. --
+  /// Longest step (s) the admittance integrator and the force limiter take in one cycle; 0 = no cap. See
+  /// integration_period.hpp.
+  double max_integration_period_s_{0.0};
   bool enable_redundancy_weighting_{false};
   std::vector<double> redundancy_weights_;
   /// A SEPARATE instance from admittance_rule_'s own internal kinematics_ (private, not exposed)

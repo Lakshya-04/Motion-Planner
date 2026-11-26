@@ -21,6 +21,10 @@ controller_manager:
 # hard-coding a description at launch-file parse time.
 combined_arm_lift_controller:
   ros__parameters:
+    # An overrunning 100 Hz cycle (14 to 22 ms seen on a busy host) must not give the explicit-Euler admittance
+    # integrator a long step: that is what triggers the 'Cartesian offset diverged' reset and the force spikes
+    # that follow. Steps are capped at 15 ms; 0 turns the cap off.
+    max_integration_period_s: 0.015
     joints:
       - lift_prismatic_joint
       - joint1
