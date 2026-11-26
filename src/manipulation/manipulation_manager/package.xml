@@ -22,6 +22,7 @@
   <depend>rclcpp</depend>
   <depend>rclcpp_action</depend>
   <depend>control_msgs</depend>
+  <depend>moveit_msgs</depend>
   <depend>std_msgs</depend>
   <depend>reachability_msgs</depend>
   <depend>stand_navigator_msgs</depend>
