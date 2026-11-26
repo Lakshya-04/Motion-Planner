@@ -53,6 +53,12 @@ struct DockIkSelectorParams
   /// makes lift motion twice as costly as arm motion, so the choice prefers arm motion over lift motion. 1.0 = the
   /// plain max |dq|.
   double lift_cost_weight{2.0};
+  /// Per-joint movement cost, the profile's `joint_costs` (same order as a solution). When it has the solution's
+  /// size the ranking cost is max_i joint_costs[i] * |dq_i| / range_i, the same range-normalised travel the planners
+  /// weight: range_i is joint_upper - joint_lower, or without limits the lift stroke (lift_min_m .. lift_max_m) for a
+  /// linear joint and 2*pi for any other. It replaces lift_cost_weight; empty keeps lift_cost_weight on raw dq.
+  /// Ranking only: the max_dq_rad and exclusion checks stay on raw dq.
+  std::vector<double> joint_costs;
   // Reach preference (see the header comment); reach_target_fraction <= 0 or reach_m <= 0 = off.
   double reach_target_fraction{0.0};        ///< wanted upper bound of tool distance / reach_m
   double reach_m{0.0};                      ///< arm reach from the arm base frame origin (m)
@@ -113,8 +119,26 @@ inline bool allFiniteJoints(const std::vector<double> & q)
   return std::all_of(q.begin(), q.end(), [](double x) {return std::isfinite(x);});
 }
 
-/// max_i w_i |dq_i| between `q` and `ref`, wrapping every joint that is not linear; w_i is p.lift_cost_weight for a
-/// linear joint when `weighted`, else 1. Infinity on a size mismatch or a non-finite joint.
+/// Scale of joint i's delta in the ranking cost when p.joint_costs is used: cost_i / range_i.
+inline double dockIkJointScale(const DockIkSelectorParams & p, size_t i, size_t n, bool linear)
+{
+  double range = 0.0;
+  if (p.joint_lower.size() == n && p.joint_upper.size() == n) {
+    range = p.joint_upper[i] - p.joint_lower[i];
+  }
+  if (!(range > 1e-9)) {
+    range = linear ? p.lift_max_m - p.lift_min_m : 2.0 * M_PI;
+  }
+  if (!(range > 1e-9)) {
+    range = 1.0;
+  }
+  const double c = p.joint_costs[i];
+  return (std::isfinite(c) && c > 0.0 ? c : 1.0) / range;
+}
+
+/// max_i w_i |dq_i| between `q` and `ref`, wrapping every joint that is not linear. When `weighted`: w_i is
+/// p.joint_costs[i] / range_i if p.joint_costs has q's size, else p.lift_cost_weight for a linear joint and 1 for
+/// the rest; unweighted, w_i is 1. Infinity on a size mismatch or a non-finite joint.
 inline double dockIkCost(
   const std::vector<double> & q, const std::vector<double> & ref, const DockIkSelectorParams & p,
   bool weighted = true)
@@ -123,11 +147,17 @@ inline double dockIkCost(
     return INFINITY;
   }
   double worst = 0.0;
+  const bool per_joint = weighted && p.joint_costs.size() == q.size();
   for (size_t i = 0; i < q.size(); ++i) {
     double d = q[i] - ref[i];
-    if (std::find(p.linear_joints.begin(), p.linear_joints.end(), i) == p.linear_joints.end()) {
+    const bool linear =
+      std::find(p.linear_joints.begin(), p.linear_joints.end(), i) != p.linear_joints.end();
+    if (!linear) {
       d = wrapToPi(d);
-    } else if (weighted && std::isfinite(p.lift_cost_weight) && p.lift_cost_weight > 0.0) {
+    }
+    if (per_joint) {
+      d *= dockIkJointScale(p, i, q.size(), linear);
+    } else if (linear && weighted && std::isfinite(p.lift_cost_weight) && p.lift_cost_weight > 0.0) {
       d *= p.lift_cost_weight;
     }
     if (std::isnan(d)) {

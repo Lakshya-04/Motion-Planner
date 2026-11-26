@@ -17,6 +17,7 @@ add_library(${PROJECT_NAME}
   src/curobo_yaml.cpp
   src/distance_source.cpp
   src/safety_monitor.cpp
+  src/safety_chain.cpp
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -55,6 +56,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(safety_monitor_test test/safety_monitor_test.cpp)
   target_link_libraries(safety_monitor_test ${PROJECT_NAME})
+
+  ament_add_gtest(safety_chain_test test/safety_chain_test.cpp)
+  target_link_libraries(safety_chain_test ${PROJECT_NAME})
 
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)
