@@ -2,12 +2,8 @@
  * @file coverage_source.hpp
  * @brief Seam for "where does the Actual coverage path come from."
  * @details Pure (no ROS deps), matching core_types::Pose's discipline.
- *          Today the only implementation is YamlCoverageSource (a hardcoded
- *          test/validation config) -- a second implementation backed by
- *          coverage_planner's real service is a plain follow-on once that
- *          package populates real segment metadata (see
- *          docs/architecture.md), not a
- *          redesign of this interface.
+ *          Implementations: CoverageOutputJsonSource (coverage_output.json) and RosCoverageSource
+ *          (the latched CoveragePlan topic).
  * @author Lakshya Agarwal <100lakshyaagarwal@gmail.com>
  */
 

@@ -44,3 +44,29 @@ and as a fraction.
 Findings: the planner's column order (adjacent columns, alternating direction) has zero excess (tested for 1 to 3
 stands); the stand order of `reachability` is already a nearest-next plus 2-opt tour, so no change was needed in the
 planner. A shuffled order shows the excess in the tests, so a regression would be caught.
+
+## Coverage feed over ROS
+
+The manager can take its plan from the coverage planner over ROS instead of reading `coverage_output.json`. The default is unchanged: `coverage_source: json` reads the file named by `coverage_json_path` (or the goal's `coverage_json_path`).
+
+| Parameter (`manipulation_manager_node`) | Default | Meaning |
+|---|---|---|
+| `coverage_source` | `json` | `json`: read the file. `ros`: use the latest `coverage_planner_msgs/CoveragePlan` on `coverage_plan_topic`. Any other value stops the node at start. |
+| `coverage_plan_topic` | `/wall_coverage_service_node/coverage_plan` | Topic of the plan (`wall_coverage_service_node`'s `~/coverage_plan`). |
+| `coverage_plan_timeout_s` | `10.0` | How long a task waits for a plan if none has arrived; then the task fails with "cannot load the coverage plan". |
+
+Data flow with `coverage_source:=ros`:
+
+1. `ros2 service call /wall_coverage_service_node/start std_srvs/srv/Trigger` makes `wall_coverage_service_node` call `GenerateCoveragePath`, lift and expand the result (`expandCoveragePasses`) and publish one `CoveragePlan` on `~/coverage_plan`. The publisher is now `reliable` + `transient_local` (depth 1), so the last plan is kept and a subscriber that starts later still gets it.
+2. The manager subscribes with the same QoS at start and keeps the latest message. At the start of a task `RosCoverageSource` waits for it (spinning the node, up to `coverage_plan_timeout_s`), checks it (`success`, at least one pose, segment indices inside the path), and gives it to `buildCoverageIntents()`.
+3. `buildCoverageIntents()` (`core/coverage_plan_intents.hpp`) is the code `CoverageOutputJsonSource` always had, moved out: columns by position along the wall, one stroke per segment span, resampling inside `coverage_z_min_m` to `coverage_z_max_m`, `z_offset_m`, `wall_direction`. Both sources call it, so the same plan gives the same `CoverageSegmentIntent` list (a gtest compares them).
+
+Why the topic and not a service call: the planner side already has two entry points. `GenerateCoveragePath` takes an occupancy grid and returns the raw (not lifted) path, so using it from the manager would mean the manager rasterises the wall and repeats the lifting. `wall_coverage_service_node` already does all of that and already publishes the finished plan, so the only interface change is the QoS of that publisher (one line). It is the pattern ROS 2 gives for "latest value, available to late joiners" (the `transient_local` durability of the QoS guide; Nav2's `map_server` publishes `/map` the same way).
+
+Notes and limits:
+
+- With `ros`, a task uses the newest plan received. The goal's `coverage_json_path` is ignored. A new plan on the topic is picked up by the next task, not one that is running.
+- The mission ledger identifies the plan by a text of its poses and segments (6 decimals) instead of the file bytes, so `resume` works the same way.
+- The message frame is not checked: like the JSON, the poses are taken as given (`z_offset_m` converts base_link to base_footprint).
+- Status: the conversion, validation and wait are host-tested (`coverage_plan_intents_test`). The ROS glue (`ros_coverage_source.cpp`, the node's parameters and subscription, the QoS change) was reviewed by hand only: it could not be compiled on the machine this was written on (Humble headers, Jazzy target), and no run on a simulator was done.
+
