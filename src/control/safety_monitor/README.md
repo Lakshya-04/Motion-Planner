@@ -37,6 +37,7 @@ All in namespace `safety_monitor`, headers under `include/safety_monitor/`:
   constant velocity).
 - **`safety_monitor.hpp` -- `SafetyMonitor::evaluate()`** returns `Result{speed_scale, state, reason,
   worst_sphere, worst_link, min_distance}`.
+- **`safety_chain.hpp` -- `SafetyChain`**: latched OK / HOLD / ESTOP over overload, stale-data, base obstacle, operator e-stop and controller-fault inputs, with stop outputs and an event log; see [docs/safety_chain.md](../../../docs/safety_chain.md).
 - **`heartbeat_watchdog.hpp` -- `HeartbeatWatchdog`**: `beat(t)`, `expired(t)`; never beaten, bad time
   or a clock running backwards counts as expired.
 

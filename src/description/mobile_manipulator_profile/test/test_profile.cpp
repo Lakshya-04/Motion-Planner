@@ -83,3 +83,51 @@ TEST_F(ProfileTest, EveryShippedProfileLoads)
     EXPECT_NO_THROW(loadProfile(e.path().string())) << e.path();
   }
 }
+
+namespace
+{
+// A minimal profile: lift (optional) plus a 2-joint arm.
+std::string miniProfile(bool lift, const std::string & extra)
+{
+  std::string y =
+    "robot:\n  xacro_args:\n    arm: generic_6dof\n"
+    "joints:\n";
+  y += lift ? "  lift: lift_joint\n" : "  lift: null\n";
+  y += "  arm: [j1, j2]\nhome:\n";
+  if (lift) {y += "  lift_joint: 0.0\n";}
+  y += "  j1: 0.0\n  j2: 0.0\n"
+    "frames: {world_base: a, base: b, arm_base: c, flange: d, tool_mount: e, tcp: f}\n" + extra;
+  return y;
+}
+}  // namespace
+
+TEST(ProfileJointCosts, DefaultIsLiftTwoArmOne)
+{
+  const auto p = mobile_manipulator_profile::parseProfile(YAML::Load(miniProfile(true, "")), "mini");
+  EXPECT_TRUE(p.joint_costs.empty());
+  EXPECT_EQ(p.jointCosts(), (std::vector<double>{2.0, 1.0, 1.0}));
+  const auto q = mobile_manipulator_profile::parseProfile(YAML::Load(miniProfile(false, "")), "mini");
+  EXPECT_EQ(q.jointCosts(), (std::vector<double>{1.0, 1.0}));
+}
+
+TEST(ProfileJointCosts, ExplicitArrayInJointsOrder)
+{
+  const auto p = mobile_manipulator_profile::parseProfile(
+    YAML::Load(miniProfile(true, "joint_costs: [3.0, 1.0, 0.5]\n")), "mini");
+  EXPECT_EQ(p.jointCosts(), (std::vector<double>{3.0, 1.0, 0.5}));
+}
+
+TEST(ProfileJointCosts, RejectsWrongSizeAndBadValues)
+{
+  using mobile_manipulator_profile::parseProfile;
+  EXPECT_THROW(parseProfile(YAML::Load(miniProfile(true, "joint_costs: [2.0, 1.0]\n")), "mini"), std::runtime_error);
+  EXPECT_THROW(parseProfile(YAML::Load(miniProfile(true, "joint_costs: [2.0, 0.0, 1.0]\n")), "mini"), std::runtime_error);
+  EXPECT_THROW(parseProfile(YAML::Load(miniProfile(true, "joint_costs: [2.0, -1.0, 1.0]\n")), "mini"), std::runtime_error);
+}
+
+TEST_F(ProfileTest, ShippedProfilesDefaultToTheCurrentWeights)
+{
+  const auto p = loadProfile("ur10e_telescopic");
+  EXPECT_EQ(p.jointCosts().size(), p.dof());
+  EXPECT_DOUBLE_EQ(p.jointCosts().front(), 2.0);
+}
