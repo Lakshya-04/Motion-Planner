@@ -127,6 +127,22 @@ redundancy (the `plan_redundancy_report` binary when on `PATH`, else a python mi
 partial columns, a force spike at the first sample after a stroke (the retract start) over 40 N and twice the stroke median, plan jumps
 over 2x pitch. The exit code is always 0: a report, not a gate. Test: `python3 -m pytest docker/tools/tests/test_run_report.py`.
 
+## Recording a bag
+
+```bash
+docker/tools/record_bag.sh -o /tmp/my_run          # while a sim or stack is up; Ctrl-C to stop
+docker/tools/record_bag.sh --no-depth -t 120       # skip the depth cloud, stop after 120 s
+docker/tools/record_bag.sh -- /tool/valve          # extra topics after --
+ros2 bag info /tmp/my_run                          # then ros2 bag play /tmp/my_run
+```
+
+Records `/joint_states`, `/odom`, `/scan`, the raw and conditioned wrench, `/tf`, `/tf_static`, the `execute_coverage` action status and
+feedback (the manager's progress), `/tool/valve`, `/depth_sensor/points` and `/rosout`. The cuRobo node has no telemetry topic: its per-plan
+lines are in `/rosout`. Topics a run does not publish (`/scan` without the lidar, the conditioned wrench without `ft_conditioner`) are skipped
+silently. The format is mcap with zstd chunk compression, split at 512 MB (`BAG_MAX_MB`, and `BAG_MAX_S` for a duration split).
+Checked in the `sim-gazebo` image on a 25 s Gazebo run (depth sensor and base motion on): 11.5k messages in 1.9 MiB, and the bag plays back
+and records again.
+
 ## Related
 
 [sim_mujoco.md](sim_mujoco.md) (scripts, gates, other passes), [coverage_patterns.md](coverage_patterns.md) (the scorer), [manager_parameters.md](manager_parameters.md).
