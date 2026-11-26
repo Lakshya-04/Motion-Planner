@@ -161,6 +161,10 @@ struct IkRequest
   std::string end_effector_link;    ///< Link to solve the target pose for.
   std::vector<double> target_pose;  ///< Flat xyz+rpy(6) or xyz+quat(7) target.
   std::vector<double> joint_seed;   ///< Optional seed joint values for the solver.
+  /// Accepted error at the goal; negative = not set (solver default). Only an IkPort that says it
+  /// honours them should be given one: the MoveIt backend ignores both today.
+  double position_tolerance{-1.0};      ///< m.
+  double orientation_tolerance{-1.0};   ///< rad.
 };
 
 /**
