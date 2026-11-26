@@ -10,51 +10,24 @@ end to end in headless one-command passes (coverage planner, manager, MoveIt, co
 and scored), including multi-stand passes where the base drives between stands. Nothing here has run on hardware.
 The per-area checklist, with evidence for every item, is [docs/ROADMAP.md](docs/ROADMAP.md).
 
-**Where it stands (2026-11-22, main at #204):**
-- **Single-stand wall passes** in MuJoCo are reliable (8 of 8 runs across four scenarios, with obstacles).
-- **Two-stand passes in MuJoCo pass**, with MoveIt/OMPL and with cuRobo. The latest run (MoveIt/OMPL, scored on the tool pose after #167 and
-  #172, one run): 10 of 10 columns, coverage 100 %, tool tilt at most 0.15 deg, wall gap at most 0.9 mm, peak force 22.1 N against a 10 N
-  target ([older run](docs/sim_mujoco.md), superseded by [Latest runs](#latest-runs)). Earlier same-session batches: 6 of 8 before the
-  second-stand fix and 8 of 8 after (not significant on its own).
-- **cuRobo v0.9.0 as the free-space planner** completed a two-stand MuJoCo pass four times (10 of 10 columns, peaks 46.8 to 72.4 N), but
-  MoveIt/OMPL still planned the stow and the second stand: cuRobo found no docked-to-stow path (its model treats low lift with the arm swung
-  out as in collision) or did not answer in time, and it needs 12 to 16 s per plan on the 4 GB laptop GPU. A `free_space_fallback` makes the
-  hand-over automatic and logged; a start/goal precheck, a 7-joint collision-matrix fix (`--ignore-hops 2`) and a joint limit guard are in,
-  but the cause of the low-lift refusal is a hypothesis until a GPU run confirms it ([docs/curobo_v2_notes.md](docs/curobo_v2_notes.md)).
-- **Gazebo two-stand pass: failed on main, passes with the joint gain at 2 /s.** On main the pass completed 3 of 10 columns (coverage 0.32,
-  peak 1886 N, wall gap 57 mm, 1592 s). The cause is gz_ros2_control's joint position loop (gain 0.1 /s, a 10 s time constant): the arm
-  is still converging when the manager docks. `run_multi_stand_pass.sh` now sets `position_gain:=2.0`: 4 of 4 runs, 10 of 10 columns, coverage 100 %,
-  peak 45 to 59 N, wall gap at most 15 mm, about 9 minutes. Gains 3 and 4 bounce on the wall, 1 still fails columns. Force quality is behind MuJoCo (about 20 N);
-  other profiles and a tall wall are not measured ([docs/sim_gazebo.md](docs/sim_gazebo.md)).
-- **Merged since the cuRobo work, mostly host-tested only (no simulator, GPU or hardware run unless stated):** column-sequence feasibility
-  (approach, contact, strokes, retract; split avoidance), an RM4D-backed column port in the manager (advisory, off by default), `ColumnIkChain`
-  and a path quality audit (not yet called by the planner), a stand-check gate and dock IK continuity (both opt-in), N-DOF arms and a
-  redundancy policy for maps (FR3, iiwa 7, Kinova Gen3, xArm 7, UR3e to UR20), tool-pose scoring (tilt, wall gap), plane-generic stands and a
-  base placement optimiser (ceilings, corners), a differential-IK core, a runtime safety monitor core (**not a certified safety function**),
-  tool contact frame, tilt and plane-touch calibration, a teleoperation core and a lateral dock term. The list with evidence is
-  [CHANGELOG.md](CHANGELOG.md) and [docs/ROADMAP.md](docs/ROADMAP.md#19-since-143-what-merged-and-what-it-is-worth).
-- **Newest additions (#198 and #203), each with an honest tag.** "Host-tested only" means unit tests or host builds and no simulator run; "unbuilt" means the ROS node wiring was not compiled in a workspace image.
-  | Addition | Tag | Where |
-  |---|---|---|
-  | Coverage paint (live done / not done wall map, `run.csv` replay to a PNG and a percent) | host-tested only (31 pytest); node, RViz, Gazebo and MuJoCo drawing never run | [docs/sim_overlay.md](docs/sim_overlay.md) |
-  | Plan and stand overlay inside Gazebo and MuJoCo | host-tested only (gz commands dry-run); never run in a simulator | [docs/sim_overlay.md](docs/sim_overlay.md) |
-  | Reach report (reach fractions per lift height, minimum lift positions, flags, heat strip from an RM4D map) | host-tested only (pytest on an analytic map); Python tool, no simulator involved | [docs/reachability.md](docs/reachability.md) |
-  | Stand navigation planner (grid A* over the wall scene, shortcut, waypoint follower; opt-in) | host-tested only; the MuJoCo switch `MULTI_STAND_PATH_PLANNER` is not yet measured; `MULTI_STAND_WALL_DOCK=1` ran in one two-stand MuJoCo pass (same scorecard as without it, one run) | [docs/stand_navigation.md](docs/stand_navigation.md) |
-  | Perception-in-the-loop mode (`MULTI_STAND_PERCEPTION=1`: simulated cloud to `wall_detector` to the coverage planner) | host-tested only (Python mirror of the fit); C++ node and simulator run unbuilt; `wall_detector` reports no obstacles | [docs/perception_live.md](docs/perception_live.md) |
-  | Plan redundancy report (`plan_redundancy_report`, `score_run --plan`: jumps, repeated strokes, strip and stand order) | host-tested only (host g++ gtests); not built in the ROS image | [docs/coverage_planner.md](docs/coverage_planner.md) |
-  | Chained columns (`chain_columns`, one straight move between neighbouring columns; on by default since #292) | built and run in the MuJoCo and Gazebo passes under [Latest runs](#latest-runs) | [docs/manager_parameters.md](docs/manager_parameters.md) |
-  | Scenario sync, standoff advisor, per-module RViz profiles, plan-only playback | host-tested only | [docs/scenario_sync.md](docs/scenario_sync.md), [docs/standoff.md](docs/standoff.md), [docs/rviz/README.md](docs/rviz/README.md) |
-  | Navigation safety layer (stale odometry, command gate, stuck detection, scan/cloud obstacle stop; default-on checks, tested not to change healthy runs) | host-tested only (pytest); built and unit-tested in the ROS image with the batch, never run in a simulator | [docs/stand_navigation.md](docs/stand_navigation.md#base-safety-layer-and-the-nav2-backend) |
-  | Nav2 adapter (`backend:=nav2`, goal conversion and result mapping) | host-tested only (fake Nav2 client); no image has Nav2, so never run against a real Nav2 | [docs/stand_navigation.md](docs/stand_navigation.md#nav2-swap-path) |
-  | Wall dock step after `navigate_to_stand` (opt-in, feeds the stand check and the verify result) | host-tested only (gtests on the gate); built with the batch, never run in a simulator | [docs/manager_parameters.md](docs/manager_parameters.md) |
-  | Failed-column retry (`retry_failed_columns`, next dock IK solution, fresh stow, optional stand re-plan; opt-in) | host-tested only (gtests on the policy); built with the batch, no simulator run yet | [docs/manager_parameters.md](docs/manager_parameters.md) |
-  | Touch-up plan (undone cells of a recorded run to a serpentine `coverage_output.json`) | host-tested only (pytest); the plan has not been executed by the manager in a simulator | [docs/sim_overlay.md](docs/sim_overlay.md) |
-  | Gazebo multi-stand script parity with MuJoCo (double pass, reach, clearance, tall patch knobs) | host-tested only (script test); the Gazebo tall wall has never run, unverified in sim | [docs/sim_gazebo.md](docs/sim_gazebo.md) |
-
-  None of these is verified in a simulator yet (the batch-2 rows were built and unit-tested in the ROS image, no more); the verified-in-sim results are the MuJoCo passes above.
-- **Navigation and perception are the weakest links.** The base drives a straight line to each stand on ground-truth simulator odometry (no map, no localisation; an opt-in planner, safety layer and Nav2 adapter now exist but have not run in a simulator), wall docking and `wall_detector` are not started in the two-stand passes (the wall is pre-baked), and the self filter is not in any pass. [docs/navigation_and_perception.md](docs/navigation_and_perception.md) has the component table and the ordered gap list.
-- **Nothing has run on hardware.**
-- What is untested on real hardware, in commissioning order: [docs/hardware_readiness.md](docs/hardware_readiness.md).
+**Where it stands (2026-11-27):**
+- **Wall passes run end to end in both simulators** (coverage planner, manager, MoveIt/OMPL, compliant controller, recorded and scored).
+  By default each seam is covered once (`serpentine_columns`) and neighbouring strips are joined by a connector that stays in contact
+  (`contact_connectors`, `chain_columns`). Results, with failures, are under [Latest runs](#latest-runs): 10 of 10 columns in a tall-wall
+  MuJoCo run and a one-wall Gazebo run, connectors used 8 of 8 times.
+- **Not good yet:** contact force. The MuJoCo tall-wall run peaked at 307 N (the previous column mode: 21 N at the same speed) with
+  repeated "Cartesian offset diverged" resets in the compliant controller, and the Gazebo run has single-sample peaks in the kN range
+  while the manager's filtered feedback stays near 100 N. Both are under investigation, one run each so far.
+- **Free-space planning:** OMPL by default; cuRobo and VAMP are wired as opt-in backends. cuRobo completed two-stand MuJoCo passes but
+  needs 12 to 16 s per plan on the 4 GB laptop GPU and has no low-lift stow plan ([docs/curobo_v2_notes.md](docs/curobo_v2_notes.md));
+  the cuRobo-vs-MoveIt table has not been produced.
+- **Opt-in layers, mostly host-tested only (no simulator, GPU or hardware run unless stated):** simulated lidar, odometry noise, IMU and an
+  EKF, Nav2 adapter, base drive modes, platform sensor suites, a safety-chain core (**not a certified safety function**), a Cartesian
+  tracking controller, a ROS coverage feed, per-joint costs, a differential-IK core, coverage paint and RViz plan overlays. The list with
+  evidence is [CHANGELOG.md](CHANGELOG.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+- **Navigation and perception are the weakest links:** the base drives a straight line to each stand on simulator odometry; wall docking,
+  Nav2 and perception-in-the-loop exist but are not part of the standard passes.
+- **Nothing has run on hardware.** What is untested there, in commissioning order: [docs/hardware_readiness.md](docs/hardware_readiness.md).
 - Open work and exit tests: [docs/ROADMAP.md](docs/ROADMAP.md); the handoff: [docs/dev_handoff.md](docs/dev_handoff.md); the order of
   the next themes: [docs/development_plan.md](docs/development_plan.md).
 
