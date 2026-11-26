@@ -111,7 +111,7 @@ fi
 
 # shellcheck disable=SC2046
 eval gz_start sim_launch ros2 launch sim_gazebo sim.launch.py $(gz_sim_args) base_motion:=true \
-  wall_scene:=$OUT/data/smoke_wall_scene.json standoff:=0.915 ${MULTI_STAND_LAUNCH_ARGS:-}
+  wall_scene:=$OUT/data/smoke_wall_scene.json standoff:=0.915 rviz_plan_file:=$OUT/coverage_output.json ${MULTI_STAND_LAUNCH_ARGS:-}
 gz_start coverage_planner ros2 run coverage_planner coverage_planner_node
 gz_start reachability ros2 run reachability reachability_node --ros-args -r __node:=reachability_node -p map_file:=$MAP \
   -p base_profile:=$PROFILE -p stand_min_clearance_m:=${MULTI_STAND_MIN_CLEARANCE:-0.0} \
